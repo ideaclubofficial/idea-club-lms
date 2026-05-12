@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>IDEA CLUB</title>
+  <title>IDEA CLUB LMS</title>
   <style>
     * {
       box-sizing: border-box;
@@ -2684,6 +2684,8 @@
     <p>Student Interface แยกจาก Admin Back Office แล้ว</p>
   </footer>
 
+  <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore-compat.js"></script>
   <script>
     function getElement(id) {
       return document.getElementById(id);
@@ -2691,10 +2693,120 @@
 
     function safeRun(fn, label) {
       try {
-        if (typeof fn === 'function') fn();
+        if (typeof fn === 'function') return fn();
       } catch (error) {
         console.error('IDEA CLUB LMS error' + (label ? ' @ ' + label : '') + ':', error);
       }
+    }
+
+    const firebaseConfig = {
+      apiKey: "AIzaSyCfC1NQW0PCYAfWUDMNrwa0jAeOJHijzMU",
+      authDomain: "ideaclub-webapp.firebaseapp.com",
+      projectId: "ideaclub-webapp",
+      storageBucket: "ideaclub-webapp.firebasestorage.app",
+      messagingSenderId: "988808570463",
+      appId: "1:988808570463:web:035a0377d7afd055d11dea",
+      measurementId: "G-09NDY7W9BS"
+    };
+
+    let db = null;
+    let firebaseReady = false;
+
+    try {
+      firebase.initializeApp(firebaseConfig);
+      db = firebase.firestore();
+      firebaseReady = true;
+      console.log('Firebase connected: ideaclub-webapp');
+    } catch (error) {
+      firebaseReady = false;
+      console.error('Firebase init error:', error);
+    }
+
+    function showFirebaseStatus(message, isError) {
+      const targetIds = ['studentSaveResult', 'teacherSaveResult', 'courseSaveResult', 'monthlyTestSaveResult'];
+      targetIds.forEach(function(id) {
+        const el = getElement(id);
+        if (el && message) {
+          el.textContent = message;
+          el.style.color = isError ? '#dc2626' : '#16a34a';
+        }
+      });
+    }
+
+    async function getFirebaseCollection(collectionName) {
+      if (!firebaseReady || !db) return [];
+      const snapshot = await db.collection(collectionName).get();
+      return snapshot.docs.map(function(docSnap) {
+        const data = docSnap.data();
+        return Object.assign({ firebaseDocId: docSnap.id }, data);
+      });
+    }
+
+    async function setFirebaseDocument(collectionName, item) {
+      if (!firebaseReady || !db || !item) return;
+      const docId = String(item.firebaseDocId || item.id || Date.now());
+      const cleanItem = Object.assign({}, item, {
+        firebaseDocId: docId,
+        updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+      });
+      await db.collection(collectionName).doc(docId).set(cleanItem, { merge: true });
+      item.firebaseDocId = docId;
+    }
+
+    async function deleteFirebaseDocument(collectionName, item) {
+      if (!firebaseReady || !db || !item) return;
+      const docId = String(item.firebaseDocId || item.id);
+      await db.collection(collectionName).doc(docId).delete();
+    }
+
+    async function seedCollectionIfEmpty(collectionName, localArray) {
+      if (!firebaseReady || !db) return;
+      const snapshot = await db.collection(collectionName).limit(1).get();
+      if (!snapshot.empty) return;
+      const batch = db.batch();
+      localArray.forEach(function(item) {
+        const docId = String(item.firebaseDocId || item.id || Date.now() + Math.random());
+        item.firebaseDocId = docId;
+        const ref = db.collection(collectionName).doc(docId);
+        batch.set(ref, Object.assign({}, item, {
+          firebaseDocId: docId,
+          createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+          updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+        }));
+      });
+      await batch.commit();
+    }
+
+    function replaceArray(targetArray, newItems) {
+      targetArray.length = 0;
+      newItems.forEach(function(item) { targetArray.push(item); });
+    }
+
+    async function loadCoreDataFromFirebase() {
+      if (!firebaseReady || !db) {
+        console.warn('Firebase is not ready. ระบบจะใช้ข้อมูล Demo ในไฟล์ก่อน');
+        return;
+      }
+
+      await seedCollectionIfEmpty('students', students);
+      await seedCollectionIfEmpty('teachers', teachers);
+      await seedCollectionIfEmpty('courses', courses);
+      await seedCollectionIfEmpty('onDemandPlaylists', onDemandPlaylists);
+      await seedCollectionIfEmpty('paymentMonths', paymentMonths);
+      await seedCollectionIfEmpty('receipts', receipts);
+      await seedCollectionIfEmpty('monthlyQuestions', monthlyQuestions);
+      await seedCollectionIfEmpty('scoreReports', scoreReports);
+      await seedCollectionIfEmpty('adminScoreRecords', adminScoreRecords);
+
+      replaceArray(students, await getFirebaseCollection('students'));
+      replaceArray(teachers, await getFirebaseCollection('teachers'));
+      replaceArray(courses, await getFirebaseCollection('courses'));
+      replaceArray(onDemandPlaylists, await getFirebaseCollection('onDemandPlaylists'));
+      replaceArray(paymentMonths, await getFirebaseCollection('paymentMonths'));
+      replaceArray(receipts, await getFirebaseCollection('receipts'));
+      replaceArray(monthlyQuestions, await getFirebaseCollection('monthlyQuestions'));
+      replaceArray(scoreReports, await getFirebaseCollection('scoreReports'));
+      replaceArray(adminScoreRecords, await getFirebaseCollection('adminScoreRecords'));
     }
 
     const sortState = {};
@@ -3352,7 +3464,7 @@
       }).join('') : '<tr><td colspan="9">ยังไม่มีนักเรียนในระดับชั้นที่เลือก</td></tr>';
     }
 
-    function saveStudentInfo() {
+    async function saveStudentInfo() {
       const editingId = getElement('editingStudentId').value;
       const name = getElement('adminStudentName').value.trim();
       const nickname = getElement('adminStudentNickname').value.trim();
@@ -3366,13 +3478,18 @@
         return;
       }
       if (editingId) {
-        const s = students.find(function(item) { return item.id === Number(editingId); });
-        if (s) Object.assign(s, { name: name, nickname: nickname, grade: grade, phone: phone, course: course });
-        result.textContent = 'แก้ไขข้อมูลนักเรียนเรียบร้อย';
+        const s = students.find(function(item) { return String(item.id) === String(editingId); });
+        if (s) {
+          Object.assign(s, { name: name, nickname: nickname, grade: grade, phone: phone, course: course });
+          await setFirebaseDocument('students', s);
+        }
+        result.textContent = 'แก้ไขข้อมูลนักเรียนเรียบร้อย และบันทึกลง Firebase แล้ว';
       } else {
-        const newId = students.length ? Math.max.apply(null, students.map(function(s) { return s.id; })) + 1 : 1;
-        students.push({ id: newId, memberId: '-', name: name, nickname: nickname, grade: grade, phone: phone, course: course, status: 'ปกติ' });
-        result.textContent = 'เพิ่มนักเรียนใหม่เรียบร้อย';
+        const newId = Date.now();
+        const newStudent = { id: newId, firebaseDocId: String(newId), memberId: '-', name: name, nickname: nickname, grade: grade, phone: phone, course: course, status: 'ปกติ' };
+        students.push(newStudent);
+        await setFirebaseDocument('students', newStudent);
+        result.textContent = 'เพิ่มนักเรียนใหม่เรียบร้อย และบันทึกลง Firebase แล้ว';
       }
       result.style.color = '#16a34a';
       clearStudentForm(false);
@@ -3380,7 +3497,7 @@
     }
 
     function editStudent(id) {
-      const s = students.find(function(item) { return item.id === id; });
+      const s = students.find(function(item) { return String(item.id) === String(id); });
       if (!s) return;
 
       openEditBubble('แก้ไขข้อมูลนักเรียน',
@@ -3408,6 +3525,7 @@
             phone: phone,
             course: bubbleValue('bubbleStudentCourse') || 'ยังไม่ได้สมัครคอร์ส'
           });
+          setFirebaseDocument('students', s).catch(function(error) { console.error('save student firebase error:', error); });
           renderAdminStudents();
           closeEditBubble();
           getElement('studentSaveResult').textContent = 'แก้ไขข้อมูลนักเรียนเรียบร้อย';
@@ -3416,10 +3534,12 @@
       );
     }
 
-    function deleteStudent(id) {
-      const index = students.findIndex(function(item) { return item.id === id; });
+    async function deleteStudent(id) {
+      const index = students.findIndex(function(item) { return String(item.id) === String(id); });
       if (index === -1) return;
       const name = students[index].name;
+      const item = students[index];
+      await deleteFirebaseDocument('students', item);
       students.splice(index, 1);
       renderAdminStudents();
       getElement('studentSaveResult').textContent = 'ลบนักเรียน ' + name + ' เรียบร้อย';
@@ -3451,7 +3571,7 @@
       if (getElement('teacherIdPreview')) getElement('teacherIdPreview').value = 'T' + year + padNumber(teachers.length + 1, 4);
     }
 
-    function saveTeacher() {
+    async function saveTeacher() {
       const editingId = getElement('editingTeacherId').value;
       const name = getElement('teacherName').value.trim();
       const subject = getElement('teacherSubject').value;
@@ -3466,13 +3586,19 @@
         return;
       }
       if (editingId) {
-        const t = teachers.find(function(item) { return item.id === Number(editingId); });
-        if (t) Object.assign(t, { name: name, subject: subject, username: username, branch: branch, role: role, status: status });
-        result.textContent = 'แก้ไขข้อมูลครูเรียบร้อย';
+        const t = teachers.find(function(item) { return String(item.id) === String(editingId); });
+        if (t) {
+          Object.assign(t, { name: name, subject: subject, username: username, branch: branch, role: role, status: status });
+          await setFirebaseDocument('teachers', t);
+        }
+        result.textContent = 'แก้ไขข้อมูลครูเรียบร้อย และบันทึกลง Firebase แล้ว';
       } else {
         const year = String(new Date().getFullYear() + 543).slice(-2);
-        teachers.push({ id: Date.now(), teacherId: 'T' + year + padNumber(teachers.length + 1, 4), name: name, subject: subject, username: username, branch: branch, role: role, status: status });
-        result.textContent = 'สร้างสมาชิกครูเรียบร้อย';
+        const newId = Date.now();
+        const newTeacher = { id: newId, firebaseDocId: String(newId), teacherId: 'T' + year + padNumber(teachers.length + 1, 4), name: name, subject: subject, username: username, branch: branch, role: role, status: status };
+        teachers.push(newTeacher);
+        await setFirebaseDocument('teachers', newTeacher);
+        result.textContent = 'สร้างสมาชิกครูเรียบร้อย และบันทึกลง Firebase แล้ว';
       }
       result.style.color = '#16a34a';
       clearTeacherForm(false);
@@ -3481,7 +3607,7 @@
     }
 
     function editTeacher(id) {
-      const t = teachers.find(function(item) { return item.id === id; });
+      const t = teachers.find(function(item) { return String(item.id) === String(id); });
       if (!t) return;
 
       openEditBubble('แก้ไขข้อมูลครู',
@@ -3513,6 +3639,7 @@
             role: bubbleSelectValue('bubbleTeacherRole') || 'Teacher',
             status: bubbleSelectValue('bubbleTeacherStatus')
           });
+          setFirebaseDocument('teachers', t).catch(function(error) { console.error('save teacher firebase error:', error); });
           renderTeachers();
           closeEditBubble();
           getElement('teacherSaveResult').textContent = 'แก้ไขข้อมูลครูเรียบร้อย';
@@ -3521,9 +3648,11 @@
       );
     }
 
-    function deleteTeacher(id) {
-      const index = teachers.findIndex(function(item) { return item.id === id; });
+    async function deleteTeacher(id) {
+      const index = teachers.findIndex(function(item) { return String(item.id) === String(id); });
       if (index === -1) return;
+      const item = teachers[index];
+      await deleteFirebaseDocument('teachers', item);
       teachers.splice(index, 1);
       renderTeachers();
       updateTeacherIdPreview();
@@ -3532,7 +3661,7 @@
     }
 
     function resetTeacherPassword(id) {
-      const t = teachers.find(function(item) { return item.id === id; });
+      const t = teachers.find(function(item) { return String(item.id) === String(id); });
       if (!t) return;
       getElement('teacherSaveResult').textContent = 'Reset รหัสผ่านของ ' + t.name + ' เป็น 0000 เรียบร้อย';
       getElement('teacherSaveResult').style.color = '#16a34a';
@@ -3900,7 +4029,7 @@
     }
 
     function editOnlineClass(id) {
-      const c = courses.find(function(item) { return item.id === id; });
+      const c = courses.find(function(item) { return String(item.id) === String(id); });
       if (!c) return;
 
       openEditBubble('แก้ไขห้องเรียน Online',
@@ -3923,7 +4052,7 @@
       );
     }
 
-    function saveCourseFromAdmin() {
+    async function saveCourseFromAdmin() {
       const editingId = getElement('editingCourseId').value;
       const name = getElement('adminCourseName').value.trim();
       const grade = getElement('adminCourseGrade').value;
@@ -3940,12 +4069,18 @@
         return;
       }
       if (editingId) {
-        const c = courses.find(function(item) { return item.id === Number(editingId); });
-        if (c) Object.assign(c, { name: name, grade: grade, price: price, access: access, location: location, days: days, status: status, desc: desc || 'ไม่มีรายละเอียดเพิ่มเติม' });
-        result.textContent = 'แก้ไขคอร์สเรียบร้อย';
+        const c = courses.find(function(item) { return String(item.id) === String(editingId); });
+        if (c) {
+          Object.assign(c, { name: name, grade: grade, price: price, access: access, location: location, days: days, status: status, desc: desc || 'ไม่มีรายละเอียดเพิ่มเติม' });
+          await setFirebaseDocument('courses', c);
+        }
+        result.textContent = 'แก้ไขคอร์สเรียบร้อย และบันทึกลง Firebase แล้ว';
       } else {
-        courses.push({ id: Date.now(), grade: grade, name: name, price: price, access: access, location: location, days: days, status: status, onlineLink: '', roomId: '', roomPassword: '', onDemandSubject: guessSubjectFromCourse(name), onDemandGrade: grade, onDemandTitle: '', onDemandLink: '', desc: desc || 'ไม่มีรายละเอียดเพิ่มเติม' });
-        result.textContent = 'เพิ่มคอร์สใหม่เรียบร้อย';
+        const newId = Date.now();
+        const newCourse = { id: newId, firebaseDocId: String(newId), grade: grade, name: name, price: price, access: access, location: location, days: days, status: status, onlineLink: '', roomId: '', roomPassword: '', onDemandSubject: guessSubjectFromCourse(name), onDemandGrade: grade, onDemandTitle: '', onDemandLink: '', desc: desc || 'ไม่มีรายละเอียดเพิ่มเติม' };
+        courses.push(newCourse);
+        await setFirebaseDocument('courses', newCourse);
+        result.textContent = 'เพิ่มคอร์สใหม่เรียบร้อย และบันทึกลง Firebase แล้ว';
       }
       result.style.color = '#16a34a';
       clearCourseForm(false);
@@ -3960,7 +4095,7 @@
     }
 
     function editCourse(id) {
-      const c = courses.find(function(item) { return item.id === id; });
+      const c = courses.find(function(item) { return String(item.id) === String(id); });
       if (!c) return;
 
       openEditBubble('แก้ไขคอร์สเรียน',
@@ -3996,6 +4131,7 @@
             status: bubbleSelectValue('bubbleCourseStatus'),
             desc: bubbleValue('bubbleCourseDesc') || 'ไม่มีรายละเอียดเพิ่มเติม'
           });
+          setFirebaseDocument('courses', c).catch(function(error) { console.error('save course firebase error:', error); });
           renderAdminCourses();
           renderOnlineClassCourseSelect();
           renderOnlineClassTable();
@@ -4011,9 +4147,11 @@
       );
     }
 
-    function deleteCourse(id) {
-      const index = courses.findIndex(function(item) { return item.id === id; });
+    async function deleteCourse(id) {
+      const index = courses.findIndex(function(item) { return String(item.id) === String(id); });
       if (index === -1) return;
+      const item = courses[index];
+      await deleteFirebaseDocument('courses', item);
       courses.splice(index, 1);
       renderAdminCourses();
       renderStudentCourses();
@@ -4036,7 +4174,7 @@
     }
 
     function applyCourse(id) {
-      const c = courses.find(function(item) { return item.id === id; });
+      const c = courses.find(function(item) { return String(item.id) === String(id); });
       if (!c) return;
       currentStudentCourseId = c.id;
       updateStudentCourseDisplay();
@@ -4168,7 +4306,7 @@
     }
 
     function openOnlineClassByCourseId(id) {
-      const c = courses.find(function(item) { return item.id === id; });
+      const c = courses.find(function(item) { return String(item.id) === String(id); });
       if (!c || !c.onlineLink) {
         alert('ยังไม่ได้เปิดห้องเรียน Online สำหรับคอร์สนี้');
         return;
@@ -5409,7 +5547,7 @@
       }
     }
 
-    function initPage() {
+    async function initPage() {
       const currentBEYear = new Date().getFullYear() + 543;
       if (getElement('memberYearBE')) getElement('memberYearBE').value = currentBEYear;
 
@@ -5419,6 +5557,8 @@
           getElement('loginUsername').value = localStorage.getItem('ideaClubLoginUsername') || '';
         }
       }, 'remember-login');
+
+      await loadCoreDataFromFirebase();
 
       safeRun(updateMemberIdPreview, 'member-id-preview');
       safeRun(updateTeacherIdPreview, 'teacher-id-preview');
@@ -5445,51 +5585,6 @@
     }
 
     document.addEventListener('DOMContentLoaded', initPage);
-  </script type="module">
-    import { initializeApp } from "https://www.gstatic.com/firebasejs/11.10.0/firebase-app.js";
-import {
-  getFirestore,
-  collection,
-  getDocs,
-  addDoc,
-  updateDoc,
-  deleteDoc,
-  doc,
-  setDoc,
-  query,
-  where,
-  orderBy,
-  serverTimestamp
-} from "https://www.gstatic.com/firebasejs/11.10.0/firebase-firestore.js";
-
-import {
-  getAuth,
-  signInWithEmailAndPassword,
-  createUserWithEmailAndPassword,
-  signOut,
-  onAuthStateChanged
-} from "https://www.gstatic.com/firebasejs/11.10.0/firebase-auth.js";
-
-const firebaseConfig = {// For Firebase JS SDK v7.20.0 and later, measurementId is optional
-const firebaseConfig = {
-  apiKey: "AIzaSyCfC1NQW0PCYAfWUDMNrwa0jAeOJHijzMU",
-  authDomain: "ideaclub-webapp.firebaseapp.com",
-  projectId: "ideaclub-webapp",
-  storageBucket: "ideaclub-webapp.firebasestorage.app",
-  messagingSenderId: "988808570463",
-  appId: "1:988808570463:web:035a0377d7afd055d11dea",
-  measurementId: "G-09NDY7W9BS"
-};
-  apiKey: "ใส่ของคุณ",
-  authDomain: "ใส่ของคุณ",
-  projectId: "ใส่ของคุณ",
-  storageBucket: "ใส่ของคุณ",
-  messagingSenderId: "ใส่ของคุณ",
-  appId: "ใส่ของคุณ"
-};
-
-const app = initializeApp(firebaseConfig);
-const db = getFirestore(app);
-const auth = getAuth(app);
+  </script>
 </body>
 </html>
