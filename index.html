@@ -3123,8 +3123,7 @@
       }).join('') : '<tr><td colspan="5">ยังไม่มีนักเรียนในคอร์สที่เลือก</td></tr>';
     }
 
-    const pickupList = [];);
-    }
+    const pickupList = [];
 
     let pickupCurrentPage = 1;
     const pickupPerPage = 20;
@@ -3368,7 +3367,7 @@
 
     function renderAdminDashboard() {
       const totalStudents = Array.isArray(students) ? students.length : 0;
-      const openCourses = Array.isArray(courses) ? courses.filter(function(c) { return c.status === 'open'; }).length : 0;
+      const openCourses = Array.isArray(courses) ? courses.filter(function(c) { return c.status === 'open' || c.status === 'เปิดรับสมัคร'; }).length : 0;
       const overdueStudents = Array.isArray(students) ? students.filter(function(s) { return Array.isArray(s.overdueMonths) && s.overdueMonths.length > 0; }).length : 0;
       const pendingPayments = Array.isArray(students) ? students.filter(function(s) { return s.paymentStatus === 'รอตรวจสลิป'; }).length : 0;
       const todayAbsent = Array.isArray(students) ? students.filter(function(s) { return s.pickupStatus === 'ไม่มา'; }).length : 0;
@@ -3464,6 +3463,7 @@
           });
           setFirebaseDocument('students', s).catch(function(error) { console.error('save student firebase error:', error); });
           renderAdminStudents();
+          renderAdminDashboard();
           closeEditBubble();
           getElement('studentSaveResult').textContent = 'แก้ไขข้อมูลนักเรียนเรียบร้อย';
           getElement('studentSaveResult').style.color = '#16a34a';
@@ -3496,6 +3496,10 @@
     function renderTeachers() {
       const tbody = getElement('teacherTableBody');
       if (!tbody) return;
+      if (!Array.isArray(teachers) || teachers.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="9">ยังไม่มีสมาชิกครูในระบบ</td></tr>';
+        return;
+      }
       tbody.innerHTML = teachers.map(function(t, i) {
         const status = t.status === 'Active' ? '<span class="status-paid">Active</span>' : '<span class="status-absent">Inactive</span>';
         const role = (t.role || 'Teacher') === 'Admin' ? '<span class="status-parent">Admin</span>' : '<span class="status-paid">Teacher</span>';
@@ -3579,6 +3583,7 @@
           });
           setFirebaseDocument('teachers', t).catch(function(error) { console.error('save teacher firebase error:', error); });
           renderTeachers();
+          renderAdminDashboard();
           closeEditBubble();
           getElement('teacherSaveResult').textContent = 'แก้ไขข้อมูลครูเรียบร้อย';
           getElement('teacherSaveResult').style.color = '#16a34a';
@@ -3973,6 +3978,10 @@
     function renderOnlineClassTable() {
       const tbody = getElement('adminOnlineClassTableBody');
       if (!tbody) return;
+      if (!Array.isArray(courses) || courses.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="6">ยังไม่มีคอร์สในระบบ</td></tr>';
+        return;
+      }
       tbody.innerHTML = courses.map(function(c) {
         return '<tr><td>' + c.grade + '</td><td>' + c.name + '</td><td>' + (c.onlineLink ? 'มีลิงก์' : '-') + '</td><td>' + (c.roomId || '-') + '</td><td>' + (c.roomPassword || '-') + '</td><td><button class="btn btn-blue" type="button" onclick="editOnlineClass(' + c.id + ')">แก้ไข</button></td></tr>';
       }).join('');
@@ -4098,6 +4107,7 @@
           });
           setFirebaseDocument('courses', c).catch(function(error) { console.error('save course firebase error:', error); });
           renderAdminCourses();
+          renderAdminDashboard();
           renderOnlineClassCourseSelect();
           renderOnlineClassTable();
           renderOnDemandCourseSelect();
@@ -4477,6 +4487,15 @@
       const studentSelect = getElement('studentPaymentMonth');
       const statusFilter = getElement('paymentStatusMonthFilter');
       if (!tbody) return;
+
+      if (!Array.isArray(paymentMonths) || paymentMonths.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="4">ยังไม่มีเดือนชำระเงิน ให้เพิ่มจากฟอร์มด้านบน</td></tr>';
+        if (studentSelect) studentSelect.innerHTML = '<option value="">ยังไม่มีเดือนชำระเงิน</option>';
+        if (statusFilter) statusFilter.innerHTML = '<option value="ทั้งหมด">ทั้งหมด</option>';
+        renderReceiptMonthFilter();
+        filterPaymentStatusByMonth();
+        return;
+      }
 
       tbody.innerHTML = paymentMonths.map(function(item, index) {
         return '<tr><td>' + (index + 1) + '</td><td>' + item.month + '</td><td>' + formatPrice(item.amount) + '</td><td><button class="btn btn-blue" type="button" onclick="editPaymentMonth(' + item.id + ')">แก้ไข</button><button class="btn btn-red" type="button" onclick="deletePaymentMonth(' + item.id + ')">ลบ</button></td></tr>';
@@ -4981,9 +5000,9 @@
     function renderStudentReceipts() {
       const tbody = getElement('studentReceiptTableBody');
       if (!tbody) return;
-      const studentName = getElement('profileName') ? getElement('profileName').textContent : students[0].name;
+      const studentName = getElement('profileName') ? getElement('profileName').textContent : '';
       const visibleReceipts = receipts.filter(function(r) {
-        return r.status === 'published' && (r.student === studentName || r.student === students[0].name);
+        return r.status === 'published' && r.student === studentName;
       }).slice().sort(function(a, b) {
         return Number(b.id) - Number(a.id);
       });
