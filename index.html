@@ -2639,6 +2639,7 @@
   <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-auth-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-storage-compat.js"></script>
   <script>
     function getElement(id) {
       return document.getElementById(id);
@@ -2665,6 +2666,7 @@
     const PRODUCTION_MODE = true;
     let db = null;
     let auth = null;
+    let storage = null;
     let firebaseReady = false;
     let firebaseUser = null;
     let firebaseUserProfile = null;
@@ -2673,6 +2675,7 @@
       firebase.initializeApp(firebaseConfig);
       auth = firebase.auth();
       db = firebase.firestore();
+      storage = firebase.storage();
       firebaseReady = true;
       auth.onAuthStateChanged(async function(user) {
         firebaseUser = user || null;
@@ -2710,6 +2713,41 @@
         const data = docSnap.data();
         return Object.assign({ firebaseDocId: docSnap.id }, data);
       });
+    }
+
+    function dataUrlToBlob(dataUrl) {
+      if (!dataUrl || !String(dataUrl).startsWith('data:')) return null;
+      const parts = dataUrl.split(',');
+      const meta = parts[0];
+      const base64 = parts[1];
+      const mimeMatch = meta.match(/data:(.*?);base64/);
+      const mime = mimeMatch ? mimeMatch[1] : 'application/octet-stream';
+      const binary = atob(base64);
+      const bytes = new Uint8Array(binary.length);
+      for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+      return new Blob([bytes], { type: mime });
+    }
+
+    function getSafeFileName(name) {
+      return String(name || 'file').replace(/[^a-zA-Z0-9ก-ฮะ-์._-]/g, '-');
+    }
+
+    async function uploadFileToFirebaseStorage(path, fileOrDataUrl) {
+      if (!firebaseReady || !storage) throw new Error('Firebase Storage ยังไม่พร้อมใช้งาน');
+      if (PRODUCTION_MODE && !firebaseUser) throw new Error('กรุณา Login ด้วย Firebase Auth ก่อนอัปโหลดไฟล์');
+
+      let uploadData = fileOrDataUrl;
+      if (typeof fileOrDataUrl === 'string') uploadData = dataUrlToBlob(fileOrDataUrl);
+      if (!uploadData) throw new Error('ไม่พบไฟล์สำหรับอัปโหลด');
+
+      const ref = storage.ref().child(path);
+      const snapshot = await ref.put(uploadData);
+      return await snapshot.ref.getDownloadURL();
+    }
+
+    async function saveCollectionItem(collectionName, item) {
+      await setFirebaseDocument(collectionName, item);
+      return item;
     }
 
     async function setFirebaseDocument(collectionName, item) {
@@ -2776,6 +2814,7 @@
       replaceArray(courses, await getFirebaseCollection('courses'));
       replaceArray(onDemandPlaylists, await getFirebaseCollection('onDemandPlaylists'));
       replaceArray(paymentMonths, await getFirebaseCollection('paymentMonths'));
+      replaceArray(payments, await getFirebaseCollection('payments'));
       replaceArray(receipts, await getFirebaseCollection('receipts'));
       replaceArray(monthlyQuestions, await getFirebaseCollection('monthlyQuestions'));
       replaceArray(scoreReports, await getFirebaseCollection('scoreReports'));
@@ -2797,6 +2836,7 @@
     let currentStudent = null;
 
     const paymentMonths = [];
+    const payments = [];
 
     const receipts = [];
     let receiptRunningNumber = 1;
@@ -2934,8 +2974,24 @@
       });
     }
 
+    function normalizeLoginId(input) {
+      const value = String(input || '').trim();
+      if (value.includes('@')) return value;
+      const phone = value.replace(/[^0-9]/g, '');
+      if (/^0[0-9]{9}$/.test(phone)) return phone + '@ideaclub.local';
+      return value;
+    }
+
+    function getDisplayLoginId(input) {
+      const value = String(input || '').trim();
+      if (value.includes('@')) return value;
+      return value.replace(/[^0-9]/g, '') || value;
+    }
+
     async function loginByRole() {
-      const username = getElement('loginUsername').value.trim();
+      const rawUsername = getElement('loginUsername').value.trim();
+      const username = normalizeLoginId(rawUsername);
+      const displayLoginId = getDisplayLoginId(rawUsername);
       const password = getElement('loginPassword').value.trim();
       const remember = getElement('rememberLogin').checked;
       const result = getElement('studentLoginResult');
@@ -2948,7 +3004,7 @@
 
       if (remember) {
         localStorage.setItem('ideaClubRememberLogin', 'true');
-        localStorage.setItem('ideaClubLoginUsername', username);
+        localStorage.setItem('ideaClubLoginUsername', rawUsername);
       } else {
         localStorage.removeItem('ideaClubRememberLogin');
         localStorage.removeItem('ideaClubLoginUsername');
@@ -2996,7 +3052,7 @@
 
           if (userRole === 'teacher') {
             const teacher = teachers.find(function(t) {
-              return t.authUid === firebaseUser.uid || t.email === username || t.username === username;
+              return t.authUid === firebaseUser.uid || t.email === username || t.username === username || t.phone === displayLoginId || t.username === displayLoginId;
             }) || {
               id: firebaseUser.uid,
               name: firebaseUserProfile.name || firebaseUser.email || 'Teacher',
@@ -3010,7 +3066,7 @@
           }
 
           const student = students.find(function(s) {
-            return s.authUid === firebaseUser.uid || s.email === username || s.phone === username;
+            return s.authUid === firebaseUser.uid || s.email === username || s.phone === displayLoginId || s.phone === rawUsername;
           });
 
           if (!student) {
@@ -3020,7 +3076,7 @@
           }
 
           currentStudent = student;
-          studentLogin(student.phone || student.email || username);
+          studentLogin(student.phone || student.email || displayLoginId);
           return;
         } catch (error) {
           console.error('Firebase login error:', error);
@@ -3037,7 +3093,7 @@
       }
 
       const teacher = teachers.find(function(item) {
-        return (item.username === username || item.teacherId === username) && item.status === 'Active';
+        return (item.username === username || item.username === displayLoginId || item.email === username || item.phone === displayLoginId || item.teacherId === displayLoginId) && item.status === 'Active';
       });
       if (teacher && password === '0000') {
         setSuperAdminMode(false);
@@ -3049,9 +3105,9 @@
         return;
       }
 
-      if ((username === 'test1' && password === '0000') || students.some(function(s) { return s.phone === username; })) {
+      if ((displayLoginId === 'test1' && password === '0000') || students.some(function(s) { return s.phone === displayLoginId || s.email === username; })) {
         setSuperAdminMode(false);
-        studentLogin(username);
+        studentLogin(displayLoginId);
         return;
       }
 
@@ -3475,6 +3531,7 @@
       safeRun(renderAdminScoreAdjustTable, 'admin-score-table');
       safeRun(renderAdminScoreStatsTable, 'admin-score-stats');
       safeRun(renderPaymentMonths, 'admin-payment-months');
+      safeRun(renderPaymentTable, 'admin-payment-table');
       safeRun(renderReceiptMonthFilter, 'admin-receipt-month-filter');
       safeRun(renderAdminReceipts, 'admin-receipts');
       safeRun(renderTodayTeachingList, 'admin-today-teaching');
@@ -3506,6 +3563,7 @@
       }
       if (tabId === 'admin-payment') {
         safeRun(renderPaymentMonths, 'payment-months');
+        safeRun(renderPaymentTable, 'payment-table');
         safeRun(renderReceiptMonthFilter, 'receipt-month-filter');
         safeRun(renderAdminReceipts, 'admin-receipts');
         safeRun(updatePaymentSummary, 'payment-summary');
@@ -3945,7 +4003,7 @@
       getElement('adminOnlineClassPassword').value = c.roomPassword || '';
     }
 
-    function saveOnlineClassSettings() {
+    async function saveOnlineClassSettings() {
       const select = getElement('adminOnlineClassCourseSelect');
       if (!select) return;
       const c = courses.find(function(item) { return String(item.id) === String(select.value); });
@@ -3953,8 +4011,15 @@
       c.onlineLink = getElement('adminOnlineClassLink').value.trim();
       c.roomId = getElement('adminOnlineClassRoomId').value.trim();
       c.roomPassword = getElement('adminOnlineClassPassword').value.trim();
-      getElement('adminOnlineClassResult').textContent = 'บันทึกข้อมูลห้องเรียน Online เรียบร้อย';
-      getElement('adminOnlineClassResult').style.color = '#16a34a';
+      try {
+        await setFirebaseDocument('courses', c);
+        getElement('adminOnlineClassResult').textContent = 'บันทึกข้อมูลห้องเรียน Online เรียบร้อย';
+        getElement('adminOnlineClassResult').style.color = '#16a34a';
+      } catch (error) {
+        console.error('online class firebase error:', error);
+        getElement('adminOnlineClassResult').textContent = 'บันทึกไม่สำเร็จ: ' + (error.message || error.code);
+        getElement('adminOnlineClassResult').style.color = '#dc2626';
+      }
       renderOnlineClassTable();
       updateStudentCourseDisplay();
     }
@@ -3995,7 +4060,7 @@
       }
     }
 
-    function saveOnDemandSettings() {
+    async function saveOnDemandSettings() {
       const courseId = Number(getElement('adminOnDemandCourseSelect').value);
       const subject = getElement('adminOnDemandSubject').value;
       const grade = getElement('adminOnDemandGrade').value;
@@ -4010,13 +4075,26 @@
         return;
       }
 
-      if (editingId) {
-        const item = onDemandPlaylists.find(function(p) { return p.id === Number(editingId); });
-        if (item) Object.assign(item, { courseId: courseId, subject: subject, grade: grade, playlistName: playlistName, clipTitle: clipTitle, link: link });
-        getElement('videoSaveResult').textContent = 'แก้ไข Playlist / คลิป On-demand เรียบร้อย';
-      } else {
-        onDemandPlaylists.push({ id: Date.now(), courseId: courseId, subject: subject, grade: grade, playlistName: playlistName, clipTitle: clipTitle, link: link });
-        getElement('videoSaveResult').textContent = 'เพิ่ม Playlist / คลิป On-demand เรียบร้อย';
+      try {
+        if (editingId) {
+          const item = onDemandPlaylists.find(function(p) { return String(p.id) === String(editingId); });
+          if (item) {
+            Object.assign(item, { courseId: courseId, subject: subject, grade: grade, playlistName: playlistName, clipTitle: clipTitle, link: link });
+            await setFirebaseDocument('onDemandPlaylists', item);
+          }
+          getElement('videoSaveResult').textContent = 'แก้ไข Playlist / คลิป On-demand เรียบร้อย';
+        } else {
+          const newId = Date.now();
+          const newItem = { id: newId, firebaseDocId: String(newId), courseId: courseId, subject: subject, grade: grade, playlistName: playlistName, clipTitle: clipTitle, link: link };
+          onDemandPlaylists.push(newItem);
+          await setFirebaseDocument('onDemandPlaylists', newItem);
+          getElement('videoSaveResult').textContent = 'เพิ่ม Playlist / คลิป On-demand เรียบร้อย';
+        }
+      } catch (error) {
+        console.error('ondemand firebase error:', error);
+        getElement('videoSaveResult').textContent = 'บันทึกไม่สำเร็จ: ' + (error.message || error.code);
+        getElement('videoSaveResult').style.color = '#dc2626';
+        return;
       }
 
       getElement('videoSaveResult').style.color = '#16a34a';
@@ -4108,8 +4186,10 @@
     }
 
     function deleteOnDemandPlaylist(id) {
-      const index = onDemandPlaylists.findIndex(function(p) { return p.id === id; });
+      const index = onDemandPlaylists.findIndex(function(p) { return String(p.id) === String(id); });
       if (index === -1) return;
+      const item = onDemandPlaylists[index];
+      deleteFirebaseDocument('onDemandPlaylists', item).catch(function(error) { console.error('delete ondemand firebase error:', error); });
       onDemandPlaylists.splice(index, 1);
       renderOnDemandTable();
       updateStudentCourseDisplay();
@@ -4552,6 +4632,12 @@
 
     function updatePaymentRowStatus(row, status) {
       if (!row) return;
+      const paymentId = row.getAttribute('data-payment-id');
+      const payment = payments.find(function(p) { return String(p.id) === String(paymentId); });
+      if (payment) {
+        payment.status = status;
+        setFirebaseDocument('payments', payment).catch(function(error) { console.error('payment status firebase error:', error); });
+      }
       if (status === 'ชำระแล้ว') {
         row.children[4].innerHTML = '<span class="status-paid">ตรวจแล้ว</span>';
         row.children[5].innerHTML = '<span class="status-paid">ชำระแล้ว</span>';
@@ -4684,7 +4770,7 @@
       receiptMonthFilter.value = paymentMonths.some(function(item) { return item.month === currentValue; }) ? currentValue : 'ทั้งหมด';
     }
 
-    function addPaymentMonth() {
+    async function addPaymentMonth() {
       const monthInput = getElement('newPaymentMonth');
       const amountInput = getElement('newPaymentAmount');
       const result = getElement('paymentMonthResult');
@@ -4704,7 +4790,9 @@
         return;
       }
 
-      paymentMonths.push({ id: Date.now(), month: month, amount: amount });
+      const newItem = { id: Date.now(), firebaseDocId: String(Date.now()), month: month, amount: amount };
+      paymentMonths.push(newItem);
+      await setFirebaseDocument('paymentMonths', newItem);
       monthInput.value = '';
       amountInput.value = '';
       result.textContent = 'เพิ่มเดือนชำระเงินเรียบร้อย';
@@ -4744,6 +4832,7 @@
 
           item.month = newMonth;
           item.amount = newAmount;
+          setFirebaseDocument('paymentMonths', item).catch(function(error) { console.error('payment month firebase error:', error); });
 
           if (oldMonth !== newMonth) {
             document.querySelectorAll('#paymentTableBody tr').forEach(function(row) {
@@ -4782,8 +4871,10 @@
     }
 
     function deletePaymentMonth(id) {
-      const index = paymentMonths.findIndex(function(item) { return item.id === id; });
+      const index = paymentMonths.findIndex(function(item) { return String(item.id) === String(id); });
       if (index === -1) return;
+      const item = paymentMonths[index];
+      deleteFirebaseDocument('paymentMonths', item).catch(function(error) { console.error('delete payment month firebase error:', error); });
       paymentMonths.splice(index, 1);
       renderPaymentMonths();
       const result = getElement('paymentMonthResult');
@@ -4804,6 +4895,22 @@
       });
 
       updatePaymentSummary();
+    }
+
+    function getPaymentMonthAmount(month) {
+      const item = paymentMonths.find(function(m) { return m.month === month; });
+      return item ? item.amount : 0;
+    }
+
+    function renderPaymentTable() {
+      const tbody = getElement('paymentTableBody');
+      if (!tbody) return;
+      tbody.innerHTML = payments.length ? payments.map(function(p) {
+        const slipCell = p.slipUrl ? '<a href="' + p.slipUrl + '" target="_blank">ดูสลิป</a>' : '-';
+        const statusClass = p.status === 'ชำระแล้ว' ? 'status-paid' : p.status === 'ค้างชำระ' || p.status === 'สลิปไม่ผ่าน' ? 'status-absent' : 'status-waiting';
+        return '<tr data-payment-id="' + p.id + '"><td>' + (p.student || '-') + '</td><td>' + (p.course || '-') + '</td><td>' + (p.month || '-') + '</td><td>' + formatPrice(p.amount || 0) + '</td><td>' + slipCell + '</td><td><span class="' + statusClass + '">' + (p.status || 'รอตรวจสลิป') + '</span></td><td>' + paymentActionButtons(p.status || 'รอตรวจสลิป') + '</td></tr>';
+      }).join('') : '<tr><td colspan="7">ยังไม่มีรายการชำระเงิน</td></tr>';
+      filterPaymentStatusByMonth();
     }
 
     function updatePaymentSummary() {
@@ -4885,17 +4992,21 @@
         return;
       }
 
-      receipts.push({
-        id: Date.now(),
+      const receiptId = Date.now();
+      const newReceipt = {
+        id: receiptId,
+        firebaseDocId: String(receiptId),
         receiptNo: createReceiptNo(),
         student: data.student,
         course: data.course,
         month: data.month,
-        amount: data.amount,
+        amount: String(data.amount).replace(' บาท', ''),
         approvedDate: new Date().toLocaleDateString('th-TH'),
         admin: getElement('profileName') ? getElement('profileName').textContent : 'Admin IDEA CLUB',
         status: 'draft'
-      });
+      };
+      receipts.push(newReceipt);
+      setFirebaseDocument('receipts', newReceipt).catch(function(error) { console.error('receipt firebase error:', error); });
 
       renderAdminReceipts();
       renderStudentReceipts();
@@ -5109,6 +5220,7 @@
       const receipt = receipts.find(function(r) { return r.id === id; });
       if (!receipt) return;
       receipt.status = 'published';
+      setFirebaseDocument('receipts', receipt).catch(function(error) { console.error('publish receipt firebase error:', error); });
       renderAdminReceipts();
       renderStudentReceipts();
       openReceiptDetail(id, 'admin');
@@ -5118,14 +5230,17 @@
       const receipt = receipts.find(function(r) { return r.id === id; });
       if (!receipt) return;
       receipt.status = 'hidden';
+      setFirebaseDocument('receipts', receipt).catch(function(error) { console.error('hide receipt firebase error:', error); });
       renderAdminReceipts();
       renderStudentReceipts();
       openReceiptDetail(id, 'admin');
     }
 
     function deleteReceipt(id) {
-      const index = receipts.findIndex(function(r) { return r.id === id; });
+      const index = receipts.findIndex(function(r) { return String(r.id) === String(id); });
       if (index === -1) return;
+      const receipt = receipts[index];
+      deleteFirebaseDocument('receipts', receipt).catch(function(error) { console.error('delete receipt firebase error:', error); });
       receipts.splice(index, 1);
       renderAdminReceipts();
       renderStudentReceipts();
@@ -5195,30 +5310,79 @@
       renderStudentReceipts();
     }
 
+    let studentSlipData = '';
+
     function previewStudentSlip() {
       const input = getElement('studentSlipUpload');
       const box = getElement('studentSlipPreview');
       const file = input && input.files ? input.files[0] : null;
       if (!file || !box) return;
       const reader = new FileReader();
-      reader.onload = function(event) { box.innerHTML = '<img class="slip-preview" src="' + event.target.result + '" alt="Preview Slip">'; };
+      reader.onload = function(event) {
+        studentSlipData = event.target.result;
+        box.innerHTML = '<img class="slip-preview" src="' + event.target.result + '" alt="Preview Slip" style="max-width:100%; border-radius:14px;">';
+      };
       reader.readAsDataURL(file);
     }
 
-    function submitStudentSlip() {
-      const month = getElement('studentPaymentMonth').value;
-      const hasSlip = getElement('studentSlipUpload').files.length > 0;
+    async function submitStudentSlip() {
+      const month = getElement('studentPaymentMonth') ? getElement('studentPaymentMonth').value : '';
       const result = getElement('studentSlipResult');
-      if (!hasSlip) {
+      if (!currentStudent) {
+        result.textContent = 'กรุณา Login ก่อนส่งสลิป';
+        result.style.color = '#dc2626';
+        return;
+      }
+      if (!month) {
+        result.textContent = 'กรุณาเลือกเดือนที่ชำระ';
+        result.style.color = '#dc2626';
+        return;
+      }
+      if (!studentSlipData) {
         result.textContent = 'กรุณาอัปโหลดสลิปก่อนส่งข้อมูล';
         result.style.color = '#dc2626';
         return;
       }
-      result.textContent = 'ส่งสลิปเดือน ' + month + ' เรียบร้อย กรุณารอเจ้าหน้าที่ตรวจสอบ';
-      result.style.color = '#16a34a';
-      getElement('studentPaymentStatus').textContent = 'ส่งสลิปแล้ว · รอตรวจสอบ';
-      getElement('studentPaymentStatus').className = 'status-waiting';
+      try {
+        result.textContent = 'กำลังอัปโหลดสลิป...';
+        result.style.color = '#0f4cbd';
+        const slipUrl = await uploadFileToFirebaseStorage('slips/' + getSafeFileName(currentStudent.authUid || currentStudent.id || currentStudent.phone) + '/' + getSafeFileName(month) + '-' + Date.now() + '.png', studentSlipData);
+        const paymentId = Date.now();
+        const payment = {
+          id: paymentId,
+          firebaseDocId: String(paymentId),
+          studentId: currentStudent.id || '',
+          authUid: currentStudent.authUid || (firebaseUser ? firebaseUser.uid : ''),
+          student: currentStudent.name || '',
+          courseId: currentStudent.courseId || '',
+          course: currentStudent.course || '',
+          month: month,
+          amount: getPaymentMonthAmount(month),
+          slipUrl: slipUrl,
+          status: 'รอตรวจสลิป',
+          createdAtText: new Date().toLocaleString('th-TH')
+        };
+        payments.push(payment);
+        await setFirebaseDocument('payments', payment);
+        currentStudent.paymentStatus = 'รอตรวจสลิป';
+        await setFirebaseDocument('students', currentStudent);
+        updateStudentCourseDisplay();
+        renderPaymentTable();
+        renderAdminDashboard();
+        result.textContent = 'ส่งสลิปเดือน ' + month + ' เรียบร้อย กรุณารอเจ้าหน้าที่ตรวจสอบ';
+        result.style.color = '#16a34a';
+        if (getElement('studentPaymentStatus')) {
+          getElement('studentPaymentStatus').textContent = 'ส่งสลิปแล้ว · รอตรวจสอบ';
+          getElement('studentPaymentStatus').className = 'status-waiting';
+        }
+      } catch (error) {
+        console.error('submit slip error:', error);
+        result.textContent = 'ส่งสลิปไม่สำเร็จ: ' + (error.message || error.code);
+        result.style.color = '#dc2626';
+      }
     }
+
+    let paymentQrData = '';
 
     function previewAdminQr() {
       const input = getElement('adminQrUpload');
@@ -5226,21 +5390,36 @@
       const file = input && input.files ? input.files[0] : null;
       if (!file || !box) return;
       const reader = new FileReader();
-      reader.onload = function(event) { box.innerHTML = '<img src="' + event.target.result + '" alt="QR Code">'; };
+      reader.onload = function(event) {
+        paymentQrData = event.target.result;
+        box.innerHTML = '<img src="' + event.target.result + '" alt="QR Code">';
+      };
       reader.readAsDataURL(file);
     }
 
-    function savePaymentQr() {
-      const adminQrImg = document.querySelector('#adminQrPreview img');
+    async function savePaymentQr() {
       const result = getElement('qrSaveResult');
-      if (!adminQrImg) {
+      if (!paymentQrData) {
         result.textContent = 'กรุณาอัปโหลด QR Code ก่อนบันทึก';
         result.style.color = '#dc2626';
         return;
       }
-      getElement('studentQrBox').innerHTML = '<img src="' + adminQrImg.src + '" alt="QR Code สำหรับชำระเงิน">';
-      result.textContent = 'บันทึก QR Code เรียบร้อย และอัปเดตไปยังหน้าชำระเงินของนักเรียนแล้ว';
-      result.style.color = '#16a34a';
+      try {
+        result.textContent = 'กำลังอัปโหลด QR Code...';
+        result.style.color = '#0f4cbd';
+        const qrUrl = await uploadFileToFirebaseStorage('qr-codes/payment-qr-' + Date.now() + '.png', paymentQrData);
+        const qrSetting = { id: 'main-payment-qr', firebaseDocId: 'main-payment-qr', type: 'paymentQr', qrUrl: qrUrl, updatedAtText: new Date().toLocaleString('th-TH') };
+        await setFirebaseDocument('settings', qrSetting);
+        paymentQrData = qrUrl;
+        getElement('studentQrBox').innerHTML = '<img src="' + qrUrl + '" alt="QR Code สำหรับชำระเงิน">';
+        getElement('adminQrPreview').innerHTML = '<img src="' + qrUrl + '" alt="QR Code">';
+        result.textContent = 'บันทึก QR Code เรียบร้อย และอัปเดตไปยังหน้าชำระเงินของนักเรียนแล้ว';
+        result.style.color = '#16a34a';
+      } catch (error) {
+        console.error('save payment qr error:', error);
+        result.textContent = 'บันทึก QR Code ไม่สำเร็จ: ' + (error.message || error.code);
+        result.style.color = '#dc2626';
+      }
     }
 
     function downloadPaymentQr(source) {
@@ -5425,7 +5604,7 @@
       return img ? img.src : '';
     }
 
-    function saveQuestion() {
+    async function saveQuestion() {
       const editingId = getElement('editingQuestionId').value;
       const subject = getElement('questionSubject').value;
       const text = getElement('questionText').value.trim();
@@ -5443,13 +5622,30 @@
         result.style.color = '#dc2626';
         return;
       }
-      if (editingId) {
-        const q = monthlyQuestions.find(function(item) { return item.id === Number(editingId); });
-        if (q) Object.assign(q, { subject: subject, text: text, choices: { A: choiceA, B: choiceB, C: choiceC, D: choiceD }, correct: correct, image: image || q.image, testDate: testDate, testTime: testTime });
-        result.textContent = 'แก้ไขข้อสอบเรียบร้อย';
-      } else {
-        monthlyQuestions.push({ id: Date.now(), subject: subject, text: text, choices: { A: choiceA, B: choiceB, C: choiceC, D: choiceD }, correct: correct, image: image, testDate: testDate, testTime: testTime });
-        result.textContent = 'เพิ่มข้อสอบเรียบร้อย ตอนนี้มีทั้งหมด ' + monthlyQuestions.length + ' ข้อ คะแนนรวมยังคิดเต็ม 50 คะแนน';
+      try {
+        let imageUrl = image;
+        if (image && image.startsWith('data:')) {
+          imageUrl = await uploadFileToFirebaseStorage('question-images/' + getSafeFileName(subject) + '-' + Date.now() + '.png', image);
+        }
+        if (editingId) {
+          const q = monthlyQuestions.find(function(item) { return String(item.id) === String(editingId); });
+          if (q) {
+            Object.assign(q, { subject: subject, text: text, choices: { A: choiceA, B: choiceB, C: choiceC, D: choiceD }, correct: correct, image: imageUrl || q.image, testDate: testDate, testTime: testTime });
+            await setFirebaseDocument('monthlyQuestions', q);
+          }
+          result.textContent = 'แก้ไขข้อสอบเรียบร้อย';
+        } else {
+          const newId = Date.now();
+          const newQuestion = { id: newId, firebaseDocId: String(newId), subject: subject, text: text, choices: { A: choiceA, B: choiceB, C: choiceC, D: choiceD }, correct: correct, image: imageUrl, testDate: testDate, testTime: testTime };
+          monthlyQuestions.push(newQuestion);
+          await setFirebaseDocument('monthlyQuestions', newQuestion);
+          result.textContent = 'เพิ่มข้อสอบเรียบร้อย ตอนนี้มีทั้งหมด ' + monthlyQuestions.length + ' ข้อ คะแนนรวมยังคิดเต็ม 50 คะแนน';
+        }
+      } catch (error) {
+        console.error('question firebase error:', error);
+        result.textContent = 'บันทึกข้อสอบไม่สำเร็จ: ' + (error.message || error.code);
+        result.style.color = '#dc2626';
+        return;
       }
       result.style.color = '#16a34a';
       clearQuestionForm(false);
@@ -5496,8 +5692,10 @@
     }
 
     function deleteQuestion(id) {
-      const index = monthlyQuestions.findIndex(function(item) { return item.id === id; });
+      const index = monthlyQuestions.findIndex(function(item) { return String(item.id) === String(id); });
       if (index === -1) return;
+      const item = monthlyQuestions[index];
+      deleteFirebaseDocument('monthlyQuestions', item).catch(function(error) { console.error('delete question firebase error:', error); });
       monthlyQuestions.splice(index, 1);
       renderAdminExamSetFilters();
       renderAdminQuestions();
@@ -5810,6 +6008,7 @@
       safeRun(renderAdminScoreStatsTable, 'admin-score-stats-init');
       safeRun(renderStudentExamFilters, 'student-exam-filters-init');
       safeRun(renderPaymentMonths, 'payment-months-init');
+      safeRun(renderPaymentTable, 'payment-table-init');
       safeRun(renderReceiptMonthFilter, 'receipt-month-filter-init');
       safeRun(renderAdminReceipts, 'admin-receipts-init');
       safeRun(renderStudentReceipts, 'student-receipts-init');
