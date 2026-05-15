@@ -2637,6 +2637,7 @@
   </footer>
 
   <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-auth-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore-compat.js"></script>
   <script>
     function getElement(id) {
@@ -2661,13 +2662,30 @@
       measurementId: "G-09NDY7W9BS"
     };
 
+    const PRODUCTION_MODE = true;
     let db = null;
+    let auth = null;
     let firebaseReady = false;
+    let firebaseUser = null;
+    let firebaseUserProfile = null;
 
     try {
       firebase.initializeApp(firebaseConfig);
+      auth = firebase.auth();
       db = firebase.firestore();
       firebaseReady = true;
+      auth.onAuthStateChanged(async function(user) {
+        firebaseUser = user || null;
+        firebaseUserProfile = null;
+        if (user) {
+          try {
+            const profileDoc = await db.collection('users').doc(user.uid).get();
+            firebaseUserProfile = profileDoc.exists ? profileDoc.data() : null;
+          } catch (error) {
+            console.error('load user profile error:', error);
+          }
+        }
+      });
       console.log('Firebase connected: ideaclub-webapp');
     } catch (error) {
       firebaseReady = false;
@@ -2695,7 +2713,8 @@
     }
 
     async function setFirebaseDocument(collectionName, item) {
-      if (!firebaseReady || !db || !item) return;
+      if (!firebaseReady || !db || !item) throw new Error('Firebase ยังไม่พร้อมใช้งาน');
+      if (PRODUCTION_MODE && !firebaseUser) throw new Error('กรุณา Login ด้วย Firebase Auth ก่อนบันทึกข้อมูล');
       const docId = String(item.firebaseDocId || item.id || Date.now());
       const cleanItem = Object.assign({}, item, {
         firebaseDocId: docId,
@@ -2706,12 +2725,14 @@
     }
 
     async function deleteFirebaseDocument(collectionName, item) {
-      if (!firebaseReady || !db || !item) return;
+      if (!firebaseReady || !db || !item) throw new Error('Firebase ยังไม่พร้อมใช้งาน');
+      if (PRODUCTION_MODE && !firebaseUser) throw new Error('กรุณา Login ด้วย Firebase Auth ก่อนลบข้อมูล');
       const docId = String(item.firebaseDocId || item.id);
       await db.collection(collectionName).doc(docId).delete();
     }
 
     async function seedCollectionIfEmpty(collectionName, localArray) {
+      if (PRODUCTION_MODE) return;
       if (!firebaseReady || !db) return;
       const snapshot = await db.collection(collectionName).limit(1).get();
       if (!snapshot.empty) return;
@@ -2736,7 +2757,7 @@
 
     async function loadCoreDataFromFirebase() {
       if (!firebaseReady || !db) {
-        console.warn('Firebase is not ready. ระบบจะใช้ข้อมูล Demo ในไฟล์ก่อน');
+        console.warn('Firebase is not ready. ระบบจะไม่โหลดข้อมูลจนกว่า Firebase จะพร้อม');
         return;
       }
 
@@ -2913,14 +2934,15 @@
       });
     }
 
-    function loginByRole() {
+    async function loginByRole() {
       const username = getElement('loginUsername').value.trim();
       const password = getElement('loginPassword').value.trim();
       const remember = getElement('rememberLogin').checked;
+      const result = getElement('studentLoginResult');
 
       if (!username || !password) {
-        getElement('studentLoginResult').textContent = 'กรุณากรอก ID และรหัสผ่าน';
-        getElement('studentLoginResult').style.color = '#dc2626';
+        result.textContent = 'กรุณากรอกอีเมล/ID และรหัสผ่าน';
+        result.style.color = '#dc2626';
         return;
       }
 
@@ -2930,6 +2952,82 @@
       } else {
         localStorage.removeItem('ideaClubRememberLogin');
         localStorage.removeItem('ideaClubLoginUsername');
+      }
+
+      if (PRODUCTION_MODE) {
+        if (!firebaseReady || !auth || !db) {
+          result.textContent = 'Firebase ยังไม่พร้อมใช้งาน กรุณาตรวจสอบการเชื่อมต่อ';
+          result.style.color = '#dc2626';
+          return;
+        }
+
+        try {
+          result.textContent = 'กำลังเข้าสู่ระบบ...';
+          result.style.color = '#0f4cbd';
+
+          const credential = await auth.signInWithEmailAndPassword(username, password);
+          firebaseUser = credential.user;
+
+          const profileDoc = await db.collection('users').doc(firebaseUser.uid).get();
+          if (!profileDoc.exists) {
+            result.textContent = 'บัญชีนี้ยังไม่มีสิทธิ์ในระบบ กรุณาเพิ่มข้อมูลใน Firestore collection users โดยใช้ uid ของบัญชีนี้';
+            result.style.color = '#dc2626';
+            await auth.signOut();
+            return;
+          }
+
+          firebaseUserProfile = profileDoc.data();
+          if (firebaseUserProfile.status && firebaseUserProfile.status !== 'active') {
+            result.textContent = 'บัญชีนี้ถูกปิดการใช้งาน กรุณาติดต่อ Admin';
+            result.style.color = '#dc2626';
+            await auth.signOut();
+            return;
+          }
+
+          await loadCoreDataFromFirebase();
+
+          const userRole = firebaseUserProfile.role || 'student';
+          setSuperAdminMode(userRole === 'admin');
+
+          if (userRole === 'admin') {
+            showAdminPanel(true);
+            return;
+          }
+
+          if (userRole === 'teacher') {
+            const teacher = teachers.find(function(t) {
+              return t.authUid === firebaseUser.uid || t.email === username || t.username === username;
+            }) || {
+              id: firebaseUser.uid,
+              name: firebaseUserProfile.name || firebaseUser.email || 'Teacher',
+              subject: firebaseUserProfile.subject || '-',
+              username: firebaseUser.email,
+              status: 'Active',
+              role: 'Teacher'
+            };
+            showTeacherPanel(teacher);
+            return;
+          }
+
+          const student = students.find(function(s) {
+            return s.authUid === firebaseUser.uid || s.email === username || s.phone === username;
+          });
+
+          if (!student) {
+            result.textContent = 'ไม่พบบัญชีนักเรียนในระบบ กรุณาให้ Admin เพิ่มข้อมูลนักเรียนก่อน';
+            result.style.color = '#dc2626';
+            return;
+          }
+
+          currentStudent = student;
+          studentLogin(student.phone || student.email || username);
+          return;
+        } catch (error) {
+          console.error('Firebase login error:', error);
+          result.textContent = 'Login ไม่สำเร็จ: ' + (error.message || error.code || 'ไม่ทราบสาเหตุ');
+          result.style.color = '#dc2626';
+          return;
+        }
       }
 
       if (username === 'admin' && password === '0000') {
@@ -2957,8 +3055,8 @@
         return;
       }
 
-      getElement('studentLoginResult').textContent = 'ID หรือ Password ไม่ถูกต้อง';
-      getElement('studentLoginResult').style.color = '#dc2626';
+      result.textContent = 'ID หรือ Password ไม่ถูกต้อง';
+      result.style.color = '#dc2626';
     }
 
     function studentLogin(username) {
@@ -2997,7 +3095,7 @@
       getElement('student-login').scrollIntoView({ behavior: 'smooth' });
     }
 
-    function studentRegister() {
+    async function studentRegister() {
       const parentName = getElement('registerParentName').value.trim();
       const studentName = getElement('registerStudentName').value.trim();
       const nickname = getElement('registerNickname').value.trim();
@@ -3008,11 +3106,51 @@
         result.style.color = '#dc2626';
         return;
       }
-      const newId = students.length ? Math.max.apply(null, students.map(function(s) { return s.id; })) + 1 : 1;
-      const newStudent = { id: newId, firebaseDocId: String(newId), memberId: '-', name: studentName, nickname: nickname, grade: 'ป.6', phone: phone, course: 'ยังไม่ได้สมัครคอร์ส', courseId: null, courseAccess: '-', courseStatus: 'ยังไม่ได้สมัครคอร์ส', paymentStatus: 'ยังไม่ได้สมัครคอร์ส', status: 'ปกติ' };
+      let authUid = null;
+      let studentEmail = '';
+
+      if (PRODUCTION_MODE) {
+        if (!firebaseReady || !auth || !db) {
+          result.textContent = 'Firebase ยังไม่พร้อมใช้งาน';
+          result.style.color = '#dc2626';
+          return;
+        }
+        studentEmail = phone.replace(/[^0-9]/g, '') + '@ideaclub.local';
+        try {
+          const credential = await auth.createUserWithEmailAndPassword(studentEmail, '0000');
+          firebaseUser = credential.user;
+          authUid = firebaseUser.uid;
+          await db.collection('users').doc(authUid).set({
+            name: studentName,
+            nickname: nickname,
+            parentName: parentName,
+            phone: phone,
+            email: studentEmail,
+            role: 'student',
+            status: 'active',
+            createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+            updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+          }, { merge: true });
+        } catch (error) {
+          console.error('register firebase auth error:', error);
+          result.textContent = 'ลงทะเบียนไม่สำเร็จ: ' + (error.message || error.code);
+          result.style.color = '#dc2626';
+          return;
+        }
+      }
+
+      const newId = Date.now();
+      const newStudent = { id: newId, firebaseDocId: String(newId), authUid: authUid, email: studentEmail, memberId: '-', name: studentName, nickname: nickname, grade: 'ป.6', phone: phone, course: 'ยังไม่ได้สมัครคอร์ส', courseId: null, courseAccess: '-', courseStatus: 'ยังไม่ได้สมัครคอร์ส', paymentStatus: 'ยังไม่ได้สมัครคอร์ส', status: 'ปกติ' };
       students.push(newStudent);
       currentStudent = newStudent;
-      setFirebaseDocument('students', newStudent).catch(function(error) { console.error('register student firebase error:', error); });
+      try {
+        await setFirebaseDocument('students', newStudent);
+      } catch (error) {
+        console.error('register student firebase error:', error);
+        result.textContent = 'สร้างบัญชีได้แล้ว แต่บันทึกข้อมูลนักเรียนไม่สำเร็จ: ' + (error.message || error.code);
+        result.style.color = '#dc2626';
+        return;
+      }
       result.textContent = 'ลงทะเบียนเรียบร้อย ระบบเข้าสู่หน้าสมาชิกให้อัตโนมัติ';
       result.style.color = '#16a34a';
       getElement('profileFullName').value = studentName;
@@ -3034,7 +3172,13 @@
       window.scrollTo({ top: 0, behavior: 'smooth' });
     }
 
-    function logoutSystem() {
+    async function logoutSystem() {
+      if (PRODUCTION_MODE && auth) {
+        try { await auth.signOut(); } catch (error) { console.error('Firebase sign out error:', error); }
+      }
+      firebaseUser = null;
+      firebaseUserProfile = null;
+      currentStudent = null;
       setSuperAdminMode(false);
       getElement('profileMenu').classList.add('hidden');
       getElement('profilePanel').classList.add('hidden');
@@ -3087,6 +3231,10 @@
       showAdminPanel(true);
       setSuperAdminMode(false);
       getElement('profileName').textContent = teacher ? teacher.name : 'Admin';
+    }
+
+    function getFirebaseAuthUidText() {
+      return firebaseUser ? firebaseUser.uid : '-';
     }
 
     function showTeacherPanel(teacher) {
@@ -3296,11 +3444,18 @@
 
     function showAdminPanel(skipCheck) {
       if (!skipCheck) {
-        const username = getElement('loginUsername') ? getElement('loginUsername').value.trim() : '';
-        const password = getElement('loginPassword') ? getElement('loginPassword').value.trim() : '';
-        if (username !== 'admin' || password !== '0000') {
-          alert('กรุณา Login ด้วย Admin ก่อนเข้าใช้งานหลังบ้าน');
-          return;
+        if (PRODUCTION_MODE) {
+          if (!firebaseUser || !firebaseUserProfile || firebaseUserProfile.role !== 'admin') {
+            alert('กรุณา Login ด้วยบัญชี Admin ก่อนเข้าใช้งาน Admin Panel');
+            return;
+          }
+        } else {
+          const username = getElement('loginUsername') ? getElement('loginUsername').value.trim() : '';
+          const password = getElement('loginPassword') ? getElement('loginPassword').value.trim() : '';
+          if (username !== 'admin' || password !== '0000') {
+            alert('กรุณา Login ด้วย Admin ก่อนเข้าใช้งานหลังบ้าน');
+            return;
+          }
         }
       }
 
