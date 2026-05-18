@@ -631,6 +631,10 @@
 
     function renderStudentCourses() {
       const grade = el('studentCourseGradeFilter').value;
+      if (!grade) {
+        setHTML('studentCourseList', '<div class="card">กรุณาเลือกระดับชั้นก่อน</div>');
+        return;
+      }
       const open = courses.filter(c => c.grade === grade && c.status === 'open');
       setHTML('studentCourseList', open.length ? open.map(c => `<div class="card"><h3>${c.name}</h3><p>${c.desc || ''}</p><p class="status-paid">${formatPrice(c.price)}</p><p>สิทธิ์: ${c.access}</p><button class="btn btn-blue" onclick="applyCourse('${c.id}')">สมัครคอร์สนี้</button></div>`).join('') : '<div class="card">ยังไม่มีคอร์สที่เปิดรับสมัครในระดับชั้นนี้</div>');
     }
@@ -643,14 +647,17 @@
     function renderStudentHome() {
       if (!currentStudent) currentStudent = students.find(s => s.authUid === firebaseUser.uid || s.email === firebaseUser.email);
       if (!currentStudent) return;
-      setText('studentNameText', currentStudent.name || '-'); setText('studentNicknameText', currentStudent.nickname || '-'); setText('studentGradeText', currentStudent.grade || '-'); setText('studentPhoneText', currentStudent.phone || '-');
+      const hasStudentProfile = !!((currentStudent.name || '').trim() || (currentStudent.phone || '').trim() || (currentStudent.nickname || '').trim());
+      const hasRegisteredCourse = !!currentStudent.courseId;
+      const profileGrade = hasStudentProfile || hasRegisteredCourse ? (currentStudent.grade || '') : '';
+      setText('studentNameText', currentStudent.name || '-'); setText('studentNicknameText', currentStudent.nickname || '-'); setText('studentGradeText', profileGrade || '-'); setText('studentPhoneText', currentStudent.phone || '-');
       const hasCourse = !!currentStudent.courseId;
       setText('studentCourseText', hasCourse ? currentStudent.course : 'ยังไม่ได้สมัครคอร์ส');
       setText('studentPaymentText', currentStudent.paymentStatus || '-');
       el('studentPaymentBox').classList.toggle('hidden', !hasCourse);
       el('studentPickupCard').classList.toggle('hidden', !hasCourse);
       setText('studentPickupDateText', currentStudent.pickupDate || '-'); setText('studentPickupText', currentStudent.pickupStatus || '-');
-      el('studentCourseGradeFilter').value = currentStudent.grade || 'ป.4'; renderStudentCourses(); renderStudentPaymentMonths(); renderStudentPaymentSummary(); renderStudentReceipts(); renderPaymentQr();
+      el('studentCourseGradeFilter').value = profileGrade || ''; renderStudentCourses(); renderStudentPaymentMonths(); renderStudentPaymentSummary(); renderStudentReceipts(); renderPaymentQr();
     }
 
     async function savePaymentQr() {
@@ -742,7 +749,8 @@
     async function deleteQuestion(id) { const i = monthlyQuestions.findIndex(x => String(x.id) === String(id)); if (i < 0) return; try { await deleteDoc(COLLECTIONS.monthlyQuestions, monthlyQuestions[i]); monthlyQuestions.splice(i,1); renderQuestions(); } catch (error) { result('questionSaveResult', 'ลบไม่สำเร็จ: ' + explainFirebaseError(error), false); } }
 
     function populateOptions() {
-      ['registerGrade','adminStudentGrade','adminCourseGrade','studentCourseGradeFilter'].forEach(id => setHTML(id, GRADES.map(g => `<option value="${g}">${g}</option>`).join('')));
+      ['registerGrade','adminStudentGrade','adminCourseGrade'].forEach(id => setHTML(id, GRADES.map(g => `<option value="${g}">${g}</option>`).join('')));
+      setHTML('studentCourseGradeFilter', '<option value="">เลือกระดับชั้น</option>' + GRADES.map(g => `<option value="${g}">${g}</option>`).join(''));
       setHTML('pickupGradeFilter', '<option value="ทั้งหมด">ทั้งหมด</option>' + GRADES.map(g => `<option value="${g}">${g}</option>`).join(''));
       el('pickupDate').valueAsDate = new Date();
     }
