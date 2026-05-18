@@ -1118,7 +1118,7 @@
         <div class="notice" style="margin-bottom:18px;">
           <strong>ข้อมูลสำหรับเข้าสู่ระบบ</strong>
           <p>• Login ID ใช้เป็น “เบอร์โทรศัพท์ที่ลงทะเบียน”</p>
-          <p>• รหัสผ่านเริ่มต้นคือ <strong>0000</strong></p>
+          <p>• รหัสผ่านเริ่มต้นคือ <strong>000000</strong></p>
           <p>• หลังเข้าสู่ระบบแล้ว สามารถเปลี่ยนรหัสผ่านภายหลังได้ในเมนู “แก้ไขข้อมูลส่วนตัว”</p>
         </div>
 
@@ -1811,7 +1811,7 @@
                 <h3 style="color:#0f4cbd; margin-bottom:10px;">สร้างรหัสสมาชิกสำเร็จ</h3>
                 <p><strong>Member ID:</strong> <span id="generatedMemberId">-</span></p>
                 <p><strong>Login ID / เบอร์โทรศัพท์:</strong> <span id="generatedUsername">-</span></p>
-                <p><strong>รหัสผ่านเริ่มต้น:</strong> 0000</p>
+                <p><strong>รหัสผ่านเริ่มต้น:</strong> 000000</p>
                 
                 <p><strong>สถานะสมาชิก:</strong> <span class="status-paid">Active</span></p>
                 <br />
@@ -3108,7 +3108,7 @@
         }
       }
 
-      if (username === 'admin' && password === '0000') {
+      if (username === 'admin' && password === '000000') {
         setSuperAdminMode(true);
         showAdminPanel(true);
         return;
@@ -3117,7 +3117,7 @@
       const teacher = teachers.find(function(item) {
         return (item.username === username || item.username === displayLoginId || item.email === username || item.phone === displayLoginId || item.teacherId === displayLoginId) && item.status === 'Active';
       });
-      if (teacher && password === '0000') {
+      if (teacher && password === '000000') {
         setSuperAdminMode(false);
         if ((teacher.role || 'Teacher') === 'Admin') {
           showTeacherAdminPanel(teacher);
@@ -3127,7 +3127,7 @@
         return;
       }
 
-      if ((displayLoginId === 'test1' && password === '0000') || students.some(function(s) { return s.phone === displayLoginId || s.email === username; })) {
+      if ((displayLoginId === 'test1' && password === '000000') || students.some(function(s) { return s.phone === displayLoginId || s.email === username; })) {
         setSuperAdminMode(false);
         studentLogin(displayLoginId);
         return;
@@ -3195,7 +3195,7 @@
         }
         studentEmail = phone.replace(/[^0-9]/g, '') + '@ideaclub.local';
         try {
-          const credential = await auth.createUserWithEmailAndPassword(studentEmail, '0000');
+          const credential = await auth.createUserWithEmailAndPassword(studentEmail, '000000');
           firebaseUser = credential.user;
           authUid = firebaseUser.uid;
           await db.collection('users').doc(authUid).set({
@@ -3530,7 +3530,7 @@
         } else {
           const username = getElement('loginUsername') ? getElement('loginUsername').value.trim() : '';
           const password = getElement('loginPassword') ? getElement('loginPassword').value.trim() : '';
-          if (username !== 'admin' || password !== '0000') {
+          if (username !== 'admin' || password !== '000000') {
             alert('กรุณา Login ด้วย Admin ก่อนเข้าใช้งานหลังบ้าน');
             return;
           }
@@ -3567,7 +3567,10 @@
       const selectedTab = getElement(tabId);
       if (selectedTab) selectedTab.classList.remove('hidden');
       if (tabId === 'admin-dashboard') safeRun(renderAdminDashboard, 'admin-dashboard');
-      if (tabId === 'admin-students') safeRun(renderAdminStudents, 'admin-students');
+      if (tabId === 'admin-students') {
+        safeRun(renderAdminStudents, 'admin-students');
+        safeRun(renderMemberTable, 'member-table');
+      }
       if (tabId === 'admin-teachers') safeRun(renderTeachers, 'admin-teachers');
       if (tabId === 'admin-courses') {
         safeRun(renderAdminCourses, 'admin-courses');
@@ -3619,6 +3622,18 @@
     let adminStudentCurrentPage = 1;
     const adminStudentPerPage = 20;
 
+    function renderMemberTable() {
+      const tbody = getElement('memberTableBody');
+      if (!tbody) return;
+      if (!Array.isArray(students) || students.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="6">ยังไม่มีรายการสมาชิกที่สร้างจากระบบ</td></tr>';
+        return;
+      }
+      tbody.innerHTML = students.map(function(s, i) {
+        return '<tr><td>' + (s.memberId || '-') + '</td><td>' + (s.name || '-') + '</td><td>' + (s.nickname || '-') + '</td><td>' + (s.grade || '-') + '</td><td>' + (s.phone || '-') + '</td><td><span class="status-paid">' + (s.status || 'ปกติ') + '</span></td></tr>';
+      }).join('');
+    }
+
     function renderAdminStudents() {
       const tbody = getElement('adminStudentTableBody');
       if (!tbody) return;
@@ -3659,7 +3674,7 @@
         const studentEmail = buildLocalEmailFromPhone(phone);
         let authUid = null;
         if (PRODUCTION_MODE && studentEmail) {
-          authUid = await createAuthUserFromAdmin(studentEmail, '0000');
+          authUid = await createAuthUserFromAdmin(studentEmail, '000000');
           await db.collection('users').doc(authUid).set({
             name: name,
             nickname: nickname,
@@ -3672,14 +3687,15 @@
             updatedAt: firebase.firestore.FieldValue.serverTimestamp()
           }, { merge: true });
         }
-        const newStudent = { id: authUid || newId, firebaseDocId: String(authUid || newId), authUid: authUid, email: studentEmail, defaultPassword: '0000', memberId: '-', name: name, nickname: nickname, grade: grade, phone: phone, course: course, courseId: null, courseAccess: '-', courseStatus: course === 'ยังไม่ได้สมัครคอร์ส' ? 'ยังไม่ได้สมัครคอร์ส' : 'สมัครแล้ว', paymentStatus: course === 'ยังไม่ได้สมัครคอร์ส' ? 'ยังไม่ได้สมัครคอร์ส' : 'รอชำระเงิน', status: 'ปกติ' };
+        const newStudent = { id: authUid || newId, firebaseDocId: String(authUid || newId), authUid: authUid, email: studentEmail, defaultPassword: '000000', memberId: '-', name: name, nickname: nickname, grade: grade, phone: phone, course: course, courseId: null, courseAccess: '-', courseStatus: course === 'ยังไม่ได้สมัครคอร์ส' ? 'ยังไม่ได้สมัครคอร์ส' : 'สมัครแล้ว', paymentStatus: course === 'ยังไม่ได้สมัครคอร์ส' ? 'ยังไม่ได้สมัครคอร์ส' : 'รอชำระเงิน', status: 'ปกติ' };
         students.push(newStudent);
         await setFirebaseDocument('students', newStudent);
-        result.textContent = 'เพิ่มนักเรียนใหม่เรียบร้อย รหัสเริ่มต้น 0000 และบันทึกลง Firebase แล้ว';
+        result.textContent = 'เพิ่มนักเรียนใหม่เรียบร้อย รหัสเริ่มต้น 000000 และบันทึกลง Firebase แล้ว';
       }
       result.style.color = '#16a34a';
       clearStudentForm(false);
       renderAdminStudents();
+      renderMemberTable();
       renderAdminDashboard();
     }
 
@@ -3714,7 +3730,8 @@
           });
           setFirebaseDocument('students', s).catch(function(error) { console.error('save student firebase error:', error); });
           renderAdminStudents();
-          renderAdminDashboard();
+      renderMemberTable();
+      renderAdminDashboard();
           closeEditBubble();
           getElement('studentSaveResult').textContent = 'แก้ไขข้อมูลนักเรียนเรียบร้อย';
           getElement('studentSaveResult').style.color = '#16a34a';
@@ -3754,7 +3771,7 @@
       tbody.innerHTML = teachers.map(function(t, i) {
         const status = t.status === 'Active' ? '<span class="status-paid">Active</span>' : '<span class="status-absent">Inactive</span>';
         const role = (t.role || 'Teacher') === 'Admin' ? '<span class="status-parent">Admin</span>' : '<span class="status-paid">Teacher</span>';
-        return '<tr><td>' + (i + 1) + '</td><td>' + t.teacherId + '</td><td>' + t.name + '</td><td>' + t.subject + '</td><td>' + t.username + '</td><td>' + t.branch + '</td><td>' + role + '</td><td>' + status + '</td><td><button class="btn btn-blue" type="button" onclick="editTeacher(' + t.id + ')">แก้ไข</button><button class="btn btn-dark" type="button" onclick="resetTeacherPassword(' + t.id + ')">Reset 0000</button><button class="btn btn-red" type="button" onclick="deleteTeacher(' + t.id + ')">ลบ</button></td></tr>';
+        return '<tr><td>' + (i + 1) + '</td><td>' + t.teacherId + '</td><td>' + t.name + '</td><td>' + t.subject + '</td><td>' + t.username + '</td><td>' + t.branch + '</td><td>' + role + '</td><td>' + status + '</td><td><button class="btn btn-blue" type="button" onclick="editTeacher(' + t.id + ')">แก้ไข</button><button class="btn btn-dark" type="button" onclick="resetTeacherPassword(' + t.id + ')">Reset 000000</button><button class="btn btn-red" type="button" onclick="deleteTeacher(' + t.id + ')">ลบ</button></td></tr>';
       }).join('');
     }
 
@@ -3791,7 +3808,7 @@
         if (!teacherEmail) teacherEmail = 'teacher-' + Date.now() + '@ideaclub.local';
         let authUid = null;
         if (PRODUCTION_MODE) {
-          authUid = await createAuthUserFromAdmin(teacherEmail, '0000');
+          authUid = await createAuthUserFromAdmin(teacherEmail, '000000');
           await db.collection('users').doc(authUid).set({
             name: name,
             email: teacherEmail,
@@ -3804,10 +3821,10 @@
             updatedAt: firebase.firestore.FieldValue.serverTimestamp()
           }, { merge: true });
         }
-        const newTeacher = { id: authUid || newId, firebaseDocId: String(authUid || newId), authUid: authUid, teacherId: 'T' + year + padNumber(teachers.length + 1, 4), name: name, subject: subject, email: teacherEmail, username: username || teacherEmail, defaultPassword: '0000', branch: branch, role: role, status: status };
+        const newTeacher = { id: authUid || newId, firebaseDocId: String(authUid || newId), authUid: authUid, teacherId: 'T' + year + padNumber(teachers.length + 1, 4), name: name, subject: subject, email: teacherEmail, username: username || teacherEmail, defaultPassword: '000000', branch: branch, role: role, status: status };
         teachers.push(newTeacher);
         await setFirebaseDocument('teachers', newTeacher);
-        result.textContent = 'สร้างสมาชิกครูเรียบร้อย รหัสเริ่มต้น 0000 และบันทึกลง Firebase แล้ว';
+        result.textContent = 'สร้างสมาชิกครูเรียบร้อย รหัสเริ่มต้น 000000 และบันทึกลง Firebase แล้ว';
       }
       result.style.color = '#16a34a';
       clearTeacherForm(false);
@@ -3874,7 +3891,7 @@
     function resetTeacherPassword(id) {
       const t = teachers.find(function(item) { return String(item.id) === String(id); });
       if (!t) return;
-      getElement('teacherSaveResult').textContent = 'Reset รหัสผ่านของ ' + t.name + ' เป็น 0000 เรียบร้อย';
+      getElement('teacherSaveResult').textContent = 'Reset รหัสผ่านของ ' + t.name + ' เป็น 000000 เรียบร้อย';
       getElement('teacherSaveResult').style.color = '#16a34a';
     }
 
@@ -3925,7 +3942,7 @@
         'ข้อมูลเข้าสู่ระบบ IDEA CLUB',
         'Member ID: ' + getElement('generatedMemberId').textContent,
         'Login ID: ' + getElement('generatedUsername').textContent,
-        'รหัสผ่านเริ่มต้น: 0000'
+        'รหัสผ่านเริ่มต้น: 000000'
       ].join(String.fromCharCode(10));
 
       if (navigator.clipboard) {
@@ -3946,7 +3963,7 @@
         'นักเรียน: ' + row.children[1].innerText,
         'Member ID: ' + row.children[0].innerText,
         'Login ID: ' + row.children[3].innerText,
-        'รหัสผ่านเริ่มต้น: 0000'
+        'รหัสผ่านเริ่มต้น: 000000'
       ].join(String.fromCharCode(10));
 
       alert(message);
@@ -3954,7 +3971,7 @@
 
     function resetMemberPassword(button) {
       const row = button.closest('tr');
-      alert('Reset รหัสผ่านของ ' + row.children[1].innerText + ' เป็น 0000 เรียบร้อย');
+      alert('Reset รหัสผ่านของ ' + row.children[1].innerText + ' เป็น 000000 เรียบร้อย');
     }
 
     function toggleMemberStatus(button) {
@@ -6049,6 +6066,7 @@
       safeRun(updateTeacherIdPreview, 'teacher-id-preview');
       safeRun(renderAdminDashboard, 'admin-dashboard-init');
       safeRun(renderAdminStudents, 'admin-students-init');
+      safeRun(renderMemberTable, 'member-table-init');
       safeRun(renderTeachers, 'teachers-init');
       safeRun(renderAdminCourses, 'courses-init');
       safeRun(renderOnlineClassCourseSelect, 'online-select-init');
