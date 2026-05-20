@@ -2645,6 +2645,17 @@
       return String(name || 'file').replace(/[^a-zA-Z0-9ก-ฮะ-์._-]/g, '-');
     }
 
+    function jsArg(value) {
+      return String(value === undefined || value === null ? '' : value)
+        .replace(/\\/g, '\\\\')
+        .replace(/'/g, "\\'")
+        .replace(/[\r\n]/g, ' ');
+    }
+
+    function actionCall(functionName, id) {
+      return functionName + "('" + jsArg(id) + "')";
+    }
+
     async function uploadFileToFirebaseStorage(path, fileOrDataUrl) {
       if (!firebaseReady || !storage) throw new Error('Firebase Storage ยังไม่พร้อมใช้งาน');
       if (PRODUCTION_MODE && !firebaseUser) throw new Error('กรุณา Login ด้วย Firebase Auth ก่อนอัปโหลดไฟล์');
@@ -3548,7 +3559,7 @@
       const pageItems = filtered.slice(start, start + adminStudentPerPage);
 
       tbody.innerHTML = pageItems.length ? pageItems.map(function(s, i) {
-        return '<tr><td>' + (start + i + 1) + '</td><td>' + (s.memberId || '-') + '</td><td class="student-name">' + s.name + '</td><td>' + (s.nickname || '-') + '</td><td>' + s.grade + '</td><td>' + s.phone + '</td><td>' + s.course + '</td><td><span class="status-paid">' + s.status + '</span></td><td><button class="btn btn-blue" type="button" onclick="editStudent(' + s.id + ')">แก้ไข</button><button class="btn btn-red" type="button" onclick="deleteStudent(' + s.id + ')">ลบ</button></td></tr>';
+        return '<tr><td>' + (start + i + 1) + '</td><td>' + (s.memberId || '-') + '</td><td class="student-name">' + s.name + '</td><td>' + (s.nickname || '-') + '</td><td>' + s.grade + '</td><td>' + s.phone + '</td><td>' + s.course + '</td><td><span class="status-paid">' + s.status + '</span></td><td><button class="btn btn-blue" type="button" onclick="' + actionCall('editStudent', s.id) + '">แก้ไข</button><button class="btn btn-red" type="button" onclick="' + actionCall('deleteStudent', s.id) + '">ลบ</button></td></tr>';
       }).join('') : '<tr><td colspan="9">ยังไม่มีนักเรียนในระดับชั้นที่เลือก</td></tr>';
     }
 
@@ -3672,7 +3683,7 @@
       tbody.innerHTML = teachers.map(function(t, i) {
         const status = t.status === 'Active' ? '<span class="status-paid">Active</span>' : '<span class="status-absent">Inactive</span>';
         const role = (t.role || 'Teacher') === 'Admin' ? '<span class="status-parent">Admin</span>' : '<span class="status-paid">Teacher</span>';
-        return '<tr><td>' + (i + 1) + '</td><td>' + t.teacherId + '</td><td>' + t.name + '</td><td>' + t.subject + '</td><td>' + t.username + '</td><td>' + t.branch + '</td><td>' + role + '</td><td>' + status + '</td><td><button class="btn btn-blue" type="button" onclick="editTeacher(' + t.id + ')">แก้ไข</button><button class="btn btn-dark" type="button" onclick="resetTeacherPassword(' + t.id + ')">Reset 000000</button><button class="btn btn-red" type="button" onclick="deleteTeacher(' + t.id + ')">ลบ</button></td></tr>';
+        return '<tr><td>' + (i + 1) + '</td><td>' + t.teacherId + '</td><td>' + t.name + '</td><td>' + t.subject + '</td><td>' + t.username + '</td><td>' + t.branch + '</td><td>' + role + '</td><td>' + status + '</td><td><button class="btn btn-blue" type="button" onclick="' + actionCall('editTeacher', t.id) + '">แก้ไข</button><button class="btn btn-dark" type="button" onclick="' + actionCall('resetTeacherPassword', t.id) + '">Reset 000000</button><button class="btn btn-red" type="button" onclick="' + actionCall('deleteTeacher', t.id) + '">ลบ</button></td></tr>';
       }).join('');
     }
 
@@ -3926,7 +3937,7 @@
       }
       const filtered = courses.filter(function(c) { return c.grade === grade && c.status === 'open'; });
       list.innerHTML = filtered.length ? filtered.map(function(c) {
-        return '<div class="card"><span class="tag">' + c.grade + ' · แถม ' + c.access + '</span><h3>' + c.name + '</h3><p>' + c.desc + '</p><p><strong>สถานที่เรียน:</strong> ' + c.location + '</p><p><strong>วันเรียน:</strong> ' + ((c.days || []).join(' / ') || '-') + '</p><p class="price">' + formatPrice(c.price) + '</p><button class="btn btn-blue" type="button" onclick="applyCourse(' + c.id + ')">สมัครคอร์สนี้</button></div>';
+        return '<div class="card"><span class="tag">' + c.grade + ' · แถม ' + c.access + '</span><h3>' + c.name + '</h3><p>' + c.desc + '</p><p><strong>สถานที่เรียน:</strong> ' + c.location + '</p><p><strong>วันเรียน:</strong> ' + ((c.days || []).join(' / ') || '-') + '</p><p class="price">' + formatPrice(c.price) + '</p><button class="btn btn-blue" type="button" onclick="' + actionCall('applyCourse', c.id) + '">สมัครคอร์สนี้</button></div>';
       }).join('') : '<div class="card"><h3>ยังไม่มีคอร์สที่เปิดรับสมัคร</h3><p>ระดับชั้น ' + grade + ' ยังไม่มีคอร์สเปิดรับสมัครในขณะนี้</p></div>';
     }
 
@@ -3948,7 +3959,7 @@
       }
       tbody.innerHTML = courses.map(function(c) {
         const statusText = c.status === 'open' ? '<span class="status-paid">เปิดรับสมัคร</span>' : '<span class="status-absent">ปิดรับสมัคร</span>';
-        return '<tr><td>' + c.grade + '</td><td>' + c.name + '</td><td>' + formatPrice(c.price) + '</td><td>' + c.access + '</td><td>' + c.location + '</td><td>' + ((c.days || []).join(' / ') || '-') + '</td><td>' + statusText + '</td><td><button class="btn btn-blue" type="button" onclick="editCourse(' + c.id + ')">แก้ไข</button><button class="btn btn-red" type="button" onclick="deleteCourse(' + c.id + ')">ลบ</button></td></tr>';
+        return '<tr><td>' + c.grade + '</td><td>' + c.name + '</td><td>' + formatPrice(c.price) + '</td><td>' + c.access + '</td><td>' + c.location + '</td><td>' + ((c.days || []).join(' / ') || '-') + '</td><td>' + statusText + '</td><td><button class="btn btn-blue" type="button" onclick="' + actionCall('editCourse', c.id) + '">แก้ไข</button><button class="btn btn-red" type="button" onclick="' + actionCall('deleteCourse', c.id) + '">ลบ</button></td></tr>';
       }).join('');
     }
 
@@ -4112,13 +4123,13 @@
       if (!tbody) return;
       const filtered = getFilteredSortedOnDemandPlaylists();
       tbody.innerHTML = filtered.length ? filtered.map(function(item) {
-        const course = courses.find(function(c) { return c.id === item.courseId; });
-        return '<tr><td>' + item.subject + '</td><td>' + item.grade + '</td><td>' + item.playlistName + '</td><td>' + item.clipTitle + '</td><td>' + (course ? course.name : '-') + '</td><td>' + (item.link ? 'มีลิงก์' : '-') + '</td><td><button class="btn btn-blue" type="button" onclick="editOnDemand(' + item.id + ')">แก้ไข</button><button class="btn btn-red" type="button" onclick="deleteOnDemandPlaylist(' + item.id + ')">ลบ</button></td></tr>';
+        const course = courses.find(function(c) { return String(c.id) === String(item.courseId); });
+        return '<tr><td>' + item.subject + '</td><td>' + item.grade + '</td><td>' + item.playlistName + '</td><td>' + item.clipTitle + '</td><td>' + (course ? course.name : '-') + '</td><td>' + (item.link ? 'มีลิงก์' : '-') + '</td><td><button class="btn btn-blue" type="button" onclick="' + actionCall('editOnDemand', item.id) + '">แก้ไข</button><button class="btn btn-red" type="button" onclick="' + actionCall('deleteOnDemandPlaylist', item.id) + '">ลบ</button></td></tr>';
       }).join('') : '<tr><td colspan="7">ไม่พบคลิป On-demand ตามวิชาและระดับชั้นที่เลือก</td></tr>';
     }
 
     function editOnDemand(id) {
-      const item = onDemandPlaylists.find(function(p) { return p.id === id; });
+      const item = onDemandPlaylists.find(function(p) { return String(p.id) === String(id); });
       if (!item) return;
 
       openEditBubble('แก้ไข Playlist / คลิป On-demand',
@@ -4191,7 +4202,7 @@
         return;
       }
       tbody.innerHTML = courses.map(function(c) {
-        return '<tr><td>' + c.grade + '</td><td>' + c.name + '</td><td>' + (c.onlineLink ? 'มีลิงก์' : '-') + '</td><td>' + (c.roomId || '-') + '</td><td>' + (c.roomPassword || '-') + '</td><td><button class="btn btn-blue" type="button" onclick="editOnlineClass(' + c.id + ')">แก้ไข</button></td></tr>';
+        return '<tr><td>' + c.grade + '</td><td>' + c.name + '</td><td>' + (c.onlineLink ? 'มีลิงก์' : '-') + '</td><td>' + (c.roomId || '-') + '</td><td>' + (c.roomPassword || '-') + '</td><td><button class="btn btn-blue" type="button" onclick="' + actionCall('editOnlineClass', c.id) + '">แก้ไข</button></td></tr>';
       }).join('');
     }
 
@@ -4490,7 +4501,7 @@
           '<p><strong>Meeting ID:</strong> ' + (c.roomId || '-') + '</p>' +
           '<p><strong>Password:</strong> ' + (c.roomPassword || '-') + '</p>' +
           '<p style="color:#6b7280;">' + (hasLink ? 'ลิงก์ MS Teams พร้อมใช้งานจากหลังบ้าน' : 'ยังไม่มีลิงก์ MS Teams สำหรับคอร์สนี้') + '</p>' +
-          '<button class="btn ' + (hasLink ? 'btn-blue' : 'btn-dark') + '" type="button" onclick="openOnlineClassByCourseId(' + c.id + ')">เข้าห้องเรียนสด</button>' +
+          '<button class="btn ' + (hasLink ? 'btn-blue' : 'btn-dark') + '" type="button" onclick="' + actionCall('openOnlineClassByCourseId', c.id) + '">เข้าห้องเรียนสด</button>' +
         '</div>';
       }).join('');
     }
@@ -4541,7 +4552,7 @@
             return '<div style="border-top:1px solid #374151; padding-top:10px; margin-top:10px;">' +
               '<p style="color:white;"><strong>' + (index + 1) + '. ' + item.clipTitle + '</strong></p>' +
               '<p style="color:#d1d5db;">' + (item.link ? 'ลิงก์คลิปพร้อมใช้งานจากหลังบ้าน' : 'ยังไม่มีลิงก์คลิปนี้') + '</p>' +
-              '<button class="btn ' + (item.link ? '' : 'btn-dark') + '" type="button" onclick="openOnDemandPlaylistClip(' + item.id + ')">ดูคลิปนี้</button>' +
+              '<button class="btn ' + (item.link ? '' : 'btn-dark') + '" type="button" onclick="' + actionCall('openOnDemandPlaylistClip', item.id) + '">ดูคลิปนี้</button>' +
             '</div>';
           }).join('') +
         '</div>';
@@ -4549,7 +4560,7 @@
     }
 
     function openOnDemandPlaylistClip(id) {
-      const item = onDemandPlaylists.find(function(p) { return p.id === id; });
+      const item = onDemandPlaylists.find(function(p) { return String(p.id) === String(id); });
       if (!item || !item.link) {
         alert('ยังไม่ได้เพิ่มลิงก์คลิปนี้');
         return;
@@ -4567,7 +4578,7 @@
     }
 
     function openOnDemandByCourseId(id) {
-      const item = onDemandPlaylists.find(function(p) { return p.courseId === id; });
+      const item = onDemandPlaylists.find(function(p) { return String(p.courseId) === String(id); });
       if (!item || !item.link) {
         alert('ยังไม่ได้เพิ่มคลิป On-demand สำหรับคอร์สนี้');
         return;
@@ -4720,7 +4731,7 @@
       }
 
       tbody.innerHTML = paymentMonths.map(function(item, index) {
-        return '<tr><td>' + (index + 1) + '</td><td>' + item.month + '</td><td>' + formatPrice(item.amount) + '</td><td><button class="btn btn-blue" type="button" onclick="editPaymentMonth(' + item.id + ')">แก้ไข</button><button class="btn btn-red" type="button" onclick="deletePaymentMonth(' + item.id + ')">ลบ</button></td></tr>';
+        return '<tr><td>' + (index + 1) + '</td><td>' + item.month + '</td><td>' + formatPrice(item.amount) + '</td><td><button class="btn btn-blue" type="button" onclick="' + actionCall('editPaymentMonth', item.id) + '">แก้ไข</button><button class="btn btn-red" type="button" onclick="' + actionCall('deletePaymentMonth', item.id) + '">ลบ</button></td></tr>';
       }).join('');
 
       if (studentSelect) {
@@ -4782,7 +4793,7 @@
     }
 
     function editPaymentMonth(id) {
-      const item = paymentMonths.find(function(month) { return month.id === id; });
+      const item = paymentMonths.find(function(month) { return String(month.id) === String(id); });
       if (!item) return;
       const oldMonth = item.month;
 
@@ -4803,7 +4814,7 @@
           }
 
           const duplicated = paymentMonths.some(function(month) {
-            return month.id !== id && month.month === newMonth;
+            return String(month.id) !== String(id) && month.month === newMonth;
           });
           if (duplicated) {
             getElement('editBubbleResult').textContent = 'เดือนนี้มีอยู่ในระบบแล้ว';
@@ -5025,7 +5036,7 @@
     }
 
     function openReceiptDetail(id, mode) {
-      const receipt = receipts.find(function(r) { return r.id === id; });
+      const receipt = receipts.find(function(r) { return String(r.id) === String(id); });
       if (!receipt) return;
       const adminActions = mode === 'admin'
         ? '<div class="test-actions"><button class="btn btn-green" type="button" onclick="publishReceipt(' + id + ')">แสดงให้ผู้ปกครอง</button><button class="btn btn-dark" type="button" onclick="hideReceipt(' + id + ')">ซ่อนจากผู้ปกครอง</button><button class="btn btn-blue" type="button" onclick="downloadReceiptImage(' + id + ')">Download ใบเสร็จเป็นรูป</button><button class="btn btn-red" type="button" onclick="deleteReceipt(' + id + ')">ลบใบเสร็จ</button><button class="btn btn-dark" type="button" onclick="closeEditBubble()">ปิด</button></div>'
@@ -5034,7 +5045,7 @@
     }
 
     function downloadReceiptImage(id) {
-      const receipt = receipts.find(function(r) { return r.id === id; });
+      const receipt = receipts.find(function(r) { return String(r.id) === String(id); });
       if (!receipt) return;
 
       const scale = 2;
@@ -5198,7 +5209,7 @@
     }
 
     function publishReceipt(id) {
-      const receipt = receipts.find(function(r) { return r.id === id; });
+      const receipt = receipts.find(function(r) { return String(r.id) === String(id); });
       if (!receipt) return;
       receipt.status = 'published';
       setFirebaseDocument('receipts', receipt).catch(function(error) { console.error('publish receipt firebase error:', error); });
@@ -5208,7 +5219,7 @@
     }
 
     function hideReceipt(id) {
-      const receipt = receipts.find(function(r) { return r.id === id; });
+      const receipt = receipts.find(function(r) { return String(r.id) === String(id); });
       if (!receipt) return;
       receipt.status = 'hidden';
       setFirebaseDocument('receipts', receipt).catch(function(error) { console.error('hide receipt firebase error:', error); });
@@ -5240,7 +5251,7 @@
       });
 
       tbody.innerHTML = filtered.length ? filtered.map(function(r) {
-        return '<tr><td>' + r.receiptNo + '</td><td>' + r.student + '</td><td>' + r.course + '</td><td>' + r.month + '</td><td>' + r.amount + '</td><td>' + receiptStatusText(r.status) + '</td><td><button class="btn btn-blue" type="button" onclick="openReceiptAdmin(' + r.id + ')">ตรวจสอบ</button><button class="btn btn-green" type="button" onclick="publishReceipt(' + r.id + ')">แสดง</button><button class="btn btn-dark" type="button" onclick="hideReceipt(' + r.id + ')">ซ่อน</button></td></tr>';
+        return '<tr><td>' + r.receiptNo + '</td><td>' + r.student + '</td><td>' + r.course + '</td><td>' + r.month + '</td><td>' + r.amount + '</td><td>' + receiptStatusText(r.status) + '</td><td><button class="btn btn-blue" type="button" onclick="' + actionCall('openReceiptAdmin', r.id) + '">ตรวจสอบ</button><button class="btn btn-green" type="button" onclick="' + actionCall('publishReceipt', r.id) + '">แสดง</button><button class="btn btn-dark" type="button" onclick="' + actionCall('hideReceipt', r.id) + '">ซ่อน</button></td></tr>';
       }).join('') : '<tr><td colspan="7">ยังไม่มีใบเสร็จตามเงื่อนไขที่เลือก</td></tr>';
 
       if (getElement('receiptDraftCount')) getElement('receiptDraftCount').textContent = receipts.filter(function(r) { return r.status === 'draft'; }).length + ' ใบ';
@@ -5266,7 +5277,7 @@
       const pageItems = visibleReceipts.slice(start, start + studentReceiptPerPage);
 
       tbody.innerHTML = pageItems.length ? pageItems.map(function(r) {
-        return '<tr><td>' + r.receiptNo + '</td><td>' + r.month + '</td><td>' + r.course + '</td><td>' + r.amount + ' บาท</td><td><span class="status-paid">ชำระแล้ว</span></td><td><button class="btn btn-blue" type="button" onclick="openReceiptStudent(' + r.id + ')">ดูใบเสร็จ</button></td></tr>';
+        return '<tr><td>' + r.receiptNo + '</td><td>' + r.month + '</td><td>' + r.course + '</td><td>' + r.amount + ' บาท</td><td><span class="status-paid">ชำระแล้ว</span></td><td><button class="btn btn-blue" type="button" onclick="' + actionCall('openReceiptStudent', r.id) + '">ดูใบเสร็จ</button></td></tr>';
       }).join('') : '<tr><td colspan="6">ยังไม่มีใบเสร็จที่สถาบันแสดงให้ผู้ปกครอง</td></tr>';
 
       renderStudentReceiptPagination(visibleReceipts.length, totalPages);
@@ -5667,7 +5678,7 @@
     }
 
     function editQuestion(id) {
-      const q = monthlyQuestions.find(function(item) { return item.id === id; });
+      const q = monthlyQuestions.find(function(item) { return String(item.id) === String(id); });
       if (!q) return;
       getElement('questionFormBox').classList.remove('hidden');
       getElement('editingQuestionId').value = q.id;
@@ -5675,7 +5686,7 @@
       getElement('questionSubject').value = q.subject;
       if (getElement('monthlyTestDate')) getElement('monthlyTestDate').value = q.testDate || getElement('monthlyTestDate').value;
       if (getElement('monthlyTestTime')) getElement('monthlyTestTime').value = q.testTime || '09:00';
-      getElement('questionNumber').value = monthlyQuestions.findIndex(function(item) { return item.id === id; }) + 1;
+      getElement('questionNumber').value = monthlyQuestions.findIndex(function(item) { return String(item.id) === String(id); }) + 1;
       getElement('questionText').value = q.text;
       getElement('choiceA').value = q.choices.A;
       getElement('choiceB').value = q.choices.B;
@@ -5717,7 +5728,7 @@
       });
       tbody.innerHTML = filtered.length ? filtered.map(function(q, i) {
         const img = q.image ? '<img class="question-thumb" src="' + q.image + '" alt="รูปประกอบคำถาม">' : '-';
-        return '<tr><td>' + (i + 1) + '</td><td>' + (q.testDate || '-') + '</td><td>' + (q.testTime || '-') + '</td><td>' + q.subject + '</td><td>' + q.text + '</td><td>' + img + '</td><td>' + q.correct + '</td><td><button class="btn btn-blue" type="button" onclick="editQuestion(' + q.id + ')">แก้ไข</button><button class="btn btn-red" type="button" onclick="deleteQuestion(' + q.id + ')">ลบ</button></td></tr>';
+        return '<tr><td>' + (i + 1) + '</td><td>' + (q.testDate || '-') + '</td><td>' + (q.testTime || '-') + '</td><td>' + q.subject + '</td><td>' + q.text + '</td><td>' + img + '</td><td>' + q.correct + '</td><td><button class="btn btn-blue" type="button" onclick="' + actionCall('editQuestion', q.id) + '">แก้ไข</button><button class="btn btn-red" type="button" onclick="' + actionCall('deleteQuestion', q.id) + '">ลบ</button></td></tr>';
       }).join('') : '<tr><td colspan="8">ยังไม่มีข้อสอบในเดือน เวลา และวิชาที่เลือก</td></tr>';
     }
 
@@ -6146,7 +6157,7 @@
           '<td>' + (item.title || '-') + '</td>' +
           '<td>' + linkText + '</td>' +
           '<td>' + statusText + '</td>' +
-          '<td><button class="btn btn-blue" type="button" onclick="editMonthlyExamLink(' + item.id + ')">แก้ไข</button><button class="btn btn-red" type="button" onclick="deleteMonthlyExamLink(' + item.id + ')">ลบ</button></td>' +
+          '<td><button class="btn btn-blue" type="button" onclick="' + actionCall('editMonthlyExamLink', item.id) + '">แก้ไข</button><button class="btn btn-red" type="button" onclick="' + actionCall('deleteMonthlyExamLink', item.id) + '">ลบ</button></td>' +
         '</tr>';
       }).join('') : '<tr><td colspan="7">ยังไม่มีลิงก์แบบทดสอบ ให้เพิ่มลิงก์ Google Form จากฟอร์มด้านบน</td></tr>';
     }
