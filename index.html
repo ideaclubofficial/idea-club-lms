@@ -4873,6 +4873,51 @@
       return courses.find(function(item) { return String(item.id) === String(currentStudentCourseId); }) || null;
     }
 
+    function normalizeTextValue(value) {
+      return String(value || '').trim().replace(/\s+/g, ' ');
+    }
+
+    function isCurrentStudentMatchRecord(record) {
+      if (!currentStudent || !record) return false;
+      const currentId = currentStudent.id !== undefined && currentStudent.id !== null ? String(currentStudent.id) : '';
+      const currentAuthUid = currentStudent.authUid ? String(currentStudent.authUid) : (firebaseUser ? String(firebaseUser.uid) : '');
+      const currentName = normalizeTextValue(currentStudent.name);
+      const currentPhone = String(currentStudent.phone || '').replace(/[^0-9]/g, '');
+
+      const recordStudentId = record.studentId !== undefined && record.studentId !== null ? String(record.studentId) : '';
+      const recordAuthUid = record.authUid ? String(record.authUid) : '';
+      const recordName = normalizeTextValue(record.student);
+      const recordPhone = String(record.phone || record.studentPhone || '').replace(/[^0-9]/g, '');
+
+      if (currentId && recordStudentId && currentId === recordStudentId) return true;
+      if (currentAuthUid && recordAuthUid && currentAuthUid === recordAuthUid) return true;
+      if (currentPhone && recordPhone && currentPhone === recordPhone) return true;
+      if (currentName && recordName && currentName === recordName) return true;
+      return false;
+    }
+
+    function getCurrentStudentLatestPayment() {
+      if (!currentStudent || !Array.isArray(payments)) return null;
+      const studentPayments = payments.filter(isCurrentStudentMatchRecord).slice().sort(function(a, b) {
+        return Number(b.id || 0) - Number(a.id || 0);
+      });
+      return studentPayments[0] || null;
+    }
+
+    function getCurrentStudentPaymentStatusText() {
+      const latestPayment = getCurrentStudentLatestPayment();
+      if (latestPayment && latestPayment.status) return latestPayment.status;
+      if (currentStudent && currentStudent.paymentStatus) return currentStudent.paymentStatus;
+      return '-';
+    }
+
+    function setPaymentStatusElement(el, statusText) {
+      if (!el) return;
+      const text = statusText || '-';
+      el.textContent = text;
+      el.className = text === 'ชำระแล้ว' ? 'status-paid' : text === 'ค้างชำระ' || text === 'สลิปไม่ผ่าน' ? 'status-absent' : 'status-waiting';
+    }
+
     function getProfileGrade() {
       return getElement('profileGrade') ? getElement('profileGrade').value : 'ป.6';
     }
@@ -4913,9 +4958,8 @@
       if (getElement('studentDashboardCourseAccess')) getElement('studentDashboardCourseAccess').textContent = selectedCourse ? selectedCourse.access : '';
       if (getElement('studentDashboardGradeText')) getElement('studentDashboardGradeText').textContent = profileGrade;
       if (getElement('studentDashboardPaymentStatus')) {
-        const paymentText = hasRegisteredCourse && currentStudent && currentStudent.paymentStatus ? currentStudent.paymentStatus : '';
-        getElement('studentDashboardPaymentStatus').textContent = paymentText;
-        getElement('studentDashboardPaymentStatus').className = paymentText === 'ชำระแล้ว' ? 'status-paid' : paymentText === 'ค้างชำระ' || paymentText === 'สลิปไม่ผ่าน' ? 'status-absent' : 'status-waiting';
+        const paymentText = hasRegisteredCourse ? getCurrentStudentPaymentStatusText() : '';
+        setPaymentStatusElement(getElement('studentDashboardPaymentStatus'), paymentText);
       }
       if (getElement('studentDashboardPaymentRow')) {
         getElement('studentDashboardPaymentRow').classList.toggle('hidden', !hasRegisteredCourse);
@@ -4935,6 +4979,11 @@
       if (getElement('studentPaymentCurrentMonth')) {
         const firstMonth = Array.isArray(paymentMonths) && paymentMonths.length ? paymentMonths[0].month : '-';
         getElement('studentPaymentCurrentMonth').textContent = firstMonth;
+      }
+
+      if (getElement('studentPaymentStatus')) {
+        const paymentText = hasRegisteredCourse ? getCurrentStudentPaymentStatusText() : '-';
+        setPaymentStatusElement(getElement('studentPaymentStatus'), paymentText);
       }
 
       const overdueMonths = currentStudent && Array.isArray(currentStudent.overdueMonths) ? currentStudent.overdueMonths : [];
@@ -5398,13 +5447,20 @@
     }
 
     function getPaymentDataFromRow(row) {
+      const paymentId = row ? row.getAttribute('data-payment-id') : '';
+      const payment = payments.find(function(p) { return String(p.id) === String(paymentId); });
       return {
-        student: row.children[0] ? row.children[0].innerText.trim() : '-',
-        course: row.children[1] ? row.children[1].innerText.trim() : '-',
-        month: row.children[2] ? row.children[2].innerText.trim() : '-',
-        amount: row.children[3] ? row.children[3].innerText.trim() : '0',
-        slip: row.children[4] ? row.children[4].innerText.trim() : '-',
-        status: row.children[5] ? row.children[5].innerText.trim() : '-'
+        paymentId: paymentId,
+        studentId: payment ? payment.studentId : '',
+        authUid: payment ? payment.authUid : '',
+        courseId: payment ? payment.courseId : '',
+        phone: payment ? (payment.phone || payment.studentPhone || '') : '',
+        student: payment ? (payment.student || '-') : (row && row.children[0] ? row.children[0].innerText.trim() : '-'),
+        course: payment ? (payment.course || '-') : (row && row.children[1] ? row.children[1].innerText.trim() : '-'),
+        month: payment ? (payment.month || '-') : (row && row.children[2] ? row.children[2].innerText.trim() : '-'),
+        amount: payment ? formatPrice(payment.amount || 0).replace(' บาท', '') : (row && row.children[3] ? row.children[3].innerText.trim().replace(' บาท', '') : '0'),
+        slip: payment ? (payment.slipUrl ? 'มีสลิป' : (payment.slipSource || '-')) : (row && row.children[4] ? row.children[4].innerText.trim() : '-'),
+        status: payment ? (payment.status || '-') : (row && row.children[5] ? row.children[5].innerText.trim() : '-')
       };
     }
 
@@ -5462,6 +5518,11 @@
       const newReceipt = {
         id: receiptId,
         firebaseDocId: String(receiptId),
+        paymentId: data.paymentId || '',
+        studentId: data.studentId || '',
+        authUid: data.authUid || '',
+        courseId: data.courseId || '',
+        phone: data.phone || '',
         receiptNo: createReceiptNo(),
         student: data.student,
         course: data.course,
@@ -5736,25 +5797,79 @@
     function renderStudentReceipts() {
       const tbody = getElement('studentReceiptTableBody');
       if (!tbody) return;
-      const studentName = getElement('profileName') ? getElement('profileName').textContent : '';
+
       const visibleReceipts = receipts.filter(function(r) {
-        return r.status === 'published' && r.student === studentName;
+        return r.status === 'published' && isCurrentStudentMatchRecord(r);
       }).slice().sort(function(a, b) {
-        return Number(b.id) - Number(a.id);
+        return Number(b.id || 0) - Number(a.id || 0);
       });
 
-      const totalPages = Math.max(1, Math.ceil(visibleReceipts.length / studentReceiptPerPage));
+      const receiptPaymentIds = visibleReceipts.map(function(r) { return String(r.paymentId || ''); });
+      const paidPaymentsWithoutReceipt = payments.filter(function(p) {
+        return isCurrentStudentMatchRecord(p) && p.status === 'ชำระแล้ว' && !receiptPaymentIds.includes(String(p.id || ''));
+      }).slice().sort(function(a, b) {
+        return Number(b.id || 0) - Number(a.id || 0);
+      });
+
+      const rows = visibleReceipts.map(function(r) {
+        return { type: 'receipt', id: r.id, sortId: Number(r.id || 0), receiptNo: r.receiptNo, month: r.month, course: r.course, amount: r.amount, status: 'ชำระแล้ว' };
+      }).concat(paidPaymentsWithoutReceipt.map(function(p) {
+        return { type: 'payment', id: p.id, sortId: Number(p.id || 0), receiptNo: 'AUTO-' + String(p.id || '').slice(-6), month: p.month || '-', course: p.course || '-', amount: formatPrice(p.amount || 0).replace(' บาท', ''), status: 'ชำระแล้ว' };
+      })).sort(function(a, b) {
+        return b.sortId - a.sortId;
+      });
+
+      const totalPages = Math.max(1, Math.ceil(rows.length / studentReceiptPerPage));
       if (studentReceiptCurrentPage > totalPages) studentReceiptCurrentPage = totalPages;
       if (studentReceiptCurrentPage < 1) studentReceiptCurrentPage = 1;
 
       const start = (studentReceiptCurrentPage - 1) * studentReceiptPerPage;
-      const pageItems = visibleReceipts.slice(start, start + studentReceiptPerPage);
+      const pageItems = rows.slice(start, start + studentReceiptPerPage);
 
       tbody.innerHTML = pageItems.length ? pageItems.map(function(r) {
-        return '<tr><td>' + r.receiptNo + '</td><td>' + r.month + '</td><td>' + r.course + '</td><td>' + r.amount + ' บาท</td><td><span class="status-paid">ชำระแล้ว</span></td><td><button class="btn btn-blue" type="button" onclick="' + actionCall('openReceiptStudent', r.id) + '">ดูใบเสร็จ</button></td></tr>';
-      }).join('') : '<tr><td colspan="6">ยังไม่มีใบเสร็จที่สถาบันแสดงให้ผู้ปกครอง</td></tr>';
+        const openAction = r.type === 'receipt' ? actionCall('openReceiptStudent', r.id) : actionCall('openStudentPaymentReceipt', r.id);
+        return '<tr><td>' + r.receiptNo + '</td><td>' + r.month + '</td><td>' + r.course + '</td><td>' + r.amount + ' บาท</td><td><span class="status-paid">' + r.status + '</span></td><td><button class="btn btn-blue" type="button" onclick="' + openAction + '">ดูใบเสร็จ</button></td></tr>';
+      }).join('') : '<tr><td colspan="6">ยังไม่มีใบเสร็จหรือรายการชำระแล้วที่แสดงให้ผู้ปกครอง</td></tr>';
 
-      renderStudentReceiptPagination(visibleReceipts.length, totalPages);
+      renderStudentReceiptPagination(rows.length, totalPages);
+    }
+
+    function openStudentPaymentReceipt(paymentId) {
+      const payment = payments.find(function(p) { return String(p.id) === String(paymentId); });
+      if (!payment) return;
+      const receipt = {
+        id: payment.id,
+        receiptNo: 'AUTO-' + String(payment.id || '').slice(-6),
+        student: payment.student || (currentStudent ? currentStudent.name : '-'),
+        course: payment.course || '-',
+        month: payment.month || '-',
+        amount: formatPrice(payment.amount || 0).replace(' บาท', ''),
+        approvedDate: payment.approvedDate || new Date().toLocaleDateString('th-TH'),
+        admin: 'Admin IDEA CLUB',
+        status: 'published'
+      };
+      openViewBubble('ใบยืนยันการชำระเงิน', receiptHtml(receipt) + '<div class="test-actions"><button class="btn btn-blue" type="button" onclick="downloadPaymentReceiptImage(' + payment.id + ')">Download ใบเสร็จเป็นรูป</button><button class="btn btn-dark" type="button" onclick="closeEditBubble()">ปิด</button></div>');
+    }
+
+    function downloadPaymentReceiptImage(paymentId) {
+      const payment = payments.find(function(p) { return String(p.id) === String(paymentId); });
+      if (!payment) return;
+      const tempReceipt = {
+        id: payment.id,
+        receiptNo: 'AUTO-' + String(payment.id || '').slice(-6),
+        student: payment.student || (currentStudent ? currentStudent.name : '-'),
+        course: payment.course || '-',
+        month: payment.month || '-',
+        amount: formatPrice(payment.amount || 0).replace(' บาท', ''),
+        approvedDate: payment.approvedDate || new Date().toLocaleDateString('th-TH'),
+        admin: 'Admin IDEA CLUB',
+        status: 'published'
+      };
+      const oldReceipts = receipts.slice();
+      receipts.push(tempReceipt);
+      downloadReceiptImage(tempReceipt.id);
+      receipts.length = 0;
+      oldReceipts.forEach(function(item) { receipts.push(item); });
     }
 
     function renderStudentReceiptPagination(totalItems, totalPages) {
@@ -5882,7 +5997,7 @@
           courseId: currentStudent.courseId || '',
           course: currentStudent.course || '',
           month: month,
-          amount: getPaymentMonthAmount(month),
+          amount: getPaymentMonthAmount(month) || (getCurrentStudentCourse() ? Number(getCurrentStudentCourse().price || 0) : 0),
           slipUrl: slipUrl,
           status: 'รอตรวจสลิป',
           createdAtText: new Date().toLocaleString('th-TH')
