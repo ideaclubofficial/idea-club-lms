@@ -1453,6 +1453,7 @@
         <aside class="admin-sidebar">
           <h3>Teacher Menu</h3>
           <a onclick="showTeacherTab('teacher-attendance')">รับนักเรียน / เช็คชื่อ</a>
+          <a onclick="showTeacherTab('teacher-online')">ห้องเรียน Online</a>
           <a onclick="showTeacherTab('teacher-dashboard')">Dashboard</a>
           <a onclick="showTeacherTab('teacher-students')">รายชื่อนักเรียน</a>
           <a onclick="showPublic()">ออกจากหน้าครู</a>
@@ -1475,6 +1476,32 @@
                 </div>
               </div>
             </div>
+          </section>
+
+          <section id="teacher-online" class="teacher-tab hidden">
+            <div class="form-box">
+              <h3>ห้องเรียน Online สำหรับครู</h3>
+              <p style="margin-bottom:18px; color:#6b7280;">ครูสามารถดูวันเรียน เวลาเรียน Meeting ID / Password และกดเข้าห้องเรียน Online ได้จากหน้านี้</p>
+              <div class="form-row">
+                <div>
+                  <label>กรองตามระดับชั้น</label>
+                  <select id="teacherOnlineGradeFilter" onchange="renderTeacherOnlineClasses()">
+                    <option value="ทั้งหมด">ทั้งหมด</option>
+                    <option value="ป.4">ป.4</option>
+                    <option value="ป.5">ป.5</option>
+                    <option value="ป.6">ป.6</option>
+                    <option value="ม.1">ม.1</option>
+                    <option value="ม.2">ม.2</option>
+                    <option value="ม.3">ม.3</option>
+                    <option value="ม.4">ม.4</option>
+                    <option value="ม.5">ม.5</option>
+                    <option value="ม.6">ม.6</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+            <br />
+            <div id="teacherOnlineClassList" class="grid"></div>
           </section>
 
           <section id="teacher-students" class="teacher-tab hidden">
@@ -2123,39 +2150,6 @@
             <br />
 
             <div class="form-box">
-              <h3>เพิ่ม / แจ้งยอดค้างชำระ</h3>
-              <p style="margin-bottom:18px; color:#6b7280;">ใช้สำหรับสร้างรายการค้างชำระให้นักเรียนเป็นรายเดือน เมื่อบันทึกแล้ว ฝั่งนักเรียนจะแสดงเดือนที่ค้าง ยอดที่ต้องชำระ และสถานะค้างชำระทันที</p>
-              <div class="form-row">
-                <div>
-                  <label>เลือกนักเรียน</label>
-                  <select id="overdueStudentSelect" onchange="loadOverdueStudentCourse()"></select>
-                </div>
-                <div>
-                  <label>คอร์สที่ค้างชำระ</label>
-                  <select id="overdueCourseSelect"></select>
-                </div>
-              </div>
-              <div class="form-row">
-                <div>
-                  <label>เดือนที่ค้างชำระ</label>
-                  <select id="overdueMonthSelect" onchange="fillOverdueAmountFromMonth()"></select>
-                </div>
-                <div>
-                  <label>ยอดค้างชำระ</label>
-                  <input id="overdueAmountInput" type="number" placeholder="เช่น 1500" />
-                </div>
-              </div>
-              <label>หมายเหตุ</label>
-              <textarea id="overdueNoteInput" placeholder="เช่น ยังไม่ได้ชำระประจำเดือน / แจ้งยอดค้างจากรอบก่อน"></textarea>
-              <br /><br />
-              <button class="btn btn-red" type="button" onclick="createOverduePayment()">บันทึกค้างชำระ</button>
-              <button class="btn btn-dark" type="button" onclick="clearOverduePaymentForm()">ล้างฟอร์ม</button>
-              <p id="overduePaymentResult" style="margin-top:14px; font-weight:bold;"></p>
-            </div>
-
-<br />
-
-            <div class="form-box">
               <h3>สรุปค้างชำระรายเดือน</h3>
               <p style="margin-bottom:18px; color:#6b7280;">คอร์สเปิดเทอมชำระเป็นรายเดือน ระบบจะแสดงว่านักเรียนค้างชำระเดือนไหนบ้าง</p>
               <div class="dashboard-grid">
@@ -2781,8 +2775,6 @@
       replaceArray(monthlyExamLinks, await getFirebaseCollection('monthlyExamLinks'));
       replaceArray(scoreReports, await getFirebaseCollection('scoreReports'));
       replaceArray(adminScoreRecords, await getFirebaseCollection('adminScoreRecords'));
-      safeRun(renderOverduePaymentFormOptions, 'overdue-payment-options-after-load');
-      safeRun(renderAdminStudentCourseOptions, 'student-course-options-after-load');
     }
 
     const sortState = {};
@@ -2798,6 +2790,7 @@
 
     let currentStudentCourseId = null;
     let currentStudent = null;
+    let currentTeacher = null;
 
     const paymentMonths = [];
     const payments = [];
@@ -3432,6 +3425,7 @@
     }
 
     function showTeacherPanel(teacher) {
+      currentTeacher = teacher || null;
       hideAllMain();
       getElement('teacherInterface').classList.remove('hidden');
       getElement('mainMenu').classList.add('hidden');
@@ -3441,6 +3435,7 @@
       getElement('profilePanel').classList.add('hidden');
       renderTeacherStudents();
       renderTodayTeachingList();
+      renderTeacherOnlineClasses();
       renderPickupList();
       showTeacherTab('teacher-attendance');
       window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -3452,6 +3447,7 @@
       if (selectedTab) selectedTab.classList.remove('hidden');
       if (tabId === 'teacher-students') renderTeacherStudents();
       if (tabId === 'teacher-dashboard') renderTodayTeachingList();
+      if (tabId === 'teacher-online') renderTeacherOnlineClasses();
       if (tabId === 'teacher-attendance') renderPickupList();
     }
 
@@ -3464,6 +3460,54 @@
         return '<tr><td>' + (i + 1) + '</td><td>' + s.name + '</td><td>' + (s.nickname || '-') + '</td><td>' + s.grade + '</td><td>' + s.course + '</td></tr>';
       }).join('') : '<tr><td colspan="5">ยังไม่มีนักเรียนในคอร์สที่เลือก</td></tr>';
     }
+
+
+    function getTeacherVisibleOnlineCourses() {
+      const teacherSubject = currentTeacher && currentTeacher.subject ? String(currentTeacher.subject) : '';
+      const teacherRole = currentTeacher && currentTeacher.role ? String(currentTeacher.role) : '';
+      const selectedGrade = getElement('teacherOnlineGradeFilter') ? getElement('teacherOnlineGradeFilter').value : 'ทั้งหมด';
+
+      return courses.filter(function(c) {
+        const hasOnlineAccess = String(c.access || '').indexOf('Online') !== -1 || !!c.onlineLink || !!c.roomId;
+        const gradeMatched = selectedGrade === 'ทั้งหมด' || c.grade === selectedGrade;
+        const subjectMatched = !teacherSubject ||
+          teacherRole === 'Admin' ||
+          teacherSubject === '-' ||
+          guessSubjectFromCourse(c.name) === teacherSubject ||
+          c.subject === teacherSubject ||
+          c.onlineSubject === teacherSubject;
+        return hasOnlineAccess && gradeMatched && subjectMatched;
+      });
+    }
+
+    function renderTeacherOnlineClasses() {
+      const box = getElement('teacherOnlineClassList');
+      if (!box) return;
+
+      const onlineCourses = getTeacherVisibleOnlineCourses();
+
+      if (!onlineCourses.length) {
+        box.innerHTML = '<div class="card"><h3>ยังไม่มีห้องเรียน Online</h3><p>ยังไม่พบห้องเรียน Online ตามสิทธิ์ของครู หรือระดับชั้นที่เลือก</p></div>';
+        return;
+      }
+
+      box.innerHTML = onlineCourses.map(function(c) {
+        const hasLink = !!c.onlineLink;
+        const dayText = c.onlineClassDay || ((c.days || []).join(' / ') || '-');
+        const timeText = c.onlineClassTime || '-';
+        return '<div class="card">' +
+          '<span class="tag">' + (c.grade || '-') + ' · ' + guessSubjectFromCourse(c.name) + '</span>' +
+          '<h3>' + (c.name || '-') + '</h3>' +
+          '<p><strong>วันเรียน Online:</strong> ' + dayText + '</p>' +
+          '<p><strong>เวลาเรียน Online:</strong> ' + timeText + '</p>' +
+          '<p><strong>Meeting ID:</strong> ' + (c.roomId || '-') + '</p>' +
+          '<p><strong>Password:</strong> ' + (c.roomPassword || '-') + '</p>' +
+          '<p style="color:#6b7280;">' + (hasLink ? 'ลิงก์ MS Teams พร้อมใช้งาน' : 'ยังไม่ได้เพิ่มลิงก์ MS Teams ในหลังบ้าน') + '</p>' +
+          '<button class="btn ' + (hasLink ? 'btn-blue' : 'btn-dark') + '" type="button" onclick="' + actionCall('openOnlineClassByCourseId', c.id) + '">เข้าห้องเรียน Online</button>' +
+        '</div>';
+      }).join('');
+    }
+
 
     const pickupList = [];
 
@@ -3709,7 +3753,6 @@
         safeRun(renderPaymentTable, 'payment-table');
         safeRun(renderReceiptMonthFilter, 'receipt-month-filter');
         safeRun(renderAdminReceipts, 'admin-receipts');
-        safeRun(renderOverduePaymentFormOptions, 'overdue-payment-options');
         safeRun(updatePaymentSummary, 'payment-summary');
       }
       if (tabId === 'admin-monthly-test') {
@@ -3725,8 +3768,8 @@
     function renderAdminDashboard() {
       const totalStudents = Array.isArray(students) ? students.length : 0;
       const openCourses = Array.isArray(courses) ? courses.filter(function(c) { return c.status === 'open' || c.status === 'เปิดรับสมัคร'; }).length : 0;
-      const overdueStudents = Array.isArray(payments) ? payments.filter(function(p) { return p.status === 'ค้างชำระ'; }).length : 0;
-      const pendingPayments = Array.isArray(payments) ? payments.filter(function(p) { return String(p.status || '').includes('รอตรวจ'); }).length : 0;
+      const overdueStudents = Array.isArray(students) ? students.filter(function(s) { return Array.isArray(s.overdueMonths) && s.overdueMonths.length > 0; }).length : 0;
+      const pendingPayments = Array.isArray(students) ? students.filter(function(s) { return s.paymentStatus === 'รอตรวจสลิป'; }).length : 0;
       const todayAbsent = Array.isArray(students) ? students.filter(function(s) { return s.pickupStatus === 'ไม่มา'; }).length : 0;
 
       if (getElement('dashTotalStudents')) getElement('dashTotalStudents').textContent = totalStudents + ' คน';
@@ -4941,9 +4984,6 @@
     }
 
     function getCurrentStudentPaymentStatusText() {
-      const studentPayments = getCurrentStudentPayments ? getCurrentStudentPayments() : [];
-      const overduePayment = studentPayments.find(function(p) { return p.status === 'ค้างชำระ'; });
-      if (overduePayment) return 'ค้างชำระ';
       const latestPayment = getCurrentStudentLatestPayment();
       if (latestPayment && latestPayment.status) return latestPayment.status;
       if (currentStudent && currentStudent.paymentStatus) return currentStudent.paymentStatus;
@@ -5025,16 +5065,10 @@
         setPaymentStatusElement(getElement('studentPaymentStatus'), paymentText);
       }
 
-      const studentPaymentsForOverdue = currentStudent ? payments.filter(function(p) {
-        return ((p.studentId && String(p.studentId) === String(currentStudent.id)) ||
-          (p.authUid && currentStudent.authUid && p.authUid === currentStudent.authUid) ||
-          (p.student && p.student === currentStudent.name)) && p.status === 'ค้างชำระ';
-      }) : [];
-      const overdueMonths = studentPaymentsForOverdue.length ? studentPaymentsForOverdue.map(function(p) { return p.month; }) : (currentStudent && Array.isArray(currentStudent.overdueMonths) ? currentStudent.overdueMonths : []);
-      const overdueTotal = studentPaymentsForOverdue.reduce(function(sum, p) { return sum + Number(p.amount || 0); }, 0);
+      const overdueMonths = currentStudent && Array.isArray(currentStudent.overdueMonths) ? currentStudent.overdueMonths : [];
       const shouldShowOverdue = hasRegisteredCourse && overdueMonths.length > 0;
       if (getElement('studentOverdueBox')) getElement('studentOverdueBox').classList.toggle('hidden', !shouldShowOverdue);
-      if (getElement('studentOverdueMonths')) getElement('studentOverdueMonths').textContent = shouldShowOverdue ? (overdueMonths.join(', ') + (overdueTotal ? ' | รวมยอดค้าง ' + formatPrice(overdueTotal) : '')) : '';
+      if (getElement('studentOverdueMonths')) getElement('studentOverdueMonths').textContent = shouldShowOverdue ? overdueMonths.join(', ') : '';
 
       if (getElement('studentLearningGradeText')) {
         getElement('studentLearningGradeText').textContent = '';
@@ -5180,7 +5214,7 @@
     function paymentActionButtons(status) {
       const isPaid = status === 'ชำระแล้ว';
       const isRejected = status === 'สลิปไม่ผ่าน';
-      const isPending = String(status || '').includes('รอตรวจ');
+      const isPending = status === 'รอตรวจสลิป';
       const isOverdue = status === 'ค้างชำระ';
       return '<button class="btn ' + (isPaid ? 'btn-dark' : 'btn-green') + '" type="button" onclick="approvePayment(this)">' + (isPaid ? 'อนุมัติแล้ว' : 'อนุมัติ') + '</button>' +
         '<button class="btn ' + (isRejected ? 'btn-dark' : 'btn-red') + '" type="button" onclick="rejectPayment(this)">' + (isRejected ? 'ปฏิเสธแล้ว' : 'ปฏิเสธ') + '</button>' +
@@ -5245,15 +5279,9 @@
 
     function syncStudentPaymentStatusFromRow(row, status) {
       if (!row) return;
-      const paymentId = row.getAttribute('data-payment-id');
-      const payment = payments.find(function(p) { return String(p.id) === String(paymentId); });
       const studentName = row.children[0] ? row.children[0].innerText.trim() : '';
-      const month = payment ? payment.month : (row.children[2] ? row.children[2].innerText.trim() : '');
-      const student = students.find(function(s) {
-        return (payment && String(s.id) === String(payment.studentId)) ||
-          (payment && s.authUid && s.authUid === payment.authUid) ||
-          s.name === studentName;
-      });
+      const month = row.children[2] ? row.children[2].innerText.trim() : '';
+      const student = students.find(function(s) { return s.name === studentName; });
       if (!student) return;
 
       student.overdueMonths = Array.isArray(student.overdueMonths) ? student.overdueMonths : [];
@@ -5287,153 +5315,6 @@
       ].join(String.fromCharCode(10));
 
       alert(message);
-    }
-
-
-    function renderOverduePaymentFormOptions() {
-      const studentSelect = getElement('overdueStudentSelect');
-      const courseSelect = getElement('overdueCourseSelect');
-      const monthSelect = getElement('overdueMonthSelect');
-      if (studentSelect) {
-        const current = studentSelect.value || '';
-        studentSelect.innerHTML = students.length ? students.map(function(s) {
-          return '<option value="' + s.id + '">' + (s.name || '-') + ' · ' + (s.grade || '-') + ' · ' + (s.phone || '-') + '</option>';
-        }).join('') : '<option value="">ยังไม่มีนักเรียน</option>';
-        if (students.some(function(s) { return String(s.id) === String(current); })) studentSelect.value = current;
-      }
-      if (monthSelect) {
-        const currentMonth = monthSelect.value || '';
-        monthSelect.innerHTML = paymentMonths.length ? paymentMonths.map(function(m) {
-          return '<option value="' + m.month + '">' + m.month + '</option>';
-        }).join('') : '<option value="">ยังไม่มีเดือนชำระเงิน</option>';
-        if (paymentMonths.some(function(m) { return m.month === currentMonth; })) monthSelect.value = currentMonth;
-      }
-      if (courseSelect) {
-        const currentCourse = courseSelect.value || '';
-        courseSelect.innerHTML = courses.length ? courses.map(function(c) {
-          return '<option value="' + c.id + '">' + c.grade + ' · ' + c.name + '</option>';
-        }).join('') : '<option value="">ยังไม่มีคอร์ส</option>';
-        if (courses.some(function(c) { return String(c.id) === String(currentCourse); })) courseSelect.value = currentCourse;
-      }
-      loadOverdueStudentCourse();
-      fillOverdueAmountFromMonth();
-    }
-
-    function loadOverdueStudentCourse() {
-      const studentSelect = getElement('overdueStudentSelect');
-      const courseSelect = getElement('overdueCourseSelect');
-      if (!studentSelect || !courseSelect) return;
-      const student = students.find(function(s) { return String(s.id) === String(studentSelect.value); });
-      if (student && student.courseId && courses.some(function(c) { return String(c.id) === String(student.courseId); })) {
-        courseSelect.value = String(student.courseId);
-      } else if (student && student.course) {
-        const course = courses.find(function(c) { return c.name === student.course; });
-        if (course) courseSelect.value = String(course.id);
-      }
-      fillOverdueAmountFromMonth();
-    }
-
-    function fillOverdueAmountFromMonth() {
-      const monthSelect = getElement('overdueMonthSelect');
-      const amountInput = getElement('overdueAmountInput');
-      const courseSelect = getElement('overdueCourseSelect');
-      if (!amountInput) return;
-      const monthAmount = monthSelect ? getPaymentMonthAmount(monthSelect.value) : 0;
-      const course = courseSelect ? courses.find(function(c) { return String(c.id) === String(courseSelect.value); }) : null;
-      amountInput.value = monthAmount || (course ? Number(course.price || 0) : '');
-    }
-
-    function clearOverduePaymentForm() {
-      if (getElement('overdueNoteInput')) getElement('overdueNoteInput').value = '';
-      fillOverdueAmountFromMonth();
-      if (getElement('overduePaymentResult')) getElement('overduePaymentResult').textContent = '';
-    }
-
-    async function createOverduePayment() {
-      const result = getElement('overduePaymentResult');
-      const studentId = getElement('overdueStudentSelect') ? getElement('overdueStudentSelect').value : '';
-      const courseId = getElement('overdueCourseSelect') ? getElement('overdueCourseSelect').value : '';
-      const month = getElement('overdueMonthSelect') ? getElement('overdueMonthSelect').value : '';
-      const amount = Number(getElement('overdueAmountInput') ? getElement('overdueAmountInput').value || 0 : 0);
-      const note = getElement('overdueNoteInput') ? getElement('overdueNoteInput').value.trim() : '';
-      const student = students.find(function(s) { return String(s.id) === String(studentId); });
-      const course = courses.find(function(c) { return String(c.id) === String(courseId); });
-
-      if (!student || !course || !month || !amount) {
-        if (result) {
-          result.textContent = 'กรุณาเลือกนักเรียน คอร์ส เดือน และยอดค้างชำระให้ครบถ้วน';
-          result.style.color = '#dc2626';
-        }
-        return;
-      }
-
-      const duplicated = payments.find(function(p) {
-        return String(p.studentId || '') === String(student.id || '') && String(p.courseId || '') === String(course.id || '') && p.month === month && p.status === 'ค้างชำระ';
-      });
-      if (duplicated) {
-        if (result) {
-          result.textContent = 'รายการค้างชำระเดือนนี้ของนักเรียนคนนี้มีอยู่แล้ว';
-          result.style.color = '#dc2626';
-        }
-        return;
-      }
-
-      try {
-        if (result) {
-          result.textContent = 'กำลังบันทึกรายการค้างชำระ...';
-          result.style.color = '#0f4cbd';
-        }
-        const existingPayment = payments.find(function(p) {
-          return String(p.studentId || '') === String(currentStudent.id || '') && p.month === month && p.status === 'ค้างชำระ';
-        });
-        const paymentId = existingPayment ? existingPayment.id : Date.now();
-        const payment = existingPayment || {
-          id: paymentId,
-          firebaseDocId: String(paymentId),
-          studentId: student.id || '',
-          authUid: student.authUid || '',
-          phone: student.phone || '',
-          student: student.name || '',
-          courseId: course.id || '',
-          course: course.name || '',
-          month: month,
-          amount: amount,
-          slipUrl: '',
-          slipSource: note || 'ยังไม่พบสลิป',
-          status: 'ค้างชำระ',
-          note: note,
-          createdAtText: new Date().toLocaleString('th-TH')
-        };
-        payments.push(payment);
-        await setFirebaseDocument('payments', payment);
-
-        student.courseId = student.courseId || course.id;
-        student.course = student.course || course.name;
-        student.courseAccess = student.courseAccess || course.access || '-';
-        student.courseStatus = student.courseStatus === 'ยังไม่ได้สมัครคอร์ส' ? 'สมัครแล้ว' : (student.courseStatus || 'สมัครแล้ว');
-        student.paymentStatus = 'ค้างชำระ';
-        student.overdueMonths = Array.isArray(student.overdueMonths) ? student.overdueMonths : [];
-        if (!student.overdueMonths.includes(month)) student.overdueMonths.push(month);
-        await setFirebaseDocument('students', student);
-
-        if (currentStudent && String(currentStudent.id) === String(student.id)) {
-          currentStudent = student;
-          updateStudentCourseDisplay();
-        }
-        renderPaymentTable();
-        renderAdminDashboard();
-        updatePaymentSummary();
-        if (result) {
-          result.textContent = 'บันทึกค้างชำระเรียบร้อย และแจ้งยอดในหน้าสมาชิกแล้ว';
-          result.style.color = '#16a34a';
-        }
-      } catch (error) {
-        console.error('create overdue payment error:', error);
-        if (result) {
-          result.textContent = 'บันทึกค้างชำระไม่สำเร็จ: ' + (error.message || error.code || 'ไม่ทราบสาเหตุ');
-          result.style.color = '#dc2626';
-        }
-      }
     }
 
     function renderPaymentMonths() {
@@ -5470,7 +5351,6 @@
       }
 
       renderReceiptMonthFilter();
-      renderOverduePaymentFormOptions();
       filterPaymentStatusByMonth();
     }
 
@@ -6137,18 +6017,12 @@
           amount: paymentAmount,
           slipUrl: '',
           slipSource: 'LINE กลุ่มประจำชั้น',
-          status: 'ส่งสลิปแล้ว - รอตรวจสอบ',
+          status: 'รอตรวจสลิป',
           createdAtText: new Date().toLocaleString('th-TH')
         };
-        Object.assign(payment, {
-          slipSource: 'LINE กลุ่มประจำชั้น',
-          status: 'ส่งสลิปแล้ว - รอตรวจสอบ',
-          updatedAtText: new Date().toLocaleString('th-TH')
-        });
-        if (!existingPayment) payments.push(payment);
+        payments.push(payment);
         await setFirebaseDocument('payments', payment);
-        currentStudent.paymentStatus = 'ส่งสลิปแล้ว - รอตรวจสอบ';
-        currentStudent.overdueMonths = Array.isArray(currentStudent.overdueMonths) ? currentStudent.overdueMonths.filter(function(item) { return item !== month; }) : [];
+        currentStudent.paymentStatus = 'รอตรวจสลิป';
         await setFirebaseDocument('students', currentStudent);
         updateStudentCourseDisplay();
         renderPaymentTable();
