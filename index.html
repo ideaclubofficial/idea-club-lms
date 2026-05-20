@@ -1912,6 +1912,23 @@
               <div class="stat clickable" onclick="jumpToPaymentStatus('รอตรวจสลิป')"><h4>รอตรวจสลิป</h4><p id="dashPendingPayments">0 รายการ</p><small>กดเพื่อดูรายการรอตรวจ</small></div>
               <div class="stat clickable" onclick="jumpToPaymentStatus('ค้างชำระ')"><h4>ค้างชำระ</h4><p id="dashOverdueStudents">0 คน</p><small>กดเพื่อดูรายการค้างชำระ</small></div>
             </div>
+            <br />
+            <div class="grid">
+              <div class="card">
+                <h3>งานที่ต้องตรวจสอบวันนี้</h3>
+                <div id="adminTodoList" class="status-display">กำลังโหลดงานที่ต้องตรวจสอบ...</div>
+              </div>
+              <div class="card">
+                <h3>สรุปยอดชำระรายเดือน</h3>
+                <div class="form-row">
+                  <div>
+                    <label>เลือกเดือน</label>
+                    <select id="dashboardPaymentMonthFilter" onchange="renderDashboardPaymentSummary()"></select>
+                  </div>
+                </div>
+                <div id="dashboardPaymentSummary" class="status-display">กำลังโหลดสรุปยอด...</div>
+              </div>
+            </div>
           </section>
 
           <section id="admin-students" class="admin-tab hidden">
@@ -1970,6 +1987,18 @@
                 </div>
               </div>
 
+              <div class="form-row">
+                <div>
+                  <label>สถานะการเรียน</label>
+                  <select id="adminStudentLearningStatus">
+                    <option value="เรียนอยู่">เรียนอยู่</option>
+                    <option value="พักเรียน">พักเรียน</option>
+                    <option value="ลาออก">ลาออก</option>
+                    <option value="จบคอร์ส">จบคอร์ส</option>
+                  </select>
+                </div>
+              </div>
+
               <button class="btn btn-green" type="button" onclick="saveStudentInfo()">บันทึกข้อมูลนักเรียน</button>
               <button class="btn btn-dark" type="button" onclick="clearStudentForm()">ล้างฟอร์ม</button>
               <p id="studentSaveResult" style="margin-top:14px; font-weight:bold;"></p>
@@ -2018,6 +2047,16 @@
                   </select>
                 </div>
                 <div>
+                  <label>สถานะการเรียน</label>
+                  <select id="studentLearningStatusFilter" onchange="renderAdminStudents()">
+                    <option value="ทั้งหมด">ทั้งหมด</option>
+                    <option value="เรียนอยู่">เรียนอยู่</option>
+                    <option value="พักเรียน">พักเรียน</option>
+                    <option value="ลาออก">ลาออก</option>
+                    <option value="จบคอร์ส">จบคอร์ส</option>
+                  </select>
+                </div>
+                <div>
                   <label>ค้างชำระ</label>
                   <select id="studentOverdueFilter" onchange="renderAdminStudents()">
                     <option value="ทั้งหมด">ทั้งหมด</option>
@@ -2043,7 +2082,7 @@
                     <th class="sortable" onclick="sortData('students','grade')">ระดับชั้น</th>
                     <th class="sortable" onclick="sortData('students','phone')">เบอร์ผู้ปกครอง</th>
                     <th class="sortable" onclick="sortData('students','course')">คอร์ส</th>
-                    <th class="sortable" onclick="sortData('students','status')">สถานะ</th>
+                    <th class="sortable" onclick="sortData('students','status')">สถานะการเรียน</th>
                     <th>จัดการ</th>
                   </tr>
                 </thead>
@@ -2459,9 +2498,11 @@
               <h3>สรุปค้างชำระรายเดือน</h3>
               <p style="margin-bottom:18px; color:#6b7280;">คอร์สเปิดเทอมชำระเป็นรายเดือน ระบบจะแสดงว่านักเรียนค้างชำระเดือนไหนบ้าง</p>
               <div class="dashboard-grid">
-                <div class="stat"><h4>รอตรวจสลิป</h4><p id="pendingSlipCount">2 รายการ</p></div>
-                <div class="stat"><h4>ค้างชำระ</h4><p id="overdueCount">3 รายการ</p></div>
-                <div class="stat"><h4>ชำระแล้วเดือนนี้</h4><p id="paidThisMonthCount">1 รายการ</p></div>
+                <div class="stat"><h4>รอตรวจสลิป</h4><p id="pendingSlipCount">0 รายการ</p></div>
+                <div class="stat"><h4>ค้างชำระ</h4><p id="overdueCount">0 รายการ</p></div>
+                <div class="stat"><h4>ชำระแล้วเดือนนี้</h4><p id="paidThisMonthCount">0 รายการ</p></div>
+                <div class="stat"><h4>ยอดที่ชำระแล้ว</h4><p id="paidAmountThisMonth">0 บาท</p></div>
+                <div class="stat"><h4>ยอดที่ควรได้รับ</h4><p id="expectedAmountThisMonth">0 บาท</p></div>
               </div>
             </div>
 
@@ -4305,6 +4346,8 @@
       const receiptHtmlList = studentReceipts.length ? studentReceipts.slice().reverse().map(function(r) {
         return '<p>• ' + (r.month || '-') + ' — ' + (r.receiptNo || '-') + ' — ' + (r.status || '-') + '</p>';
       }).join('') : '<p style="color:#6b7280;">ยังไม่มีใบเสร็จ</p>';
+      const studentAttendanceSummary = getStudentAttendanceSummary(student);
+      const attendanceHtml = '<p><strong>มาเรียน:</strong> ' + studentAttendanceSummary.present + ' ครั้ง</p><p><strong>ไม่มา:</strong> ' + studentAttendanceSummary.absent + ' ครั้ง</p><p><strong>ผู้ปกครองมารับ:</strong> ' + studentAttendanceSummary.parent + ' ครั้ง</p>';
       const scoreHtml = studentScores.length ? studentScores.slice().reverse().map(function(record) {
         return '<p>• ' + (record.month || '-') + ' — วิทย์ ' + (record.scores && record.scores['วิทยาศาสตร์'] || 0) + ', คณิต ' + (record.scores && record.scores['คณิตศาสตร์'] || 0) + ', อังกฤษ ' + (record.scores && record.scores['ภาษาอังกฤษ'] || 0) + ' — ' + (record.status || '-') + '</p>';
       }).join('') : '<p style="color:#6b7280;">ยังไม่มีคะแนนสอบ</p>';
@@ -4317,6 +4360,7 @@
             '<p><strong>ชื่อเล่น:</strong> ' + (student.nickname || '-') + '</p>' +
             '<p><strong>ระดับชั้น:</strong> ' + (student.grade || '-') + '</p>' +
             '<p><strong>เบอร์ผู้ปกครอง:</strong> ' + (student.phone || '-') + '</p>' +
+            '<p><strong>สถานะการเรียน:</strong> ' + (student.learningStatus || student.status || 'เรียนอยู่') + '</p>' +
           '</div>' +
           '<div class="card" style="box-shadow:none; border:1px solid #e5e7eb;"><h3>คอร์ส / สถานะ</h3>' +
             '<p><strong>คอร์ส:</strong> ' + (student.course || '-') + '</p>' +
@@ -4327,6 +4371,7 @@
         '</div>' +
         '<br><div class="card" style="box-shadow:none; border:1px solid #e5e7eb;"><h3>การชำระเงิน</h3>' + paymentHtml + '</div>' +
         '<br><div class="card" style="box-shadow:none; border:1px solid #e5e7eb;"><h3>ใบเสร็จ</h3>' + receiptHtmlList + '</div>' +
+        '<br><div class="card" style="box-shadow:none; border:1px solid #e5e7eb;"><h3>ประวัติการเข้าเรียน</h3>' + attendanceHtml + '</div>' +
         '<br><div class="card" style="box-shadow:none; border:1px solid #e5e7eb;"><h3>คะแนนสอบ</h3>' + scoreHtml + '</div>'
       );
     }
@@ -4345,6 +4390,8 @@
       if (getElement('overdueCount')) getElement('overdueCount').textContent = overdueStudents + ' รายการ';
       if (getElement('pendingSlipCount')) getElement('pendingSlipCount').textContent = pendingPayments + ' รายการ';
       if (getElement('pickupWaitingCount')) getElement('pickupWaitingCount').textContent = todayAbsent + ' คน';
+      renderAdminTodoList();
+      renderDashboardPaymentSummary();
     }
 
     let adminStudentCurrentPage = 1;
@@ -4361,7 +4408,9 @@
       const pageItems = filtered.slice(start, start + adminStudentPerPage);
 
       tbody.innerHTML = pageItems.length ? pageItems.map(function(s, i) {
-        return '<tr><td>' + (start + i + 1) + '</td><td>' + (s.memberId || '-') + '</td><td class="student-name">' + s.name + '</td><td>' + (s.nickname || '-') + '</td><td>' + s.grade + '</td><td>' + s.phone + '</td><td>' + s.course + '</td><td><span class="status-paid">' + s.status + '</span></td><td><button class="btn btn-blue" type="button" onclick="' + actionCall('showStudentProfileDetail', s.id) + '">ดูข้อมูล</button><button class="btn btn-blue" type="button" onclick="' + actionCall('editStudent', s.id) + '">แก้ไข</button><button class="btn btn-dark" type="button" onclick="' + actionCall('copyStudentLoginInfoById', s.id) + '">Copy Login</button><button class="btn btn-red" type="button" onclick="' + actionCall('deleteStudent', s.id) + '">ลบ</button></td></tr>';
+        const learningStatus = s.learningStatus || s.status || 'เรียนอยู่';
+        const learningClass = learningStatus === 'เรียนอยู่' || learningStatus === 'จบคอร์ส' ? 'status-paid' : learningStatus === 'พักเรียน' ? 'status-waiting' : 'status-absent';
+        return '<tr><td>' + (start + i + 1) + '</td><td>' + (s.memberId || '-') + '</td><td class="student-name">' + s.name + '</td><td>' + (s.nickname || '-') + '</td><td>' + s.grade + '</td><td>' + s.phone + '</td><td>' + s.course + '</td><td><span class="' + learningClass + '">' + learningStatus + '</span></td><td><button class="btn btn-blue" type="button" onclick="' + actionCall('showStudentProfileDetail', s.id) + '">ดูข้อมูล</button><button class="btn btn-blue" type="button" onclick="' + actionCall('editStudent', s.id) + '">แก้ไข</button><button class="btn btn-dark" type="button" onclick="' + actionCall('copyStudentLoginInfoById', s.id) + '">Copy Login</button><button class="btn btn-red" type="button" onclick="' + actionCall('deleteStudent', s.id) + '">ลบ</button></td></tr>';
       }).join('') : '<tr><td colspan="9">ยังไม่มีนักเรียนในระดับชั้นที่เลือก</td></tr>';
     }
 
@@ -4372,6 +4421,7 @@
       const grade = getElement('adminStudentGrade').value;
       const phone = getElement('adminStudentPhone').value.trim();
       const courseValue = getElement('adminStudentCourse').value;
+      const learningStatus = getElement('adminStudentLearningStatus') ? getElement('adminStudentLearningStatus').value : 'เรียนอยู่';
       const selectedCourse = courses.find(function(c) { return String(c.id) === String(courseValue); });
       const course = selectedCourse ? selectedCourse.name : 'ยังไม่ได้สมัครคอร์ส';
       const result = getElement('studentSaveResult');
@@ -4399,7 +4449,9 @@
             courseId: selectedCourse ? selectedCourse.id : null,
             courseAccess: selectedCourse ? selectedCourse.access : '-',
             courseStatus: selectedCourse ? 'สมัครแล้ว' : 'ยังไม่ได้สมัครคอร์ส',
-            paymentStatus: selectedCourse ? (s.paymentStatus && s.paymentStatus !== 'ยังไม่ได้สมัครคอร์ส' ? s.paymentStatus : 'รอชำระเงิน') : 'ยังไม่ได้สมัครคอร์ส'
+            paymentStatus: selectedCourse ? (s.paymentStatus && s.paymentStatus !== 'ยังไม่ได้สมัครคอร์ส' ? s.paymentStatus : 'รอชำระเงิน') : 'ยังไม่ได้สมัครคอร์ส',
+            status: learningStatus,
+            learningStatus: learningStatus
           });
 
           await setFirebaseDocument('students', s);
@@ -4473,7 +4525,8 @@
             courseAccess: selectedCourse ? selectedCourse.access : '-',
             courseStatus: selectedCourse ? 'สมัครแล้ว' : 'ยังไม่ได้สมัครคอร์ส',
             paymentStatus: selectedCourse ? 'รอชำระเงิน' : 'ยังไม่ได้สมัครคอร์ส',
-            status: 'ปกติ'
+            status: learningStatus,
+            learningStatus: learningStatus
           };
           students.push(newStudent);
           await setFirebaseDocument('students', newStudent);
@@ -4493,6 +4546,7 @@
         renderAdminStudents();
         renderMemberTable();
         renderAdminDashboard();
+        addActivityLog(editingId ? 'แก้ไขข้อมูลนักเรียน' : 'เพิ่มนักเรียนใหม่', name + ' · ' + (selectedCourse ? selectedCourse.name : 'ยังไม่ได้สมัครคอร์ส'));
       } catch (error) {
         console.error('save student error:', error);
         result.textContent = 'บันทึกนักเรียนไม่สำเร็จ: ' + (error.message || error.code || 'ไม่ทราบสาเหตุ');
@@ -4513,7 +4567,8 @@
           '<div><label>ระดับชั้น</label><select id="bubbleStudentGrade">' + gradeOptionsHtml(s.grade) + '</select></div>' +
           '<div><label>เบอร์ผู้ปกครอง</label><input id="bubbleStudentPhone" type="text" value="' + s.phone + '"></div>' +
         '</div>' +
-        '<label>คอร์สที่ลงเรียน</label><select id="bubbleStudentCourseId">' + studentCourseOptionsHtml(s.courseId || s.course) + '</select>',
+        '<label>คอร์สที่ลงเรียน</label><select id="bubbleStudentCourseId">' + studentCourseOptionsHtml(s.courseId || s.course) + '</select>' +
+        '<br><br><label>สถานะการเรียน</label><select id="bubbleStudentLearningStatus"><option value="เรียนอยู่"' + ((s.learningStatus || s.status || 'เรียนอยู่') === 'เรียนอยู่' ? ' selected' : '') + '>เรียนอยู่</option><option value="พักเรียน"' + ((s.learningStatus || s.status) === 'พักเรียน' ? ' selected' : '') + '>พักเรียน</option><option value="ลาออก"' + ((s.learningStatus || s.status) === 'ลาออก' ? ' selected' : '') + '>ลาออก</option><option value="จบคอร์ส"' + ((s.learningStatus || s.status) === 'จบคอร์ส' ? ' selected' : '') + '>จบคอร์ส</option></select>',
         function() {
           const name = bubbleValue('bubbleStudentName');
           const phone = bubbleValue('bubbleStudentPhone');
@@ -4533,7 +4588,9 @@
             courseId: selectedCourse ? selectedCourse.id : null,
             courseAccess: selectedCourse ? selectedCourse.access : '-',
             courseStatus: selectedCourse ? 'สมัครแล้ว' : 'ยังไม่ได้สมัครคอร์ส',
-            paymentStatus: selectedCourse ? (s.paymentStatus && s.paymentStatus !== 'ยังไม่ได้สมัครคอร์ส' ? s.paymentStatus : 'รอชำระเงิน') : 'ยังไม่ได้สมัครคอร์ส'
+            paymentStatus: selectedCourse ? (s.paymentStatus && s.paymentStatus !== 'ยังไม่ได้สมัครคอร์ส' ? s.paymentStatus : 'รอชำระเงิน') : 'ยังไม่ได้สมัครคอร์ส',
+            status: bubbleSelectValue('bubbleStudentLearningStatus') || 'เรียนอยู่',
+            learningStatus: bubbleSelectValue('bubbleStudentLearningStatus') || 'เรียนอยู่'
           });
           setFirebaseDocument('students', s).catch(function(error) { console.error('save student firebase error:', error); });
           renderAdminStudents();
@@ -4553,6 +4610,7 @@
       const item = students[index];
       await deleteFirebaseDocument('students', item);
       students.splice(index, 1);
+      addActivityLog('ลบนักเรียน', name);
       renderAdminStudents();
       getElement('studentSaveResult').textContent = 'ลบนักเรียน ' + name + ' ออกจากระบบเว็บเรียบร้อยแล้ว หากต้องการปิด Login ให้เข้า Firebase Console > Authentication แล้วลบบัญชีนี้ด้วย';
       getElement('studentSaveResult').style.color = '#dc2626';
@@ -4564,6 +4622,7 @@
       getElement('adminStudentNickname').value = '';
       getElement('adminStudentGrade').value = 'ป.4';
       getElement('adminStudentPhone').value = '';
+      if (getElement('adminStudentLearningStatus')) getElement('adminStudentLearningStatus').value = 'เรียนอยู่';
       renderAdminStudentCourseOptions();
       getElement('adminStudentCourse').value = '';
       updateMemberIdPreview();
@@ -5899,6 +5958,8 @@
         '<button class="btn ' + (isPending ? 'btn-dark' : 'btn-blue') + '" type="button" onclick="resetPaymentToPending(this)">' + (isPending ? 'รอตรวจแล้ว' : 'กลับไปรอตรวจ') + '</button>' +
         '<button class="btn ' + (isOverdue ? 'btn-dark' : 'btn-red') + '" type="button" onclick="setPaymentOverdue(this)">' + (isOverdue ? 'ค้างชำระแล้ว' : 'ตั้งค้างชำระ') + '</button>' +
         '<button class="btn btn-blue" type="button" onclick="showPaymentDetail(this)">ดูข้อมูล</button>' +
+        '<button class="btn btn-dark" type="button" onclick="copyPaymentMessage(this)">Copy แจ้งชำระ</button>' +
+        '<button class="btn btn-dark" type="button" onclick="copyOverdueMessage(this)">Copy ค้างชำระ</button>' +
         '<button class="btn ' + (isPaid ? 'btn-green' : 'btn-dark') + '" type="button" onclick="createReceiptFromPaymentRow(this)">ออกใบเสร็จ</button>';
     }
 
@@ -5909,6 +5970,7 @@
       if (payment) {
         payment.status = status;
         setFirebaseDocument('payments', payment).catch(function(error) { console.error('payment status firebase error:', error); });
+        addActivityLog('เปลี่ยนสถานะชำระเงิน', (payment.student || '-') + ' · ' + (payment.month || '-') + ' · ' + status);
       }
       if (status === 'ชำระแล้ว') {
         row.children[4].innerHTML = payment ? formatPaymentSlipCell(payment) : '<span class="status-paid">ตรวจแล้ว</span>';
@@ -6164,6 +6226,7 @@
       const tbody = getElement('paymentMonthTableBody');
       const studentSelect = getElement('studentPaymentMonth');
       const statusFilter = getElement('paymentStatusMonthFilter');
+      const dashboardMonthFilter = getElement('dashboardPaymentMonthFilter');
       if (!tbody) return;
 
       if (!Array.isArray(paymentMonths) || paymentMonths.length === 0) {
@@ -6186,6 +6249,12 @@
         }).join('');
         studentSelect.value = paymentMonths.some(function(item) { return item.month === currentStudentMonth; }) ? currentStudentMonth : (paymentMonths[0] ? paymentMonths[0].month : '');
         updateStudentSelectedPaymentMonth();
+      }
+
+      if (dashboardMonthFilter) {
+        const currentDashboardMonth = dashboardMonthFilter.value || (paymentMonths[0] ? paymentMonths[0].month : '');
+        dashboardMonthFilter.innerHTML = paymentMonths.map(function(item) { return '<option value= + item.month + >' + item.month + '</option>'; }).join('');
+        dashboardMonthFilter.value = paymentMonths.some(function(item) { return item.month === currentDashboardMonth; }) ? currentDashboardMonth : (paymentMonths[0] ? paymentMonths[0].month : '');
       }
 
       if (statusFilter) {
@@ -6415,6 +6484,8 @@
       if (getElement('pendingSlipCount')) getElement('pendingSlipCount').textContent = pending + ' รายการ';
       if (getElement('overdueCount')) getElement('overdueCount').textContent = overdue + ' รายการ';
       if (getElement('paidThisMonthCount')) getElement('paidThisMonthCount').textContent = paid + ' รายการ';
+      updatePaymentAmountSummary();
+      renderDashboardPaymentSummary();
     }
 
     function getPaymentDataFromRow(row) {
@@ -8085,6 +8156,7 @@
       const selectedCourse = getElement('studentCourseFilter') ? getElement('studentCourseFilter').value : 'ทั้งหมด';
       const selectedPayment = getElement('studentPaymentFilter') ? getElement('studentPaymentFilter').value : 'ทั้งหมด';
       const selectedOverdue = getElement('studentOverdueFilter') ? getElement('studentOverdueFilter').value : 'ทั้งหมด';
+      const selectedLearningStatus = getElement('studentLearningStatusFilter') ? getElement('studentLearningStatusFilter').value : 'ทั้งหมด';
       return students.filter(function(s) {
         const course = getCourseByStudentOrName(s, s.course);
         const locationText = course ? course.location : '';
@@ -8095,6 +8167,7 @@
           (selectedLocation === 'ทั้งหมด' || locationText === selectedLocation) &&
           (selectedCourse === 'ทั้งหมด' || String(s.courseId) === String(selectedCourse) || s.course === selectedCourse) &&
           (selectedPayment === 'ทั้งหมด' || s.paymentStatus === selectedPayment) &&
+          (selectedLearningStatus === 'ทั้งหมด' || (s.learningStatus || s.status || 'เรียนอยู่') === selectedLearningStatus) &&
           (selectedOverdue === 'ทั้งหมด' || (selectedOverdue === 'มีค้างชำระ' ? hasOverdue : !hasOverdue));
       });
     }
@@ -8111,7 +8184,7 @@
 
     function clearStudentFilters() {
       ['studentSearchKeyword'].forEach(function(id) { if (getElement(id)) getElement(id).value = ''; });
-      ['studentGradeFilter','studentLocationFilter','studentCourseFilter','studentPaymentFilter','studentOverdueFilter'].forEach(function(id) { if (getElement(id)) getElement(id).value = 'ทั้งหมด'; });
+      ['studentGradeFilter','studentLocationFilter','studentCourseFilter','studentPaymentFilter','studentLearningStatusFilter','studentOverdueFilter'].forEach(function(id) { if (getElement(id)) getElement(id).value = 'ทั้งหมด'; });
       renderAdminStudents();
     }
 
@@ -8134,9 +8207,9 @@
     }
 
     function exportStudentsCsv() {
-      const rows = [['Member ID','ชื่อ','ชื่อเล่น','ระดับชั้น','เบอร์','คอร์ส','สถานะชำระเงิน','ค้างชำระ']];
+      const rows = [['Member ID','ชื่อ','ชื่อเล่น','ระดับชั้น','เบอร์','คอร์ส','สถานะการเรียน','สถานะชำระเงิน','ค้างชำระ']];
       getVisibleAdminStudents().forEach(function(s) {
-        rows.push([s.memberId || '', s.name || '', s.nickname || '', s.grade || '', s.phone || '', s.course || '', s.paymentStatus || '', (s.overdueMonths || []).join(' | ')]);
+        rows.push([s.memberId || '', s.name || '', s.nickname || '', s.grade || '', s.phone || '', s.course || '', s.learningStatus || s.status || 'เรียนอยู่', s.paymentStatus || '', (s.overdueMonths || []).join(' | ')]);
       });
       downloadCsv('idea-club-students.csv', rows);
       addActivityLog('Export ข้อมูลนักเรียน', 'ดาวน์โหลด CSV รายชื่อนักเรียน');
@@ -8324,6 +8397,135 @@
       }
     }
 
+
+    function getLearningStatusCount(status) {
+      return students.filter(function(s) { return (s.learningStatus || s.status || 'เรียนอยู่') === status; }).length;
+    }
+
+    function renderAdminTodoList() {
+      const box = getElement('adminTodoList');
+      if (!box) return;
+      const pendingPayments = payments.filter(function(p) { return (p.status || '') === 'รอตรวจสลิป'; }).length;
+      const overdueStudents = students.filter(function(s) { return Array.isArray(s.overdueMonths) && s.overdueMonths.length > 0; }).length;
+      const draftReceipts = receipts.filter(function(r) { return r.status === 'draft'; }).length;
+      const unpublishedScores = adminScoreRecords.filter(function(r) { return r.status !== 'published'; }).length;
+      const noCourseStudents = students.filter(function(s) { return !s.courseId || s.course === 'ยังไม่ได้สมัครคอร์ส'; }).length;
+      const items = [
+        { label: 'รอตรวจสลิป', value: pendingPayments + ' รายการ', action: "jumpToPaymentStatus('รอตรวจสลิป')" },
+        { label: 'นักเรียนค้างชำระ', value: overdueStudents + ' คน', action: "jumpToPaymentStatus('ค้างชำระ')" },
+        { label: 'ใบเสร็จรอแสดง', value: draftReceipts + ' ใบ', action: "jumpToAdminTab('admin-payment')" },
+        { label: 'คะแนนรอประกาศ', value: unpublishedScores + ' รายการ', action: "jumpToAdminTab('admin-monthly-test')" },
+        { label: 'สมัครใหม่ยังไม่ลงคอร์ส', value: noCourseStudents + ' คน', action: "jumpToAdminTab('admin-students')" }
+      ];
+      box.innerHTML = items.map(function(item) {
+        return '<div class="status-display-row"><span><strong>' + item.label + '</strong><br><span style="color:#6b7280;">' + item.value + '</span></span><button class="btn btn-blue" type="button" onclick="' + item.action + '">จัดการ</button></div>';
+      }).join('');
+    }
+
+    function updatePaymentAmountSummary() {
+      const selectedMonth = getElement('paymentStatusMonthFilter') ? getElement('paymentStatusMonthFilter').value : 'ทั้งหมด';
+      const visibleRows = Array.from(document.querySelectorAll('#paymentTableBody tr')).filter(function(row) {
+        return row.style.display !== 'none' && row.children && row.children.length >= 6;
+      });
+      let paidAmount = 0;
+      visibleRows.forEach(function(row) {
+        const statusText = row.children[5] ? row.children[5].innerText.trim() : '';
+        const amountText = row.children[3] ? row.children[3].innerText : '0';
+        const amount = Number(String(amountText).replace(/[^0-9.]/g, '')) || 0;
+        if (statusText.includes('ชำระแล้ว')) paidAmount += amount;
+      });
+      const targetStudents = students.filter(function(s) { return s.courseId && (s.learningStatus || s.status || 'เรียนอยู่') === 'เรียนอยู่'; });
+      let expectedAmount = 0;
+      targetStudents.forEach(function(s) {
+        const course = getCourseByStudentOrName(s, s.course);
+        expectedAmount += Number(course ? course.price : 0) || 0;
+      });
+      if (getElement('paidAmountThisMonth')) getElement('paidAmountThisMonth').textContent = formatPrice(paidAmount);
+      if (getElement('expectedAmountThisMonth')) getElement('expectedAmountThisMonth').textContent = formatPrice(expectedAmount);
+    }
+
+    function renderDashboardPaymentSummary() {
+      const box = getElement('dashboardPaymentSummary');
+      if (!box) return;
+      const month = getElement('dashboardPaymentMonthFilter') ? getElement('dashboardPaymentMonthFilter').value : (paymentMonths[0] ? paymentMonths[0].month : '');
+      const monthPayments = payments.filter(function(p) { return !month || p.month === month; });
+      const enrolledStudents = students.filter(function(s) { return s.courseId && (s.learningStatus || s.status || 'เรียนอยู่') === 'เรียนอยู่'; });
+      const paid = monthPayments.filter(function(p) { return p.status === 'ชำระแล้ว'; });
+      const pending = monthPayments.filter(function(p) { return p.status === 'รอตรวจสลิป'; });
+      const overdue = students.filter(function(s) { return Array.isArray(s.overdueMonths) && s.overdueMonths.includes(month); });
+      const paidAmount = paid.reduce(function(sum, p) { return sum + (Number(p.amount || 0) || 0); }, 0);
+      let expectedAmount = 0;
+      enrolledStudents.forEach(function(s) { const c = getCourseByStudentOrName(s, s.course); expectedAmount += Number(c ? c.price : 0) || 0; });
+      box.innerHTML = '<div class="status-display-row"><span class="status-label">เดือน</span><strong>' + (month || '-') + '</strong></div>' +
+        '<div class="status-display-row"><span class="status-label">นักเรียนที่ต้องชำระ</span><strong>' + enrolledStudents.length + ' คน</strong></div>' +
+        '<div class="status-display-row"><span class="status-label">ชำระแล้ว</span><strong class="status-paid">' + paid.length + ' รายการ · ' + formatPrice(paidAmount) + '</strong></div>' +
+        '<div class="status-display-row"><span class="status-label">รอตรวจสลิป</span><strong class="status-waiting">' + pending.length + ' รายการ</strong></div>' +
+        '<div class="status-display-row"><span class="status-label">ค้างชำระ</span><strong class="status-absent">' + overdue.length + ' คน</strong></div>' +
+        '<div class="status-display-row"><span class="status-label">ยอดที่ควรได้รับ</span><strong>' + formatPrice(expectedAmount) + '</strong></div>';
+    }
+
+    function copyTextToClipboard(text) {
+      if (navigator.clipboard) {
+        navigator.clipboard.writeText(text).then(function(){ alert('Copy ข้อความเรียบร้อย'); }).catch(function(){ alert(text); });
+      } else {
+        alert(text);
+      }
+    }
+
+    function copyPaymentMessage(button) {
+      const row = button.closest('tr');
+      if (!row) return;
+      const data = getPaymentDataFromRow(row);
+      const message = [
+        'แจ้งชำระค่าเรียน IDEA CLUB',
+        'นักเรียน: ' + (data.student || '-'),
+        'คอร์ส: ' + (data.course || '-'),
+        'เดือนที่ชำระ: ' + (data.month || '-'),
+        'ยอดชำระ: ' + (data.amount || '-') + ' บาท',
+        'หลังโอนแล้ว กรุณาส่งสลิปใน LINE กลุ่มประจำชั้น และกด “กดหลังจากส่งสลิปแล้ว” ในระบบ'
+      ].join('\n');
+      copyTextToClipboard(message);
+    }
+
+    function copyOverdueMessage(button) {
+      const row = button.closest('tr');
+      if (!row) return;
+      const data = getPaymentDataFromRow(row);
+      const message = [
+        'แจ้งยอดค้างชำระ IDEA CLUB',
+        'นักเรียน: ' + (data.student || '-'),
+        'คอร์ส: ' + (data.course || '-'),
+        'เดือนที่ค้างชำระ: ' + (data.month || '-'),
+        'ยอดชำระ: ' + (data.amount || '-') + ' บาท',
+        'กรุณาชำระและส่งสลิปใน LINE กลุ่มประจำชั้น ขอบคุณครับ/ค่ะ'
+      ].join('\n');
+      copyTextToClipboard(message);
+    }
+
+    function getStudentAttendanceSummary(student) {
+      let present = 0;
+      let absent = 0;
+      let parent = 0;
+      if (!student) return { present: present, absent: absent, parent: parent };
+      pickupHistory.forEach(function(record) {
+        if (record && Array.isArray(record.items)) {
+          record.items.forEach(function(item) {
+            if (String(item.studentId || item.id || '') === String(student.id) || item.name === student.name) {
+              if (item.status === 'มาเรียน') present++;
+              else if (item.status === 'ผู้ปกครองมารับ') parent++;
+              else if (item.status === 'ไม่มา') absent++;
+            }
+          });
+        }
+      });
+      if (!present && !absent && !parent && student.pickupStatus) {
+        if (student.pickupStatus === 'มาเรียน') present = 1;
+        else if (student.pickupStatus === 'ผู้ปกครองมารับ') parent = 1;
+        else if (student.pickupStatus === 'ไม่มา') absent = 1;
+      }
+      return { present: present, absent: absent, parent: parent };
+    }
+
     async function initPage() {
       const currentBEYear = new Date().getFullYear() + 543;
       if (getElement('memberYearBE')) getElement('memberYearBE').value = currentBEYear;
@@ -8361,6 +8563,8 @@
       safeRun(renderLineGroups, 'line-groups-init');
       safeRun(renderStudentLineGroupButton, 'student-line-group-init');
       safeRun(renderPaymentTable, 'payment-table-init');
+      safeRun(renderAdminTodoList, 'admin-todo-init');
+      safeRun(renderDashboardPaymentSummary, 'dashboard-payment-summary-init');
       safeRun(renderReceiptMonthFilter, 'receipt-month-filter-init');
       safeRun(renderAdminReceipts, 'admin-receipts-init');
       safeRun(renderStudentReceipts, 'student-receipts-init');
