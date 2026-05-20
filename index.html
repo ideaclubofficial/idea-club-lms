@@ -1243,8 +1243,12 @@
             กรุณาอัปโหลดสลิปผ่าน LINE กลุ่มประจำชั้น
           </div>
           <p style="margin-top:16px; color:#6b7280; line-height:1.7;">
-            หลังจากอัปโหลดสลิปลงกลุ่ม LINE แล้ว กรุณากดปุ่ม “ยืนยันการส่งสลิป” เพื่อแจ้งสถานะให้เจ้าหน้าที่ตรวจสอบ
+            หลังจากอัปโหลดสลิปลงกลุ่ม LINE แล้ว กรุณาเลือกเดือนที่ชำระ และกดปุ่ม “ยืนยันการส่งสลิป” เพื่อแจ้งสถานะให้เจ้าหน้าที่ตรวจสอบ
           </p>
+          <label>เลือกเดือนที่ชำระ</label>
+          <select id="studentPaymentMonth" onchange="updateStudentSelectedPaymentMonth()">
+            <option value="">ยังไม่มีเดือนชำระเงิน</option>
+          </select>
           <button class="btn btn-green" type="button" onclick="confirmLineSlipPayment()">ยืนยันการส่งสลิป</button>
           <p id="studentSlipResult" style="margin-top:14px; font-weight:bold;"></p>
         </div>
@@ -5013,10 +5017,13 @@
 
 
       if (getElement('studentPaymentCourseName')) getElement('studentPaymentCourseName').textContent = selectedCourse ? selectedCourse.name : '-';
-      if (getElement('studentPaymentAmount')) getElement('studentPaymentAmount').textContent = selectedCourse ? formatPrice(selectedCourse.price) : '-';
+      const selectedPaymentMonth = getElement('studentPaymentMonth') && getElement('studentPaymentMonth').value
+        ? getElement('studentPaymentMonth').value
+        : (Array.isArray(paymentMonths) && paymentMonths.length ? paymentMonths[0].month : '-');
+      const selectedPaymentAmount = getPaymentMonthAmount(selectedPaymentMonth) || (selectedCourse ? Number(selectedCourse.price || 0) : 0);
+      if (getElement('studentPaymentAmount')) getElement('studentPaymentAmount').textContent = selectedPaymentAmount ? formatPrice(selectedPaymentAmount) : '-';
       if (getElement('studentPaymentCurrentMonth')) {
-        const firstMonth = Array.isArray(paymentMonths) && paymentMonths.length ? paymentMonths[0].month : '-';
-        getElement('studentPaymentCurrentMonth').textContent = firstMonth;
+        getElement('studentPaymentCurrentMonth').textContent = selectedPaymentMonth || '-';
       }
 
       if (getElement('studentPaymentStatus')) {
@@ -5276,6 +5283,14 @@
       alert(message);
     }
 
+    function updateStudentSelectedPaymentMonth() {
+      const monthSelect = getElement('studentPaymentMonth');
+      const month = monthSelect && monthSelect.value ? monthSelect.value : (paymentMonths[0] ? paymentMonths[0].month : '-');
+      const amount = getPaymentMonthAmount(month) || (getCurrentStudentCourse() ? Number(getCurrentStudentCourse().price || 0) : 0);
+      if (getElement('studentPaymentCurrentMonth')) getElement('studentPaymentCurrentMonth').textContent = month || '-';
+      if (getElement('studentPaymentAmount')) getElement('studentPaymentAmount').textContent = amount ? formatPrice(amount) : '-';
+    }
+
     function renderPaymentMonths() {
       const tbody = getElement('paymentMonthTableBody');
       const studentSelect = getElement('studentPaymentMonth');
@@ -5296,9 +5311,12 @@
       }).join('');
 
       if (studentSelect) {
+        const currentStudentMonth = studentSelect.value || (paymentMonths[0] ? paymentMonths[0].month : '');
         studentSelect.innerHTML = paymentMonths.map(function(item) {
-          return '<option>' + item.month + '</option>';
+          return '<option value="' + item.month + '">' + item.month + '</option>';
         }).join('');
+        studentSelect.value = paymentMonths.some(function(item) { return item.month === currentStudentMonth; }) ? currentStudentMonth : (paymentMonths[0] ? paymentMonths[0].month : '');
+        updateStudentSelectedPaymentMonth();
       }
 
       if (statusFilter) {
@@ -5512,7 +5530,7 @@
           '<div class="receipt-header"><div><div class="receipt-title">Payment Detail</div><p>ข้อมูลการชำระเงินรายเดือน</p></div><span class="status-badge ' + (data.status.includes('ชำระแล้ว') ? 'present' : data.status.includes('ไม่ผ่าน') || data.status.includes('ค้าง') ? 'absent' : 'parent') + '">' + data.status + '</span></div>' +
           '<div class="receipt-line"><strong>นักเรียน</strong><span>' + data.student + '</span></div>' +
           '<div class="receipt-line"><strong>คอร์ส</strong><span>' + data.course + '</span></div>' +
-          '<div class="receipt-line"><strong>เดือน</strong><span>' + data.month + '</span></div>' +
+          '<div class="receipt-line"><strong>เดือนที่ชำระ</strong><span>' + (data.month || '-') + '</span></div>' +
           '<div class="receipt-line"><strong>ยอดเงิน</strong><span>' + data.amount + ' บาท</span></div>' +
           '<div class="receipt-line"><strong>สลิป</strong><span>' + data.slip + '</span></div>' +
           '<div class="test-actions"><button class="btn btn-green" type="button" onclick="createReceiptFromPaymentDetail()">ออกใบเสร็จจากรายการนี้</button><button class="btn btn-dark" type="button" onclick="closeEditBubble()">ปิด</button></div>' +
@@ -5564,7 +5582,7 @@
         receiptNo: createReceiptNo(),
         student: data.student,
         course: data.course,
-        month: data.month,
+        month: data.month || '-',
         amount: String(data.amount).replace(' บาท', ''),
         approvedDate: new Date().toLocaleDateString('th-TH'),
         admin: getElement('profileName') ? getElement('profileName').textContent : 'Admin IDEA CLUB',
@@ -5592,7 +5610,7 @@
         '</div>' +
         '<div class="receipt-line"><strong>ชื่อนักเรียน</strong><span>' + receipt.student + '</span></div>' +
         '<div class="receipt-line"><strong>คอร์สเรียน</strong><span>' + receipt.course + '</span></div>' +
-        '<div class="receipt-line"><strong>รอบเดือน</strong><span>' + receipt.month + '</span></div>' +
+        '<div class="receipt-line"><strong>เดือนที่ชำระ</strong><span>' + (receipt.month || '-') + '</span></div>' +
         '<div class="receipt-line"><strong>สถานะ</strong><span>ชำระแล้ว</span></div>' +
         '<div class="receipt-line"><strong>ผู้ตรวจสอบ</strong><span>' + receipt.admin + '</span></div>' +
         '<div style="display:flex; justify-content:space-between; align-items:center; gap:14px; margin-top:18px; padding-top:14px; border-top:2px solid #e5e7eb;"><strong>ยอดชำระสุทธิ</strong><span class="receipt-total">' + receipt.amount + ' บาท</span></div>' +
@@ -5668,7 +5686,7 @@
       let y = 295;
       y = drawReceiptLine(ctx, 'ชื่อนักเรียน', receipt.student, y);
       y = drawReceiptLine(ctx, 'คอร์สเรียน', receipt.course, y);
-      y = drawReceiptLine(ctx, 'รอบเดือน', receipt.month, y);
+      y = drawReceiptLine(ctx, 'เดือนที่ชำระ', receipt.month || '-', y);
       y = drawReceiptLine(ctx, 'สถานะ', 'ชำระแล้ว', y);
       y = drawReceiptLine(ctx, 'ผู้ตรวจสอบ', receipt.admin, y);
 
@@ -5947,8 +5965,14 @@
     async function confirmLineSlipPayment() {
       const result = getElement('studentSlipResult');
       const monthSelect = getElement('studentPaymentMonth');
-      let month = monthSelect && monthSelect.value ? monthSelect.value : (paymentMonths[0] ? paymentMonths[0].month : '-');
-      if (!month || month.includes('ยังไม่มี')) month = '-';
+      let month = monthSelect && monthSelect.value ? monthSelect.value : (paymentMonths[0] ? paymentMonths[0].month : '');
+      if (!month || month.includes('ยังไม่มี')) {
+        if (result) {
+          result.textContent = 'กรุณาให้ Admin เพิ่มเดือนชำระเงินก่อน จึงจะยืนยันการส่งสลิปได้';
+          result.style.color = '#dc2626';
+        }
+        return;
+      }
       if (!currentStudent) {
         if (result) {
           result.textContent = 'กรุณา Login ก่อนยืนยันการส่งสลิป';
