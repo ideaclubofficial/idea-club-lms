@@ -5284,19 +5284,19 @@
         setFirebaseDocument('payments', payment).catch(function(error) { console.error('payment status firebase error:', error); });
       }
       if (status === 'ชำระแล้ว') {
-        row.children[4].innerHTML = '<span class="status-paid">ตรวจแล้ว</span>';
+        row.children[4].innerHTML = payment ? formatPaymentSlipCell(payment) : '<span class="status-paid">ตรวจแล้ว</span>';
         row.children[5].innerHTML = '<span class="status-paid">ชำระแล้ว</span>';
         syncStudentPaymentStatusFromRow(row, 'ชำระแล้ว');
       } else if (status === 'สลิปไม่ผ่าน') {
-        row.children[4].innerHTML = '<span class="status-absent">สลิปไม่ผ่าน</span>';
+        row.children[4].innerHTML = payment ? formatPaymentSlipCell(payment) : '<span class="status-absent">สลิปไม่ผ่าน</span>';
         row.children[5].innerHTML = '<span class="status-absent">สลิปไม่ผ่าน</span>';
         syncStudentPaymentStatusFromRow(row, 'สลิปไม่ผ่าน');
       } else if (status === 'ค้างชำระ') {
-        row.children[4].innerHTML = '<span class="status-absent">ยังไม่พบสลิป</span>';
+        row.children[4].innerHTML = payment ? formatPaymentSlipCell(payment) : '<span class="status-absent">ยังไม่พบสลิป</span>';
         row.children[5].innerHTML = '<span class="status-absent">ค้างชำระ</span>';
         syncStudentPaymentStatusFromRow(row, 'ค้างชำระ');
       } else {
-        row.children[4].innerHTML = '<span class="status-waiting">มีสลิป</span>';
+        row.children[4].innerHTML = payment ? formatPaymentSlipCell(payment) : '<span class="status-waiting">มีสลิป</span>';
         row.children[5].innerHTML = '<span class="status-waiting">รอตรวจสลิป</span>';
         syncStudentPaymentStatusFromRow(row, 'รอตรวจสลิป');
       }
@@ -5714,11 +5714,25 @@
       return item ? item.amount : 0;
     }
 
+    function formatPaymentSlipCell(payment) {
+      if (!payment) return '-';
+      const monthText = payment.month || '-';
+      const sentAtText = payment.createdAtText ? '<br><span style="color:#6b7280; font-size:13px;">แจ้งเมื่อ: ' + payment.createdAtText + '</span>' : '';
+      const monthNotice = '<br><strong style="color:#0f4cbd;">เดือนที่นักเรียนแจ้ง: ' + monthText + '</strong>';
+      if (payment.slipUrl) {
+        return '<a href="' + payment.slipUrl + '" target="_blank">ดูสลิป</a>' + monthNotice + sentAtText;
+      }
+      if (payment.slipSource) {
+        return '<span class="status-waiting">' + payment.slipSource + '</span>' + monthNotice + sentAtText;
+      }
+      return '-' + monthNotice + sentAtText;
+    }
+
     function renderPaymentTable() {
       const tbody = getElement('paymentTableBody');
       if (!tbody) return;
       tbody.innerHTML = payments.length ? payments.map(function(p) {
-        const slipCell = p.slipUrl ? '<a href="' + p.slipUrl + '" target="_blank">ดูสลิป</a>' : (p.slipSource ? p.slipSource : '-');
+        const slipCell = formatPaymentSlipCell(p);
         const statusClass = p.status === 'ชำระแล้ว' ? 'status-paid' : p.status === 'ค้างชำระ' || p.status === 'สลิปไม่ผ่าน' ? 'status-absent' : 'status-waiting';
         return '<tr data-payment-id="' + p.id + '"><td>' + (p.student || '-') + '</td><td>' + (p.course || '-') + '</td><td>' + (p.month || '-') + '</td><td>' + formatPrice(p.amount || 0) + '</td><td>' + slipCell + '</td><td><span class="' + statusClass + '">' + (p.status || 'รอตรวจสลิป') + '</span></td><td>' + paymentActionButtons(p.status || 'รอตรวจสลิป') + '</td></tr>';
       }).join('') : '<tr><td colspan="7">ยังไม่มีรายการชำระเงิน</td></tr>';
@@ -5757,6 +5771,8 @@
         month: payment ? (payment.month || '-') : (row && row.children[2] ? row.children[2].innerText.trim() : '-'),
         amount: payment ? formatPrice(payment.amount || 0).replace(' บาท', '') : (row && row.children[3] ? row.children[3].innerText.trim().replace(' บาท', '') : '0'),
         slip: payment ? (payment.slipUrl ? 'มีสลิป' : (payment.slipSource || '-')) : (row && row.children[4] ? row.children[4].innerText.trim() : '-'),
+        slipNote: payment ? (payment.slipNote || ('นักเรียนแจ้งส่งสลิปของเดือน ' + (payment.month || '-'))) : '',
+        sentAt: payment ? (payment.createdAtText || '-') : '-',
         status: payment ? (payment.status || '-') : (row && row.children[5] ? row.children[5].innerText.trim() : '-')
       };
     }
@@ -5774,6 +5790,8 @@
           '<div class="receipt-line"><strong>เดือนที่ชำระ</strong><span>' + (data.month || '-') + '</span></div>' +
           '<div class="receipt-line"><strong>ยอดเงิน</strong><span>' + data.amount + ' บาท</span></div>' +
           '<div class="receipt-line"><strong>สลิป</strong><span>' + data.slip + '</span></div>' +
+          '<div class="receipt-line"><strong>หมายเหตุการส่งสลิป</strong><span>' + (data.slipNote || '-') + '</span></div>' +
+          '<div class="receipt-line"><strong>วันที่นักเรียนแจ้ง</strong><span>' + (data.sentAt || '-') + '</span></div>' +
           '<div class="test-actions"><button class="btn btn-green" type="button" onclick="createReceiptFromPaymentDetail()">ออกใบเสร็จจากรายการนี้</button><button class="btn btn-dark" type="button" onclick="closeEditBubble()">ปิด</button></div>' +
         '</div>'
       );
@@ -6241,6 +6259,7 @@
           amount: paymentAmount,
           slipUrl: '',
           slipSource: 'LINE กลุ่มประจำชั้น',
+          slipNote: 'นักเรียนยืนยันส่งสลิปของเดือน ' + month,
           status: 'รอตรวจสลิป',
           createdAtText: new Date().toLocaleString('th-TH')
         };
@@ -6252,11 +6271,11 @@
         renderPaymentTable();
         renderAdminDashboard();
         if (result) {
-          result.textContent = 'ยืนยันการส่งสลิปเรียบร้อย กรุณารอเจ้าหน้าที่ตรวจสอบ';
+          result.textContent = 'ยืนยันการส่งสลิปเดือน ' + month + ' เรียบร้อย กรุณารอเจ้าหน้าที่ตรวจสอบ';
           result.style.color = '#16a34a';
         }
         if (getElement('studentPaymentStatus')) {
-          getElement('studentPaymentStatus').textContent = 'ส่งสลิปแล้ว · รอตรวจสอบ';
+          getElement('studentPaymentStatus').textContent = 'ส่งสลิปเดือน ' + month + ' แล้ว · รอตรวจสอบ';
           getElement('studentPaymentStatus').className = 'status-waiting';
         }
       } catch (error) {
@@ -6302,6 +6321,7 @@
           month: month,
           amount: getPaymentMonthAmount(month) || (getCurrentStudentCourse() ? Number(getCurrentStudentCourse().price || 0) : 0),
           slipUrl: slipUrl,
+          slipNote: 'นักเรียนอัปโหลดสลิปของเดือน ' + month,
           status: 'รอตรวจสลิป',
           createdAtText: new Date().toLocaleString('th-TH')
         };
