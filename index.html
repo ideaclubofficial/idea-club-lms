@@ -3478,6 +3478,7 @@
       safeRun(renderStudentCourses, 'admin-render-student-courses');
       safeRun(renderAdminExamSetFilters, 'admin-exam-set-filters');
       safeRun(renderAdminQuestions, 'admin-questions');
+      safeRun(renderMemberTable, 'member-table');
       safeRun(renderAdminScoreFilters, 'admin-score-filters');
       safeRun(renderAdminScoreAdjustTable, 'admin-score-table');
       safeRun(renderAdminScoreStatsTable, 'admin-score-stats');
@@ -3497,6 +3498,7 @@
       if (selectedTab) selectedTab.classList.remove('hidden');
       if (tabId === 'admin-dashboard') safeRun(renderAdminDashboard, 'admin-dashboard');
       if (tabId === 'admin-students') safeRun(renderAdminStudents, 'admin-students');
+      if (tabId === 'admin-members') { safeRun(renderMemberTable, 'member-table'); safeRun(updateMemberIdPreview, 'member-id-preview'); }
       if (tabId === 'admin-teachers') safeRun(renderTeachers, 'admin-teachers');
       if (tabId === 'admin-courses') {
         safeRun(renderAdminCourses, 'admin-courses');
@@ -3576,40 +3578,109 @@
         result.style.color = '#dc2626';
         return;
       }
-      if (editingId) {
-        const s = students.find(function(item) { return String(item.id) === String(editingId); });
-        if (s) {
-          Object.assign(s, { name: name, nickname: nickname, grade: grade, phone: phone, course: course });
-          await setFirebaseDocument('students', s);
-        }
-        result.textContent = 'แก้ไขข้อมูลนักเรียนเรียบร้อย และบันทึกลง Firebase แล้ว';
-      } else {
-        const newId = Date.now();
-        const studentEmail = buildLocalEmailFromPhone(phone);
-        let authUid = null;
-        if (PRODUCTION_MODE && studentEmail) {
-          authUid = await createAuthUserFromAdmin(studentEmail, '000000');
-          await db.collection('users').doc(authUid).set({
+
+      try {
+        if (editingId) {
+          const s = students.find(function(item) { return String(item.id) === String(editingId); });
+          if (!s) throw new Error('ไม่พบข้อมูลนักเรียนที่ต้องการแก้ไข');
+
+          const oldPhone = s.phone || '';
+          const studentEmail = buildLocalEmailFromPhone(phone);
+          Object.assign(s, {
             name: name,
             nickname: nickname,
-            email: studentEmail,
+            grade: grade,
             phone: phone,
-            role: 'student',
-            status: 'active',
-            createdBy: firebaseUser ? firebaseUser.uid : '',
-            createdAt: firebase.firestore.FieldValue.serverTimestamp(),
-            updatedAt: firebase.firestore.FieldValue.serverTimestamp()
-          }, { merge: true });
+            email: s.email || studentEmail,
+            course: course || 'ยังไม่ได้สมัครคอร์ส'
+          });
+
+          await setFirebaseDocument('students', s);
+
+          if (s.authUid && db) {
+            await db.collection('users').doc(s.authUid).set({
+              name: name,
+              nickname: nickname,
+              email: s.email || studentEmail,
+              phone: phone,
+              role: 'student',
+              status: 'active',
+              updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+            }, { merge: true });
+          }
+
+          result.textContent = oldPhone !== phone
+            ? 'แก้ไขข้อมูลนักเรียนเรียบร้อยแล้ว หมายเหตุ: ถ้าเปลี่ยนเบอร์ Login ต้องมีบัญชี Firebase Auth ของเบอร์ใหม่นี้ด้วย'
+            : 'แก้ไขข้อมูลนักเรียนเรียบร้อย และบันทึกลง Firebase แล้ว';
+        } else {
+          const existedStudent = students.find(function(item) {
+            return String(item.phone || '').replace(/[^0-9]/g, '') === String(phone || '').replace(/[^0-9]/g, '');
+          });
+          if (existedStudent) throw new Error('เบอร์นี้มีข้อมูลนักเรียนในระบบแล้ว ถ้าต้องการเปลี่ยนข้อมูลให้กด “แก้ไข” จากตารางรายชื่อ');
+
+          const newId = Date.now();
+          const studentEmail = buildLocalEmailFromPhone(phone);
+          let authUid = null;
+          let authNote = '';
+
+          if (PRODUCTION_MODE && studentEmail) {
+            try {
+              authUid = await createAuthUserFromAdmin(studentEmail, '000000');
+              await db.collection('users').doc(authUid).set({
+                name: name,
+                nickname: nickname,
+                email: studentEmail,
+                phone: phone,
+                role: 'student',
+                status: 'active',
+                createdBy: firebaseUser ? firebaseUser.uid : '',
+                createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+                updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+              }, { merge: true });
+            } catch (authError) {
+              console.error('create student auth error:', authError);
+              if (authError && (authError.code === 'auth/email-already-in-use' || String(authError.message || '').includes('email-already-in-use'))) {
+                authNote = ' (บัญชี Login นี้มีอยู่ใน Firebase Auth แล้ว ระบบจึงเพิ่มเฉพาะข้อมูลนักเรียน)';
+              } else {
+                throw authError;
+              }
+            }
+          }
+
+          const docId = authUid || newId;
+          const newStudent = {
+            id: docId,
+            firebaseDocId: String(docId),
+            authUid: authUid,
+            email: studentEmail,
+            defaultPassword: '000000',
+            memberId: '-',
+            name: name,
+            nickname: nickname,
+            grade: grade,
+            phone: phone,
+            course: course || 'ยังไม่ได้สมัครคอร์ส',
+            courseId: null,
+            courseAccess: '-',
+            courseStatus: course === 'ยังไม่ได้สมัครคอร์ส' ? 'ยังไม่ได้สมัครคอร์ส' : 'สมัครแล้ว',
+            paymentStatus: course === 'ยังไม่ได้สมัครคอร์ส' ? 'ยังไม่ได้สมัครคอร์ส' : 'รอชำระเงิน',
+            status: 'ปกติ'
+          };
+          students.push(newStudent);
+          await setFirebaseDocument('students', newStudent);
+          result.textContent = 'เพิ่มนักเรียนใหม่เรียบร้อย รหัสเริ่มต้น 000000 และบันทึกลง Firebase แล้ว' + authNote;
         }
-        const newStudent = { id: authUid || newId, firebaseDocId: String(authUid || newId), authUid: authUid, email: studentEmail, defaultPassword: '000000', memberId: '-', name: name, nickname: nickname, grade: grade, phone: phone, course: course, courseId: null, courseAccess: '-', courseStatus: course === 'ยังไม่ได้สมัครคอร์ส' ? 'ยังไม่ได้สมัครคอร์ส' : 'สมัครแล้ว', paymentStatus: course === 'ยังไม่ได้สมัครคอร์ส' ? 'ยังไม่ได้สมัครคอร์ส' : 'รอชำระเงิน', status: 'ปกติ' };
-        students.push(newStudent);
-        await setFirebaseDocument('students', newStudent);
-        result.textContent = 'เพิ่มนักเรียนใหม่เรียบร้อย รหัสเริ่มต้น 000000 และบันทึกลง Firebase แล้ว';
+
+        result.style.color = '#16a34a';
+        clearStudentForm(false);
+        renderAdminStudents();
+        renderMemberTable();
+        renderAdminDashboard();
+      } catch (error) {
+        console.error('save student error:', error);
+        result.textContent = 'บันทึกนักเรียนไม่สำเร็จ: ' + (error.message || error.code || 'ไม่ทราบสาเหตุ');
+        result.style.color = '#dc2626';
       }
-      result.style.color = '#16a34a';
-      clearStudentForm(false);
-      renderAdminStudents();
-      renderAdminDashboard();
     }
 
     function editStudent(id) {
@@ -3827,26 +3898,137 @@
       getElement('memberIdPreview').value = prefix + padNumber(count, 4);
     }
 
-    function generateMember() {
+    async function generateMember() {
       const grade = getElement('memberGrade').value;
-      const phone = getElement('memberPhone').value.trim() || 'ไม่ระบุ Username';
+      const phone = getElement('memberPhone').value.trim();
       const memberId = getElement('memberIdPreview').value;
-      const name = getElement('memberStudentName').value.trim() || 'ไม่ระบุชื่อ';
-      getElement('generatedMemberId').textContent = memberId;
-      getElement('generatedUsername').textContent = phone;
-      addStudentFromMember(memberId, name, grade, phone);
-      getElement('memberResult').classList.remove('hidden');
-      updateMemberIdPreview();
+      const name = getElement('memberStudentName').value.trim();
+      const resultBox = getElement('memberResult');
+
+      if (!name || !phone) {
+        alert('กรุณากรอกชื่อนักเรียนและเบอร์ผู้ปกครอง / Username');
+        return;
+      }
+
+      try {
+        await addStudentFromMember(memberId, name, grade, phone);
+        getElement('generatedMemberId').textContent = memberId;
+        getElement('generatedUsername').textContent = phone;
+        resultBox.classList.remove('hidden');
+        updateMemberIdPreview();
+      } catch (error) {
+        console.error('generate member error:', error);
+        alert('สร้างรหัสสมาชิกไม่สำเร็จ: ' + (error.message || error.code || 'ไม่ทราบสาเหตุ'));
+      }
     }
 
-    function addStudentFromMember(memberId, name, grade, phone) {
-      const existing = students.find(function(s) { return s.memberId === memberId || (s.name === name && s.phone === phone); });
-      if (existing) {
-        Object.assign(existing, { memberId: memberId, name: name, grade: grade, phone: phone });
-      } else {
-        students.push({ id: Date.now(), memberId: memberId, name: name, nickname: '-', grade: grade, phone: phone, course: 'ยังไม่ได้สมัครคอร์ส', status: 'ปกติ' });
+    async function addStudentFromMember(memberId, name, grade, phone) {
+      const cleanPhone = String(phone || '').replace(/[^0-9]/g, '');
+      const studentEmail = buildLocalEmailFromPhone(phone);
+      let existing = students.find(function(s) {
+        return s.memberId === memberId || String(s.phone || '').replace(/[^0-9]/g, '') === cleanPhone;
+      });
+
+      let authUid = existing ? existing.authUid : null;
+      let authNote = '';
+
+      if (!existing && PRODUCTION_MODE && studentEmail) {
+        try {
+          authUid = await createAuthUserFromAdmin(studentEmail, '000000');
+          await db.collection('users').doc(authUid).set({
+            name: name,
+            email: studentEmail,
+            phone: phone,
+            role: 'student',
+            status: 'active',
+            createdBy: firebaseUser ? firebaseUser.uid : '',
+            createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+            updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+          }, { merge: true });
+        } catch (authError) {
+          console.error('create member auth error:', authError);
+          if (authError && (authError.code === 'auth/email-already-in-use' || String(authError.message || '').includes('email-already-in-use'))) {
+            authNote = ' บัญชี Login นี้มีอยู่แล้ว ระบบเพิ่ม/อัปเดตข้อมูลสมาชิกให้เรียบร้อย';
+          } else {
+            throw authError;
+          }
+        }
       }
+
+      if (existing) {
+        Object.assign(existing, {
+          memberId: memberId,
+          name: name,
+          grade: grade,
+          phone: phone,
+          email: existing.email || studentEmail,
+          authUid: existing.authUid || authUid,
+          firebaseDocId: existing.firebaseDocId || String(existing.id || authUid || Date.now()),
+          course: existing.course || 'ยังไม่ได้สมัครคอร์ส',
+          status: existing.status || 'ปกติ'
+        });
+        await setFirebaseDocument('students', existing);
+        if (existing.authUid && db) {
+          await db.collection('users').doc(existing.authUid).set({
+            name: name,
+            email: existing.email || studentEmail,
+            phone: phone,
+            role: 'student',
+            status: 'active',
+            updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+          }, { merge: true });
+        }
+      } else {
+        const docId = authUid || Date.now();
+        const newStudent = {
+          id: docId,
+          firebaseDocId: String(docId),
+          authUid: authUid,
+          email: studentEmail,
+          defaultPassword: '000000',
+          memberId: memberId,
+          name: name,
+          nickname: '-',
+          grade: grade,
+          phone: phone,
+          course: 'ยังไม่ได้สมัครคอร์ส',
+          courseId: null,
+          courseAccess: '-',
+          courseStatus: 'ยังไม่ได้สมัครคอร์ส',
+          paymentStatus: 'ยังไม่ได้สมัครคอร์ส',
+          status: 'ปกติ'
+        };
+        students.push(newStudent);
+        await setFirebaseDocument('students', newStudent);
+      }
+
       renderAdminStudents();
+      renderMemberTable();
+      renderAdminDashboard();
+      if (authNote) console.warn(authNote);
+    }
+
+    function renderMemberTable() {
+      const tbody = getElement('memberTableBody');
+      if (!tbody) return;
+      const members = students.filter(function(s) { return s.memberId && s.memberId !== '-'; });
+      tbody.innerHTML = members.length ? members.map(function(s) {
+        const statusText = s.status === 'ปิดใช้งาน' || s.status === 'Inactive'
+          ? '<span class="status-absent">Inactive</span>'
+          : '<span class="status-paid">Active</span>';
+        return '<tr>' +
+          '<td>' + (s.memberId || '-') + '</td>' +
+          '<td>' + (s.name || '-') + '</td>' +
+          '<td>' + (s.grade || '-') + '</td>' +
+          '<td>' + (s.phone || s.email || '-') + '</td>' +
+          '<td>' + statusText + '</td>' +
+          '<td>' +
+            '<button class="btn btn-blue" type="button" onclick="sendMemberLoginInfo(this)">ส่งข้อมูล</button>' +
+            '<button class="btn btn-dark" type="button" onclick="resetMemberPassword(this)">Reset 000000</button>' +
+            '<button class="btn btn-red" type="button" onclick="toggleMemberStatus(this)">ปิดสมาชิก</button>' +
+          '</td>' +
+        '</tr>';
+      }).join('') : '<tr><td colspan="6">ยังไม่มีรายการสมาชิกที่สร้างจากระบบ</td></tr>';
     }
 
     function copyMemberInfo() {
@@ -6255,6 +6437,7 @@
       safeRun(updateTeacherIdPreview, 'teacher-id-preview');
       safeRun(renderAdminDashboard, 'admin-dashboard-init');
       safeRun(renderAdminStudents, 'admin-students-init');
+      safeRun(renderMemberTable, 'member-table-init');
       safeRun(renderTeachers, 'teachers-init');
       safeRun(renderAdminCourses, 'courses-init');
       safeRun(renderOnlineClassCourseSelect, 'online-select-init');
