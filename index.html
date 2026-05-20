@@ -1239,17 +1239,9 @@
 
         <div class="card">
           <h3>อัปโหลดสลิป</h3>
-          <label>เลือกเดือนที่ชำระ</label>
-          <select id="studentPaymentMonth">
-            <option value="">ยังไม่มีเดือนชำระเงิน</option>
-          </select>
-          <br /><br />
-          <label>อัปโหลดสลิปโอนเงิน</label>
-          <input id="studentSlipUpload" type="file" accept="image/*" onchange="previewStudentSlip()" />
-          <div id="studentSlipPreview" class="notice">ยังไม่ได้อัปโหลดสลิป</div>
-          <br />
-          <button class="btn btn-green" type="button" onclick="submitStudentSlip()">ส่งสลิปให้เจ้าหน้าที่ตรวจสอบ</button>
-          <p id="studentSlipResult" style="margin-top:14px; font-weight:bold;"></p>
+          <div class="notice" style="font-size:18px; font-weight:bold; line-height:1.7;">
+            กรุณาอัปโหลดสลิปผ่าน LINE กลุ่มประจำชั้น
+          </div>
         </div>
       </div>
       </div>
@@ -3647,7 +3639,10 @@
       const selectedTab = getElement(tabId);
       if (selectedTab) selectedTab.classList.remove('hidden');
       if (tabId === 'admin-dashboard') safeRun(renderAdminDashboard, 'admin-dashboard');
-      if (tabId === 'admin-students') safeRun(renderAdminStudents, 'admin-students');
+      if (tabId === 'admin-students') {
+        safeRun(renderAdminStudentCourseOptions, 'admin-student-course-options');
+        safeRun(renderAdminStudents, 'admin-students');
+      }
       if (tabId === 'admin-members') { safeRun(renderMemberTable, 'member-table'); safeRun(updateMemberIdPreview, 'member-id-preview'); }
       if (tabId === 'admin-teachers') safeRun(renderTeachers, 'admin-teachers');
       if (tabId === 'admin-courses') {
@@ -3721,7 +3716,9 @@
       const nickname = getElement('adminStudentNickname').value.trim();
       const grade = getElement('adminStudentGrade').value;
       const phone = getElement('adminStudentPhone').value.trim();
-      const course = getElement('adminStudentCourse').value;
+      const courseValue = getElement('adminStudentCourse').value;
+      const selectedCourse = courses.find(function(c) { return String(c.id) === String(courseValue); });
+      const course = selectedCourse ? selectedCourse.name : 'ยังไม่ได้สมัครคอร์ส';
       const result = getElement('studentSaveResult');
       if (!name || !phone) {
         result.textContent = 'กรุณากรอกชื่อนักเรียนและเบอร์ผู้ปกครอง';
@@ -3846,7 +3843,7 @@
           '<div><label>ระดับชั้น</label><select id="bubbleStudentGrade">' + gradeOptionsHtml(s.grade) + '</select></div>' +
           '<div><label>เบอร์ผู้ปกครอง</label><input id="bubbleStudentPhone" type="text" value="' + s.phone + '"></div>' +
         '</div>' +
-        '<label>คอร์สที่ลงเรียน</label><input id="bubbleStudentCourse" type="text" value="' + s.course + '">',
+        '<label>คอร์สที่ลงเรียน</label><select id="bubbleStudentCourseId">' + studentCourseOptionsHtml(s.courseId || s.course) + '</select>',
         function() {
           const name = bubbleValue('bubbleStudentName');
           const phone = bubbleValue('bubbleStudentPhone');
@@ -3855,12 +3852,18 @@
             getElement('editBubbleResult').style.color = '#dc2626';
             return;
           }
+          const selectedCourseId = bubbleSelectValue('bubbleStudentCourseId');
+          const selectedCourse = courses.find(function(c) { return String(c.id) === String(selectedCourseId); });
           Object.assign(s, {
             name: name,
             nickname: bubbleValue('bubbleStudentNickname'),
-            grade: bubbleSelectValue('bubbleStudentGrade'),
+            grade: selectedCourse ? selectedCourse.grade : bubbleSelectValue('bubbleStudentGrade'),
             phone: phone,
-            course: bubbleValue('bubbleStudentCourse') || 'ยังไม่ได้สมัครคอร์ส'
+            course: selectedCourse ? selectedCourse.name : 'ยังไม่ได้สมัครคอร์ส',
+            courseId: selectedCourse ? selectedCourse.id : null,
+            courseAccess: selectedCourse ? selectedCourse.access : '-',
+            courseStatus: selectedCourse ? 'สมัครแล้ว' : 'ยังไม่ได้สมัครคอร์ส',
+            paymentStatus: selectedCourse ? (s.paymentStatus && s.paymentStatus !== 'ยังไม่ได้สมัครคอร์ส' ? s.paymentStatus : 'รอชำระเงิน') : 'ยังไม่ได้สมัครคอร์ส'
           });
           setFirebaseDocument('students', s).catch(function(error) { console.error('save student firebase error:', error); });
           renderAdminStudents();
@@ -3890,7 +3893,8 @@
       getElement('adminStudentNickname').value = '';
       getElement('adminStudentGrade').value = 'ป.4';
       getElement('adminStudentPhone').value = '';
-      getElement('adminStudentCourse').value = 'ยังไม่ได้สมัครคอร์ส';
+      renderAdminStudentCourseOptions();
+      getElement('adminStudentCourse').value = '';
       if (clearMessage !== false) getElement('studentSaveResult').textContent = '';
     }
 
@@ -4329,6 +4333,27 @@
       }).join('');
     }
 
+
+    function studentCourseOptionsHtml(selectedValue) {
+      const selectedText = String(selectedValue || '');
+      const options = ['<option value="">ยังไม่ได้สมัครคอร์ส</option>'];
+      courses.forEach(function(c) {
+        const selected = String(c.id) === selectedText || c.name === selectedText ? ' selected' : '';
+        options.push('<option value="' + c.id + '"' + selected + '>' + c.grade + ' · ' + c.name + '</option>');
+      });
+      return options.join('');
+    }
+
+    function renderAdminStudentCourseOptions() {
+      const select = getElement('adminStudentCourse');
+      if (!select) return;
+      const current = select.value || '';
+      select.innerHTML = studentCourseOptionsHtml(current);
+      if (Array.from(select.options).some(function(option) { return option.value === current; })) {
+        select.value = current;
+      }
+    }
+
     function dayCheckboxesHtml(selectedDays) {
       const days = ['จันทร์', 'อังคาร', 'พุธ', 'พฤหัสบดี', 'ศุกร์', 'เสาร์', 'อาทิตย์'];
       return days.map(function(day) {
@@ -4703,6 +4728,7 @@
       }
       clearCourseForm(false);
       renderAdminCourses();
+      renderAdminStudentCourseOptions();
       renderAdminDashboard();
       renderOnlineClassCourseSelect();
       renderOnlineClassTable();
@@ -4774,6 +4800,7 @@
       await deleteFirebaseDocument('courses', item);
       courses.splice(index, 1);
       renderAdminCourses();
+      renderAdminStudentCourseOptions();
       renderStudentCourses();
       renderTodayTeachingList();
       getElement('courseSaveResult').textContent = 'ลบคอร์สออกจาก Firestore เรียบร้อย และอัปเดตหน้าสมัครคอร์สแล้ว';
@@ -6734,6 +6761,7 @@
       safeRun(renderMemberTable, 'member-table-init');
       safeRun(renderTeachers, 'teachers-init');
       safeRun(renderAdminCourses, 'courses-init');
+      safeRun(renderAdminStudentCourseOptions, 'admin-student-course-options-init');
       safeRun(renderOnlineClassCourseSelect, 'online-select-init');
       safeRun(renderOnlineClassTable, 'online-table-init');
       safeRun(renderOnDemandCourseSelect, 'ondemand-select-init');
