@@ -1242,6 +1242,10 @@
           <div class="notice" style="font-size:18px; font-weight:bold; line-height:1.7;">
             กรุณาอัปโหลดสลิปผ่าน LINE กลุ่มประจำชั้น
           </div>
+          <div id="studentLineGroupBox" class="notice" style="margin-top:14px; background:#eef6ff; border-color:#bfdbfe;">
+            <p id="studentLineGroupText" style="font-weight:bold; color:#0f4cbd; margin-bottom:8px;">กำลังตรวจสอบ LINE กลุ่มประจำชั้น...</p>
+            <button id="studentLineGroupButton" class="btn btn-green" type="button" onclick="openStudentLineGroup()">เข้ากลุ่ม LINE ประจำชั้น</button>
+          </div>
           <p style="margin-top:16px; color:#6b7280; line-height:1.7;">
             หลังจากอัปโหลดสลิปลงกลุ่ม LINE แล้ว กรุณาเลือกเดือนที่ชำระ และกดปุ่ม “ยืนยันการส่งสลิป” เพื่อแจ้งสถานะให้เจ้าหน้าที่ตรวจสอบ
           </p>
@@ -2042,6 +2046,81 @@
             <br />
 
             <div class="form-box">
+              <h3>ตั้งค่า LINE กลุ่มรับสลิป</h3>
+              <p style="margin-bottom:18px; color:#6b7280;">ใส่ลิงก์ LINE กลุ่มแยกตามศูนย์และระดับชั้น เมื่อนักเรียนเข้าสู่ระบบ ระบบจะแสดงปุ่มเข้ากลุ่มตามคอร์สที่สมัคร</p>
+
+              <input id="editingLineGroupId" type="hidden" value="" />
+
+              <div class="form-row">
+                <div>
+                  <label>ศูนย์ / สถานที่เรียน</label>
+                  <select id="lineGroupLocation">
+                    <option>IDEA CLUB ศูนย์ นครสวรรค์</option>
+                    <option>IDEA CLUB ศูนย์ หนองฉาง</option>
+                  </select>
+                </div>
+                <div>
+                  <label>ระดับชั้น</label>
+                  <select id="lineGroupGrade">
+                    <option>ป.4</option>
+                    <option>ป.5</option>
+                    <option>ป.6</option>
+                    <option>ม.1</option>
+                    <option>ม.2</option>
+                    <option>ม.3</option>
+                    <option>ม.4</option>
+                    <option>ม.5</option>
+                    <option>ม.6</option>
+                  </select>
+                </div>
+              </div>
+
+              <div class="form-row">
+                <div>
+                  <label>ชื่อกลุ่ม LINE</label>
+                  <input id="lineGroupName" type="text" placeholder="เช่น LINE กลุ่ม ป.6 นครสวรรค์" />
+                </div>
+                <div>
+                  <label>Link เข้ากลุ่ม LINE</label>
+                  <input id="lineGroupUrl" type="url" placeholder="https://line.me/..." />
+                </div>
+              </div>
+
+              <div class="form-row">
+                <div>
+                  <label>สถานะ</label>
+                  <select id="lineGroupStatus">
+                    <option value="active">เปิดใช้งาน</option>
+                    <option value="inactive">ปิดใช้งาน</option>
+                  </select>
+                </div>
+              </div>
+
+              <button class="btn btn-green" type="button" onclick="saveLineGroup()">บันทึก LINE กลุ่ม</button>
+              <button class="btn btn-dark" type="button" onclick="clearLineGroupForm()">ล้างฟอร์ม</button>
+              <p id="lineGroupSaveResult" style="margin-top:14px; font-weight:bold;"></p>
+
+              <br />
+              <div class="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>ศูนย์</th>
+                      <th>ระดับชั้น</th>
+                      <th>ชื่อกลุ่ม</th>
+                      <th>Link</th>
+                      <th>สถานะ</th>
+                      <th>จัดการ</th>
+                    </tr>
+                  </thead>
+                  <tbody id="lineGroupTableBody"></tbody>
+                </table>
+              </div>
+            </div>
+
+            <br />
+
+            <div class="form-box">
               <h3>จัดการเดือนชำระเงิน</h3>
               <p style="margin-bottom:18px; color:#6b7280;">เพิ่มเดือนที่ต้องการเรียกเก็บเงินรายเดือน เช่น มิถุนายน 2569 หรือ กรกฎาคม 2569</p>
               <div class="form-row">
@@ -2683,6 +2762,7 @@
       await seedCollectionIfEmpty('courses', courses);
       await seedCollectionIfEmpty('onDemandPlaylists', onDemandPlaylists);
       await seedCollectionIfEmpty('paymentMonths', paymentMonths);
+      await seedCollectionIfEmpty('lineGroups', lineGroups);
       await seedCollectionIfEmpty('receipts', receipts);
       await seedCollectionIfEmpty('monthlyQuestions', monthlyQuestions);
       await seedCollectionIfEmpty('monthlyExamLinks', monthlyExamLinks);
@@ -2694,6 +2774,7 @@
       replaceArray(courses, await getFirebaseCollection('courses'));
       replaceArray(onDemandPlaylists, await getFirebaseCollection('onDemandPlaylists'));
       replaceArray(paymentMonths, await getFirebaseCollection('paymentMonths'));
+      replaceArray(lineGroups, await getFirebaseCollection('lineGroups'));
       replaceArray(payments, await getFirebaseCollection('payments'));
       replaceArray(receipts, await getFirebaseCollection('receipts'));
       replaceArray(monthlyQuestions, await getFirebaseCollection('monthlyQuestions'));
@@ -2718,6 +2799,7 @@
     let currentTeacher = null;
 
     const paymentMonths = [];
+    const lineGroups = [];
     const payments = [];
 
     const receipts = [];
@@ -3678,6 +3760,7 @@
         safeRun(renderReceiptMonthFilter, 'receipt-month-filter');
         safeRun(renderAdminReceipts, 'admin-receipts');
         safeRun(updatePaymentSummary, 'payment-summary');
+        safeRun(renderLineGroups, 'line-groups');
       }
       if (tabId === 'admin-monthly-test') {
         safeRun(renderAdminExamSetFilters, 'admin-exam-set-filters');
@@ -5043,6 +5126,8 @@
         getElement('studentOnDemandGradeText').textContent = 'ระดับชั้นจากข้อมูลส่วนตัว: ' + profileGrade + ' · แสดงเฉพาะคลิปของระดับชั้นนี้';
       }
 
+      safeRun(renderStudentLineGroupButton, 'student-line-group-display');
+
       const entitledCourses = selectedCourse ? [selectedCourse] : gradeCourses;
       renderStudentOnlineClasses(entitledCourses, profileGrade);
       renderStudentOnDemandClasses(entitledCourses, profileGrade);
@@ -5281,6 +5366,162 @@
       ].join(String.fromCharCode(10));
 
       alert(message);
+    }
+
+
+    function getCurrentLineGroup() {
+      const selectedCourse = getCurrentStudentCourse ? getCurrentStudentCourse() : null;
+      const grade = currentStudent && currentStudent.grade ? currentStudent.grade : getProfileGrade();
+      const location = selectedCourse && selectedCourse.location ? selectedCourse.location : '';
+      return lineGroups.find(function(item) {
+        const active = (item.status || 'active') === 'active';
+        const gradeMatched = item.grade === grade;
+        const locationMatched = location ? item.location === location : true;
+        return active && gradeMatched && locationMatched;
+      }) || null;
+    }
+
+    function renderStudentLineGroupButton() {
+      const box = getElement('studentLineGroupBox');
+      const text = getElement('studentLineGroupText');
+      const button = getElement('studentLineGroupButton');
+      if (!box || !text || !button) return;
+
+      const selectedCourse = getCurrentStudentCourse ? getCurrentStudentCourse() : null;
+      if (!currentStudent || !selectedCourse) {
+        text.textContent = 'กรุณาสมัครคอร์สก่อน ระบบจึงจะแสดง LINE กลุ่มประจำชั้น';
+        button.classList.add('hidden');
+        return;
+      }
+
+      const group = getCurrentLineGroup();
+      if (group && group.lineUrl) {
+        text.textContent = (group.groupName || 'LINE กลุ่มประจำชั้น') + ' · ' + group.grade + ' · ' + group.location;
+        button.classList.remove('hidden');
+        return;
+      }
+
+      text.textContent = 'ยังไม่ได้ตั้งค่าลิงก์ LINE กลุ่มสำหรับ ' + (currentStudent.grade || '-') + ' · ' + (selectedCourse.location || '-') + ' กรุณาติดต่อเจ้าหน้าที่';
+      button.classList.add('hidden');
+    }
+
+    function openStudentLineGroup() {
+      const group = getCurrentLineGroup();
+      if (!group || !group.lineUrl) {
+        alert('ยังไม่ได้ตั้งค่าลิงก์ LINE กลุ่มสำหรับระดับชั้นและศูนย์นี้');
+        return;
+      }
+      window.open(group.lineUrl, '_blank');
+    }
+
+    function renderLineGroups() {
+      const tbody = getElement('lineGroupTableBody');
+      if (!tbody) return;
+      if (!Array.isArray(lineGroups) || lineGroups.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="6">ยังไม่มี LINE กลุ่มในระบบ ให้เพิ่มจากฟอร์มด้านบน</td></tr>';
+        renderStudentLineGroupButton();
+        return;
+      }
+      tbody.innerHTML = lineGroups.map(function(item) {
+        const statusText = (item.status || 'active') === 'active' ? '<span class="status-paid">เปิดใช้งาน</span>' : '<span class="status-absent">ปิดใช้งาน</span>';
+        const linkText = item.lineUrl ? '<a href="' + item.lineUrl + '" target="_blank">เปิดลิงก์</a>' : '-';
+        return '<tr><td>' + (item.location || '-') + '</td><td>' + (item.grade || '-') + '</td><td>' + (item.groupName || '-') + '</td><td>' + linkText + '</td><td>' + statusText + '</td><td><button class="btn btn-blue" type="button" onclick="' + actionCall('editLineGroup', item.id) + '">แก้ไข</button><button class="btn btn-red" type="button" onclick="' + actionCall('deleteLineGroup', item.id) + '">ลบ</button></td></tr>';
+      }).join('');
+      renderStudentLineGroupButton();
+    }
+
+    async function saveLineGroup() {
+      const editingId = getElement('editingLineGroupId') ? getElement('editingLineGroupId').value : '';
+      const location = getElement('lineGroupLocation').value;
+      const grade = getElement('lineGroupGrade').value;
+      const groupName = getElement('lineGroupName').value.trim();
+      const lineUrl = getElement('lineGroupUrl').value.trim();
+      const status = getElement('lineGroupStatus').value;
+      const result = getElement('lineGroupSaveResult');
+
+      if (!location || !grade || !groupName || !lineUrl) {
+        result.textContent = 'กรุณากรอกศูนย์ ระดับชั้น ชื่อกลุ่ม และ Link LINE ให้ครบถ้วน';
+        result.style.color = '#dc2626';
+        return;
+      }
+
+      try {
+        if (editingId) {
+          const item = lineGroups.find(function(group) { return String(group.id) === String(editingId); });
+          if (item) {
+            Object.assign(item, { location: location, grade: grade, groupName: groupName, lineUrl: lineUrl, status: status });
+            await setFirebaseDocument('lineGroups', item);
+          }
+          result.textContent = 'แก้ไข LINE กลุ่มเรียบร้อย';
+        } else {
+          const duplicated = lineGroups.some(function(group) {
+            return group.location === location && group.grade === grade;
+          });
+          if (duplicated) {
+            result.textContent = 'ศูนย์และระดับชั้นนี้มี LINE กลุ่มอยู่แล้ว ให้กดแก้ไขรายการเดิม';
+            result.style.color = '#dc2626';
+            return;
+          }
+          const newId = Date.now();
+          const newItem = { id: newId, firebaseDocId: String(newId), location: location, grade: grade, groupName: groupName, lineUrl: lineUrl, status: status };
+          lineGroups.push(newItem);
+          await setFirebaseDocument('lineGroups', newItem);
+          result.textContent = 'เพิ่ม LINE กลุ่มเรียบร้อย';
+        }
+        result.style.color = '#16a34a';
+        clearLineGroupForm(false);
+        renderLineGroups();
+      } catch (error) {
+        console.error('line group firebase error:', error);
+        result.textContent = 'บันทึก LINE กลุ่มไม่สำเร็จ: ' + (error.message || error.code);
+        result.style.color = '#dc2626';
+      }
+    }
+
+    function editLineGroup(id) {
+      const item = lineGroups.find(function(group) { return String(group.id) === String(id); });
+      if (!item) return;
+      getElement('editingLineGroupId').value = item.id;
+      getElement('lineGroupLocation').value = item.location || 'IDEA CLUB ศูนย์ นครสวรรค์';
+      getElement('lineGroupGrade').value = item.grade || 'ป.4';
+      getElement('lineGroupName').value = item.groupName || '';
+      getElement('lineGroupUrl').value = item.lineUrl || '';
+      getElement('lineGroupStatus').value = item.status || 'active';
+      const result = getElement('lineGroupSaveResult');
+      if (result) {
+        result.textContent = 'กำลังแก้ไข LINE กลุ่ม: ' + (item.groupName || '-');
+        result.style.color = '#0f4cbd';
+      }
+      const form = getElement('lineGroupLocation');
+      if (form) form.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+
+    async function deleteLineGroup(id) {
+      const index = lineGroups.findIndex(function(group) { return String(group.id) === String(id); });
+      if (index === -1) return;
+      const item = lineGroups[index];
+      try {
+        await deleteFirebaseDocument('lineGroups', item);
+      } catch (error) {
+        console.error('delete line group firebase error:', error);
+      }
+      lineGroups.splice(index, 1);
+      renderLineGroups();
+      const result = getElement('lineGroupSaveResult');
+      if (result) {
+        result.textContent = 'ลบ LINE กลุ่มเรียบร้อย';
+        result.style.color = '#dc2626';
+      }
+    }
+
+    function clearLineGroupForm(clearMessage) {
+      if (getElement('editingLineGroupId')) getElement('editingLineGroupId').value = '';
+      if (getElement('lineGroupLocation')) getElement('lineGroupLocation').value = 'IDEA CLUB ศูนย์ นครสวรรค์';
+      if (getElement('lineGroupGrade')) getElement('lineGroupGrade').value = 'ป.4';
+      if (getElement('lineGroupName')) getElement('lineGroupName').value = '';
+      if (getElement('lineGroupUrl')) getElement('lineGroupUrl').value = '';
+      if (getElement('lineGroupStatus')) getElement('lineGroupStatus').value = 'active';
+      if (clearMessage !== false && getElement('lineGroupSaveResult')) getElement('lineGroupSaveResult').textContent = '';
     }
 
     function updateStudentSelectedPaymentMonth() {
@@ -7029,6 +7270,8 @@
       safeRun(renderAdminScoreStatsTable, 'admin-score-stats-init');
       safeRun(renderStudentExamFilters, 'student-exam-filters-init');
       safeRun(renderPaymentMonths, 'payment-months-init');
+      safeRun(renderLineGroups, 'line-groups-init');
+      safeRun(renderStudentLineGroupButton, 'student-line-group-init');
       safeRun(renderPaymentTable, 'payment-table-init');
       safeRun(renderReceiptMonthFilter, 'receipt-month-filter-init');
       safeRun(renderAdminReceipts, 'admin-receipts-init');
