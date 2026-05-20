@@ -2041,6 +2041,17 @@
                 </div>
               </div>
 
+              <div class="form-row">
+                <div>
+                  <label>วันเรียน Online</label>
+                  <input id="adminOnlineClassDay" type="text" placeholder="เช่น จันทร์ / พุธ หรือ เสาร์" />
+                </div>
+                <div>
+                  <label>เวลาเรียน Online</label>
+                  <input id="adminOnlineClassTime" type="text" placeholder="เช่น 16:00–18:30 น." />
+                </div>
+              </div>
+
               <button class="btn btn-green" type="button" onclick="saveOnlineClassSettings()">บันทึกห้องเรียน Online</button>
               <p id="adminOnlineClassResult" style="margin-top:14px; font-weight:bold;"></p>
             </div>
@@ -2054,6 +2065,8 @@
                     <th>ระดับชั้น</th>
                     <th>ชื่อคอร์ส</th>
                     <th>MS Teams</th>
+                    <th>วันเรียน</th>
+                    <th>เวลาเรียน</th>
                     <th>Meeting ID</th>
                     <th>Password</th>
                     <th>จัดการ</th>
@@ -4370,6 +4383,8 @@
       const c = courses.find(function(item) { return String(item.id) === String(select.value); });
       if (!c) return;
       getElement('adminOnlineClassLink').value = c.onlineLink || '';
+      getElement('adminOnlineClassDay').value = c.onlineClassDay || ((c.days || []).join(' / ') || '');
+      getElement('adminOnlineClassTime').value = c.onlineClassTime || '';
       getElement('adminOnlineClassRoomId').value = c.roomId || '';
       getElement('adminOnlineClassPassword').value = c.roomPassword || '';
     }
@@ -4380,6 +4395,8 @@
       const c = courses.find(function(item) { return String(item.id) === String(select.value); });
       if (!c) return;
       c.onlineLink = getElement('adminOnlineClassLink').value.trim();
+      c.onlineClassDay = getElement('adminOnlineClassDay').value.trim();
+      c.onlineClassTime = getElement('adminOnlineClassTime').value.trim();
       c.roomId = getElement('adminOnlineClassRoomId').value.trim();
       c.roomPassword = getElement('adminOnlineClassPassword').value.trim();
       try {
@@ -4585,11 +4602,11 @@
       const tbody = getElement('adminOnlineClassTableBody');
       if (!tbody) return;
       if (!Array.isArray(courses) || courses.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="6">ยังไม่มีคอร์สในระบบ</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="8">ยังไม่มีคอร์สในระบบ</td></tr>';
         return;
       }
       tbody.innerHTML = courses.map(function(c) {
-        return '<tr><td>' + c.grade + '</td><td>' + c.name + '</td><td>' + (c.onlineLink ? 'มีลิงก์' : '-') + '</td><td>' + (c.roomId || '-') + '</td><td>' + (c.roomPassword || '-') + '</td><td><button class="btn btn-blue" type="button" onclick="' + actionCall('editOnlineClass', c.id) + '">แก้ไข</button></td></tr>';
+        return '<tr><td>' + c.grade + '</td><td>' + c.name + '</td><td>' + (c.onlineLink ? 'มีลิงก์' : '-') + '</td><td>' + (c.onlineClassDay || ((c.days || []).join(' / ') || '-')) + '</td><td>' + (c.onlineClassTime || '-') + '</td><td>' + (c.roomId || '-') + '</td><td>' + (c.roomPassword || '-') + '</td><td><button class="btn btn-blue" type="button" onclick="' + actionCall('editOnlineClass', c.id) + '">แก้ไข</button></td></tr>';
       }).join('');
     }
 
@@ -4601,13 +4618,20 @@
         '<div class="edit-bubble-note">คอร์ส: ' + c.grade + ' · ' + c.name + '</div>' +
         '<label>ลิงก์ห้องเรียน Online / MS Teams</label><input id="bubbleOnlineLink" type="url" value="' + (c.onlineLink || '') + '">' +
         '<div class="form-row" style="margin-top:14px;">' +
+          '<div><label>วันเรียน Online</label><input id="bubbleOnlineDay" type="text" value="' + (c.onlineClassDay || ((c.days || []).join(' / ') || '')) + '"></div>' +
+          '<div><label>เวลาเรียน Online</label><input id="bubbleOnlineTime" type="text" value="' + (c.onlineClassTime || '') + '"></div>' +
+        '</div>' +
+        '<div class="form-row" style="margin-top:14px;">' +
           '<div><label>Meeting ID</label><input id="bubbleOnlineRoomId" type="text" value="' + (c.roomId || '') + '"></div>' +
           '<div><label>Password</label><input id="bubbleOnlinePassword" type="text" value="' + (c.roomPassword || '') + '"></div>' +
         '</div>',
         function() {
           c.onlineLink = bubbleValue('bubbleOnlineLink');
+          c.onlineClassDay = bubbleValue('bubbleOnlineDay');
+          c.onlineClassTime = bubbleValue('bubbleOnlineTime');
           c.roomId = bubbleValue('bubbleOnlineRoomId');
           c.roomPassword = bubbleValue('bubbleOnlinePassword');
+          setFirebaseDocument('courses', c).catch(function(error) { console.error('save online class firebase error:', error); });
           renderOnlineClassTable();
           updateStudentCourseDisplay();
           closeEditBubble();
@@ -4648,7 +4672,7 @@
         result.textContent = 'แก้ไขคอร์สเรียบร้อย และบันทึกลง Firebase แล้ว';
       } else {
         const newId = Date.now();
-        const newCourse = { id: newId, firebaseDocId: String(newId), grade: grade, name: name, price: price, access: access, location: location, days: days, status: status, onlineLink: '', roomId: '', roomPassword: '', onDemandSubject: guessSubjectFromCourse(name), onDemandGrade: grade, onDemandTitle: '', onDemandLink: '', desc: desc || 'ไม่มีรายละเอียดเพิ่มเติม' };
+        const newCourse = { id: newId, firebaseDocId: String(newId), grade: grade, name: name, price: price, access: access, location: location, days: days, status: status, onlineLink: '', onlineClassDay: '', onlineClassTime: '', roomId: '', roomPassword: '', onDemandSubject: guessSubjectFromCourse(name), onDemandGrade: grade, onDemandTitle: '', onDemandLink: '', desc: desc || 'ไม่มีรายละเอียดเพิ่มเติม' };
         courses.push(newCourse);
         try {
           await setFirebaseDocument('courses', newCourse);
@@ -4885,6 +4909,8 @@
         const hasLink = !!c.onlineLink;
         return '<div class="notice" style="background:white; margin-top:0;">' +
           '<h3 style="margin-bottom:8px;">' + c.name + '</h3>' +
+          '<p><strong>วันเรียน:</strong> ' + (c.onlineClassDay || ((c.days || []).join(' / ') || '-')) + '</p>' +
+          '<p><strong>เวลาเรียน:</strong> ' + (c.onlineClassTime || '-') + '</p>' +
           '<p><strong>Meeting ID:</strong> ' + (c.roomId || '-') + '</p>' +
           '<p><strong>Password:</strong> ' + (c.roomPassword || '-') + '</p>' +
           '<p style="color:#6b7280;">' + (hasLink ? 'ลิงก์ MS Teams พร้อมใช้งานจากหลังบ้าน' : 'ยังไม่มีลิงก์ MS Teams สำหรับคอร์สนี้') + '</p>' +
