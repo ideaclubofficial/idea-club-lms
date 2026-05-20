@@ -2973,25 +2973,121 @@
           const credential = await auth.signInWithEmailAndPassword(username, password);
           firebaseUser = credential.user;
 
-          const profileDoc = await db.collection('users').doc(firebaseUser.uid).get();
-          if (!profileDoc.exists) {
-            result.textContent = 'บัญชีนี้ยังไม่มีสิทธิ์ในระบบ กรุณาเพิ่มข้อมูลใน Firestore collection users โดยใช้ uid ของบัญชีนี้';
+          // โหลดข้อมูลหลักก่อน เพื่อให้ระบบสามารถเทียบสิทธิ์จาก students / teachers ได้
+          // กรณีมี Auth แล้ว แต่ยังไม่ได้สร้าง users/{uid}
+          await loadCoreDataFromFirebase();
+          safeRun(loadPaymentQrFromGithubAsset, 'load-payment-qr-github');
+
+          const firebaseEmail = firebaseUser.email || username;
+          const cleanLoginPhone = String(displayLoginId || rawUsername || '').replace(/[^0-9]/g, '');
+
+          let profileData = null;
+          let profileSourceDocId = '';
+
+          // 1) หาแบบมาตรฐาน: users/{uid}
+          let profileDoc = await db.collection('users').doc(firebaseUser.uid).get();
+          if (profileDoc.exists) {
+            profileData = profileDoc.data();
+            profileSourceDocId = profileDoc.id;
+          }
+
+          // 2) ถ้าไม่เจอ ให้หาใน users ด้วย email
+          if (!profileData && firebaseEmail) {
+            const emailQuery = await db.collection('users')
+              .where('email', '==', firebaseEmail)
+              .limit(1)
+              .get();
+            if (!emailQuery.empty) {
+              profileDoc = emailQuery.docs[0];
+              profileData = profileDoc.data();
+              profileSourceDocId = profileDoc.id;
+            }
+          }
+
+          // 3) ถ้ายังไม่เจอ ให้หาใน users ด้วย phone
+          if (!profileData && cleanLoginPhone) {
+            const phoneQuery = await db.collection('users')
+              .where('phone', '==', cleanLoginPhone)
+              .limit(1)
+              .get();
+            if (!phoneQuery.empty) {
+              profileDoc = phoneQuery.docs[0];
+              profileData = profileDoc.data();
+              profileSourceDocId = profileDoc.id;
+            }
+          }
+
+          // 4) ถ้ายังไม่เจอ ให้ผูกสิทธิ์จากข้อมูลครู/นักเรียนที่ Admin เพิ่มไว้ในหลังบ้าน
+          // แล้วสร้าง users/{uid} ให้อัตโนมัติ เพื่อไม่ต้องไปใส่ UID เองทุกครั้ง
+          let matchedTeacher = teachers.find(function(t) {
+            const teacherPhone = String(t.phone || t.username || '').replace(/[^0-9]/g, '');
+            return t.authUid === firebaseUser.uid ||
+              t.email === firebaseEmail ||
+              t.username === firebaseEmail ||
+              teacherPhone === cleanLoginPhone ||
+              t.username === displayLoginId ||
+              t.teacherId === displayLoginId;
+          });
+
+          let matchedStudent = students.find(function(s) {
+            const studentPhone = String(s.phone || '').replace(/[^0-9]/g, '');
+            return s.authUid === firebaseUser.uid ||
+              s.email === firebaseEmail ||
+              studentPhone === cleanLoginPhone ||
+              s.phone === rawUsername;
+          });
+
+          if (!profileData && matchedTeacher) {
+            profileData = {
+              name: matchedTeacher.name || firebaseEmail || 'Teacher',
+              email: matchedTeacher.email || firebaseEmail,
+              phone: matchedTeacher.phone || matchedTeacher.username || cleanLoginPhone,
+              role: (matchedTeacher.role || 'Teacher') === 'Admin' ? 'admin' : 'teacher',
+              status: matchedTeacher.status === 'Inactive' ? 'inactive' : 'active',
+              subject: matchedTeacher.subject || ''
+            };
+          }
+
+          if (!profileData && matchedStudent) {
+            profileData = {
+              name: matchedStudent.name || firebaseEmail || 'Student',
+              nickname: matchedStudent.nickname || '',
+              email: matchedStudent.email || firebaseEmail,
+              phone: matchedStudent.phone || cleanLoginPhone,
+              role: 'student',
+              status: 'active'
+            };
+          }
+
+          if (!profileData) {
+            result.textContent = 'บัญชีนี้ยังไม่มีสิทธิ์ในระบบ กรุณาให้ Admin เพิ่มข้อมูลนักเรียน/ครูในหลังบ้านก่อน';
             result.style.color = '#dc2626';
             await auth.signOut();
             return;
           }
 
-          firebaseUserProfile = profileDoc.data();
-          if (firebaseUserProfile.status && firebaseUserProfile.status !== 'active') {
+          // ถ้าเจอ users จาก email/phone หรือสร้าง profile จาก students/teachers ให้เขียนกลับเป็น users/{uid}
+          // เพื่อให้ Login ครั้งต่อไปเร็วและตรงมาตรฐาน
+          try {
+            await db.collection('users').doc(firebaseUser.uid).set(Object.assign({}, profileData, {
+              email: profileData.email || firebaseEmail,
+              phone: profileData.phone || cleanLoginPhone,
+              linkedFromDocId: profileSourceDocId || '',
+              updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+            }), { merge: true });
+          } catch (syncProfileError) {
+            console.warn('sync users uid profile warning:', syncProfileError);
+          }
+
+          firebaseUserProfile = profileData;
+
+          const profileStatus = String(firebaseUserProfile.status || 'active').toLowerCase();
+          if (['inactive', 'disabled', 'blocked', 'ปิดใช้งาน'].includes(profileStatus)) {
             result.textContent = 'บัญชีนี้ถูกปิดการใช้งาน กรุณาติดต่อ Admin';
             result.style.color = '#dc2626';
             await auth.signOut();
             return;
           }
-
-          await loadCoreDataFromFirebase();
-
-      safeRun(loadPaymentQrFromGithubAsset, 'load-payment-qr-github');
 
           const userRole = firebaseUserProfile.role || 'student';
           setSuperAdminMode(userRole === 'admin');
@@ -3002,13 +3098,21 @@
           }
 
           if (userRole === 'teacher') {
-            const teacher = teachers.find(function(t) {
-              return t.authUid === firebaseUser.uid || t.email === username || t.username === username || t.phone === displayLoginId || t.username === displayLoginId;
+            const teacher = matchedTeacher || teachers.find(function(t) {
+              const teacherPhone = String(t.phone || t.username || '').replace(/[^0-9]/g, '');
+              return t.authUid === firebaseUser.uid ||
+                t.email === firebaseEmail ||
+                t.username === firebaseEmail ||
+                teacherPhone === cleanLoginPhone ||
+                t.username === displayLoginId ||
+                t.teacherId === displayLoginId;
             }) || {
               id: firebaseUser.uid,
-              name: firebaseUserProfile.name || firebaseUser.email || 'Teacher',
+              authUid: firebaseUser.uid,
+              name: firebaseUserProfile.name || firebaseEmail || 'Teacher',
               subject: firebaseUserProfile.subject || '-',
-              username: firebaseUser.email,
+              username: firebaseUserProfile.phone || cleanLoginPhone || firebaseEmail,
+              email: firebaseEmail,
               status: 'Active',
               role: 'Teacher'
             };
@@ -3016,14 +3120,25 @@
             return;
           }
 
-          const student = students.find(function(s) {
-            return s.authUid === firebaseUser.uid || s.email === username || s.phone === displayLoginId || s.phone === rawUsername;
+          const student = matchedStudent || students.find(function(s) {
+            const studentPhone = String(s.phone || '').replace(/[^0-9]/g, '');
+            return s.authUid === firebaseUser.uid ||
+              s.email === firebaseEmail ||
+              studentPhone === cleanLoginPhone ||
+              s.phone === rawUsername;
           });
 
           if (!student) {
             result.textContent = 'ไม่พบบัญชีนักเรียนในระบบ กรุณาให้ Admin เพิ่มข้อมูลนักเรียนก่อน';
             result.style.color = '#dc2626';
             return;
+          }
+
+          // เติม authUid ให้ข้อมูลนักเรียนเดิมอัตโนมัติ ถ้ายังไม่มี
+          if (!student.authUid) {
+            student.authUid = firebaseUser.uid;
+            student.email = student.email || firebaseEmail;
+            setFirebaseDocument('students', student).catch(function(error) { console.error('sync student authUid error:', error); });
           }
 
           currentStudent = student;
@@ -3067,7 +3182,15 @@
     }
 
     function studentLogin(username) {
-      const student = students.find(function(s) { return s.phone === username; });
+      const cleanUsername = String(username || '').replace(/[^0-9]/g, '');
+      const student = currentStudent || students.find(function(s) {
+        const studentPhone = String(s.phone || '').replace(/[^0-9]/g, '');
+        return s.phone === username ||
+          s.email === username ||
+          studentPhone === cleanUsername ||
+          (firebaseUser && s.authUid === firebaseUser.uid) ||
+          (firebaseUser && s.email === firebaseUser.email);
+      });
       if (!student) {
         getElement('studentLoginResult').textContent = 'ไม่พบบัญชีนักเรียน กรุณาให้ Admin เพิ่มข้อมูลก่อน';
         getElement('studentLoginResult').style.color = '#dc2626';
