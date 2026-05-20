@@ -5761,22 +5761,54 @@
       }
     }
 
-    const DEFAULT_PAYMENT_QR_PATH = 'assets/payment-qr.png';
-    let paymentQrData = DEFAULT_PAYMENT_QR_PATH;
+    const DEFAULT_PAYMENT_QR_PATHS = [
+      'assets/payment-qr.png',
+      './assets/payment-qr.png',
+      'payment-qr.png',
+      './payment-qr.png',
+      'assets/qr-code.png',
+      './assets/qr-code.png',
+      'qr-code.png',
+      './qr-code.png'
+    ];
+    let paymentQrData = '';
 
-    function loadPaymentQrFromGithubAsset() {
-      paymentQrData = DEFAULT_PAYMENT_QR_PATH;
-
+    function renderQrPlaceholder(message) {
+      const html = '<div style="padding:18px; text-align:center; color:#0f4cbd; font-weight:bold;">' +
+        (message || 'ยังไม่พบไฟล์ QR Code<br>ให้อัปโหลดไฟล์ชื่อ assets/payment-qr.png ใน GitHub') +
+        '</div>';
       const studentQrBox = getElement('studentQrBox');
       const adminQrPreview = getElement('adminQrPreview');
+      if (studentQrBox) studentQrBox.innerHTML = html;
+      if (adminQrPreview) adminQrPreview.innerHTML = html;
+    }
 
-      if (studentQrBox) {
-        studentQrBox.innerHTML = '<img src="' + DEFAULT_PAYMENT_QR_PATH + '" alt="QR Code สำหรับชำระเงิน">';
+    function setPaymentQrImage(src) {
+      paymentQrData = src;
+      const safeSrc = String(src || '').replace(/"/g, '&quot;');
+      const imgHtml = '<img src="' + safeSrc + '" alt="QR Code สำหรับชำระเงิน" onerror="renderQrPlaceholder()">';
+      const studentQrBox = getElement('studentQrBox');
+      const adminQrPreview = getElement('adminQrPreview');
+      if (studentQrBox) studentQrBox.innerHTML = imgHtml;
+      if (adminQrPreview) adminQrPreview.innerHTML = imgHtml;
+    }
+
+    function tryLoadQrPath(index) {
+      if (index >= DEFAULT_PAYMENT_QR_PATHS.length) {
+        paymentQrData = '';
+        renderQrPlaceholder('ยังไม่พบไฟล์ QR Code<br>ให้วางไฟล์ชื่อ <strong>payment-qr.png</strong> ไว้ในโฟลเดอร์ <strong>assets</strong> ของ GitHub');
+        return;
       }
 
-      if (adminQrPreview) {
-        adminQrPreview.innerHTML = '<img src="' + DEFAULT_PAYMENT_QR_PATH + '" alt="QR Code">';
-      }
+      const path = DEFAULT_PAYMENT_QR_PATHS[index];
+      const testImage = new Image();
+      testImage.onload = function() { setPaymentQrImage(path); };
+      testImage.onerror = function() { tryLoadQrPath(index + 1); };
+      testImage.src = path + '?v=' + Date.now();
+    }
+
+    function loadPaymentQrFromGithubAsset() {
+      tryLoadQrPath(0);
     }
 
     function previewAdminQr() {
@@ -5800,14 +5832,15 @@
         return;
       }
       try {
-        result.textContent = 'กำลังอัปโหลด QR Code...';
+        result.textContent = 'กำลังบันทึก QR Code...';
         result.style.color = '#0f4cbd';
-        const qrUrl = await uploadFileToFirebaseStorage('qr-codes/payment-qr-' + Date.now() + '.png', paymentQrData);
+        let qrUrl = paymentQrData;
+        if (String(paymentQrData || '').startsWith('data:')) {
+          qrUrl = await uploadFileToFirebaseStorage('qr-codes/payment-qr-' + Date.now() + '.png', paymentQrData);
+        }
         const qrSetting = { id: 'main-payment-qr', firebaseDocId: 'main-payment-qr', type: 'paymentQr', qrUrl: qrUrl, updatedAtText: new Date().toLocaleString('th-TH') };
         await setFirebaseDocument('settings', qrSetting);
-        paymentQrData = qrUrl;
-        getElement('studentQrBox').innerHTML = '<img src="' + qrUrl + '" alt="QR Code สำหรับชำระเงิน">';
-        getElement('adminQrPreview').innerHTML = '<img src="' + qrUrl + '" alt="QR Code">';
+        setPaymentQrImage(qrUrl);
         result.textContent = 'บันทึก QR Code เรียบร้อย และอัปเดตไปยังหน้าชำระเงินของนักเรียนแล้ว';
         result.style.color = '#16a34a';
       } catch (error) {
@@ -6638,6 +6671,7 @@
 
       await loadCoreDataFromFirebase();
 
+      safeRun(loadPaymentQrFromGithubAsset, 'load-payment-qr-github-init');
       safeRun(updateMemberIdPreview, 'member-id-preview');
       safeRun(updateTeacherIdPreview, 'teacher-id-preview');
       safeRun(renderAdminDashboard, 'admin-dashboard-init');
