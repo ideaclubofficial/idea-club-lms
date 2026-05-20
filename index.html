@@ -2235,7 +2235,7 @@
                     <th>เลขที่ใบเสร็จ</th>
                     <th>นักเรียน</th>
                     <th>คอร์ส</th>
-                    <th>เดือน</th>
+                    <th>เดือนที่ชำระ</th>
                     <th>ยอดเงิน</th>
                     <th>สถานะ</th>
                     <th>จัดการ</th>
@@ -2400,6 +2400,20 @@
                 </div>
               </div>
 
+              <div class="notice">
+                <strong>วิธีใช้งานใบคะแนน</strong>
+                <p>1. เลือกเดือนสอบและระดับชั้น</p>
+                <p>2. กด “สร้างตารางคะแนนจากรายชื่อนักเรียน” ระบบจะดึงนักเรียนในระดับชั้นนั้นมาให้กรอกคะแนน</p>
+                <p>3. กรอกคะแนนแต่ละวิชา แล้วกดบันทึก จากนั้นกดประกาศผลเพื่อให้นักเรียนดูใบคะแนนย้อนหลังได้</p>
+              </div>
+
+              <div class="test-actions">
+                <button class="btn btn-blue" type="button" onclick="createScoreRecordsForSelectedMonthGrade()">สร้างตารางคะแนนจากรายชื่อนักเรียน</button>
+                <button class="btn btn-green" type="button" onclick="saveAdjustedScores()">บันทึกคะแนนชุดนี้</button>
+                <button class="btn btn-dark" type="button" onclick="publishSelectedScoreSet()">ประกาศผลชุดนี้</button>
+              </div>
+              <p id="scoreAdjustResult" style="margin-top:14px; font-weight:bold;"></p>
+
               <div class="table-wrap">
                 <table>
                   <thead>
@@ -2415,11 +2429,6 @@
                   <tbody id="adminScoreAdjustTableBody"></tbody>
                 </table>
               </div>
-
-              <br />
-              <button class="btn btn-green" type="button" onclick="saveAdjustedScores()">บันทึกคะแนนชุดนี้</button>
-              <button class="btn btn-dark" type="button" onclick="publishSelectedScoreSet()">ประกาศผลชุดนี้</button>
-              <p id="scoreAdjustResult" style="margin-top:14px; font-weight:bold;"></p>
             </div>
 
             <br />
@@ -6550,40 +6559,169 @@
       alert('ประกาศคะแนนเรียบร้อย สำหรับวันสอบ ' + (testDate || '-') + ' นักเรียนสามารถกดดูคะแนนย้อนหลังได้');
     }
 
-    function saveAdjustedScores() {
+    async function createScoreRecordsForSelectedMonthGrade() {
+      const selectedMonth = getElement('adminScoreTestSetFilter') ? getElement('adminScoreTestSetFilter').value : '';
+      const selectedGrade = getElement('adminScoreGradeFilter') ? getElement('adminScoreGradeFilter').value : '';
+      const result = getElement('scoreAdjustResult');
+
+      if (!selectedMonth || !selectedGrade) {
+        if (result) {
+          result.textContent = 'กรุณาเลือกเดือนสอบและระดับชั้นก่อนสร้างตารางคะแนน';
+          result.style.color = '#dc2626';
+        }
+        return;
+      }
+
+      const gradeStudents = students.filter(function(student) {
+        return student.grade === selectedGrade;
+      });
+
+      if (!gradeStudents.length) {
+        if (result) {
+          result.textContent = 'ยังไม่มีนักเรียนในระดับชั้น ' + selectedGrade + ' จึงไม่สามารถสร้างตารางคะแนนได้';
+          result.style.color = '#dc2626';
+        }
+        renderAdminScoreAdjustTable();
+        renderAdminScoreStatsTable();
+        return;
+      }
+
+      let createdCount = 0;
+      let skippedCount = 0;
+      const now = Date.now();
+
+      for (let i = 0; i < gradeStudents.length; i++) {
+        const student = gradeStudents[i];
+        const exists = adminScoreRecords.some(function(record) {
+          const sameStudentId = record.studentId && student.id && String(record.studentId) === String(student.id);
+          const sameAuthUid = record.authUid && student.authUid && String(record.authUid) === String(student.authUid);
+          const sameName = record.student === student.name;
+          return record.month === selectedMonth && record.grade === selectedGrade && (sameStudentId || sameAuthUid || sameName);
+        });
+
+        if (exists) {
+          skippedCount++;
+          continue;
+        }
+
+        const newId = now + i;
+        const record = {
+          id: newId,
+          firebaseDocId: String(newId),
+          month: selectedMonth,
+          grade: selectedGrade,
+          studentId: student.id || '',
+          authUid: student.authUid || '',
+          student: student.name || '-',
+          nickname: student.nickname || '-',
+          scores: {
+            'วิทยาศาสตร์': 0,
+            'คณิตศาสตร์': 0,
+            'ภาษาอังกฤษ': 0
+          },
+          status: 'draft'
+        };
+        adminScoreRecords.push(record);
+        createdCount++;
+        try {
+          await setFirebaseDocument('adminScoreRecords', record);
+        } catch (error) {
+          console.error('create score record firebase error:', error);
+        }
+      }
+
+      renderAdminScoreFilters();
+      if (getElement('adminScoreTestSetFilter')) getElement('adminScoreTestSetFilter').value = selectedMonth;
+      if (getElement('adminScoreGradeFilter')) getElement('adminScoreGradeFilter').value = selectedGrade;
+      renderAdminScoreAdjustTable();
+      renderAdminScoreStatsTable();
+      renderStudentExamFilters();
+
+      if (result) {
+        result.textContent = 'สร้างตารางคะแนนเรียบร้อย เพิ่มใหม่ ' + createdCount + ' คน' + (skippedCount ? ' · มีอยู่แล้ว ' + skippedCount + ' คน' : '');
+        result.style.color = '#16a34a';
+      }
+    }
+
+    async function saveAdjustedScores() {
       const selectedMonth = getElement('adminScoreTestSetFilter') ? getElement('adminScoreTestSetFilter').value : 'พฤษภาคม 2569';
       const selectedGrade = getElement('adminScoreGradeFilter') ? getElement('adminScoreGradeFilter').value : 'ป.6';
-      const rows = document.querySelectorAll('#adminScoreAdjustTableBody tr');
-      rows.forEach(function(row) {
+      const rows = document.querySelectorAll('#adminScoreAdjustTableBody tr[data-score-id]');
+      const result = getElement('scoreAdjustResult');
+
+      if (!rows.length) {
+        if (result) {
+          result.textContent = 'ยังไม่มีตารางคะแนน กรุณากด “สร้างตารางคะแนนจากรายชื่อนักเรียน” ก่อน';
+          result.style.color = '#dc2626';
+        }
+        return;
+      }
+
+      for (let i = 0; i < rows.length; i++) {
+        const row = rows[i];
         const recordId = Number(row.getAttribute('data-score-id'));
-        const record = adminScoreRecords.find(function(item) { return item.id === recordId; });
-        if (!record) return;
+        const record = adminScoreRecords.find(function(item) { return Number(item.id) === recordId; });
+        if (!record) continue;
+        record.scores = record.scores || {};
         record.scores['วิทยาศาสตร์'] = Number(row.querySelector('.score-input[data-subject="วิทยาศาสตร์"]').value || 0);
         record.scores['คณิตศาสตร์'] = Number(row.querySelector('.score-input[data-subject="คณิตศาสตร์"]').value || 0);
         record.scores['ภาษาอังกฤษ'] = Number(row.querySelector('.score-input[data-subject="ภาษาอังกฤษ"]').value || 0);
+        record.month = selectedMonth;
+        record.grade = selectedGrade;
         record.status = 'draft';
-      });
-      syncScoreReportFromAdmin(selectedMonth, selectedGrade, 'draft');
+        try {
+          await setFirebaseDocument('adminScoreRecords', record);
+        } catch (error) {
+          console.error('save adjusted score firebase error:', error);
+        }
+      }
+
+      await syncScoreReportFromAdmin(selectedMonth, selectedGrade, 'draft');
       renderAdminScoreAdjustTable();
       renderAdminScoreStatsTable();
       renderScoreHistoryByMonth();
-      getElement('scoreAdjustResult').textContent = 'บันทึกคะแนนของชุด ' + selectedMonth + ' ระดับชั้น ' + selectedGrade + ' เรียบร้อย';
-      getElement('scoreAdjustResult').style.color = '#16a34a';
+      renderStudentExamFilters();
+      if (result) {
+        result.textContent = 'บันทึกคะแนนของชุด ' + selectedMonth + ' ระดับชั้น ' + selectedGrade + ' เรียบร้อย';
+        result.style.color = '#16a34a';
+      }
     }
 
-    function publishSelectedScoreSet() {
+    async function publishSelectedScoreSet() {
       const selectedMonth = getElement('adminScoreTestSetFilter') ? getElement('adminScoreTestSetFilter').value : 'พฤษภาคม 2569';
       const selectedGrade = getElement('adminScoreGradeFilter') ? getElement('adminScoreGradeFilter').value : 'ป.6';
-      adminScoreRecords.forEach(function(record) {
-        if (record.month === selectedMonth && record.grade === selectedGrade) record.status = 'published';
+      const records = adminScoreRecords.filter(function(record) {
+        return record.month === selectedMonth && record.grade === selectedGrade;
       });
-      syncScoreReportFromAdmin(selectedMonth, selectedGrade, 'published');
+      const result = getElement('scoreAdjustResult');
+
+      if (!records.length) {
+        if (result) {
+          result.textContent = 'ยังไม่มีคะแนนสำหรับประกาศผล กรุณาสร้างตารางคะแนนและบันทึกคะแนนก่อน';
+          result.style.color = '#dc2626';
+        }
+        return;
+      }
+
+      for (let i = 0; i < records.length; i++) {
+        records[i].status = 'published';
+        try {
+          await setFirebaseDocument('adminScoreRecords', records[i]);
+        } catch (error) {
+          console.error('publish score record firebase error:', error);
+        }
+      }
+
+      await syncScoreReportFromAdmin(selectedMonth, selectedGrade, 'published');
       renderAdminScoreAdjustTable();
       renderAdminScoreStatsTable();
       renderScoreHistoryByMonth();
-      getElement('adminScorePublishSelect').value = 'published';
-      getElement('scoreAdjustResult').textContent = 'ประกาศผลชุด ' + selectedMonth + ' ระดับชั้น ' + selectedGrade + ' เรียบร้อย';
-      getElement('scoreAdjustResult').style.color = '#0f4cbd';
+      renderStudentExamFilters();
+      if (getElement('adminScorePublishSelect')) getElement('adminScorePublishSelect').value = 'published';
+      if (result) {
+        result.textContent = 'ประกาศผลชุด ' + selectedMonth + ' ระดับชั้น ' + selectedGrade + ' เรียบร้อย นักเรียนดูใบคะแนนย้อนหลังได้แล้ว';
+        result.style.color = '#0f4cbd';
+      }
     }
 
     function filterQuestionsBySubject() {
@@ -6872,16 +7010,38 @@
     function renderScoreHistoryByMonth() {
       const selectedMonth = getElement('scoreHistoryMonthFilter') ? getElement('scoreHistoryMonthFilter').value : 'พฤษภาคม 2569';
       const selectedGrade = getElement('scoreHistoryGradeFilter') ? getElement('scoreHistoryGradeFilter').value : getProfileGrade();
+      const gradeRecords = adminScoreRecords.filter(function(record) {
+        return record.month === selectedMonth && record.grade === selectedGrade && record.status === 'published';
+      });
+
+      const studentRecord = gradeRecords.find(function(record) {
+        if (!currentStudent) return false;
+        const sameStudentId = record.studentId && currentStudent.id && String(record.studentId) === String(currentStudent.id);
+        const sameAuthUid = record.authUid && currentStudent.authUid && String(record.authUid) === String(currentStudent.authUid);
+        const sameName = record.student === currentStudent.name;
+        return sameStudentId || sameAuthUid || sameName;
+      });
+
       const report = scoreReports.find(function(item) {
         return item.month === selectedMonth && item.grade === selectedGrade && item.status === 'published';
       });
-      const fallbackSubjects = [
+
+      const subjectNames = ['วิทยาศาสตร์', 'คณิตศาสตร์', 'ภาษาอังกฤษ'];
+      const hasPublishedScore = !!studentRecord;
+      const subjects = hasPublishedScore ? subjectNames.map(function(subject) {
+        const stat = calculateSubjectStats(gradeRecords, subject);
+        return {
+          subject: subject,
+          score: Number((studentRecord.scores || {})[subject] || 0),
+          max: stat.max,
+          min: stat.min,
+          avg: stat.avg
+        };
+      }) : (report && !currentStudent ? report.subjects : [
         { subject: 'วิทยาศาสตร์', score: 0, max: 0, min: 0, avg: 0 },
         { subject: 'คณิตศาสตร์', score: 0, max: 0, min: 0, avg: 0 },
         { subject: 'ภาษาอังกฤษ', score: 0, max: 0, min: 0, avg: 0 }
-      ];
-      const subjects = report ? report.subjects : fallbackSubjects;
-
+      ]);
 
       if (getElement('scoreHistoryStudentName')) getElement('scoreHistoryStudentName').textContent = currentStudent ? (currentStudent.name || '-') : '-';
       if (getElement('latestScoreMonth')) getElement('latestScoreMonth').textContent = selectedMonth || '-';
@@ -6889,27 +7049,27 @@
       if (getElement('scoreHistoryTitle')) getElement('scoreHistoryTitle').textContent = 'ใบประกาศคะแนน: Monthly Test ' + (selectedMonth || '-') + ' · ' + (selectedGrade || '-');
       if (getElement('scoreHistoryGradeText')) getElement('scoreHistoryGradeText').textContent = selectedGrade || '-';
       if (getElement('scoreHistoryStatusText')) {
-        getElement('scoreHistoryStatusText').textContent = report ? 'ประกาศผลแล้ว' : 'ยังไม่ประกาศผล';
-        getElement('scoreHistoryStatusText').className = report ? 'status-paid' : 'status-waiting';
+        getElement('scoreHistoryStatusText').textContent = hasPublishedScore ? 'ประกาศผลแล้ว' : 'ยังไม่ประกาศผล';
+        getElement('scoreHistoryStatusText').className = hasPublishedScore ? 'status-paid' : 'status-waiting';
       }
 
       const summaryBox = getElement('scoreSummaryBox');
       if (summaryBox) {
-        summaryBox.innerHTML = report ? subjects.map(function(item) {
+        summaryBox.innerHTML = hasPublishedScore ? subjects.map(function(item) {
           return '<p><strong>' + item.subject + ':</strong> ' + item.score + ' / 50</p>';
         }).join('') : '<p class="status-waiting">ยังไม่มีคะแนนที่ประกาศในเดือนและระดับชั้นนี้</p>';
       }
 
       const tbody = getElement('scoreHistoryTableBody');
       if (tbody) {
-        tbody.innerHTML = report ? subjects.map(function(item) {
+        tbody.innerHTML = hasPublishedScore ? subjects.map(function(item) {
           return '<tr><td>' + item.subject + '</td><td>' + item.score + '</td><td>' + item.max + '</td><td>' + item.min + '</td><td>' + item.avg + '</td></tr>';
         }).join('') : '<tr><td colspan="5">ยังไม่มีข้อมูลคะแนนสำหรับเดือนและระดับชั้นที่เลือก</td></tr>';
       }
 
       const chart = getElement('scoreChartBox');
       if (chart) {
-        chart.innerHTML = report ? subjects.map(function(item) {
+        chart.innerHTML = hasPublishedScore ? subjects.map(function(item) {
           const width = Math.max(0, Math.min(100, item.score * 2));
           return '<div class="chart-row"><strong>' + item.subject + '</strong><div class="chart-track"><div class="chart-bar" style="width:' + width + '%;"></div></div><span>' + item.score + '</span></div>';
         }).join('') : '<p class="status-waiting">ยังไม่มีกราฟคะแนนสำหรับเงื่อนไขนี้</p>';
@@ -6989,23 +7149,34 @@
       }).join('') : '<tr><td colspan="5">ยังไม่มีสถิติคะแนนของชุดข้อสอบและระดับชั้นที่เลือก</td></tr>';
     }
 
-    function syncScoreReportFromAdmin(month, grade, status) {
+    async function syncScoreReportFromAdmin(month, grade, status) {
       const records = adminScoreRecords.filter(function(record) {
         return record.month === month && record.grade === grade;
       });
-      if (!records.length) return;
+      if (!records.length) return null;
       const subjects = ['วิทยาศาสตร์', 'คณิตศาสตร์', 'ภาษาอังกฤษ'].map(function(subject) {
         return calculateSubjectStats(records, subject);
       });
       let report = scoreReports.find(function(item) { return item.month === month && item.grade === grade; });
+      const reportId = 'score-' + String(month || '').replace(/[^0-9ก-ฮะ-์a-zA-Z_-]/g, '-') + '-' + String(grade || '').replace(/[^0-9ก-ฮะ-์a-zA-Z_-]/g, '-');
       if (!report) {
-        report = { month: month, grade: grade, subjects: subjects, status: status || 'draft' };
+        report = { id: reportId, firebaseDocId: reportId, month: month, grade: grade, subjects: subjects, status: status || 'draft' };
         scoreReports.push(report);
       } else {
+        report.id = report.id || reportId;
+        report.firebaseDocId = report.firebaseDocId || reportId;
         report.subjects = subjects;
         report.status = status || report.status || 'draft';
       }
+      try {
+        await setFirebaseDocument('scoreReports', report);
+      } catch (error) {
+        console.error('score report firebase error:', error);
+      }
+      return report;
     }
+
+
 
 
 
