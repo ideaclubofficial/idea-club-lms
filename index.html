@@ -2549,7 +2549,7 @@
 
               <div class="form-row">
                 <div>
-                  <label>ราคา</label>
+                  <label>ราคาปกติต่อเดือน</label>
                   <input id="adminCoursePrice" type="number" placeholder="2400" />
                 </div>
                 <div>
@@ -2784,15 +2784,15 @@
 
             <div class="form-box">
               <h3>จัดการเดือนชำระเงิน</h3>
-              <p style="margin-bottom:18px; color:#6b7280;">เพิ่มเดือนที่ต้องการเรียกเก็บเงินรายเดือน เช่น มิถุนายน 2569 หรือ กรกฎาคม 2569</p>
+              <p style="margin-bottom:18px; color:#6b7280;">เพิ่มรอบบิลรายเดือน เช่น มิถุนายน 2569 หรือ กรกฎาคม 2569 โดยยอดจริงจะดึงจากราคาคอร์สของนักเรียนแต่ละคน</p>
               <div class="form-row">
                 <div>
                   <label>เพิ่มเดือนชำระเงิน</label>
                   <input id="newPaymentMonth" type="text" placeholder="เช่น มิถุนายน 2569" />
                 </div>
                 <div>
-                  <label>ยอดชำระเริ่มต้น</label>
-                  <input id="newPaymentAmount" type="number" placeholder="2400" />
+                  <label>ยอดสำรองของเดือนนี้</label>
+                  <input id="newPaymentAmount" type="number" placeholder="ใช้เฉพาะกรณีคอร์สไม่มีราคา เช่น 2400" />
                 </div>
               </div>
               <button class="btn btn-green" type="button" onclick="addPaymentMonth()">เพิ่มเดือน</button>
@@ -2804,7 +2804,7 @@
                     <tr>
                       <th>ลำดับ</th>
                       <th>เดือน</th>
-                      <th>ยอดเริ่มต้น</th>
+                      <th>ยอดสำรอง</th>
                       <th>จัดการ</th>
                     </tr>
                   </thead>
@@ -2819,8 +2819,8 @@
               <h3>บันทึกการชำระเงินเองจากหลังบ้าน</h3>
               <p style="margin-bottom:18px; color:#6b7280;">ใช้สำหรับกรณีจ่ายเงินสด โอนแล้วแจ้งส่วนตัว หรือ Admin ต้องการบันทึกเอง</p>
               <div class="form-row">
-                <div><label>เลือกนักเรียน</label><select id="manualPaymentStudent"></select></div>
-                <div><label>เดือนที่ชำระ</label><select id="manualPaymentMonth"></select></div>
+                <div><label>เลือกนักเรียน</label><select id="manualPaymentStudent" onchange="updateManualPaymentSuggestedAmount()"></select></div>
+                <div><label>เดือนที่ชำระ</label><select id="manualPaymentMonth" onchange="updateManualPaymentSuggestedAmount()"></select></div>
                 <div><label>ยอดเงิน</label><input id="manualPaymentAmount" type="number" placeholder="2400" /></div>
                 <div><label>สถานะ</label><select id="manualPaymentStatus"><option>ชำระแล้ว</option><option>รอตรวจสลิป</option><option>ค้างชำระ</option><option>สลิปไม่ผ่าน</option></select></div>
               </div>
@@ -2876,6 +2876,7 @@
                   <label>กรองตามสถานะ</label>
                   <select id="paymentStatusStateFilter" onchange="filterPaymentStatusByMonth()">
                     <option value="ทั้งหมด">ทั้งหมด</option>
+                    <option>รอชำระเงิน</option>
                     <option>รอตรวจสลิป</option>
                     <option>ชำระแล้ว</option>
                     <option>สลิปไม่ผ่าน</option>
@@ -2885,6 +2886,7 @@
               </div>
               <div class="admin-toolbar">
                 <input id="paymentSearchKeyword" type="text" placeholder="ค้นหานักเรียน / คอร์ส / หมายเหตุ" oninput="filterPaymentStatusByMonth()" />
+                <button class="btn btn-green" type="button" onclick="createMonthlyPaymentRecords()">สร้างรายการชำระเงินของเดือนนี้</button>
                 <button class="btn btn-blue" type="button" onclick="exportPaymentsCsv()">Export การเงิน CSV</button>
               </div>
             </div>
@@ -5561,6 +5563,56 @@
       return Number(price || 0).toLocaleString('th-TH') + ' บาท';
     }
 
+    function getCourseMonthlyPrice(course) {
+      if (!course) return 0;
+      return Number(course.monthlyPrice || course.price || 0) || 0;
+    }
+
+    function getExpectedPaymentAmountForStudent(student, month) {
+      const course = getCourseByStudentOrName(student, student ? student.course : '');
+      const coursePrice = getCourseMonthlyPrice(course);
+      const fallbackMonthAmount = getPaymentMonthAmount(month);
+      return coursePrice || fallbackMonthAmount || 0;
+    }
+
+    function getPaymentFinalAmount(payment) {
+      if (!payment) return 0;
+      if (payment.finalAmount !== undefined && payment.finalAmount !== null) return Number(payment.finalAmount || 0) || 0;
+      return Number(payment.amount || 0) || 0;
+    }
+
+    function getPaymentBaseAmount(payment) {
+      if (!payment) return 0;
+      if (payment.baseAmount !== undefined && payment.baseAmount !== null) return Number(payment.baseAmount || 0) || 0;
+      return getPaymentFinalAmount(payment);
+    }
+
+    function getPaymentDiscountAmount(payment) {
+      if (!payment) return 0;
+      return Number(payment.discount || 0) || 0;
+    }
+
+    function renderPaymentAmountText(payment) {
+      const base = getPaymentBaseAmount(payment);
+      const discount = getPaymentDiscountAmount(payment);
+      const finalAmount = getPaymentFinalAmount(payment);
+      if (discount > 0 || base !== finalAmount) {
+        return '<strong>' + formatPrice(finalAmount) + '</strong><br><span class="mini-muted">ราคาคอร์ส: ' + formatPrice(base) + '</span><br><span class="mini-muted">ส่วนลด: ' + formatPrice(discount) + '</span>';
+      }
+      return formatPrice(finalAmount);
+    }
+
+    function updateManualPaymentSuggestedAmount() {
+      const studentId = getElement('manualPaymentStudent') ? getElement('manualPaymentStudent').value : '';
+      const month = getElement('manualPaymentMonth') ? getElement('manualPaymentMonth').value : '';
+      const amountInput = getElement('manualPaymentAmount');
+      const student = students.find(function(s) { return String(s.id) === String(studentId); });
+      if (!amountInput || !student || !month) return;
+      const suggested = getExpectedPaymentAmountForStudent(student, month);
+      amountInput.placeholder = suggested ? 'แนะนำ: ' + formatPrice(suggested) : 'กรอกยอดเงิน';
+      if (!amountInput.value && suggested) amountInput.value = suggested;
+    }
+
     function renderStudentCourses() {
       const gradeFilter = getElement('courseGradeFilter');
       const list = getElement('studentCourseList');
@@ -5572,7 +5624,7 @@
       }
       const filtered = courses.filter(function(c) { return c.grade === grade && c.status === 'open'; });
       list.innerHTML = filtered.length ? filtered.map(function(c) {
-        return '<div class="card"><span class="tag">' + c.grade + ' · แถม ' + c.access + '</span><h3>' + c.name + '</h3><p>' + c.desc + '</p><p><strong>สถานที่เรียน:</strong> ' + c.location + '</p><p><strong>วันเรียน:</strong> ' + ((c.days || []).join(' / ') || '-') + '</p><p class="price">' + formatPrice(c.price) + '</p><button class="btn btn-blue" type="button" onclick="' + actionCall('applyCourse', c.id) + '">สมัครคอร์สนี้</button></div>';
+        return '<div class="card"><span class="tag">' + c.grade + ' · แถม ' + c.access + '</span><h3>' + c.name + '</h3><p>' + c.desc + '</p><p><strong>สถานที่เรียน:</strong> ' + c.location + '</p><p><strong>วันเรียน:</strong> ' + ((c.days || []).join(' / ') || '-') + '</p><p class="price">' + formatPrice(getCourseMonthlyPrice(c)) + ' / เดือน</p><button class="btn btn-blue" type="button" onclick="' + actionCall('applyCourse', c.id) + '">สมัครคอร์สนี้</button></div>';
       }).join('') : '<div class="card"><h3>ยังไม่มีคอร์สที่เปิดรับสมัคร</h3><p>ระดับชั้น ' + grade + ' ยังไม่มีคอร์สเปิดรับสมัครในขณะนี้</p></div>';
     }
 
@@ -5947,7 +5999,7 @@
       if (editingId) {
         const c = courses.find(function(item) { return String(item.id) === String(editingId); });
         if (c) {
-          Object.assign(c, { name: name, grade: grade, price: price, access: access, location: location, days: days, status: status, desc: desc || 'ไม่มีรายละเอียดเพิ่มเติม' });
+          Object.assign(c, { name: name, grade: grade, price: price, monthlyPrice: price, access: access, location: location, days: days, status: status, desc: desc || 'ไม่มีรายละเอียดเพิ่มเติม' });
           try {
             await setFirebaseDocument('courses', c);
           } catch (error) {
@@ -5959,7 +6011,7 @@
         result.textContent = 'แก้ไขคอร์สเรียบร้อย และบันทึกลง Firebase แล้ว';
       } else {
         const newId = Date.now();
-        const newCourse = { id: newId, firebaseDocId: String(newId), grade: grade, name: name, price: price, access: access, location: location, days: days, status: status, onlineLink: '', onlineClassDay: '', onlineClassTime: '', roomId: '', roomPassword: '', onDemandSubject: guessSubjectFromCourse(name), onDemandGrade: grade, onDemandTitle: '', onDemandLink: '', desc: desc || 'ไม่มีรายละเอียดเพิ่มเติม' };
+        const newCourse = { id: newId, firebaseDocId: String(newId), grade: grade, name: name, price: price, monthlyPrice: price, access: access, location: location, days: days, status: status, onlineLink: '', onlineClassDay: '', onlineClassTime: '', roomId: '', roomPassword: '', onDemandSubject: guessSubjectFromCourse(name), onDemandGrade: grade, onDemandTitle: '', onDemandLink: '', desc: desc || 'ไม่มีรายละเอียดเพิ่มเติม' };
         courses.push(newCourse);
         try {
           await setFirebaseDocument('courses', newCourse);
@@ -5996,7 +6048,7 @@
           '<div><label>ระดับชั้น</label><select id="bubbleCourseGrade">' + gradeOptionsHtml(c.grade) + '</select></div>' +
         '</div>' +
         '<div class="form-row">' +
-          '<div><label>ราคา</label><input id="bubbleCoursePrice" type="number" value="' + c.price + '"></div>' +
+          '<div><label>ราคาปกติต่อเดือน</label><input id="bubbleCoursePrice" type="number" value="' + c.price + '"></div>' +
           '<div><label>สิทธิ์ที่แถมในคอร์ส</label><select id="bubbleCourseAccess"><option' + (c.access === 'Online' ? ' selected' : '') + '>Online</option><option' + (c.access === 'On-demand' ? ' selected' : '') + '>On-demand</option><option' + (c.access === 'Online + On-demand' ? ' selected' : '') + '>Online + On-demand</option></select></div>' +
         '</div>' +
         '<div class="form-row">' +
@@ -6017,6 +6069,7 @@
             name: name,
             grade: bubbleSelectValue('bubbleCourseGrade'),
             price: price,
+            monthlyPrice: price,
             access: bubbleSelectValue('bubbleCourseAccess'),
             location: bubbleSelectValue('bubbleCourseLocation'),
             days: Array.from(document.querySelectorAll('.bubbleCourseDay:checked')).map(function(input) { return input.value; }),
@@ -6713,7 +6766,7 @@
     function updateStudentSelectedPaymentMonth() {
       const monthSelect = getElement('studentPaymentMonth');
       const month = monthSelect && monthSelect.value ? monthSelect.value : (paymentMonths[0] ? paymentMonths[0].month : '-');
-      const amount = getPaymentMonthAmount(month) || (getCurrentStudentCourse() ? Number(getCurrentStudentCourse().price || 0) : 0);
+      const amount = currentStudent ? getExpectedPaymentAmountForStudent(currentStudent, month) : (getCurrentStudentCourse() ? getCourseMonthlyPrice(getCurrentStudentCourse()) : getPaymentMonthAmount(month));
       if (getElement('studentPaymentCurrentMonth')) getElement('studentPaymentCurrentMonth').textContent = month || '-';
       if (getElement('studentPaymentAmount')) getElement('studentPaymentAmount').textContent = amount ? formatPrice(amount) : '-';
     }
@@ -6735,7 +6788,7 @@
       }
 
       tbody.innerHTML = paymentMonths.map(function(item, index) {
-        return '<tr><td>' + (index + 1) + '</td><td>' + item.month + '</td><td>' + formatPrice(item.amount) + '</td><td><button class="btn btn-blue" type="button" onclick="' + actionCall('editPaymentMonth', item.id) + '">แก้ไข</button><button class="btn btn-red" type="button" onclick="' + actionCall('deletePaymentMonth', item.id) + '">ลบ</button></td></tr>';
+        return '<tr><td>' + (index + 1) + '</td><td>' + item.month + '</td><td>' + formatPrice(item.amount || 0) + '</td><td><button class="btn btn-blue" type="button" onclick="' + actionCall('editPaymentMonth', item.id) + '">แก้ไข</button><button class="btn btn-red" type="button" onclick="' + actionCall('deletePaymentMonth', item.id) + '">ลบ</button></td></tr>';
       }).join('');
 
       if (studentSelect) {
@@ -6749,7 +6802,7 @@
 
       if (dashboardMonthFilter) {
         const currentDashboardMonth = dashboardMonthFilter.value || (paymentMonths[0] ? paymentMonths[0].month : '');
-        dashboardMonthFilter.innerHTML = paymentMonths.map(function(item) { return '<option value= + item.month + >' + item.month + '</option>'; }).join('');
+        dashboardMonthFilter.innerHTML = paymentMonths.map(function(item) { return '<option value="' + item.month + '">' + item.month + '</option>'; }).join('');
         dashboardMonthFilter.value = paymentMonths.some(function(item) { return item.month === currentDashboardMonth; }) ? currentDashboardMonth : (paymentMonths[0] ? paymentMonths[0].month : '');
       }
 
@@ -6785,7 +6838,7 @@
       const amount = Number(amountInput.value || 0);
 
       if (!month || !amount) {
-        result.textContent = 'กรุณากรอกเดือนและยอดชำระ';
+        result.textContent = 'กรุณากรอกเดือน และใส่ยอดสำรองเป็น 0 ได้ถ้าจะใช้ราคาตามคอร์ส';
         result.style.color = '#dc2626';
         return;
       }
@@ -6815,7 +6868,7 @@
       openEditBubble('แก้ไขเดือนชำระเงิน',
         '<div class="form-row">' +
           '<div><label>เดือนชำระเงิน</label><input id="bubblePaymentMonthName" type="text" value="' + item.month + '"></div>' +
-          '<div><label>ยอดชำระเริ่มต้น</label><input id="bubblePaymentMonthAmount" type="number" value="' + item.amount + '"></div>' +
+          '<div><label>ยอดสำรองของเดือนนี้</label><input id="bubblePaymentMonthAmount" type="number" value="' + item.amount + '"></div>' +
         '</div>' +
         '<div class="notice">เมื่อแก้ชื่อเดือน ระบบจะอัปเดตตัวเลือกเดือนในฝั่งนักเรียน หลังบ้าน ใบเสร็จ และรายการสถานะที่ใช้เดือนเดิมให้ด้วย</div>',
         function() {
@@ -6823,7 +6876,7 @@
           const newAmount = Number(bubbleValue('bubblePaymentMonthAmount') || 0);
 
           if (!newMonth || !newAmount) {
-            getElement('editBubbleResult').textContent = 'กรุณากรอกเดือนและยอดชำระ';
+            getElement('editBubbleResult').textContent = 'กรุณากรอกเดือน และใส่ยอดสำรองเป็น 0 ได้ถ้าจะใช้ราคาตามคอร์ส';
             getElement('editBubbleResult').style.color = '#dc2626';
             return;
           }
@@ -6959,7 +7012,7 @@
         const slipCell = p.slipUrl ? '<a href="' + p.slipUrl + '" target="_blank">ดูสลิป</a>' : (p.slipNote || '-');
         const statusClass = p.status === 'ชำระแล้ว' ? 'status-paid' : p.status === 'ค้างชำระ' || p.status === 'สลิปไม่ผ่าน' ? 'status-absent' : 'status-waiting';
         const noteText = p.adminNote ? '<br><span class="mini-muted">หมายเหตุ Admin: ' + p.adminNote + '</span>' : '';
-        return '<tr data-payment-id="' + p.id + '"><td>' + (p.student || '-') + '</td><td>' + (p.course || '-') + '</td><td>' + (p.month || '-') + '</td><td>' + formatPrice(p.amount || 0) + '</td><td>' + slipCell + '<br><span class="mini-muted">เดือนที่นักเรียนแจ้ง: ' + (p.studentSelectedMonth || p.month || '-') + '</span><br><span class="mini-muted">แจ้งเมื่อ: ' + (p.createdAtText || '-') + '</span>' + noteText + '</td><td><span class="' + statusClass + '">' + (p.status || 'รอตรวจสลิป') + '</span></td><td>' + paymentActionButtons(p.status || 'รอตรวจสลิป') + '<button class="btn btn-dark" type="button" onclick="editPaymentAdminNote(this)">หมายเหตุ</button></td></tr>';
+        return '<tr data-payment-id="' + p.id + '"><td>' + (p.student || '-') + '</td><td>' + (p.course || '-') + '</td><td>' + (p.month || '-') + '</td><td>' + renderPaymentAmountText(p) + '</td><td>' + slipCell + '<br><span class="mini-muted">เดือนที่นักเรียนแจ้ง: ' + (p.studentSelectedMonth || p.month || '-') + '</span><br><span class="mini-muted">แจ้งเมื่อ: ' + (p.createdAtText || '-') + '</span>' + noteText + '</td><td><span class="' + statusClass + '">' + (p.status || 'รอชำระเงิน') + '</span></td><td>' + paymentActionButtons(p.status || 'รอชำระเงิน') + '<button class="btn btn-blue" type="button" onclick="editPaymentAmountDiscount(this)">แก้ยอด/ส่วนลด</button><button class="btn btn-dark" type="button" onclick="editPaymentAdminNote(this)">หมายเหตุ</button></td></tr>';
       }).join('') : '<tr><td colspan="7">ยังไม่มีรายการชำระเงิน</td></tr>';
       filterPaymentStatusByMonth();
     }
@@ -6996,7 +7049,7 @@
         student: payment ? (payment.student || '-') : (row && row.children[0] ? row.children[0].innerText.trim() : '-'),
         course: payment ? (payment.course || '-') : (row && row.children[1] ? row.children[1].innerText.trim() : '-'),
         month: payment ? (payment.month || '-') : (row && row.children[2] ? row.children[2].innerText.trim() : '-'),
-        amount: payment ? formatPrice(payment.amount || 0).replace(' บาท', '') : (row && row.children[3] ? row.children[3].innerText.trim().replace(' บาท', '') : '0'),
+        amount: payment ? String(getPaymentFinalAmount(payment)) : (row && row.children[3] ? row.children[3].innerText.trim().replace(' บาท', '') : '0'),
         slip: payment ? (payment.slipUrl ? 'มีสลิป' : (payment.slipSource || '-')) : (row && row.children[4] ? row.children[4].innerText.trim() : '-'),
         slipNote: payment ? (payment.slipNote || ('นักเรียนแจ้งส่งสลิปของเดือน ' + (payment.month || '-'))) : '',
         sentAt: payment ? (payment.createdAtText || '-') : '-',
@@ -7467,7 +7520,8 @@
         return;
       }
       const selectedCourse = getCurrentStudentCourse ? getCurrentStudentCourse() : null;
-      const paymentAmount = getPaymentMonthAmount(month) || (selectedCourse ? Number(selectedCourse.price || 0) : 0);
+      const baseAmount = getExpectedPaymentAmountForStudent(currentStudent, month);
+      const paymentAmount = baseAmount;
       try {
         if (result) {
           result.textContent = 'กำลังบันทึกการยืนยันส่งสลิป...';
@@ -7483,6 +7537,9 @@
           courseId: currentStudent.courseId || '',
           course: currentStudent.course || '',
           month: month,
+          baseAmount: baseAmount,
+          discount: 0,
+          finalAmount: paymentAmount,
           amount: paymentAmount,
           slipUrl: '',
           slipSource: 'LINE กลุ่มประจำชั้น',
@@ -7546,7 +7603,10 @@
           courseId: currentStudent.courseId || '',
           course: currentStudent.course || '',
           month: month,
-          amount: getPaymentMonthAmount(month) || (getCurrentStudentCourse() ? Number(getCurrentStudentCourse().price || 0) : 0),
+          baseAmount: getExpectedPaymentAmountForStudent(currentStudent, month),
+          discount: 0,
+          finalAmount: getExpectedPaymentAmountForStudent(currentStudent, month),
+          amount: getExpectedPaymentAmountForStudent(currentStudent, month),
           slipUrl: slipUrl,
           slipNote: 'นักเรียนอัปโหลดสลิปของเดือน ' + month,
           status: 'รอตรวจสลิป',
@@ -8756,8 +8816,9 @@
       const select = getElement('manualPaymentStudent');
       if (!select) return;
       const current = select.value;
-      select.innerHTML = students.map(function(s) { return '<option value="' + s.id + '">' + (s.name || '-') + ' · ' + (s.grade || '-') + '</option>'; }).join('');
+      select.innerHTML = students.map(function(s) { return '<option value="' + s.id + '">' + (s.name || '-') + ' · ' + (s.grade || '-') + ' · ' + (s.course || '-') + '</option>'; }).join('');
       if (current) select.value = current;
+      updateManualPaymentSuggestedAmount();
     }
 
     function renderManualPaymentMonthOptions() {
@@ -8766,19 +8827,23 @@
       const current = select.value;
       select.innerHTML = paymentMonths.map(function(m) { return '<option value="' + m.month + '">' + m.month + '</option>'; }).join('');
       if (current) select.value = current;
+      updateManualPaymentSuggestedAmount();
     }
 
     async function saveManualPayment() {
       const studentId = getElement('manualPaymentStudent') ? getElement('manualPaymentStudent').value : '';
       const month = getElement('manualPaymentMonth') ? getElement('manualPaymentMonth').value : '';
-      const amount = Number(getElement('manualPaymentAmount') ? getElement('manualPaymentAmount').value || 0 : 0) || getPaymentMonthAmount(month);
       const status = getElement('manualPaymentStatus') ? getElement('manualPaymentStatus').value : 'ชำระแล้ว';
       const note = getElement('manualPaymentNote') ? getElement('manualPaymentNote').value.trim() : '';
       const result = getElement('manualPaymentResult');
       const student = students.find(function(s) { return String(s.id) === String(studentId); });
       if (!student || !month) { result.textContent = 'กรุณาเลือกนักเรียนและเดือนที่ชำระ'; result.style.color = '#dc2626'; return; }
+      const baseAmount = getExpectedPaymentAmountForStudent(student, month);
+      const manualAmount = Number(getElement('manualPaymentAmount') ? getElement('manualPaymentAmount').value || 0 : 0);
+      const amount = manualAmount || baseAmount;
+      const discount = Math.max(0, baseAmount - amount);
       const paymentId = Date.now();
-      const payment = { id: paymentId, firebaseDocId: String(paymentId), studentId: student.id, authUid: student.authUid || '', student: student.name || '', courseId: student.courseId || '', course: student.course || '', month: month, studentSelectedMonth: month, amount: amount, slipUrl: '', slipNote: 'Admin บันทึกเอง', adminNote: note, status: status, createdAtText: new Date().toLocaleString('th-TH') };
+      const payment = { id: paymentId, firebaseDocId: String(paymentId), studentId: student.id, authUid: student.authUid || '', student: student.name || '', courseId: student.courseId || '', course: student.course || '', month: month, studentSelectedMonth: month, baseAmount: baseAmount, discount: discount, finalAmount: amount, amount: amount, slipUrl: '', slipNote: 'Admin บันทึกเอง', adminNote: note, status: status, createdAtText: new Date().toLocaleString('th-TH') };
       payments.push(payment);
       student.paymentStatus = status;
       student.overdueMonths = Array.isArray(student.overdueMonths) ? student.overdueMonths : [];
@@ -8791,6 +8856,95 @@
         addActivityLog('บันทึกการชำระเงินเอง', student.name + ' · ' + month + ' · ' + status);
         renderPaymentTable(); renderAdminDashboard(); renderAdminStudents(); updateStudentCourseDisplay();
       } catch (error) { result.textContent = 'บันทึกไม่สำเร็จ: ' + (error.message || error.code); result.style.color = '#dc2626'; }
+    }
+
+    async function createMonthlyPaymentRecords() {
+      const month = getElement('paymentStatusMonthFilter') ? getElement('paymentStatusMonthFilter').value : '';
+      const targetMonth = month && month !== 'ทั้งหมด' ? month : (paymentMonths[0] ? paymentMonths[0].month : '');
+      if (!targetMonth) {
+        alert('กรุณาเพิ่มเดือนชำระเงินก่อน');
+        return;
+      }
+      if (!confirm('สร้างรายการชำระเงินสำหรับเดือน ' + targetMonth + ' จากราคาคอร์สของนักเรียนทุกคนที่อนุมัติคอร์สแล้ว ใช่หรือไม่?')) return;
+
+      const targetStudents = students.filter(function(s) {
+        return s.courseId && (s.courseStatus === 'อนุมัติแล้ว' || s.courseStatus === 'รออนุมัติคอร์ส') && (s.learningStatus || s.status || 'เรียนอยู่') === 'เรียนอยู่';
+      });
+
+      let created = 0;
+      for (const student of targetStudents) {
+        const existed = payments.some(function(p) {
+          return String(p.studentId || '') === String(student.id || '') && p.month === targetMonth;
+        });
+        if (existed) continue;
+        const baseAmount = getExpectedPaymentAmountForStudent(student, targetMonth);
+        const paymentId = Date.now() + created;
+        const payment = {
+          id: paymentId,
+          firebaseDocId: String(paymentId),
+          studentId: student.id,
+          authUid: student.authUid || '',
+          student: student.name || '',
+          courseId: student.courseId || '',
+          course: student.course || '',
+          month: targetMonth,
+          studentSelectedMonth: targetMonth,
+          baseAmount: baseAmount,
+          discount: 0,
+          finalAmount: baseAmount,
+          amount: baseAmount,
+          slipUrl: '',
+          slipNote: 'ระบบสร้างรายการรอชำระเงินจากราคาคอร์ส',
+          adminNote: '',
+          status: 'รอชำระเงิน',
+          createdAtText: new Date().toLocaleString('th-TH')
+        };
+        payments.push(payment);
+        try { await setFirebaseDocument('payments', payment); } catch (error) { console.error('create monthly payment firebase error:', error); }
+        created++;
+      }
+
+      addActivityLog('สร้างรายการชำระเงินรายเดือน', targetMonth + ' · สร้างใหม่ ' + created + ' รายการ');
+      renderPaymentTable();
+      renderAdminDashboard();
+      alert('สร้างรายการชำระเงินเดือน ' + targetMonth + ' เรียบร้อย: ' + created + ' รายการ');
+    }
+
+    function editPaymentAmountDiscount(button) {
+      const row = button.closest('tr');
+      if (!row) return;
+      const paymentId = row.getAttribute('data-payment-id');
+      const payment = payments.find(function(p) { return String(p.id) === String(paymentId); });
+      if (!payment) return;
+      const base = getPaymentBaseAmount(payment);
+      const discount = getPaymentDiscountAmount(payment);
+      const finalAmount = getPaymentFinalAmount(payment);
+      openEditBubble('แก้ยอดชำระ / ส่วนลด',
+        '<div class="form-row">' +
+          '<div><label>ราคาปกติจากคอร์ส</label><input id="bubblePaymentBaseAmount" type="number" value="' + base + '"></div>' +
+          '<div><label>ส่วนลด</label><input id="bubblePaymentDiscount" type="number" value="' + discount + '"></div>' +
+          '<div><label>ยอดที่ต้องชำระจริง</label><input id="bubblePaymentFinalAmount" type="number" value="' + finalAmount + '"></div>' +
+        '</div>' +
+        '<label>หมายเหตุ Admin</label><textarea id="bubblePaymentAmountNote">' + (payment.adminNote || '') + '</textarea>' +
+        '<div class="notice">ระบบจะเก็บทั้งราคาปกติ ส่วนลด และยอดชำระจริงไว้ในรายการนี้</div>',
+        async function() {
+          const newBase = Number(bubbleValue('bubblePaymentBaseAmount') || 0);
+          const newDiscount = Number(bubbleValue('bubblePaymentDiscount') || 0);
+          const newFinal = Number(bubbleValue('bubblePaymentFinalAmount') || 0) || Math.max(0, newBase - newDiscount);
+          payment.baseAmount = newBase;
+          payment.discount = newDiscount;
+          payment.finalAmount = newFinal;
+          payment.amount = newFinal;
+          payment.adminNote = bubbleValue('bubblePaymentAmountNote');
+          try {
+            await setFirebaseDocument('payments', payment);
+            addActivityLog('แก้ยอดชำระ/ส่วนลด', (payment.student || '-') + ' · ' + (payment.month || '-') + ' · ' + formatPrice(newFinal));
+          } catch (error) { console.error(error); }
+          renderPaymentTable();
+          renderAdminDashboard();
+          closeEditBubble();
+        }
+      );
     }
 
     function editPaymentAdminNote(button) {
@@ -8930,15 +9084,16 @@
       let paidAmount = 0;
       visibleRows.forEach(function(row) {
         const statusText = row.children[5] ? row.children[5].innerText.trim() : '';
-        const amountText = row.children[3] ? row.children[3].innerText : '0';
-        const amount = Number(String(amountText).replace(/[^0-9.]/g, '')) || 0;
+        const paymentId = row.getAttribute('data-payment-id');
+        const payment = payments.find(function(p) { return String(p.id) === String(paymentId); });
+        const amount = payment ? getPaymentFinalAmount(payment) : 0;
         if (statusText.includes('ชำระแล้ว')) paidAmount += amount;
       });
       const targetStudents = students.filter(function(s) { return s.courseId && (s.learningStatus || s.status || 'เรียนอยู่') === 'เรียนอยู่'; });
       let expectedAmount = 0;
       targetStudents.forEach(function(s) {
         const course = getCourseByStudentOrName(s, s.course);
-        expectedAmount += Number(course ? course.price : 0) || 0;
+        expectedAmount += getExpectedPaymentAmountForStudent(s, selectedMonth);
       });
       if (getElement('paidAmountThisMonth')) getElement('paidAmountThisMonth').textContent = formatPrice(paidAmount);
       if (getElement('expectedAmountThisMonth')) getElement('expectedAmountThisMonth').textContent = formatPrice(expectedAmount);
@@ -8953,9 +9108,9 @@
       const paid = monthPayments.filter(function(p) { return p.status === 'ชำระแล้ว'; });
       const pending = monthPayments.filter(function(p) { return p.status === 'รอตรวจสลิป'; });
       const overdue = students.filter(function(s) { return Array.isArray(s.overdueMonths) && s.overdueMonths.includes(month); });
-      const paidAmount = paid.reduce(function(sum, p) { return sum + (Number(p.amount || 0) || 0); }, 0);
+      const paidAmount = paid.reduce(function(sum, p) { return sum + getPaymentFinalAmount(p); }, 0);
       let expectedAmount = 0;
-      enrolledStudents.forEach(function(s) { const c = getCourseByStudentOrName(s, s.course); expectedAmount += Number(c ? c.price : 0) || 0; });
+      enrolledStudents.forEach(function(s) { expectedAmount += getExpectedPaymentAmountForStudent(s, month); });
       box.innerHTML = '<div class="status-display-row"><span class="status-label">เดือน</span><strong>' + (month || '-') + '</strong></div>' +
         '<div class="status-display-row"><span class="status-label">นักเรียนที่ต้องชำระ</span><strong>' + enrolledStudents.length + ' คน</strong></div>' +
         '<div class="status-display-row"><span class="status-label">ชำระแล้ว</span><strong class="status-paid">' + paid.length + ' รายการ · ' + formatPrice(paidAmount) + '</strong></div>' +
