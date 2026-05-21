@@ -2241,7 +2241,7 @@
           <p><strong>คอร์ส:</strong> <span id="studentPaymentCourseName">-</span></p>
           <p><strong>รูปแบบชำระ:</strong> รายเดือน</p>
           <label style="margin-top:12px;">เลือกเดือนที่ชำระ</label>
-          <select id="studentPaymentMonth" onchange="updateStudentSelectedPaymentMonth()">
+          <select id="studentPaymentMonth" onchange="updateStudentSelectedPaymentMonth(); updateStudentCourseDisplay()">
             <option value="">ยังไม่มีเดือนชำระเงิน</option>
           </select>
           <p style="margin-top:12px;"><strong>เดือนที่เลือก:</strong> <span id="studentPaymentCurrentMonth">-</span></p>
@@ -2741,7 +2741,7 @@
               <div class="stat clickable" onclick="jumpToAdminTab('admin-students')"><h4>นักเรียนทั้งหมด</h4><p id="dashTotalStudents">0 คน</p><small>กดเพื่อนักเรียน</small></div>
               <div class="stat clickable" onclick="jumpToAdminTab('admin-courses')"><h4>คอร์สที่เปิดสอน</h4><p id="dashOpenCourses">0 คอร์ส</p><small>กดเพื่อจัดการคอร์ส</small></div>
               <div class="stat clickable" onclick="jumpToPaymentStatus('รอตรวจสลิป')"><h4>รอตรวจสลิป</h4><p id="dashPendingPayments">0 รายการ</p><small>กดเพื่อดูรายการรอตรวจ</small></div>
-              <div class="stat clickable" onclick="jumpToPaymentStatus('ค้างชำระ')"><h4>ค้างชำระ</h4><p id="dashOverdueStudents">0 คน</p><small>กดเพื่อดูรายการค้างชำระ</small></div>
+              <div class="stat clickable" onclick="jumpToPaymentStatus('ค้างชำระ')"><h4>ค้างชำระ</h4><p id="dashOverdueStudents">0 รายการ</p><small>กดเพื่อดูรายการค้างชำระ</small></div>
               <div class="stat clickable" onclick="jumpToCourseApproval()"><h4>รออนุมัติคอร์ส</h4><p id="dashPendingCourses">0 คน</p><small>กดเพื่อดูรายการรออนุมัติ</small></div>
             </div>
             <br />
@@ -5439,21 +5439,56 @@
       );
     }
 
+    function isActiveStudentForDashboard(s) {
+      const status = s.learningStatus || s.status || 'เรียนอยู่';
+      return status !== 'ลาออก' && status !== 'ปิดใช้งาน' && s.archived !== true;
+    }
+
+    function getPendingPaymentRecords() {
+      return payments.filter(function(p) { return (p.status || '') === 'รอตรวจสลิป'; });
+    }
+
+    function getOverduePaymentRecords(month) {
+      return payments.filter(function(p) {
+        const statusMatched = (p.status || '') === 'ค้างชำระ';
+        const monthMatched = !month || month === 'ทั้งหมด' || p.month === month;
+        return statusMatched && monthMatched;
+      });
+    }
+
+    function getDraftReceipts() {
+      return receipts.filter(function(r) { return r.status === 'draft' || r.status === 'รอตรวจ'; });
+    }
+
+    function getUnpublishedScores() {
+      return adminScoreRecords.filter(function(r) { return (r.status || '') !== 'published'; });
+    }
+
+    function getPendingCourseStudents() {
+      return students.filter(function(s) { return isActiveStudentForDashboard(s) && s.courseStatus === 'รออนุมัติคอร์ส'; });
+    }
+
+    function getNoCourseStudents() {
+      return students.filter(function(s) {
+        return isActiveStudentForDashboard(s) && (!s.courseId || s.course === 'ยังไม่ได้สมัครคอร์ส');
+      });
+    }
+
     function renderAdminDashboard() {
-      const totalStudents = Array.isArray(students) ? students.length : 0;
+      const totalStudents = Array.isArray(students) ? students.filter(isActiveStudentForDashboard).length : 0;
       const openCourses = Array.isArray(courses) ? courses.filter(function(c) { return c.status === 'open' || c.status === 'เปิดรับสมัคร'; }).length : 0;
-      const overdueStudents = Array.isArray(students) ? students.filter(function(s) { return Array.isArray(s.overdueMonths) && s.overdueMonths.length > 0; }).length : 0;
-      const pendingPayments = Array.isArray(students) ? students.filter(function(s) { return s.paymentStatus === 'รอตรวจสลิป'; }).length : 0;
-      const todayAbsent = Array.isArray(students) ? students.filter(function(s) { return s.pickupStatus === 'ไม่มา'; }).length : 0;
-      const pendingCourseStudents = Array.isArray(students) ? students.filter(function(s) { return s.courseStatus === 'รออนุมัติคอร์ส'; }).length : 0;
+      const pendingPaymentRecords = getPendingPaymentRecords();
+      const overduePaymentRecords = getOverduePaymentRecords();
+      const pendingCourseStudents = getPendingCourseStudents();
+      const todayAbsent = Array.isArray(students) ? students.filter(function(s) { return s.pickupStatus === 'ไม่มา' || s.pickupStatus === 'ยังไม่เช็คชื่อ'; }).length : 0;
 
       if (getElement('dashTotalStudents')) getElement('dashTotalStudents').textContent = totalStudents + ' คน';
       if (getElement('dashOpenCourses')) getElement('dashOpenCourses').textContent = openCourses + ' คอร์ส';
-      if (getElement('dashPendingPayments')) getElement('dashPendingPayments').textContent = pendingPayments + ' รายการ';
-      if (getElement('dashOverdueStudents')) getElement('dashOverdueStudents').textContent = overdueStudents + ' คน';
-      if (getElement('dashPendingCourses')) getElement('dashPendingCourses').textContent = pendingCourseStudents + ' คน';
-      if (getElement('overdueCount')) getElement('overdueCount').textContent = overdueStudents + ' รายการ';
-      if (getElement('pendingSlipCount')) getElement('pendingSlipCount').textContent = pendingPayments + ' รายการ';
+      if (getElement('dashPendingPayments')) getElement('dashPendingPayments').textContent = pendingPaymentRecords.length + ' รายการ';
+      if (getElement('dashOverdueStudents')) getElement('dashOverdueStudents').textContent = overduePaymentRecords.length + ' รายการ';
+      if (getElement('dashPendingCourses')) getElement('dashPendingCourses').textContent = pendingCourseStudents.length + ' คน';
+      if (getElement('overdueCount')) getElement('overdueCount').textContent = overduePaymentRecords.length + ' รายการ';
+      if (getElement('pendingSlipCount')) getElement('pendingSlipCount').textContent = pendingPaymentRecords.length + ' รายการ';
       if (getElement('pickupWaitingCount')) getElement('pickupWaitingCount').textContent = todayAbsent + ' คน';
       renderAdminTodoList();
       renderDashboardPaymentSummary();
@@ -7075,7 +7110,22 @@ function getCourseOnlineDocs(course, includeInactive) {
       return studentPayments[0] || null;
     }
 
+    function getCurrentStudentPaymentForSelectedMonth() {
+      if (!currentStudent) return null;
+      const selectedMonth = getElement('studentPaymentMonth') && getElement('studentPaymentMonth').value
+        ? getElement('studentPaymentMonth').value
+        : (paymentMonths[0] ? paymentMonths[0].month : '');
+      const matched = payments.filter(function(p) {
+        const studentMatched = isCurrentStudentMatchRecord(p);
+        const monthMatched = !selectedMonth || p.month === selectedMonth;
+        return studentMatched && monthMatched;
+      }).slice().sort(function(a, b) { return Number(b.id || 0) - Number(a.id || 0); });
+      return matched[0] || null;
+    }
+
     function getCurrentStudentPaymentStatusText() {
+      const selectedMonthPayment = getCurrentStudentPaymentForSelectedMonth();
+      if (selectedMonthPayment && selectedMonthPayment.status) return selectedMonthPayment.status;
       const latestPayment = getCurrentStudentLatestPayment();
       if (latestPayment && latestPayment.status) return latestPayment.status;
       if (currentStudent && currentStudent.paymentStatus) return currentStudent.paymentStatus;
@@ -10159,16 +10209,16 @@ function getCourseOnlineDocs(course, includeInactive) {
     function renderAdminTodoList() {
       const box = getElement('adminTodoList');
       if (!box) return;
-      const pendingPayments = payments.filter(function(p) { return (p.status || '') === 'รอตรวจสลิป'; }).length;
-      const overdueStudents = students.filter(function(s) { return Array.isArray(s.overdueMonths) && s.overdueMonths.length > 0; }).length;
-      const draftReceipts = receipts.filter(function(r) { return r.status === 'draft'; }).length;
-      const unpublishedScores = adminScoreRecords.filter(function(r) { return r.status !== 'published'; }).length;
-      const noCourseStudents = students.filter(function(s) { return !s.courseId || s.course === 'ยังไม่ได้สมัครคอร์ส'; }).length;
-      const pendingCourses = students.filter(function(s) { return s.courseStatus === 'รออนุมัติคอร์ส'; }).length;
+      const pendingPayments = getPendingPaymentRecords().length;
+      const overduePayments = getOverduePaymentRecords().length;
+      const draftReceipts = getDraftReceipts().length;
+      const unpublishedScores = getUnpublishedScores().length;
+      const noCourseStudents = getNoCourseStudents().length;
+      const pendingCourses = getPendingCourseStudents().length;
       const items = [
         { label: 'รอตรวจสลิป', value: pendingPayments + ' รายการ', action: "jumpToPaymentStatus('รอตรวจสลิป')" },
-        { label: 'นักเรียนค้างชำระ', value: overdueStudents + ' คน', action: "jumpToPaymentStatus('ค้างชำระ')" },
-        { label: 'ใบเสร็จรอแสดง', value: draftReceipts + ' ใบ', action: "jumpToAdminTab('admin-payment')" },
+        { label: 'ค้างชำระ', value: overduePayments + ' รายการ', action: "jumpToPaymentStatus('ค้างชำระ')" },
+        { label: 'ใบเสร็จรอแสดง', value: draftReceipts + ' ใบ', action: "jumpToAdminTab('admin-receipts')" },
         { label: 'คะแนนรอประกาศ', value: unpublishedScores + ' รายการ', action: "jumpToAdminTab('admin-monthly-test')" },
         { label: 'สมัครใหม่ยังไม่ลงคอร์ส', value: noCourseStudents + ' คน', action: "jumpToAdminTab('admin-students')" },
         { label: 'รออนุมัติคอร์ส', value: pendingCourses + ' คน', action: "jumpToCourseApproval()" }
@@ -10180,22 +10230,20 @@ function getCourseOnlineDocs(course, includeInactive) {
 
     function updatePaymentAmountSummary() {
       const selectedMonth = getElement('paymentStatusMonthFilter') ? getElement('paymentStatusMonthFilter').value : 'ทั้งหมด';
-      const visibleRows = Array.from(document.querySelectorAll('#paymentTableBody tr')).filter(function(row) {
-        return row.style.display !== 'none' && row.children && row.children.length >= 6;
-      });
-      let paidAmount = 0;
-      visibleRows.forEach(function(row) {
-        const statusText = row.children[5] ? row.children[5].innerText.trim() : '';
-        const paymentId = row.getAttribute('data-payment-id');
-        const payment = payments.find(function(p) { return String(p.id) === String(paymentId); });
-        const amount = payment ? getPaymentFinalAmount(payment) : 0;
-        if (statusText.includes('ชำระแล้ว')) paidAmount += amount;
-      });
-      const targetStudents = students.filter(function(s) { return s.courseId && (s.learningStatus || s.status || 'เรียนอยู่') === 'เรียนอยู่'; });
+      const monthForExpected = selectedMonth && selectedMonth !== 'ทั้งหมด' ? selectedMonth : (paymentMonths[0] ? paymentMonths[0].month : '');
+      const visiblePaymentIds = Array.from(document.querySelectorAll('#paymentTableBody tr[data-payment-id]'))
+        .filter(function(row) { return row.style.display !== 'none'; })
+        .map(function(row) { return String(row.getAttribute('data-payment-id') || ''); });
+
+      const visiblePayments = payments.filter(function(p) { return visiblePaymentIds.includes(String(p.id || '')); });
+      const paidAmount = visiblePayments
+        .filter(function(p) { return p.status === 'ชำระแล้ว'; })
+        .reduce(function(sum, p) { return sum + getPaymentFinalAmount(p); }, 0);
+
+      const targetStudents = students.filter(function(s) { return isActiveStudentForDashboard(s) && s.courseId; });
       let expectedAmount = 0;
       targetStudents.forEach(function(s) {
-        const course = getCourseByStudentOrName(s, s.course);
-        expectedAmount += getExpectedPaymentAmountForStudent(s, selectedMonth);
+        expectedAmount += getExpectedPaymentAmountForStudent(s, monthForExpected);
       });
       if (getElement('paidAmountThisMonth')) getElement('paidAmountThisMonth').textContent = formatPrice(paidAmount);
       if (getElement('expectedAmountThisMonth')) getElement('expectedAmountThisMonth').textContent = formatPrice(expectedAmount);
@@ -10206,10 +10254,10 @@ function getCourseOnlineDocs(course, includeInactive) {
       if (!box) return;
       const month = getElement('dashboardPaymentMonthFilter') ? getElement('dashboardPaymentMonthFilter').value : (paymentMonths[0] ? paymentMonths[0].month : '');
       const monthPayments = payments.filter(function(p) { return !month || p.month === month; });
-      const enrolledStudents = students.filter(function(s) { return s.courseId && (s.learningStatus || s.status || 'เรียนอยู่') === 'เรียนอยู่'; });
+      const enrolledStudents = students.filter(function(s) { return isActiveStudentForDashboard(s) && s.courseId; });
       const paid = monthPayments.filter(function(p) { return p.status === 'ชำระแล้ว'; });
       const pending = monthPayments.filter(function(p) { return p.status === 'รอตรวจสลิป'; });
-      const overdue = students.filter(function(s) { return Array.isArray(s.overdueMonths) && s.overdueMonths.includes(month); });
+      const overdue = monthPayments.filter(function(p) { return p.status === 'ค้างชำระ'; });
       const paidAmount = paid.reduce(function(sum, p) { return sum + getPaymentFinalAmount(p); }, 0);
       let expectedAmount = 0;
       enrolledStudents.forEach(function(s) { expectedAmount += getExpectedPaymentAmountForStudent(s, month); });
@@ -10217,7 +10265,7 @@ function getCourseOnlineDocs(course, includeInactive) {
         '<div class="status-display-row"><span class="status-label">นักเรียนที่ต้องชำระ</span><strong>' + enrolledStudents.length + ' คน</strong></div>' +
         '<div class="status-display-row"><span class="status-label">ชำระแล้ว</span><strong class="status-paid">' + paid.length + ' รายการ · ' + formatPrice(paidAmount) + '</strong></div>' +
         '<div class="status-display-row"><span class="status-label">รอตรวจสลิป</span><strong class="status-waiting">' + pending.length + ' รายการ</strong></div>' +
-        '<div class="status-display-row"><span class="status-label">ค้างชำระ</span><strong class="status-absent">' + overdue.length + ' คน</strong></div>' +
+        '<div class="status-display-row"><span class="status-label">ค้างชำระ</span><strong class="status-absent">' + overdue.length + ' รายการ</strong></div>' +
         '<div class="status-display-row"><span class="status-label">ยอดที่ควรได้รับ</span><strong>' + formatPrice(expectedAmount) + '</strong></div>';
     }
 
