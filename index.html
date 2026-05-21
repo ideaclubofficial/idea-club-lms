@@ -1939,47 +1939,54 @@
 
   <div id="profilePanel" class="profile-panel hidden">
     <button class="close-btn" type="button" onclick="toggleProfileBox()">×</button>
-    <h3>แก้ไขข้อมูลส่วนตัว</h3>
+    <h3>โปรไฟล์ของฉัน</h3>
+
+    <div class="notice" style="margin-bottom:16px;">
+      <p><strong id="profileDisplayName">ผู้ใช้งาน</strong></p>
+      <p><span class="mini-muted">รหัส:</span> <span id="profileDisplayId">-</span></p>
+      <p><span class="mini-muted">ประเภทบัญชี:</span> <span id="profileDisplayRole">-</span></p>
+      <p><span class="mini-muted">เบอร์ Login:</span> <span id="profileDisplayLogin">-</span></p>
+    </div>
+
+    <h3 style="font-size:18px;">แก้ไขข้อมูลส่วนตัว</h3>
     <div class="form-row">
       <div>
-        <label>ชื่อผู้ใช้งาน</label>
-        <input id="profileFullName" type="text" value="" />
+        <label>ชื่อเล่น</label>
+        <input id="profileNickname" type="text" value="" />
       </div>
       <div>
-        <label>ชื่อผู้ปกครอง <span style="color:#dc2626;">*</span></label>
+        <label>ชื่อผู้ปกครอง</label>
         <input id="profileParentName" type="text" value="" />
-      </div>
-        </div>
-
-        <div style="display:flex; flex-direction:column; gap:18px; margin-top:18px;">
-      <div>
-        <label>ระดับชั้น</label>
-        <select id="profileGrade">
-          <option value="" selected>-- เลือกระดับชั้น --</option>
-          <option>ป.4</option>
-          <option>ป.5</option>
-          <option>ป.6</option>
-          <option>ม.1</option>
-          <option>ม.2</option>
-          <option>ม.3</option>
-          <option>ม.4</option>
-          <option>ม.5</option>
-          <option>ม.6</option>
-        </select>
       </div>
       <div>
         <label>เบอร์ผู้ปกครอง</label>
         <input id="profilePhone" type="text" value="" />
       </div>
+      <div>
+        <label>LINE ID</label>
+        <input id="profileLineId" type="text" value="" />
+      </div>
+      <div>
+        <label>อีเมล</label>
+        <input id="profileEmail" type="email" value="" />
+      </div>
+      <div>
+        <label>โรงเรียน</label>
+        <input id="profileSchool" type="text" value="" />
+      </div>
     </div>
-    <label>อีเมล</label>
-    <input id="profileEmail" type="email" value="" />
-    <br /><br />
-    <label>เปลี่ยนรหัสผ่าน</label>
-    <input id="profilePassword" type="password" placeholder="กรอกรหัสผ่านใหม่ หากต้องการเปลี่ยน" />
-    
-    <br />
+
     <button class="btn btn-green" type="button" onclick="saveProfile()">บันทึกข้อมูลส่วนตัว</button>
+
+    <br /><br />
+
+    <h3 style="font-size:18px;">เปลี่ยนรหัสผ่าน</h3>
+    <label>รหัสผ่านใหม่</label>
+    <input id="profilePassword" type="password" placeholder="อย่างน้อย 6 ตัวอักษร" />
+    <label>ยืนยันรหัสผ่านใหม่</label>
+    <input id="profilePasswordConfirm" type="password" placeholder="กรอกรหัสผ่านใหม่อีกครั้ง" />
+    <button class="btn btn-blue" type="button" onclick="changeProfilePassword()">เปลี่ยนรหัสผ่าน</button>
+
     <p id="profileSaveResult" style="margin-top:12px; font-weight:bold;"></p>
   </div>
 
@@ -4755,10 +4762,7 @@
       getElement('studentLoginResult').style.color = '#0f4cbd';
       getElement('mainMenu').classList.add('hidden');
       getElement('profileMenu').classList.remove('hidden');
-      getElement('profileName').textContent = student.name;
-      getElement('profileFullName').value = student.name;
-      if (getElement('profileGrade')) getElement('profileGrade').value = student.grade || 'ป.6';
-      if (getElement('profilePhone')) getElement('profilePhone').value = student.phone || '';
+      refreshProfileBox();
       hideAuthSections();
       showStudentAreas();
       safeRun(updateStudentCourseDisplay, 'student-course-display');
@@ -4885,16 +4889,123 @@
       window.scrollTo({ top: 0, behavior: 'smooth' });
     }
 
+    function getActiveProfileRecord() {
+      if (currentStudent) return { type: 'student', roleText: 'นักเรียน', record: currentStudent };
+      if (currentTeacher) return { type: 'teacher', roleText: 'ครู', record: currentTeacher };
+      if (firebaseUserProfile && firebaseUserProfile.role === 'admin') return { type: 'admin', roleText: 'ผู้ดูแลระบบ', record: firebaseUserProfile };
+      return { type: 'guest', roleText: 'ผู้ใช้งาน', record: {} };
+    }
+
+    function refreshProfileBox() {
+      const info = getActiveProfileRecord();
+      const record = info.record || {};
+      const displayName = record.name || record.nickname || record.parentName || (firebaseUser && firebaseUser.email) || 'ผู้ใช้งาน';
+      const displayId = info.type === 'student' ? (record.memberId || record.id || '-') :
+        info.type === 'teacher' ? (record.teacherId || record.id || record.username || '-') :
+        info.type === 'admin' ? 'ADMIN' : '-';
+      const loginText = record.phone || record.username || record.email || (firebaseUser && firebaseUser.email) || '-';
+
+      if (getElement('profileName')) getElement('profileName').textContent = displayName;
+      if (getElement('profileDisplayName')) getElement('profileDisplayName').textContent = displayName;
+      if (getElement('profileDisplayId')) getElement('profileDisplayId').textContent = displayId;
+      if (getElement('profileDisplayRole')) getElement('profileDisplayRole').textContent = info.roleText;
+      if (getElement('profileDisplayLogin')) getElement('profileDisplayLogin').textContent = loginText;
+
+      if (getElement('profileNickname')) getElement('profileNickname').value = record.nickname || '';
+      if (getElement('profileParentName')) getElement('profileParentName').value = record.parentName || '';
+      if (getElement('profilePhone')) getElement('profilePhone').value = record.phone || '';
+      if (getElement('profileLineId')) getElement('profileLineId').value = record.lineId || '';
+      if (getElement('profileEmail')) getElement('profileEmail').value = record.email || (firebaseUser && firebaseUser.email) || '';
+      if (getElement('profileSchool')) getElement('profileSchool').value = record.school || '';
+      if (getElement('profilePassword')) getElement('profilePassword').value = '';
+      if (getElement('profilePasswordConfirm')) getElement('profilePasswordConfirm').value = '';
+    }
+
     function toggleProfileBox() {
+      refreshProfileBox();
       getElement('profilePanel').classList.toggle('hidden');
     }
 
-    function saveProfile() {
-      const name = getElement('profileFullName').value.trim() || 'ผู้ใช้งาน';
-      getElement('profileName').textContent = name;
-      getElement('profileSaveResult').textContent = getElement('profilePassword').value.trim() ? 'บันทึกข้อมูลส่วนตัวและเปลี่ยนรหัสผ่านเรียบร้อย' : 'บันทึกข้อมูลส่วนตัวเรียบร้อย';
-      getElement('profileSaveResult').style.color = '#16a34a';
-      updateStudentCourseDisplay();
+    async function saveProfile() {
+      const result = getElement('profileSaveResult');
+      const info = getActiveProfileRecord();
+      const record = info.record;
+      if (!record || info.type === 'guest') {
+        result.textContent = 'ไม่พบข้อมูลบัญชีที่กำลังใช้งาน';
+        result.style.color = '#dc2626';
+        return;
+      }
+
+      record.nickname = getElement('profileNickname') ? getElement('profileNickname').value.trim() : (record.nickname || '');
+      record.parentName = getElement('profileParentName') ? getElement('profileParentName').value.trim() : (record.parentName || '');
+      record.phone = getElement('profilePhone') ? getElement('profilePhone').value.trim() : (record.phone || '');
+      record.lineId = getElement('profileLineId') ? getElement('profileLineId').value.trim() : (record.lineId || '');
+      record.email = getElement('profileEmail') ? getElement('profileEmail').value.trim() : (record.email || '');
+      record.school = getElement('profileSchool') ? getElement('profileSchool').value.trim() : (record.school || '');
+
+      try {
+        if (info.type === 'student') {
+          await setFirebaseDocument('students', record);
+          currentStudent = record;
+          updateStudentCourseDisplay();
+        } else if (info.type === 'teacher') {
+          await setFirebaseDocument('teachers', record);
+          currentTeacher = record;
+          renderTeacherDashboardSummary();
+        } else if (info.type === 'admin') {
+          firebaseUserProfile = Object.assign(firebaseUserProfile || {}, record);
+          if (firebaseReady && db && firebaseUser) {
+            await db.collection('users').doc(firebaseUser.uid).set(Object.assign({}, firebaseUserProfile, {
+              updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+            }), { merge: true });
+          }
+        }
+
+        refreshProfileBox();
+        result.textContent = 'บันทึกข้อมูลส่วนตัวเรียบร้อย';
+        result.style.color = '#16a34a';
+      } catch (error) {
+        result.textContent = 'บันทึกไม่สำเร็จ: ' + (error.message || error.code || 'ไม่ทราบสาเหตุ');
+        result.style.color = '#dc2626';
+      }
+    }
+
+    async function changeProfilePassword() {
+      const result = getElement('profileSaveResult');
+      const newPassword = getElement('profilePassword') ? getElement('profilePassword').value.trim() : '';
+      const confirmPassword = getElement('profilePasswordConfirm') ? getElement('profilePasswordConfirm').value.trim() : '';
+
+      if (!newPassword || newPassword.length < 6) {
+        result.textContent = 'กรุณากรอกรหัสผ่านใหม่อย่างน้อย 6 ตัวอักษร';
+        result.style.color = '#dc2626';
+        return;
+      }
+      if (newPassword !== confirmPassword) {
+        result.textContent = 'รหัสผ่านใหม่และยืนยันรหัสผ่านไม่ตรงกัน';
+        result.style.color = '#dc2626';
+        return;
+      }
+      if (!firebaseReady || !auth || !firebaseUser) {
+        result.textContent = 'ต้อง Login ด้วย Firebase Auth ก่อนจึงจะเปลี่ยนรหัสผ่านได้';
+        result.style.color = '#dc2626';
+        return;
+      }
+
+      try {
+        await firebaseUser.updatePassword(newPassword);
+        getElement('profilePassword').value = '';
+        getElement('profilePasswordConfirm').value = '';
+        result.textContent = 'เปลี่ยนรหัสผ่านเรียบร้อย';
+        result.style.color = '#16a34a';
+      } catch (error) {
+        const code = String(error.code || error.message || '');
+        if (code.includes('requires-recent-login')) {
+          result.textContent = 'เพื่อความปลอดภัย กรุณาออกจากระบบแล้ว Login ใหม่ก่อนเปลี่ยนรหัสผ่าน';
+        } else {
+          result.textContent = 'เปลี่ยนรหัสผ่านไม่สำเร็จ: ' + (error.message || error.code || 'ไม่ทราบสาเหตุ');
+        }
+        result.style.color = '#dc2626';
+      }
     }
 
     function showStudentPanelForAdmin() {
@@ -4910,7 +5021,7 @@
     function showTeacherPanelForAdmin() {
       showTeacherPanel({ name: 'Admin IDEA CLUB', username: 'admin', status: 'Active' });
       setSuperAdminMode(true);
-      getElement('profileName').textContent = 'Admin IDEA CLUB';
+      refreshProfileBox();
     }
 
     function showAdminPanelForAdmin() {
@@ -4920,7 +5031,7 @@
     function showTeacherAdminPanel(teacher) {
       showAdminPanel(true);
       setSuperAdminMode(false);
-      getElement('profileName').textContent = teacher ? teacher.name : 'Admin';
+      refreshProfileBox();
     }
 
     function getFirebaseAuthUidText() {
@@ -4934,7 +5045,7 @@
       getElement('mainMenu').classList.add('hidden');
       getElement('adminMenu').classList.add('hidden');
       getElement('profileMenu').classList.remove('hidden');
-      getElement('profileName').textContent = teacher ? teacher.name : 'ครูผู้สอน';
+      refreshProfileBox();
       getElement('profilePanel').classList.add('hidden');
       renderTeacherCourseOptions();
       renderTeacherStudents();
@@ -5311,7 +5422,8 @@
       getElement('adminMenu').classList.add('hidden');
       getElement('profileMenu').classList.remove('hidden');
       getElement('profilePanel').classList.add('hidden');
-      getElement('profileName').textContent = 'Admin IDEA CLUB';
+      if (!firebaseUserProfile) firebaseUserProfile = { role: 'admin', name: 'Admin IDEA CLUB', email: firebaseUser && firebaseUser.email ? firebaseUser.email : '' };
+      refreshProfileBox();
       setSuperAdminMode(true);
 
       safeRun(renderStudentCourses, 'admin-render-student-courses');
