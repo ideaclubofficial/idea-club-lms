@@ -2992,6 +2992,12 @@
                 </div>
               </div>
 
+              <label>ไฟล์ PDF ประกอบบทเรียน (Google Drive)</label>
+              <textarea id="adminOnDemandPdfFiles" placeholder="ใส่ 1 ไฟล์ต่อ 1 บรรทัด เช่น
+ชีทเรียน ระบบย่อยอาหาร | https://drive.google.com/...
+เฉลยแบบฝึกหัด | https://drive.google.com/..."></textarea>
+              <p class="mini-muted">หมายเหตุ: ไฟล์ Google Drive ต้องตั้งสิทธิ์เป็น Anyone with the link can view ก่อน นักเรียนจึงจะเปิดได้</p>
+
               <button class="btn btn-blue" type="button" onclick="saveOnDemandSettings()">บันทึก Playlist / คลิป</button>
               <button class="btn btn-dark" type="button" onclick="clearOnDemandForm()">ล้างฟอร์ม</button>
               <p id="videoSaveResult" style="margin-top:14px; font-weight:bold;"></p>
@@ -3061,6 +3067,7 @@
                     <th class="sortable" onclick="setOnDemandSort('clipTitle')">ชื่อคลิป</th>
                     <th>คอร์สที่เกี่ยวข้อง</th>
                     <th>ลิงก์วิดีโอ</th>
+                    <th>ไฟล์ PDF</th>
                     <th>จัดการ</th>
                   </tr>
                 </thead>
@@ -5395,6 +5402,51 @@
       }
     }
 
+    function parsePdfFilesFromText(text) {
+      return String(text || '')
+        .split('\n')
+        .map(function(line) { return line.trim(); })
+        .filter(Boolean)
+        .map(function(line, index) {
+          const parts = line.split('|');
+          const title = parts.length > 1 ? parts[0].trim() : 'ไฟล์ PDF ' + (index + 1);
+          const url = parts.length > 1 ? parts.slice(1).join('|').trim() : line.trim();
+          return { title: title || ('ไฟล์ PDF ' + (index + 1)), url: url, source: 'googleDrive' };
+        })
+        .filter(function(file) { return file.url; });
+    }
+
+    function pdfFilesToText(pdfFiles) {
+      if (!Array.isArray(pdfFiles) || !pdfFiles.length) return '';
+      return pdfFiles.map(function(file) {
+        return (file.title || 'ไฟล์ PDF') + ' | ' + (file.url || '');
+      }).join('\n');
+    }
+
+    function getPdfFileCountText(item) {
+      const count = Array.isArray(item && item.pdfFiles) ? item.pdfFiles.filter(function(file) { return file && file.url; }).length : 0;
+      return count ? 'มี ' + count + ' ไฟล์' : 'ยังไม่มีไฟล์';
+    }
+
+    function renderPdfButtonsForStudent(item) {
+      const files = Array.isArray(item && item.pdfFiles) ? item.pdfFiles.filter(function(file) { return file && file.url; }) : [];
+      if (!files.length) return '<p style="color:#d1d5db; margin-top:8px;">ยังไม่มีไฟล์ PDF ประกอบบทเรียนสำหรับคลิปนี้</p>';
+      return '<div style="margin-top:10px;">' +
+        '<p style="color:#d1d5db; font-weight:bold; margin-bottom:6px;">ไฟล์ประกอบบทเรียน</p>' +
+        files.map(function(file) {
+          return '<button class="btn btn-blue" type="button" onclick="openExternalLink(\'' + jsArg(file.url) + '\')">📄 ' + (file.title || 'เปิดไฟล์ PDF') + '</button>';
+        }).join('') +
+      '</div>';
+    }
+
+    function openExternalLink(url) {
+      if (!url) {
+        alert('ยังไม่มีลิงก์ไฟล์');
+        return;
+      }
+      window.open(url, '_blank');
+    }
+
     async function saveOnDemandSettings() {
       const courseId = Number(getElement('adminOnDemandCourseSelect').value);
       const subject = getElement('adminOnDemandSubject').value;
@@ -5402,6 +5454,7 @@
       const playlistName = getElement('adminOnDemandPlaylistName').value.trim();
       const clipTitle = getElement('adminOnDemandTitle').value.trim();
       const link = getElement('adminOnDemandLink').value.trim();
+      const pdfFiles = parsePdfFilesFromText(getElement('adminOnDemandPdfFiles') ? getElement('adminOnDemandPdfFiles').value : '');
       const editingId = getElement('editingOnDemandPlaylistId').value;
 
       if (!playlistName || !clipTitle || !link) {
@@ -5414,13 +5467,13 @@
         if (editingId) {
           const item = onDemandPlaylists.find(function(p) { return String(p.id) === String(editingId); });
           if (item) {
-            Object.assign(item, { courseId: courseId, subject: subject, grade: grade, playlistName: playlistName, clipTitle: clipTitle, link: link });
+            Object.assign(item, { courseId: courseId, subject: subject, grade: grade, playlistName: playlistName, clipTitle: clipTitle, link: link, pdfFiles: pdfFiles });
             await setFirebaseDocument('onDemandPlaylists', item);
           }
           getElement('videoSaveResult').textContent = 'แก้ไข Playlist / คลิป On-demand เรียบร้อย';
         } else {
           const newId = Date.now();
-          const newItem = { id: newId, firebaseDocId: String(newId), courseId: courseId, subject: subject, grade: grade, playlistName: playlistName, clipTitle: clipTitle, link: link };
+          const newItem = { id: newId, firebaseDocId: String(newId), courseId: courseId, subject: subject, grade: grade, playlistName: playlistName, clipTitle: clipTitle, link: link, pdfFiles: pdfFiles };
           onDemandPlaylists.push(newItem);
           await setFirebaseDocument('onDemandPlaylists', newItem);
           getElement('videoSaveResult').textContent = 'เพิ่ม Playlist / คลิป On-demand เรียบร้อย';
@@ -5475,8 +5528,8 @@
       const filtered = getFilteredSortedOnDemandPlaylists();
       tbody.innerHTML = filtered.length ? filtered.map(function(item) {
         const course = courses.find(function(c) { return String(c.id) === String(item.courseId); });
-        return '<tr><td>' + item.subject + '</td><td>' + item.grade + '</td><td>' + item.playlistName + '</td><td>' + item.clipTitle + '</td><td>' + (course ? course.name : '-') + '</td><td>' + (item.link ? 'มีลิงก์' : '-') + '</td><td><button class="btn btn-blue" type="button" onclick="' + actionCall('editOnDemand', item.id) + '">แก้ไข</button><button class="btn btn-red" type="button" onclick="' + actionCall('deleteOnDemandPlaylist', item.id) + '">ลบ</button></td></tr>';
-      }).join('') : '<tr><td colspan="7">ไม่พบคลิป On-demand ตามวิชาและระดับชั้นที่เลือก</td></tr>';
+        return '<tr><td>' + item.subject + '</td><td>' + item.grade + '</td><td>' + item.playlistName + '</td><td>' + item.clipTitle + '</td><td>' + (course ? course.name : '-') + '</td><td>' + (item.link ? 'มีลิงก์' : '-') + '</td><td>' + getPdfFileCountText(item) + '</td><td><button class="btn btn-blue" type="button" onclick="' + actionCall('editOnDemand', item.id) + '">แก้ไข</button><button class="btn btn-red" type="button" onclick="' + actionCall('deleteOnDemandPlaylist', item.id) + '">ลบ</button></td></tr>';
+      }).join('') : '<tr><td colspan="8">ไม่พบคลิป On-demand ตามวิชาและระดับชั้นที่เลือก</td></tr>';
     }
 
     function editOnDemand(id) {
@@ -5493,11 +5546,14 @@
           '<div><label>ชื่อ Playlist</label><input id="bubbleOnDemandPlaylistName" type="text" value="' + item.playlistName + '"></div>' +
         '</div>' +
         '<label>ชื่อคลิป / บทเรียน</label><input id="bubbleOnDemandTitle" type="text" value="' + item.clipTitle + '">' +
-        '<br><br><label>ลิงก์วิดีโอ On-demand</label><input id="bubbleOnDemandLink" type="url" value="' + item.link + '">',
+        '<br><br><label>ลิงก์วิดีโอ On-demand</label><input id="bubbleOnDemandLink" type="url" value="' + item.link + '">' +
+        '<br><br><label>ไฟล์ PDF ประกอบบทเรียน (Google Drive)</label><textarea id="bubbleOnDemandPdfFiles" placeholder="ชีทเรียน | https://drive.google.com/...">' + pdfFilesToText(item.pdfFiles) + '</textarea>' +
+        '<p class="mini-muted">ใส่ 1 ไฟล์ต่อ 1 บรรทัด รูปแบบ: ชื่อไฟล์ | ลิงก์ Google Drive</p>',
         function() {
           const playlistName = bubbleValue('bubbleOnDemandPlaylistName');
           const clipTitle = bubbleValue('bubbleOnDemandTitle');
           const link = bubbleValue('bubbleOnDemandLink');
+          const pdfFiles = parsePdfFilesFromText(bubbleValue('bubbleOnDemandPdfFiles'));
           if (!playlistName || !clipTitle || !link) {
             getElement('editBubbleResult').textContent = 'กรุณากรอกชื่อ Playlist ชื่อคลิป และลิงก์วิดีโอให้ครบถ้วน';
             getElement('editBubbleResult').style.color = '#dc2626';
@@ -5509,7 +5565,8 @@
             grade: bubbleSelectValue('bubbleOnDemandGrade'),
             playlistName: playlistName,
             clipTitle: clipTitle,
-            link: link
+            link: link,
+            pdfFiles: pdfFiles
           });
           setFirebaseDocument('onDemandPlaylists', item).catch(function(error) { console.error('save ondemand firebase error:', error); });
           renderOnDemandTable();
@@ -5537,6 +5594,7 @@
       getElement('editingOnDemandPlaylistId').value = '';
       getElement('adminOnDemandTitle').value = '';
       getElement('adminOnDemandLink').value = '';
+      if (getElement('adminOnDemandPdfFiles')) getElement('adminOnDemandPdfFiles').value = '';
       const course = courses.find(function(c) { return String(c.id) === String(getElement('adminOnDemandCourseSelect').value); });
       if (course) {
         getElement('adminOnDemandSubject').value = course.onDemandSubject || guessSubjectFromCourse(course.name);
@@ -6045,6 +6103,7 @@
               '<p style="color:white;"><strong>' + (index + 1) + '. ' + item.clipTitle + '</strong></p>' +
               '<p style="color:#d1d5db;">' + (item.link ? 'ลิงก์คลิปพร้อมใช้งานจากหลังบ้าน' : 'ยังไม่มีลิงก์คลิปนี้') + '</p>' +
               '<button class="btn ' + (item.link ? '' : 'btn-dark') + '" type="button" onclick="' + actionCall('openOnDemandPlaylistClip', item.id) + '">ดูคลิปนี้</button>' +
+              renderPdfButtonsForStudent(item) +
             '</div>';
           }).join('') +
         '</div>';
