@@ -1672,7 +1672,7 @@
        ========================================================= */
     .pickup-actions-mobile {
       display: grid;
-      grid-template-columns: repeat(4, minmax(0, 1fr));
+      grid-template-columns: repeat(3, minmax(0, 1fr));
       gap: 8px;
       width: 100%;
     }
@@ -2605,8 +2605,8 @@
 
               <div class="dashboard-grid">
                 <div class="stat"><h4>นักเรียนทั้งหมด</h4><p id="pickupTotalCount">0 คน</p></div>
-                <div class="stat"><h4>มาเรียน</h4><p id="pickupDoneCount">0 คน</p></div>
-                <div class="stat"><h4>ผู้ปกครองมาส่ง / รถรับส่ง</h4><p id="pickupParentCount">0 คน</p></div>
+                <div class="stat"><h4>มาเรียนแล้ว</h4><p id="pickupDoneCount">0 คน</p></div>
+                <div class="stat"><h4>วิธีมาเรียน</h4><p id="pickupParentCount">0 คน</p></div>
                 <div class="stat"><h4>ไม่มา / ยังไม่เช็ค</h4><p id="pickupWaitingCount">0 คน</p></div>
               </div>
 
@@ -2652,9 +2652,8 @@
               </div>
 
               <div class="test-actions">
-                <button class="btn btn-green" type="button" onclick="markAllPickup('มาเรียน')">มาเรียนทั้งหมด</button>
+                <button class="btn btn-green" type="button" onclick="markAllPickup('รถรับส่ง')">รถรับส่งทั้งหมด</button>
                 <button class="btn btn-dark" type="button" onclick="markAllPickup('ผู้ปกครองมาส่ง')">ผู้ปกครองมาส่งทั้งหมด</button>
-                <button class="btn btn-blue" type="button" onclick="markAllPickup('รถรับส่ง')">รถรับส่งทั้งหมด</button>
                 <button class="btn btn-red" type="button" onclick="markAllPickup('ไม่มา')">ไม่มาทั้งหมด</button>
                 <button class="btn btn-blue" type="button" onclick="teacherSaveAttendance()">บันทึกเช็คชื่อ</button>
               </div>
@@ -5142,10 +5141,9 @@
           '<td data-label="สถานะ"><span class="' + statusClass + '">' + item.status + '</span></td>' +
           '<td data-label="เช็คด่วน">' +
             '<div class="pickup-actions-mobile">' +
-              '<button class="btn btn-green" type="button" onclick="setPickupStatus(' + item.id + ', \'มาเรียน\')">มาเรียน</button>' +
-              '<button class="btn btn-dark" type="button" onclick="setPickupStatus(' + item.id + ', \'ผู้ปกครองมาส่ง\')">ผู้ปกครองมาส่ง</button>' +
-              '<button class="btn btn-blue" type="button" onclick="setPickupStatus(' + item.id + ', \'รถรับส่ง\')">รถรับส่ง</button>' +
-              '<button class="btn btn-red" type="button" onclick="setPickupStatus(' + item.id + ', \'ไม่มา\')">ไม่มา</button>' +
+              '<button class="btn btn-green" type="button" onclick="setPickupStatus(\'' + jsArg(item.id) + '\', \'รถรับส่ง\')">รถรับส่ง</button>' +
+              '<button class="btn btn-dark" type="button" onclick="setPickupStatus(\'' + jsArg(item.id) + '\', \'ผู้ปกครองมาส่ง\')">ผู้ปกครองมาส่ง</button>' +
+              '<button class="btn btn-red" type="button" onclick="setPickupStatus(\'' + jsArg(item.id) + '\', \'ไม่มา\')">ไม่มา</button>' +
             '</div>' +
           '</td>' +
         '</tr>';
@@ -5174,16 +5172,35 @@
       renderPickupList();
     }
 
-    function setPickupStatus(id, status) {
+    async function setPickupStatus(id, status) {
       const item = pickupList.find(function(student) { return String(student.id) === String(id); });
       const student = students.find(function(s) { return String(s.id) === String(id); });
-      if (!item && !student) return;
+      const result = getElement('teacherAttendanceResult');
+      if (!item && !student) {
+        if (result) { result.textContent = 'ไม่พบข้อมูลนักเรียนที่ต้องการเช็คชื่อ'; result.style.color = '#dc2626'; }
+        return;
+      }
+
       if (item) item.status = status;
+
       if (student) {
         student.pickupStatus = status;
         student.pickupDate = getElement('pickupDate') ? getElement('pickupDate').value : '';
-        setFirebaseDocument('students', student).catch(function(error) { console.error('pickup firebase error:', error); });
+        try {
+          await setFirebaseDocument('students', student);
+          if (result) {
+            result.textContent = 'บันทึกสถานะ "' + status + '" ของ ' + (student.name || '-') + ' เรียบร้อย';
+            result.style.color = '#16a34a';
+          }
+        } catch (error) {
+          console.error('pickup firebase error:', error);
+          if (result) {
+            result.textContent = 'บันทึกเช็คชื่อไม่สำเร็จ: ' + (error.message || error.code || 'ไม่ทราบสาเหตุ');
+            result.style.color = '#dc2626';
+          }
+        }
       }
+
       renderPickupList();
       renderTeacherStudents();
       renderTeacherDashboardSummary();
