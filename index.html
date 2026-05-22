@@ -297,6 +297,7 @@
     .status-waiting { color: #d97706; font-weight: bold; }
     .status-absent { color: #dc2626; font-weight: bold; }
     .status-parent { color: #7c3aed; font-weight: bold; }
+    .status-no-class { color: #6b7280; font-weight: bold; }
 
     .student-status-card {
       border: 1px solid #dbeafe;
@@ -2719,6 +2720,7 @@
                     <option value="ผู้ปกครองมาส่ง">ผู้ปกครองมาส่ง</option>
                     <option value="รถรับส่ง">รถรับส่ง</option>
                     <option value="ยังไม่เช็คชื่อ">ยังไม่เช็คชื่อ</option>
+                    <option value="ไม่มีเรียน">ไม่มีเรียน</option>
                     <option value="ไม่มา">ไม่มา</option>
                   </select>
                 </div>
@@ -5347,7 +5349,9 @@
       const relatedStudents = students.filter(function(s) {
         return !teacherCourseNames.length || teacherCourseNames.includes(s.course) || (currentTeacher && currentTeacher.role === 'Admin');
       });
-      const absentCount = relatedStudents.filter(function(s) { return (s.pickupStatus || 'ไม่มา') === 'ไม่มา'; }).length;
+      const todayText = getLocalDateString();
+      const todayClassStudents = relatedStudents.filter(function(s) { return isStudentClassOnDate(s, todayText); });
+      const absentCount = todayClassStudents.filter(function(s) { return getStudentAttendanceDisplayStatus(s, todayText) === 'ไม่มา' || getStudentAttendanceDisplayStatus(s, todayText) === 'ยังไม่เช็คชื่อ'; }).length;
       if (getElement('teacherDashCourseCount')) getElement('teacherDashCourseCount').textContent = teacherCourses.length + ' คอร์ส';
       if (getElement('teacherDashStudentCount')) getElement('teacherDashStudentCount').textContent = relatedStudents.length + ' คน';
       if (getElement('teacherDashAbsentCount')) getElement('teacherDashAbsentCount').textContent = absentCount + ' คน';
@@ -5377,16 +5381,68 @@
     const pickupPerPage = 20;
     const pickupHistory = [];
 
+    function getLocalDateString(date) {
+      const target = date ? new Date(date) : new Date();
+      const year = target.getFullYear();
+      const month = String(target.getMonth() + 1).padStart(2, '0');
+      const day = String(target.getDate()).padStart(2, '0');
+      return year + '-' + month + '-' + day;
+    }
+
+    function getPickupDateValue() {
+      return getElement('pickupDate') && getElement('pickupDate').value
+        ? getElement('pickupDate').value
+        : getLocalDateString();
+    }
+
+    function getThaiDayFromDate(dateText) {
+      const days = ['อาทิตย์', 'จันทร์', 'อังคาร', 'พุธ', 'พฤหัสบดี', 'ศุกร์', 'เสาร์'];
+      const date = dateText ? new Date(dateText + 'T00:00:00') : new Date();
+      return days[date.getDay()];
+    }
+
+    function getCourseDayList(course) {
+      if (!course) return [];
+      let dayText = '';
+      if (Array.isArray(course.days)) dayText += ' ' + course.days.join(' ');
+      if (course.onlineClassDay) dayText += ' ' + course.onlineClassDay;
+      if (course.day) dayText += ' ' + course.day;
+      if (!dayText.trim()) return [];
+      return ['จันทร์', 'อังคาร', 'พุธ', 'พฤหัสบดี', 'ศุกร์', 'เสาร์', 'อาทิตย์'].filter(function(day) {
+        return dayText.indexOf(day) !== -1;
+      });
+    }
+
+    function isStudentClassOnDate(student, dateText) {
+      if (!student || !student.courseId && (!student.course || student.course === 'ยังไม่ได้สมัครคอร์ส')) return false;
+      const course = getCourseByStudentOrName(student, student.course);
+      if (!course) return false;
+      const courseDays = getCourseDayList(course);
+      if (!courseDays.length) return true;
+      return courseDays.includes(getThaiDayFromDate(dateText));
+    }
+
+    function getStudentAttendanceDisplayStatus(student, dateText) {
+      const targetDate = dateText || getPickupDateValue();
+      if (!isStudentClassOnDate(student, targetDate)) return 'ไม่มีเรียน';
+      if (student && student.pickupDate === targetDate && student.pickupStatus) return student.pickupStatus;
+      return 'ยังไม่เช็คชื่อ';
+    }
+
     function syncPickupListFromStudents() {
+      const selectedDate = getPickupDateValue();
       pickupList.length = 0;
       students.forEach(function(student, index) {
+        const hasClassToday = isStudentClassOnDate(student, selectedDate);
         pickupList.push({
           id: student.id || index + 1,
           name: student.name || '-',
           nickname: student.nickname || '-',
           grade: student.grade || '-',
           course: student.course || '-',
-          status: student.pickupStatus || 'ยังไม่เช็คชื่อ'
+          hasClassToday: hasClassToday,
+          pickupDate: selectedDate,
+          status: getStudentAttendanceDisplayStatus(student, selectedDate)
         });
       });
     }
@@ -5411,6 +5467,7 @@
       if (status === 'รถรับส่ง') return 'status-present';
       if (status === 'ผู้ปกครองมาส่ง') return 'status-parent';
       if (status === 'ยังไม่เช็คชื่อ') return 'status-parent';
+      if (status === 'ไม่มีเรียน') return 'status-no-class';
       return 'status-absent';
     }
 
@@ -5427,6 +5484,13 @@
 
       tbody.innerHTML = pageItems.length ? pageItems.map(function(item, index) {
         const statusClass = getPickupStatusClass(item.status);
+        const actionHtml = item.hasClassToday
+          ? '<div class="pickup-actions-mobile">' +
+              '<button class="btn btn-green" type="button" onclick="setPickupStatus(\'' + jsArg(item.id) + '\', \'รถรับส่ง\')">รถรับส่ง</button>' +
+              '<button class="btn btn-dark" type="button" onclick="setPickupStatus(\'' + jsArg(item.id) + '\', \'ผู้ปกครองมาส่ง\')">ผู้ปกครองมาส่ง</button>' +
+              '<button class="btn btn-red" type="button" onclick="setPickupStatus(\'' + jsArg(item.id) + '\', \'ไม่มา\')">ไม่มา</button>' +
+            '</div>'
+          : '<span class="status-no-class">ไม่มีเรียนวันนี้</span>';
         return '<tr>' +
           '<td data-label="ลำดับ">' + (start + index + 1) + '</td>' +
           '<td data-label="นักเรียน" class="student-name">' + item.name + '</td>' +
@@ -5434,13 +5498,7 @@
           '<td data-label="ระดับชั้น">' + item.grade + '</td>' +
           '<td data-label="คอร์ส">' + (item.course || '-') + '</td>' +
           '<td data-label="สถานะ"><span class="' + statusClass + '">' + item.status + '</span></td>' +
-          '<td data-label="เช็คด่วน">' +
-            '<div class="pickup-actions-mobile">' +
-              '<button class="btn btn-green" type="button" onclick="setPickupStatus(\'' + jsArg(item.id) + '\', \'รถรับส่ง\')">รถรับส่ง</button>' +
-              '<button class="btn btn-dark" type="button" onclick="setPickupStatus(\'' + jsArg(item.id) + '\', \'ผู้ปกครองมาส่ง\')">ผู้ปกครองมาส่ง</button>' +
-              '<button class="btn btn-red" type="button" onclick="setPickupStatus(\'' + jsArg(item.id) + '\', \'ไม่มา\')">ไม่มา</button>' +
-            '</div>' +
-          '</td>' +
+          '<td data-label="เช็คด่วน">' + actionHtml + '</td>' +
         '</tr>';
       }).join('') : '<tr><td colspan="7">ไม่พบรายชื่อนักเรียนในเงื่อนไขที่เลือก</td></tr>';
 
@@ -5468,6 +5526,7 @@
     }
 
     async function setPickupStatus(id, status) {
+      const selectedDate = getPickupDateValue();
       const item = pickupList.find(function(student) { return String(student.id) === String(id); });
       const student = students.find(function(s) { return String(s.id) === String(id); });
       const result = getElement('teacherAttendanceResult');
@@ -5476,11 +5535,20 @@
         return;
       }
 
+      if (student && !isStudentClassOnDate(student, selectedDate)) {
+        if (result) {
+          result.textContent = (student.name || '-') + ' ไม่มีเรียนในวันที่เลือก จึงไม่ต้องเช็คชื่อ';
+          result.style.color = '#6b7280';
+        }
+        renderPickupList();
+        return;
+      }
+
       if (item) item.status = status;
 
       if (student) {
         student.pickupStatus = status;
-        student.pickupDate = getElement('pickupDate') ? getElement('pickupDate').value : '';
+        student.pickupDate = selectedDate;
         try {
           await setFirebaseDocument('students', student);
           if (result) {
@@ -5511,21 +5579,31 @@
 
       if (!statusEl) return;
 
-      const statusText = item.pickupStatus || item.status || 'ยังไม่เช็คชื่อ';
+      const selectedDate = getLocalDateString();
+      const statusText = getStudentAttendanceDisplayStatus(currentStudent, selectedDate);
       statusEl.textContent = statusText;
-      statusEl.className = 'status-badge ' + (statusText === 'มาเรียน' || statusText === 'รถรับส่ง' ? 'present' : statusText === 'ผู้ปกครองมาส่ง' ? 'parent' : statusText === 'ยังไม่เช็คชื่อ' ? 'parent' : 'absent');
-      if (dateEl) dateEl.textContent = item.pickupDate || (getElement('pickupDate') ? getElement('pickupDate').value : 'วันนี้');
+      statusEl.className = 'status-badge ' + (statusText === 'มาเรียน' || statusText === 'รถรับส่ง' ? 'present' : statusText === 'ผู้ปกครองมาส่ง' || statusText === 'ยังไม่เช็คชื่อ' ? 'parent' : statusText === 'ไม่มีเรียน' ? 'parent' : 'absent');
+      if (dateEl) dateEl.textContent = selectedDate;
     }
 
-    function markAllPickup(status) {
-      const filteredIds = getFilteredPickupList().map(function(item) { return String(item.id); });
+    async function markAllPickup(status) {
+      const selectedDate = getPickupDateValue();
+      const filteredIds = getFilteredPickupList()
+        .filter(function(item) { return item.hasClassToday; })
+        .map(function(item) { return String(item.id); });
+      const tasks = [];
       students.forEach(function(student) {
         if (filteredIds.includes(String(student.id))) {
           student.pickupStatus = status;
-          student.pickupDate = getElement('pickupDate') ? getElement('pickupDate').value : '';
-          setFirebaseDocument('students', student).catch(function(error) { console.error('pickup firebase error:', error); });
+          student.pickupDate = selectedDate;
+          tasks.push(setFirebaseDocument('students', student));
         }
       });
+      try {
+        await Promise.all(tasks);
+      } catch (error) {
+        console.error('pickup firebase error:', error);
+      }
       pickupCurrentPage = 1;
       renderPickupList();
       renderTeacherStudents();
@@ -5535,13 +5613,20 @@
 
     function updatePickupSummary(list) {
       const data = Array.isArray(list) ? list : getFilteredPickupList();
-      const present = data.filter(function(item) { return item.status === 'มาเรียน' || item.status === 'ผู้ปกครองมาส่ง' || item.status === 'รถรับส่ง'; }).length;
-      const parent = data.filter(function(item) { return item.status === 'ผู้ปกครองมาส่ง' || item.status === 'รถรับส่ง'; }).length;
-      const absent = data.filter(function(item) { return item.status === 'ไม่มา' || item.status === 'ยังไม่เช็คชื่อ'; }).length;
-      if (getElement('pickupTotalCount')) getElement('pickupTotalCount').textContent = data.length + ' คน';
+      const classData = data.filter(function(item) { return item.hasClassToday; });
+      const present = classData.filter(function(item) { return item.status === 'มาเรียน' || item.status === 'ผู้ปกครองมาส่ง' || item.status === 'รถรับส่ง'; }).length;
+      const parent = classData.filter(function(item) { return item.status === 'ผู้ปกครองมาส่ง' || item.status === 'รถรับส่ง'; }).length;
+      const absent = classData.filter(function(item) { return item.status === 'ไม่มา' || item.status === 'ยังไม่เช็คชื่อ'; }).length;
+      const noClass = data.filter(function(item) { return item.status === 'ไม่มีเรียน'; }).length;
+      if (getElement('pickupTotalCount')) getElement('pickupTotalCount').textContent = classData.length + ' คน';
       if (getElement('pickupDoneCount')) getElement('pickupDoneCount').textContent = present + ' คน';
       if (getElement('pickupParentCount')) getElement('pickupParentCount').textContent = parent + ' คน';
       if (getElement('pickupWaitingCount')) getElement('pickupWaitingCount').textContent = absent + ' คน';
+      const result = getElement('teacherAttendanceResult');
+      if (result && noClass && !result.textContent) {
+        result.textContent = 'มีนักเรียนไม่มีเรียนในวันที่เลือก ' + noClass + ' คน ระบบไม่นับเป็นยังไม่เช็คชื่อ';
+        result.style.color = '#6b7280';
+      }
     }
 
     function renderPickupHistory() {
@@ -5554,10 +5639,10 @@
     }
 
     function teacherSaveAttendance() {
-      const filtered = getFilteredPickupList();
+      const filtered = getFilteredPickupList().filter(function(item) { return item.hasClassToday; });
       const present = filtered.filter(function(item) { return item.status === 'มาเรียน' || item.status === 'ผู้ปกครองมาส่ง' || item.status === 'รถรับส่ง'; }).length;
       const parent = filtered.filter(function(item) { return item.status === 'ผู้ปกครองมาส่ง' || item.status === 'รถรับส่ง'; }).length;
-      const absent = filtered.filter(function(item) { return item.status === 'ไม่มา'; }).length;
+      const absent = filtered.filter(function(item) { return item.status === 'ไม่มา' || item.status === 'ยังไม่เช็คชื่อ'; }).length;
       const selectedCourse = getElement('teacherAttendanceCourseFilter') ? getElement('teacherAttendanceCourseFilter').value : 'ทั้งหมด';
       const selectedGrade = getElement('pickupGradeFilter') ? getElement('pickupGradeFilter').value : 'ทั้งหมด';
 
@@ -5807,7 +5892,11 @@
       const pendingPaymentRecords = getPendingPaymentRecords();
       const overduePaymentRecords = getOverduePaymentRecords();
       const pendingCourseStudents = getPendingCourseStudents();
-      const todayAbsent = Array.isArray(students) ? students.filter(function(s) { return s.pickupStatus === 'ไม่มา' || s.pickupStatus === 'ยังไม่เช็คชื่อ'; }).length : 0;
+      const todayText = getLocalDateString();
+      const todayAbsent = Array.isArray(students) ? students.filter(function(s) {
+        const status = getStudentAttendanceDisplayStatus(s, todayText);
+        return status === 'ไม่มา' || status === 'ยังไม่เช็คชื่อ';
+      }).length : 0;
 
       if (getElement('dashTotalStudents')) getElement('dashTotalStudents').textContent = totalStudents + ' คน';
       if (getElement('dashOpenCourses')) getElement('dashOpenCourses').textContent = openCourses + ' คอร์ส';
