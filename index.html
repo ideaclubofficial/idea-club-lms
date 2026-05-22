@@ -2347,13 +2347,13 @@
             <button id="studentLineGroupButton" class="btn btn-green" type="button" onclick="openStudentLineGroup()">เข้ากลุ่ม LINE และแจ้งรอตรวจ</button>
           </div>
           <ol class="step-list">
-            <li>เลือกเดือนที่ชำระให้ถูกต้อง</li>
-            <li>กดเข้ากลุ่ม LINE ประจำชั้น ระบบจะขึ้นสถานะ “รอตรวจสลิป” ของเดือนที่เลือก</li>
-            <li>ส่งสลิปในกลุ่ม LINE พร้อมแจ้งชื่อผู้เรียนและเดือนที่ชำระ</li>
-            <li>เจ้าหน้าที่ตรวจสลิปจาก LINE และอัปเดตสถานะในหลังบ้าน</li>
-            <li>เมื่ออนุมัติแล้ว ใบเสร็จจะแสดงใน “ประวัติใบเสร็จ”</li>
+            <li>เลือกเดือนที่ต้องการชำระให้ถูกต้อง</li>
+            <li>กดปุ่ม “เข้ากลุ่ม LINE และแจ้งรอตรวจ”</li>
+            <li>ระบบจะเปลี่ยนสถานะของเดือนนั้นเป็น “รอตรวจสลิป”</li>
+            <li>ส่งสลิปใน LINE กลุ่ม พร้อมพิมพ์ชื่อนักเรียนและเดือนที่ชำระ</li>
+            <li>เจ้าหน้าที่ตรวจสอบจาก LINE แล้วอัปเดตสถานะ / ใบเสร็จในระบบ</li>
           </ol>
-          <p id="studentSlipResult" style="margin-top:14px; font-weight:bold; color:#6b7280;">หลังเข้ากลุ่ม LINE ระบบจะขึ้นสถานะรอตรวจสลิปของเดือนที่เลือก จากนั้นส่งสลิปในกลุ่มและรอเจ้าหน้าที่ตรวจสอบ</p>
+          <p id="studentSlipResult" style="margin-top:14px; font-weight:bold; color:#6b7280;">เลือกเดือนให้ถูกต้อง แล้วกดเข้ากลุ่ม LINE จากนั้นส่งสลิปในกลุ่มได้เลย</p>
         </div>
       </div>
       </div>
@@ -8027,7 +8027,8 @@ function getCourseOnlineDocs(course, includeInactive) {
         '<button class="btn btn-red" type="button" onclick="rejectPayment(this)">ไม่ผ่าน</button>' +
         '<button class="btn btn-red" type="button" onclick="setPaymentOverdue(this)">ค้างชำระ</button>' +
         '<button class="btn ' + (isPaid ? 'btn-green' : 'btn-dark') + '" type="button" onclick="createReceiptFromPaymentRow(this)">ใบเสร็จ</button>' +
-        '<button class="btn btn-blue" type="button" onclick="showPaymentDetail(this)">ดูข้อมูล</button>';
+        '<button class="btn btn-blue" type="button" onclick="showPaymentDetail(this)">ดูข้อมูล</button>' +
+        '<button class="btn btn-red" type="button" onclick="deletePaymentRecord(this)">ลบข้อมูล</button>';
     }
 
     async function updatePaymentRowStatus(row, status) {
@@ -8059,6 +8060,48 @@ function getCourseOnlineDocs(course, includeInactive) {
       row.children[6].innerHTML = paymentActionButtons(status);
       addActivityLog('เปลี่ยนสถานะชำระเงิน', (row.children[0] ? row.children[0].innerText : '-') + ' · ' + (row.children[2] ? row.children[2].innerText : '-') + ' · ' + status);
       updatePaymentSummary();
+    }
+
+    async function deletePaymentRecord(button) {
+      const row = button.closest('tr');
+      if (!row) return;
+      const paymentId = row.getAttribute('data-payment-id');
+      const index = payments.findIndex(function(p) { return String(p.id) === String(paymentId); });
+      if (index === -1) return;
+      const payment = payments[index];
+
+      if (!confirm('ต้องการลบข้อมูลการชำระเงินของ ' + (payment.student || '-') + ' เดือน ' + (payment.month || '-') + ' ใช่หรือไม่?')) return;
+
+      try {
+        await deleteFirebaseDocument('payments', payment);
+        payments.splice(index, 1);
+        addActivityLog('ลบข้อมูลการชำระเงิน', (payment.student || '-') + ' · ' + (payment.month || '-'));
+
+        const student = students.find(function(s) {
+          return String(s.id || '') === String(payment.studentId || '') || s.name === payment.student;
+        });
+        if (student) {
+          const hasOtherPaymentSameMonth = payments.some(function(p) {
+            const sameStudent = String(p.studentId || '') === String(student.id || '') || p.student === student.name;
+            return sameStudent && p.month === payment.month;
+          });
+          if (!hasOtherPaymentSameMonth && student.paymentStatus === payment.status) {
+            student.paymentStatus = 'รอชำระเงิน';
+            await setFirebaseDocument('students', student);
+          }
+          if (currentStudent && String(currentStudent.id) === String(student.id)) {
+            currentStudent = student;
+            updateStudentCourseDisplay();
+          }
+        }
+
+        renderPaymentTable();
+        renderAdminDashboard();
+        renderStudentReceipts();
+      } catch (error) {
+        console.error('delete payment error:', error);
+        alert('ลบข้อมูลการชำระเงินไม่สำเร็จ: ' + (error.message || error.code || 'ไม่ทราบสาเหตุ'));
+      }
     }
 
     function approvePayment(button) {
@@ -8129,15 +8172,37 @@ function getCourseOnlineDocs(course, includeInactive) {
     }
 
 
+    function normalizeText(value) {
+      return String(value || '').trim().replace(/\s+/g, ' ');
+    }
+
+    function normalizeExternalUrl(url) {
+      const value = String(url || '').trim();
+      if (!value) return '';
+      if (/^(https?:\/\/|line:\/\/)/i.test(value)) return value;
+      return 'https://' + value;
+    }
+
     function getCurrentLineGroup() {
       const selectedCourse = getCurrentStudentCourse ? getCurrentStudentCourse() : null;
       const grade = currentStudent && currentStudent.grade ? currentStudent.grade : getProfileGrade();
-      const location = selectedCourse && selectedCourse.location ? selectedCourse.location : '';
+      const preferredLocation = currentStudent && currentStudent.preferredLocation ? currentStudent.preferredLocation : '';
+      const courseLocation = selectedCourse && selectedCourse.location ? selectedCourse.location : '';
+      const location = normalizeText(courseLocation || preferredLocation);
+
+      const exact = lineGroups.find(function(item) {
+        const active = (item.status || 'active') === 'active';
+        const gradeMatched = normalizeText(item.grade) === normalizeText(grade);
+        const locationMatched = location ? normalizeText(item.location) === location : true;
+        return active && gradeMatched && locationMatched && item.lineUrl;
+      });
+
+      if (exact) return exact;
+
       return lineGroups.find(function(item) {
         const active = (item.status || 'active') === 'active';
-        const gradeMatched = item.grade === grade;
-        const locationMatched = location ? item.location === location : true;
-        return active && gradeMatched && locationMatched;
+        const gradeMatched = normalizeText(item.grade) === normalizeText(grade);
+        return active && gradeMatched && item.lineUrl;
       }) || null;
     }
 
@@ -8157,6 +8222,7 @@ function getCourseOnlineDocs(course, includeInactive) {
       const group = getCurrentLineGroup();
       if (group && group.lineUrl) {
         text.textContent = (group.groupName || 'LINE กลุ่มประจำชั้น') + ' · ' + group.grade + ' · ' + group.location;
+        button.setAttribute('data-line-url', normalizeExternalUrl(group.lineUrl));
         button.classList.remove('hidden');
         return;
       }
@@ -8170,6 +8236,13 @@ function getCourseOnlineDocs(course, includeInactive) {
       if (!group || !group.lineUrl) {
         alert('ยังไม่ได้ตั้งค่าลิงก์ LINE กลุ่มสำหรับระดับชั้นและศูนย์นี้');
         return;
+      }
+
+      const lineUrl = normalizeExternalUrl(group.lineUrl);
+      const openedWindow = window.open(lineUrl, '_blank');
+
+      if (!openedWindow) {
+        alert('เบราว์เซอร์บล็อก popup กรุณากดปุ่มอีกครั้ง หรือคัดลอกลิงก์ LINE จากหลังบ้าน');
       }
 
       if (currentStudent) {
@@ -8222,7 +8295,7 @@ function getCourseOnlineDocs(course, includeInactive) {
               renderPaymentTable();
               renderAdminDashboard();
               if (result) {
-                result.textContent = 'ระบบขึ้นสถานะรอตรวจสลิปสำหรับเดือน ' + month + ' แล้ว กรุณาส่งสลิปใน LINE กลุ่ม';
+                result.textContent = 'ขึ้นสถานะรอตรวจสลิปสำหรับเดือน ' + month + ' แล้ว กรุณาส่งสลิปใน LINE กลุ่ม';
                 result.style.color = '#0f4cbd';
               }
             }
@@ -8235,10 +8308,9 @@ function getCourseOnlineDocs(course, includeInactive) {
           }
         }
       }
-
-      window.open(group.lineUrl, '_blank');
     }
 
+    
     function renderLineGroups() {
       const tbody = getElement('lineGroupTableBody');
       if (!tbody) return;
