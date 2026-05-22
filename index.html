@@ -2840,7 +2840,7 @@
               <p>1. นักเรียนสมัครสมาชิกและ Login ได้ทันที</p>
               <p>2. นักเรียนสมัครคอร์ส ระบบขึ้นสถานะ <strong>รออนุมัติคอร์ส</strong></p>
               <p>3. นักเรียนชำระเงินและส่งสลิปใน LINE กลุ่มประจำชั้น โดยไม่ต้องกดยืนยันในระบบ</p>
-              <p>4. Admin ตรวจสลิปจาก LINE แล้วอัปเดตสถานะชำระเงิน / ออกใบเสร็จในหลังบ้าน</p>
+              <p>4. Admin ตรวจสลิปจาก LINE แล้วกดอนุมัติ ระบบจะออกใบเสร็จและแสดงให้ผู้ปกครองอัตโนมัติ</p>
               <p>5. เมื่อนักเรียนได้รับอนุมัติแล้ว จึงเข้า Online / ดูคลิป / ทำแบบทดสอบ / ดูคะแนนได้</p>
             </div>
           </section>
@@ -8056,23 +8056,26 @@ function getCourseOnlineDocs(course, includeInactive) {
       if (status === 'ชำระแล้ว') {
         row.children[4].innerHTML = payment ? formatPaymentSlipCell(payment) : '<span class="status-paid">ตรวจแล้ว</span>';
         row.children[5].innerHTML = '<span class="status-paid">ชำระแล้ว</span>';
-        syncStudentPaymentStatusFromRow(row, 'ชำระแล้ว');
+        await syncStudentPaymentStatusFromRow(row, 'ชำระแล้ว');
+        if (payment) await createReceipt(getPaymentDataFromRow(row), { publish: true, silent: true, source: 'auto-approve' });
       } else if (status === 'สลิปไม่ผ่าน') {
         row.children[4].innerHTML = payment ? formatPaymentSlipCell(payment) : '<span class="status-absent">สลิปไม่ผ่าน</span>';
         row.children[5].innerHTML = '<span class="status-absent">สลิปไม่ผ่าน</span>';
-        syncStudentPaymentStatusFromRow(row, 'สลิปไม่ผ่าน');
+        await syncStudentPaymentStatusFromRow(row, 'สลิปไม่ผ่าน');
       } else if (status === 'ค้างชำระ') {
         row.children[4].innerHTML = payment ? formatPaymentSlipCell(payment) : '<span class="status-absent">ยังไม่พบสลิป</span>';
         row.children[5].innerHTML = '<span class="status-absent">ค้างชำระ</span>';
-        syncStudentPaymentStatusFromRow(row, 'ค้างชำระ');
+        await syncStudentPaymentStatusFromRow(row, 'ค้างชำระ');
       } else {
         row.children[4].innerHTML = payment ? formatPaymentSlipCell(payment) : '<span class="status-waiting">มีสลิป</span>';
         row.children[5].innerHTML = '<span class="status-waiting">รอตรวจสลิป</span>';
-        syncStudentPaymentStatusFromRow(row, 'รอตรวจสลิป');
+        await syncStudentPaymentStatusFromRow(row, 'รอตรวจสลิป');
       }
       row.children[6].innerHTML = paymentActionButtons(status);
       addActivityLog('เปลี่ยนสถานะชำระเงิน', (row.children[0] ? row.children[0].innerText : '-') + ' · ' + (row.children[2] ? row.children[2].innerText : '-') + ' · ' + status);
       updatePaymentSummary();
+      renderAdminReceipts();
+      renderStudentReceipts();
     }
 
     async function deletePaymentRecord(button) {
@@ -8117,28 +8120,28 @@ function getCourseOnlineDocs(course, includeInactive) {
       }
     }
 
-    function approvePayment(button) {
+    async function approvePayment(button) {
       const row = button.closest('tr');
       if (!row) return;
-      updatePaymentRowStatus(row, 'ชำระแล้ว');
+      await updatePaymentRowStatus(row, 'ชำระแล้ว');
     }
 
-    function rejectPayment(button) {
+    async function rejectPayment(button) {
       const row = button.closest('tr');
       if (!row) return;
-      updatePaymentRowStatus(row, 'สลิปไม่ผ่าน');
+      await updatePaymentRowStatus(row, 'สลิปไม่ผ่าน');
     }
 
-    function resetPaymentToPending(button) {
+    async function resetPaymentToPending(button) {
       const row = button.closest('tr');
       if (!row) return;
-      updatePaymentRowStatus(row, 'รอตรวจสลิป');
+      await updatePaymentRowStatus(row, 'รอตรวจสลิป');
     }
 
-    function setPaymentOverdue(button) {
+    async function setPaymentOverdue(button) {
       const row = button.closest('tr');
       if (!row) return;
-      updatePaymentRowStatus(row, 'ค้างชำระ');
+      await updatePaymentRowStatus(row, 'ค้างชำระ');
     }
 
     async function syncStudentPaymentStatusFromRow(row, status) {
@@ -8934,19 +8937,32 @@ function getCourseOnlineDocs(course, includeInactive) {
       createReceipt(data);
     }
 
-    async function createReceipt(data) {
+    async function createReceipt(data, options) {
+      options = options || {};
       if (!data.status.includes('ชำระแล้ว')) {
-        alert('ต้องอนุมัติการชำระเงินเป็น “ชำระแล้ว” ก่อน จึงจะออกใบเสร็จได้');
-        return;
+        if (!options.silent) alert('ต้องอนุมัติการชำระเงินเป็น “ชำระแล้ว” ก่อน จึงจะออกใบเสร็จได้');
+        return null;
       }
 
+      const receiptMonth = getPaymentMonthForReceiptData(data);
       const exists = receipts.find(function(r) {
-        return r.student === data.student && r.course === data.course && r.month === data.month;
+        const samePayment = data.paymentId && String(r.paymentId || '') === String(data.paymentId);
+        const sameInfo = r.student === data.student && r.course === data.course && getReceiptMonth(r) === receiptMonth;
+        return samePayment || sameInfo;
       });
 
       if (exists) {
-        openReceiptDetail(exists.id, 'admin');
-        return;
+        if (options.publish && exists.status !== 'published') {
+          exists.status = 'published';
+          exists.autoPublished = true;
+          exists.publishedAtText = new Date().toLocaleString('th-TH');
+          await setFirebaseDocument('receipts', exists);
+          renderAdminReceipts();
+          renderStudentReceipts();
+          addActivityLog('แสดงใบเสร็จอัตโนมัติ', (exists.receiptNo || '-') + ' · ' + (exists.student || '-'));
+        }
+        if (!options.silent) openReceiptDetail(exists.id, 'admin');
+        return exists;
       }
 
       const receiptId = Date.now();
@@ -8961,18 +8977,30 @@ function getCourseOnlineDocs(course, includeInactive) {
         receiptNo: createReceiptNo(),
         student: data.student,
         course: data.course,
-        month: getPaymentMonthForReceiptData(data),
+        month: receiptMonth,
         amount: String(data.amount).replace(' บาท', ''),
         approvedDate: new Date().toLocaleDateString('th-TH'),
         admin: getElement('profileName') ? getElement('profileName').textContent : 'Admin IDEA CLUB',
-        status: 'draft'
+        status: options.publish ? 'published' : 'draft',
+        autoPublished: !!options.publish,
+        publishedAtText: options.publish ? new Date().toLocaleString('th-TH') : ''
       };
       receipts.push(newReceipt);
       await setFirebaseDocument('receipts', newReceipt);
 
       renderAdminReceipts();
       renderStudentReceipts();
-      alert('ออกใบเสร็จเรียบร้อย สถานะยังเป็น “รอตรวจ” ต้องกดแสดงให้ผู้ปกครองก่อน');
+      addActivityLog(options.publish ? 'ออกและแสดงใบเสร็จอัตโนมัติ' : 'ออกใบเสร็จ', (newReceipt.receiptNo || '-') + ' · ' + (newReceipt.student || '-'));
+
+      if (!options.silent) {
+        if (options.publish) {
+          alert('ออกใบเสร็จและแสดงให้ผู้ปกครองเรียบร้อย');
+        } else {
+          alert('ออกใบเสร็จเรียบร้อย สถานะยังเป็น “รอตรวจ” ต้องกดแสดงให้ผู้ปกครองก่อน');
+        }
+      }
+
+      return newReceipt;
     }
 
     
