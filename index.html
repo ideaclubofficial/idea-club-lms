@@ -2394,8 +2394,8 @@
 
         <div class="video-box">
           <div class="video-placeholder">▶ คลิปย้อนหลัง</div>
-          <h3>ดูคลิปย้อนหลังตามระดับชั้น</h3>
-          <p id="studentOnDemandGradeText">ระบบจะแสดงคลิปตามระดับชั้นในข้อมูลส่วนตัว</p>
+          <h3>ดูคลิปย้อนหลังและเอกสารประกอบ</h3>
+          <p id="studentOnDemandGradeText">ระบบจะแสดงคลิปตามระดับชั้น พร้อมเอกสารที่ผูกกับแต่ละคลิป</p>
           <div style="margin-top:14px; margin-bottom:12px;">
             <label style="color:white;">เลือกวิชา</label>
             <select id="studentOnDemandSubjectFilter" onchange="renderStudentOnDemandClasses(getCoursesForProfileGrade(), getProfileGrade())">
@@ -4034,7 +4034,7 @@
               <textarea id="adminOnDemandPdfFiles" placeholder="ใส่ 1 ไฟล์ต่อ 1 บรรทัด เช่น
 ชีทเรียน ระบบย่อยอาหาร | https://drive.google.com/...
 เฉลยแบบฝึกหัด | https://drive.google.com/..."></textarea>
-              <p class="mini-muted">หมายเหตุ: ไฟล์ Google Drive ต้องตั้งสิทธิ์เป็น Anyone with the link can view ก่อน นักเรียนจึงจะเปิดได้</p>
+              <p class="mini-muted">หมายเหตุ: เอกสารที่ใส่ตรงนี้จะผูกกับคลิปนี้โดยตรง และจะแสดงใต้คลิปนี้ในฝั่งนักเรียน ต้องตั้งสิทธิ์ Google Drive เป็น Anyone with the link can view ก่อน</p>
 
               <button class="btn btn-blue" type="button" onclick="saveOnDemandSettings()">บันทึก ชุดคลิป / คลิป</button>
               <button class="btn btn-dark" type="button" onclick="clearOnDemandForm()">ล้างฟอร์ม</button>
@@ -5339,7 +5339,7 @@
           '<p><strong>Password:</strong> ' + (c.roomPassword || '-') + '</p>' +
           '<p style="color:#6b7280;">' + (hasLink ? 'ลิงก์ MS Teams พร้อมใช้งาน' : 'ยังไม่ได้เพิ่มลิงก์ MS Teams ในหลังบ้าน') + '</p>' +
           '<button class="btn ' + (hasLink ? 'btn-blue' : 'btn-dark') + '" type="button" onclick="' + actionCall('openOnlineClassByCourseId', c.id) + '">เข้าห้องเรียน Online</button>' +
-          renderOnlineDocsForCourse(c, 4) +
+          renderOnlineDocsForCourse(c) +
         '</div>';
       }).join('');
       renderTeacherDashboardSummary();
@@ -7120,13 +7120,44 @@
       return count ? 'มี ' + count + ' ไฟล์' : 'ยังไม่มีไฟล์';
     }
 
+    function getLinkedOnDemandPdfFiles(item) {
+      const ownFiles = Array.isArray(item && item.pdfFiles)
+        ? item.pdfFiles.filter(function(file) { return file && file.url; })
+        : [];
+      if (ownFiles.length) return ownFiles.map(function(file) {
+        return Object.assign({ source: 'clip' }, file);
+      });
+
+      // fallback: ถ้าคลิปยังไม่มีไฟล์แนบโดยตรง ให้ดึงเอกสาร Online รายครั้งของคอร์สเดียวกันมาแสดงเป็นเอกสารที่เกี่ยวข้อง
+      const course = courses.find(function(c) { return String(c.id) === String(item && item.courseId); });
+      const docs = getCourseOnlineDocs(course, false);
+      const relatedFiles = [];
+      docs.forEach(function(doc) {
+        const files = Array.isArray(doc.files) ? doc.files : [];
+        files.forEach(function(file) {
+          if (file && file.url) {
+            relatedFiles.push({
+              title: (doc.topic ? doc.topic + ' · ' : '') + (file.title || 'เปิดเอกสาร'),
+              url: file.url,
+              source: 'course-doc',
+              classDate: doc.classDate || ''
+            });
+          }
+        });
+      });
+      return relatedFiles;
+    }
+
     function renderPdfButtonsForStudent(item) {
-      const files = Array.isArray(item && item.pdfFiles) ? item.pdfFiles.filter(function(file) { return file && file.url; }) : [];
-      if (!files.length) return '<p style="color:#d1d5db; margin-top:8px;">ยังไม่มีไฟล์ PDF ประกอบบทเรียนสำหรับคลิปนี้</p>';
+      const files = getLinkedOnDemandPdfFiles(item);
+      if (!files.length) return '<p style="color:#d1d5db; margin-top:8px;">ยังไม่มีเอกสารประกอบสำหรับคลิปนี้</p>';
+
+      const hasOwnFiles = Array.isArray(item && item.pdfFiles) && item.pdfFiles.some(function(file) { return file && file.url; });
       return '<div style="margin-top:10px;">' +
-        '<p style="color:#d1d5db; font-weight:bold; margin-bottom:6px;">ไฟล์ประกอบบทเรียน</p>' +
+        '<p style="color:#d1d5db; font-weight:bold; margin-bottom:6px;">' + (hasOwnFiles ? 'เอกสารที่แนบกับคลิปนี้' : 'เอกสารที่เกี่ยวข้องกับคอร์สนี้') + '</p>' +
         files.map(function(file) {
-          return '<button class="btn btn-blue" type="button" onclick="openExternalLink(\'' + jsArg(file.url) + '\')">📄 ' + (file.title || 'เปิดไฟล์ PDF') + '</button>';
+          const dateText = file.classDate ? ' (' + onlineDocDateText(file.classDate) + ')' : '';
+          return '<button class="btn btn-blue" type="button" onclick="openExternalLink(\'' + jsArg(file.url) + '\')">📄 ' + (file.title || 'เปิดไฟล์') + dateText + '</button>';
         }).join('') +
       '</div>';
     }
@@ -7170,7 +7201,7 @@ function getCourseOnlineDocs(course, includeInactive) {
       if (!docs.length) return '<div class="online-doc-group"><p class="mini-muted">ยังไม่มีเอกสารรายครั้งสำหรับคอร์สนี้</p></div>';
       const list = limit ? docs.slice(0, limit) : docs;
       return '<div style="margin-top:14px;">' +
-        '<p><strong>เอกสารประจำครั้งเรียน</strong></p>' +
+        '<p><strong>เอกสารประจำครั้งเรียนย้อนหลังทั้งหมด</strong></p>' +
         list.map(function(doc, index) {
           return '<div class="online-doc-group">' +
             '<h4>' + (index === 0 ? 'ล่าสุด · ' : '') + onlineDocDateText(doc.classDate) + '</h4>' +
@@ -7925,7 +7956,7 @@ function getCourseOnlineDocs(course, includeInactive) {
           '<p><strong>Password:</strong> ' + (c.roomPassword || '-') + '</p>' +
           '<p style="color:#6b7280;">' + (hasLink ? 'ลิงก์ MS Teams พร้อมใช้งานจากหลังบ้าน' : 'ยังไม่มีลิงก์ MS Teams สำหรับคอร์สนี้') + '</p>' +
           '<button class="btn ' + (hasLink ? 'btn-blue' : 'btn-dark') + '" type="button" onclick="' + actionCall('openOnlineClassByCourseId', c.id) + '">เข้าห้องเรียนสด</button>' +
-          renderOnlineDocsForCourse(c, 4) +
+          renderOnlineDocsForCourse(c) +
         '</div>';
       }).join('');
     }
