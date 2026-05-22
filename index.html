@@ -2353,7 +2353,7 @@
             <li>ส่งสลิปใน LINE กลุ่ม พร้อมพิมพ์ชื่อนักเรียนและเดือนที่ชำระ</li>
             <li>เจ้าหน้าที่ตรวจสอบจาก LINE แล้วอัปเดตสถานะ / ใบเสร็จในระบบ</li>
           </ol>
-          <p id="studentSlipResult" style="margin-top:14px; font-weight:bold; color:#6b7280;">เลือกเดือนให้ถูกต้อง แล้วกดเข้ากลุ่ม LINE จากนั้นส่งสลิปในกลุ่มได้เลย</p>
+          <p id="studentSlipResult" class="hidden" style="margin-top:14px; font-weight:bold;"></p>
         </div>
       </div>
       </div>
@@ -4375,6 +4375,9 @@
       const mainSettings = settingsItems.find(function(item) { return item.id === 'main' || item.firebaseDocId === 'main'; });
       if (mainSettings) systemSettings = Object.assign(systemSettings, mainSettings);
       safeRun(repairReceiptMonthsFromPayments, 'repair-receipt-months');
+      safeRun(renderReceiptMonthFilter, 'receipt-month-filter-after-load');
+      safeRun(renderActiveAdminTab, 'active-admin-tab-after-load');
+      safeRun(renderStudentReceipts, 'student-receipts-after-load');
     }
 
     const announcements = [];
@@ -5761,6 +5764,16 @@
         safeRun(renderStudentExamFilters, 'student-exam-filters');
       }
     }
+
+
+    function renderActiveAdminTab() {
+      const active = Array.from(document.querySelectorAll('.admin-tab')).find(function(tab) {
+        return !tab.classList.contains('hidden');
+      });
+      if (active && active.id) showAdminTab(active.id);
+    }
+
+
 
 
     function jumpToAdminTab(tabId) {
@@ -8254,8 +8267,8 @@ function getCourseOnlineDocs(course, includeInactive) {
             let payment = getCurrentStudentPaymentForSelectedMonth();
             if (payment && payment.status === 'ชำระแล้ว') {
               if (result) {
-                result.textContent = 'เดือน ' + month + ' ชำระแล้ว ไม่ต้องเปลี่ยนสถานะเป็นรอตรวจ';
-                result.style.color = '#16a34a';
+                result.textContent = '';
+                result.classList.add('hidden');
               }
             } else {
               if (!payment) {
@@ -8295,13 +8308,14 @@ function getCourseOnlineDocs(course, includeInactive) {
               renderPaymentTable();
               renderAdminDashboard();
               if (result) {
-                result.textContent = 'ขึ้นสถานะรอตรวจสลิปสำหรับเดือน ' + month + ' แล้ว กรุณาส่งสลิปใน LINE กลุ่ม';
-                result.style.color = '#0f4cbd';
+                result.textContent = '';
+                result.classList.add('hidden');
               }
             }
           } catch (error) {
             console.error('line group payment status error:', error);
             if (result) {
+              result.classList.remove('hidden');
               result.textContent = 'อัปเดตสถานะรอตรวจไม่สำเร็จ: ' + (error.message || error.code || 'ไม่ทราบสาเหตุ');
               result.style.color = '#dc2626';
             }
@@ -8961,9 +8975,37 @@ function getCourseOnlineDocs(course, includeInactive) {
       alert('ออกใบเสร็จเรียบร้อย สถานะยังเป็น “รอตรวจ” ต้องกดแสดงให้ผู้ปกครองก่อน');
     }
 
-    function receiptStatusText(status) {
-      if (status === 'published') return '<span class="status-paid">แสดงแล้ว</span>';
-      if (status === 'hidden') return '<span class="status-absent">ซ่อนไว้</span>';
+    
+    function normalizeReceiptStatus(status) {
+      const value = String(status || '').trim();
+      if (!value || value === 'draft' || value === 'รอตรวจ') return 'draft';
+      if (value === 'published' || value === 'แสดงแล้ว') return 'published';
+      if (value === 'hidden' || value === 'ซ่อนไว้') return 'hidden';
+      return value;
+    }
+
+    function renderReceiptMonthFilter() {
+      const select = getElement('receiptMonthFilter');
+      if (!select) return;
+      const current = select.value || 'ทั้งหมด';
+      const months = Array.from(new Set((receipts || []).map(function(r) {
+        return getReceiptMonth(r);
+      }).filter(function(month) {
+        return month && month !== '-';
+      })));
+
+      select.innerHTML = '<option value="ทั้งหมด">ทั้งหมด</option>' + months.map(function(month) {
+        return '<option value="' + month + '">' + month + '</option>';
+      }).join('');
+
+      const hasCurrent = Array.from(select.options).some(function(option) { return option.value === current; });
+      select.value = hasCurrent ? current : 'ทั้งหมด';
+    }
+
+function receiptStatusText(status) {
+      const normalized = normalizeReceiptStatus(status);
+      if (normalized === 'published') return '<span class="status-paid">แสดงแล้ว</span>';
+      if (normalized === 'hidden') return '<span class="status-absent">ซ่อนไว้</span>';
       return '<span class="status-waiting">รอตรวจ</span>';
     }
 
@@ -9206,22 +9248,31 @@ function getCourseOnlineDocs(course, includeInactive) {
     function renderAdminReceipts() {
       const tbody = getElement('adminReceiptTableBody');
       if (!tbody) return;
+
+      renderReceiptMonthFilter();
+
       const statusFilter = getElement('receiptStatusFilter') ? getElement('receiptStatusFilter').value : 'ทั้งหมด';
       const monthFilter = getElement('receiptMonthFilter') ? getElement('receiptMonthFilter').value : 'ทั้งหมด';
-      const filtered = receipts.filter(function(r) {
+      const filtered = (receipts || []).filter(function(r) {
         const receiptMonth = getReceiptMonth(r);
-        const statusMatched = statusFilter === 'ทั้งหมด' || r.status === statusFilter;
+        const normalizedStatus = normalizeReceiptStatus(r.status);
+        const statusMatched = statusFilter === 'ทั้งหมด' || normalizedStatus === statusFilter;
         const monthMatched = monthFilter === 'ทั้งหมด' || receiptMonth === monthFilter;
         return statusMatched && monthMatched;
+      }).slice().sort(function(a, b) {
+        return Number(b.id || 0) - Number(a.id || 0);
       });
 
       tbody.innerHTML = filtered.length ? filtered.map(function(r) {
-        return '<tr><td>' + r.receiptNo + '</td><td>' + r.student + '</td><td>' + r.course + '</td><td>' + getReceiptMonth(r) + '</td><td>' + r.amount + '</td><td>' + receiptStatusText(r.status) + '</td><td><button class="btn btn-blue" type="button" onclick="' + actionCall('openReceiptAdmin', r.id) + '">ตรวจสอบ</button><button class="btn btn-green" type="button" onclick="' + actionCall('publishReceipt', r.id) + '">แสดง</button><button class="btn btn-dark" type="button" onclick="' + actionCall('hideReceipt', r.id) + '">ซ่อน</button><button class="btn btn-red" type="button" onclick="' + actionCall('deleteReceipt', r.id) + '">ลบ</button></td></tr>';
+        return '<tr><td>' + (r.receiptNo || '-') + '</td><td>' + (r.student || '-') + '</td><td>' + (r.course || '-') + '</td><td>' + getReceiptMonth(r) + '</td><td>' + (r.amount || '-') + '</td><td>' + receiptStatusText(r.status) + '</td><td><button class="btn btn-blue" type="button" onclick="' + actionCall('openReceiptAdmin', r.id) + '">ตรวจสอบ</button><button class="btn btn-green" type="button" onclick="' + actionCall('publishReceipt', r.id) + '">แสดง</button><button class="btn btn-dark" type="button" onclick="' + actionCall('hideReceipt', r.id) + '">ซ่อน</button><button class="btn btn-red" type="button" onclick="' + actionCall('deleteReceipt', r.id) + '">ลบ</button></td></tr>';
       }).join('') : '<tr><td colspan="7">ยังไม่มีใบเสร็จตามเงื่อนไขที่เลือก</td></tr>';
 
-      if (getElement('receiptDraftCount')) getElement('receiptDraftCount').textContent = receipts.filter(function(r) { return r.status === 'draft'; }).length + ' ใบ';
-      if (getElement('receiptPublishedCount')) getElement('receiptPublishedCount').textContent = receipts.filter(function(r) { return r.status === 'published'; }).length + ' ใบ';
-      if (getElement('receiptHiddenCount')) getElement('receiptHiddenCount').textContent = receipts.filter(function(r) { return r.status === 'hidden'; }).length + ' ใบ';
+      const draftCount = (receipts || []).filter(function(r) { return normalizeReceiptStatus(r.status) === 'draft'; }).length;
+      const publishedCount = (receipts || []).filter(function(r) { return normalizeReceiptStatus(r.status) === 'published'; }).length;
+      const hiddenCount = (receipts || []).filter(function(r) { return normalizeReceiptStatus(r.status) === 'hidden'; }).length;
+      if (getElement('receiptDraftCount')) getElement('receiptDraftCount').textContent = draftCount + ' ใบ';
+      if (getElement('receiptPublishedCount')) getElement('receiptPublishedCount').textContent = publishedCount + ' ใบ';
+      if (getElement('receiptHiddenCount')) getElement('receiptHiddenCount').textContent = hiddenCount + ' ใบ';
     }
 
     async function repairReceiptMonthsFromPayments() {
