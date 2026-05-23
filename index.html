@@ -804,6 +804,86 @@
     .feature-actions { display:flex; flex-wrap:wrap; gap:8px; margin-top:10px; }
     .role-hidden { display:none !important; }
 
+    .permission-panel {
+      background: #f8fbff;
+      border: 1px solid #bfdbfe;
+      border-radius: 18px;
+      padding: 16px;
+      margin: 14px 0;
+    }
+
+    .permission-grid,
+    .course-feature-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+      gap: 10px;
+      margin-top: 10px;
+    }
+
+    .permission-item,
+    .course-feature-item {
+      display: flex;
+      align-items: flex-start;
+      gap: 8px;
+      padding: 10px 12px;
+      border: 1px solid #e5e7eb;
+      border-radius: 14px;
+      background: #ffffff;
+      font-weight: normal;
+      line-height: 1.45;
+    }
+
+    .permission-item input,
+    .course-feature-item input {
+      width: auto;
+      flex: 0 0 auto;
+      margin-top: 4px;
+    }
+
+    .permission-item strong,
+    .course-feature-item strong {
+      display: block;
+      color: #0f4cbd;
+      font-size: 14px;
+    }
+
+    .permission-item span,
+    .course-feature-item span {
+      display: block;
+      color: #6b7280;
+      font-size: 12px;
+      font-weight: normal;
+    }
+
+    .feature-chip {
+      display: inline-block;
+      padding: 4px 9px;
+      border-radius: 999px;
+      background: #ecfdf5;
+      color: #166534;
+      border: 1px solid #bbf7d0;
+      font-size: 12px;
+      font-weight: bold;
+      margin: 2px;
+      white-space: nowrap;
+    }
+
+    .feature-chip.off {
+      background: #f3f4f6;
+      color: #6b7280;
+      border-color: #e5e7eb;
+    }
+
+    .permission-denied-card {
+      background: #fff7ed;
+      border: 1px solid #fed7aa;
+      border-radius: 18px;
+      padding: 16px;
+      color: #9a3412;
+      font-weight: bold;
+    }
+
+
     @media print {
       body * { visibility: hidden; }
       #printReceiptArea, #printReceiptArea * { visibility: visible; }
@@ -2375,7 +2455,7 @@
 
       <br />
 
-      <div class="form-box">
+      <div id="studentReceiptContent" class="form-box">
         <h3>ประวัติใบเสร็จ / ใบยืนยันการชำระเงิน</h3>
         <div class="table-wrap">
           <table>
@@ -3127,9 +3207,15 @@
                 </div>
                 <div>
                   <label>สิทธิ์การใช้งาน</label>
-                  <select id="teacherRole">
-                    <option value="Teacher">Teacher</option>
-                    <option value="Admin">Admin</option>
+                  <select id="teacherRole" onchange="applyDefaultPermissionsFromRole()">
+                    <option value="SuperAdmin">Super Admin / เจ้าของระบบ</option>
+                    <option value="Admin">Admin / ผู้ดูแลระบบ</option>
+                    <option value="Manager">Manager / ผู้จัดการสาขา</option>
+                    <option value="Academic">Academic / ฝ่ายวิชาการ</option>
+                    <option value="Finance">Finance / ฝ่ายการเงิน</option>
+                    <option value="Teacher" selected>Teacher / ครูผู้สอน</option>
+                    <option value="Assistant">Assistant / ผู้ช่วยครู</option>
+                    <option value="Viewer">Viewer / ดูข้อมูลเท่านั้น</option>
                   </select>
                 </div>
                 <div>
@@ -3139,6 +3225,12 @@
                     <option value="Inactive">Inactive</option>
                   </select>
                 </div>
+              </div>
+
+              <div class="permission-panel">
+                <h3 style="font-size:18px;">สิทธิ์ใช้งานแบบละเอียด</h3>
+                <p class="mini-muted">เลือก Role ก่อน แล้วปรับเปิด/ปิดสิทธิ์เฉพาะรายการได้ เช่น ให้ฝ่ายการเงินเห็นเฉพาะเมนูชำระเงินและใบเสร็จ</p>
+                <div id="teacherPermissionList" class="permission-grid"></div>
               </div>
 
               <div class="notice">
@@ -3249,6 +3341,12 @@
                 </div>
               </div>
 
+              <div class="permission-panel">
+                <h3 style="font-size:18px;">เปิด / ปิดฟังก์ชันของคอร์สนี้</h3>
+                <p class="mini-muted">ใช้สำหรับกำหนดว่าแต่ละคอร์สจะให้เด็กเห็นเมนูใดบ้าง เช่น บางคอร์สเปิดเฉพาะ Online แต่ยังไม่เปิดข้อสอบหรือใบเสร็จ</p>
+                <div id="adminCourseFeatureList" class="course-feature-grid"></div>
+              </div>
+
               <label>รายละเอียดคอร์ส</label>
               <textarea id="adminCourseDesc" placeholder="รายละเอียดคอร์ส ตารางเรียน หรือสิ่งที่นักเรียนจะได้รับ"></textarea>
               <br /><br />
@@ -3270,6 +3368,7 @@
                     <th class="sortable" onclick="sortData('courses','access')">สิทธิ์</th>
                     <th class="sortable" onclick="sortData('courses','location')">สถานที่เรียน</th>
                     <th>วันเรียน</th>
+                    <th>ฟังก์ชันที่เปิด</th>
                     <th class="sortable" onclick="sortData('courses','status')">สถานะ</th>
                     <th>จัดการ</th>
                   </tr>
@@ -4413,6 +4512,309 @@
     const sortState = {};
     let isSuperAdmin = false;
 
+    const PERMISSION_DEFINITIONS = [
+      { key: 'admin.full', title: 'สิทธิ์สูงสุด', desc: 'เห็นและแก้ไขได้ทุกเมนู' },
+      { key: 'admin.dashboard', title: 'ภาพรวมหลังบ้าน', desc: 'ดู Dashboard และสรุประบบ' },
+      { key: 'admin.students', title: 'จัดการนักเรียน', desc: 'เพิ่ม แก้ไข ค้นหา และส่งออกนักเรียน' },
+      { key: 'admin.courses', title: 'จัดการคอร์ส', desc: 'เพิ่ม/แก้คอร์ส และเปิด-ปิดฟังก์ชันรายคอร์ส' },
+      { key: 'admin.online', title: 'ห้องเรียน Online', desc: 'ตั้งค่า MS Teams และเอกสารรายครั้ง' },
+      { key: 'admin.ondemand', title: 'คลิป On-demand', desc: 'เพิ่มคลิปและเอกสารประกอบคลิป' },
+      { key: 'admin.finance', title: 'การเงิน', desc: 'รอบชำระเงิน ตรวจสลิป และสถานะค้างชำระ' },
+      { key: 'admin.receipts', title: 'ใบเสร็จ', desc: 'สร้าง ตรวจ และเผยแพร่ใบเสร็จ' },
+      { key: 'admin.exams', title: 'สอบ / คะแนน', desc: 'ลิงก์สอบ ตารางคะแนน และประกาศผล' },
+      { key: 'admin.users', title: 'ครู / สิทธิ์', desc: 'สร้างบัญชีครูและกำหนด Role/Permission' },
+      { key: 'admin.announcements', title: 'ประกาศ', desc: 'ประกาศแยกตามศูนย์และระดับชั้น' },
+      { key: 'admin.settings', title: 'ตั้งค่าระบบ', desc: 'ตั้งค่า LINE, QR, Logo และข้อมูลกลาง' },
+      { key: 'admin.logs', title: 'ประวัติการแก้ไข', desc: 'ดูและส่งออก Activity Log' },
+      { key: 'teacher.dashboard', title: 'ภาพรวมครู', desc: 'ดูสรุปคอร์สและตารางสอน' },
+      { key: 'teacher.online', title: 'ห้องเรียนครู', desc: 'เข้าห้อง Online และดูข้อมูลห้องเรียน' },
+      { key: 'teacher.attendance', title: 'เช็คชื่อ', desc: 'บันทึกสถานะมาเรียน/ไม่มา' },
+      { key: 'teacher.students', title: 'รายชื่อนักเรียน', desc: 'ดูรายชื่อในคอร์สที่สอน' }
+    ];
+
+    const ROLE_DEFINITIONS = {
+      SuperAdmin: {
+        label: 'Super Admin / เจ้าของระบบ',
+        permissions: PERMISSION_DEFINITIONS.map(function(item) { return item.key; })
+      },
+      Admin: {
+        label: 'Admin / ผู้ดูแลระบบ',
+        permissions: PERMISSION_DEFINITIONS.map(function(item) { return item.key; })
+      },
+      Manager: {
+        label: 'Manager / ผู้จัดการสาขา',
+        permissions: ['admin.dashboard','admin.students','admin.courses','admin.online','admin.ondemand','admin.finance','admin.receipts','admin.exams','admin.announcements','admin.logs','teacher.dashboard','teacher.online','teacher.attendance','teacher.students']
+      },
+      Academic: {
+        label: 'Academic / ฝ่ายวิชาการ',
+        permissions: ['admin.dashboard','admin.students','admin.courses','admin.online','admin.ondemand','admin.exams','admin.announcements','teacher.dashboard','teacher.online','teacher.students']
+      },
+      Finance: {
+        label: 'Finance / ฝ่ายการเงิน',
+        permissions: ['admin.dashboard','admin.students','admin.finance','admin.receipts','admin.logs']
+      },
+      Teacher: {
+        label: 'Teacher / ครูผู้สอน',
+        permissions: ['teacher.dashboard','teacher.online','teacher.attendance','teacher.students']
+      },
+      Assistant: {
+        label: 'Assistant / ผู้ช่วยครู',
+        permissions: ['teacher.dashboard','teacher.attendance','teacher.students']
+      },
+      Viewer: {
+        label: 'Viewer / ดูข้อมูลเท่านั้น',
+        permissions: ['admin.dashboard','teacher.dashboard']
+      }
+    };
+
+    const ADMIN_TAB_PERMISSIONS = {
+      'admin-dashboard': 'admin.dashboard',
+      'admin-students': 'admin.students',
+      'admin-courses': 'admin.courses',
+      'admin-online-class': 'admin.online',
+      'admin-video': 'admin.ondemand',
+      'admin-payment-round': 'admin.finance',
+      'admin-payment': 'admin.finance',
+      'admin-receipts': 'admin.receipts',
+      'admin-monthly-test': 'admin.exams',
+      'admin-teachers': 'admin.users',
+      'admin-announcements': 'admin.announcements',
+      'admin-settings': 'admin.settings',
+      'admin-activity-log': 'admin.logs'
+    };
+
+    const TEACHER_TAB_PERMISSIONS = {
+      'teacher-dashboard': 'teacher.dashboard',
+      'teacher-online': 'teacher.online',
+      'teacher-attendance': 'teacher.attendance',
+      'teacher-students': 'teacher.students'
+    };
+
+    const COURSE_FEATURES = [
+      { key: 'online', title: 'ห้องเรียน Online', desc: 'แสดงปุ่มเข้าเรียนสด / MS Teams' },
+      { key: 'onlineDocs', title: 'เอกสาร Online', desc: 'แสดงชีทและเอกสารรายครั้ง' },
+      { key: 'onDemand', title: 'คลิป On-demand', desc: 'แสดงคลิปย้อนหลังและเอกสารที่ผูกกับคลิป' },
+      { key: 'payment', title: 'ชำระเงิน', desc: 'แสดง QR และขั้นตอนชำระเงิน' },
+      { key: 'lineGroup', title: 'LINE กลุ่ม', desc: 'เปิดปุ่มเข้ากลุ่มเพื่อส่งสลิป' },
+      { key: 'receipts', title: 'ใบเสร็จ', desc: 'แสดงประวัติใบเสร็จย้อนหลัง' },
+      { key: 'exams', title: 'แบบทดสอบ', desc: 'เปิดเมนูทำแบบทดสอบ / Google Form' },
+      { key: 'scores', title: 'คะแนน', desc: 'เปิดดูใบคะแนนย้อนหลัง' },
+      { key: 'attendance', title: 'สถานะเช็คชื่อ', desc: 'แสดงสถานะรับส่ง / เช็คชื่อ' },
+      { key: 'announcements', title: 'ประกาศ', desc: 'แสดงประกาศตามคอร์ส ศูนย์ และระดับชั้น' }
+    ];
+
+    function normalizeAppRole(role) {
+      const value = String(role || '').trim();
+      if (value === 'admin') return 'Admin';
+      if (value === 'teacher') return 'Teacher';
+      if (value === 'Super Admin') return 'SuperAdmin';
+      return ROLE_DEFINITIONS[value] ? value : 'Teacher';
+    }
+
+    function getRoleLabel(role) {
+      const normalized = normalizeAppRole(role);
+      return ROLE_DEFINITIONS[normalized] ? ROLE_DEFINITIONS[normalized].label : normalized;
+    }
+
+    function getDefaultPermissionsForRole(role) {
+      const normalized = normalizeAppRole(role);
+      return (ROLE_DEFINITIONS[normalized] && ROLE_DEFINITIONS[normalized].permissions ? ROLE_DEFINITIONS[normalized].permissions : []).slice();
+    }
+
+    function isAdminLikeRole(role) {
+      const permissions = getDefaultPermissionsForRole(role);
+      return permissions.some(function(key) { return key.indexOf('admin.') === 0; });
+    }
+
+    function getPermissionTitle(key) {
+      const item = PERMISSION_DEFINITIONS.find(function(permission) { return permission.key === key; });
+      return item ? item.title : key;
+    }
+
+    function getActiveAccessRecord() {
+      if (currentTeacher) return currentTeacher;
+      if (firebaseUserProfile) return firebaseUserProfile;
+      return {};
+    }
+
+    function getCurrentAppRole() {
+      const record = getActiveAccessRecord() || {};
+      if (record.appRole) return normalizeAppRole(record.appRole);
+      if (record.role && ROLE_DEFINITIONS[record.role]) return normalizeAppRole(record.role);
+      if (firebaseUserProfile && firebaseUserProfile.appRole) return normalizeAppRole(firebaseUserProfile.appRole);
+      if (firebaseUserProfile && firebaseUserProfile.role === 'admin') return 'SuperAdmin';
+      if (firebaseUserProfile && firebaseUserProfile.role === 'teacher') return 'Teacher';
+      return isSuperAdmin ? 'SuperAdmin' : 'Teacher';
+    }
+
+    function getEffectivePermissions(record) {
+      const source = record || getActiveAccessRecord() || {};
+      const role = normalizeAppRole(source.appRole || source.role || getCurrentAppRole());
+      if (source.permissionMode === 'custom' && Array.isArray(source.permissions)) return source.permissions.slice();
+      if (Array.isArray(source.permissions) && source.permissions.length) return source.permissions.slice();
+      return getDefaultPermissionsForRole(role);
+    }
+
+    function hasPermission(permissionKey) {
+      const permissions = getEffectivePermissions();
+      return permissions.includes('admin.full') || permissions.includes(permissionKey);
+    }
+
+    function canOpenAdminTab(tabId) {
+      const permission = ADMIN_TAB_PERMISSIONS[tabId];
+      return !permission || hasPermission(permission);
+    }
+
+    function canOpenTeacherTab(tabId) {
+      const permission = TEACHER_TAB_PERMISSIONS[tabId];
+      return !permission || hasPermission(permission);
+    }
+
+    function findFirstAllowedAdminTab() {
+      const order = ['admin-dashboard','admin-students','admin-courses','admin-online-class','admin-video','admin-payment-round','admin-payment','admin-receipts','admin-monthly-test','admin-teachers','admin-announcements','admin-settings','admin-activity-log'];
+      return order.find(function(tabId) { return canOpenAdminTab(tabId); }) || 'admin-dashboard';
+    }
+
+    function findFirstAllowedTeacherTab() {
+      const order = ['teacher-dashboard','teacher-online','teacher-attendance','teacher-students'];
+      return order.find(function(tabId) { return canOpenTeacherTab(tabId); }) || 'teacher-dashboard';
+    }
+
+    function permissionCheckboxesHtml(selectedPermissions, checkboxClass) {
+      const selected = Array.isArray(selectedPermissions) ? selectedPermissions : [];
+      const cls = checkboxClass || 'teacher-permission';
+      return PERMISSION_DEFINITIONS.map(function(item) {
+        return '<label class="permission-item">' +
+          '<input type="checkbox" class="' + cls + '" value="' + item.key + '"' + (selected.includes(item.key) ? ' checked' : '') + ' />' +
+          '<span><strong>' + item.title + '</strong><span>' + item.desc + '</span></span>' +
+        '</label>';
+      }).join('');
+    }
+
+    function roleOptionsHtml(selectedRole) {
+      const selected = normalizeAppRole(selectedRole || 'Teacher');
+      return Object.keys(ROLE_DEFINITIONS).map(function(roleKey) {
+        return '<option value="' + roleKey + '"' + (roleKey === selected ? ' selected' : '') + '>' + ROLE_DEFINITIONS[roleKey].label + '</option>';
+      }).join('');
+    }
+
+    function renderPermissionCheckboxes(containerId, selectedPermissions, checkboxClass) {
+      const box = getElement(containerId);
+      if (!box) return;
+      box.innerHTML = permissionCheckboxesHtml(selectedPermissions, checkboxClass);
+    }
+
+    function getCheckedPermissionValues(selector) {
+      return Array.from(document.querySelectorAll(selector || '.teacher-permission:checked')).map(function(input) { return input.value; });
+    }
+
+    function applyDefaultPermissionsFromRole() {
+      const select = getElement('teacherRole');
+      const role = select ? select.value : 'Teacher';
+      renderPermissionCheckboxes('teacherPermissionList', getDefaultPermissionsForRole(role), 'teacher-permission');
+    }
+
+    function applyRoleAccessToUI() {
+      document.querySelectorAll('.admin-sidebar a[onclick]').forEach(function(link) {
+        const onclick = link.getAttribute('onclick') || '';
+        const match = onclick.match(/showAdminTab\('([^']+)'\)/);
+        if (match && !canOpenAdminTab(match[1])) link.classList.add('role-hidden');
+        if (match && canOpenAdminTab(match[1])) link.classList.remove('role-hidden');
+      });
+
+      document.querySelectorAll('#teacherInterface .admin-sidebar a[onclick]').forEach(function(link) {
+        const onclick = link.getAttribute('onclick') || '';
+        const match = onclick.match(/showTeacherTab\('([^']+)'\)/);
+        if (match && !canOpenTeacherTab(match[1])) link.classList.add('role-hidden');
+        if (match && canOpenTeacherTab(match[1])) link.classList.remove('role-hidden');
+      });
+
+      if (getElement('superAdminTeacherLink')) getElement('superAdminTeacherLink').classList.toggle('hidden', !hasPermission('teacher.dashboard'));
+      if (getElement('superAdminAdminLink')) getElement('superAdminAdminLink').classList.toggle('hidden', !Object.keys(ADMIN_TAB_PERMISSIONS).some(canOpenAdminTab));
+    }
+
+    function getDefaultCourseFeaturesByAccess(access) {
+      const text = String(access || '');
+      const hasOnline = text.indexOf('Online') !== -1;
+      const hasOnDemand = text.indexOf('On-demand') !== -1;
+      return {
+        online: hasOnline,
+        onlineDocs: hasOnline,
+        onDemand: hasOnDemand,
+        payment: true,
+        lineGroup: true,
+        receipts: true,
+        exams: true,
+        scores: true,
+        attendance: true,
+        announcements: true
+      };
+    }
+
+    function normalizeCourseFeatures(course) {
+      const base = getDefaultCourseFeaturesByAccess(course && course.access ? course.access : 'Online');
+      const custom = course && course.features && typeof course.features === 'object' ? course.features : {};
+      COURSE_FEATURES.forEach(function(item) {
+        if (custom[item.key] !== undefined) base[item.key] = custom[item.key] === true;
+      });
+      return base;
+    }
+
+    function courseFeatureEnabled(course, featureKey) {
+      if (!course) return false;
+      return normalizeCourseFeatures(course)[featureKey] !== false;
+    }
+
+    function courseFeatureCheckboxesHtml(features, checkboxClass) {
+      const state = features || getDefaultCourseFeaturesByAccess(getElement('adminCourseAccess') ? getElement('adminCourseAccess').value : 'Online');
+      const cls = checkboxClass || 'course-feature';
+      return COURSE_FEATURES.map(function(item) {
+        return '<label class="course-feature-item">' +
+          '<input type="checkbox" class="' + cls + '" value="' + item.key + '"' + (state[item.key] !== false ? ' checked' : '') + ' />' +
+          '<span><strong>' + item.title + '</strong><span>' + item.desc + '</span></span>' +
+        '</label>';
+      }).join('');
+    }
+
+    function renderCourseFeatureCheckboxes(containerId, features, checkboxClass) {
+      const box = getElement(containerId);
+      if (!box) return;
+      box.innerHTML = courseFeatureCheckboxesHtml(features, checkboxClass);
+    }
+
+    function getSelectedCourseFeatures(selector) {
+      const state = {};
+      COURSE_FEATURES.forEach(function(item) { state[item.key] = false; });
+      Array.from(document.querySelectorAll(selector || '.course-feature')).forEach(function(input) {
+        state[input.value] = input.checked === true;
+      });
+      return state;
+    }
+
+    function setSelectedCourseFeatures(features, access) {
+      renderCourseFeatureCheckboxes('adminCourseFeatureList', features || getDefaultCourseFeaturesByAccess(access || (getElement('adminCourseAccess') ? getElement('adminCourseAccess').value : 'Online')), 'course-feature');
+    }
+
+    function renderCourseFeatureSummary(course) {
+      const state = normalizeCourseFeatures(course);
+      return COURSE_FEATURES.filter(function(item) { return state[item.key] !== false; }).map(function(item) {
+        return '<span class="feature-chip">' + item.title + '</span>';
+      }).join('') || '<span class="feature-chip off">ยังไม่เปิดฟังก์ชัน</span>';
+    }
+
+    function renderCourseFeatureBadges(course) {
+      const state = normalizeCourseFeatures(course);
+      return '<div style="margin:10px 0;">' + COURSE_FEATURES.slice(0, 8).map(function(item) {
+        return '<span class="feature-chip' + (state[item.key] !== false ? '' : ' off') + '">' + (state[item.key] !== false ? '✓ ' : 'ปิด ') + item.title + '</span>';
+      }).join('') + '</div>';
+    }
+
+    function updateCourseFeatureDefaultsFromAccess() {
+      const access = getElement('adminCourseAccess') ? getElement('adminCourseAccess').value : 'Online';
+      setSelectedCourseFeatures(getDefaultCourseFeaturesByAccess(access), access);
+    }
+
+
     const students = [];
 
     const teachers = [];
@@ -4739,7 +5141,10 @@
               name: matchedTeacher.name || firebaseEmail || 'Teacher',
               email: matchedTeacher.email || firebaseEmail,
               phone: matchedTeacher.phone || matchedTeacher.username || cleanLoginPhone,
-              role: (matchedTeacher.role || 'Teacher') === 'Admin' ? 'admin' : 'teacher',
+              role: isAdminLikeRole(matchedTeacher.role || 'Teacher') ? 'admin' : 'teacher',
+              appRole: normalizeAppRole(matchedTeacher.role || 'Teacher'),
+              permissions: getEffectivePermissions(matchedTeacher),
+              permissionMode: matchedTeacher.permissionMode || (Array.isArray(matchedTeacher.permissions) ? 'custom' : 'role-default'),
               status: matchedTeacher.status === 'Inactive' ? 'inactive' : 'active',
               subject: matchedTeacher.subject || ''
             };
@@ -4787,9 +5192,16 @@
           }
 
           const userRole = firebaseUserProfile.role || 'student';
-          setSuperAdminMode(userRole === 'admin');
+          const activeAppRole = normalizeAppRole(firebaseUserProfile.appRole || (matchedTeacher ? matchedTeacher.role : (userRole === 'admin' ? 'SuperAdmin' : 'Teacher')));
+          firebaseUserProfile.appRole = activeAppRole;
+          if (matchedTeacher && (!Array.isArray(firebaseUserProfile.permissions) || !firebaseUserProfile.permissions.length)) {
+            firebaseUserProfile.permissions = getEffectivePermissions(matchedTeacher);
+            firebaseUserProfile.permissionMode = matchedTeacher.permissionMode || (Array.isArray(matchedTeacher.permissions) ? 'custom' : 'role-default');
+          }
+          setSuperAdminMode(userRole === 'admin' && (getEffectivePermissions(firebaseUserProfile).includes('admin.full') || activeAppRole === 'SuperAdmin' || activeAppRole === 'Admin'));
 
           if (userRole === 'admin') {
+            currentTeacher = matchedTeacher || null;
             showAdminPanel(true);
             return;
           }
@@ -4860,7 +5272,7 @@
       });
       if (teacher && password === '000000') {
         setSuperAdminMode(false);
-        if ((teacher.role || 'Teacher') === 'Admin') {
+        if (isAdminLikeRole(teacher.appRole || teacher.role || 'Teacher')) {
           showTeacherAdminPanel(teacher);
         } else {
           showTeacherPanel(teacher);
@@ -5092,8 +5504,8 @@
 
     function getActiveProfileRecord() {
       if (currentStudent) return { type: 'student', roleText: 'นักเรียน', record: currentStudent };
-      if (currentTeacher) return { type: 'teacher', roleText: 'ครู', record: currentTeacher };
-      if (firebaseUserProfile && firebaseUserProfile.role === 'admin') return { type: 'admin', roleText: 'ผู้ดูแลระบบ', record: firebaseUserProfile };
+      if (currentTeacher) return { type: 'teacher', roleText: getRoleLabel(currentTeacher.appRole || currentTeacher.role || 'Teacher'), record: currentTeacher };
+      if (firebaseUserProfile && firebaseUserProfile.role === 'admin') return { type: 'admin', roleText: getRoleLabel(firebaseUserProfile.appRole || 'SuperAdmin'), record: firebaseUserProfile };
       return { type: 'guest', roleText: 'ผู้ใช้งาน', record: {} };
     }
 
@@ -5222,7 +5634,7 @@
     }
 
     function showTeacherPanelForAdmin() {
-      showTeacherPanel({ name: 'Admin IDEA CLUB', username: 'admin', status: 'Active' });
+      showTeacherPanel({ name: 'Admin IDEA CLUB', username: 'admin', status: 'Active', role: 'SuperAdmin', appRole: 'SuperAdmin', permissions: getDefaultPermissionsForRole('SuperAdmin'), permissionMode: 'custom' });
       setSuperAdminMode(true);
       refreshProfileBox();
     }
@@ -5232,8 +5644,9 @@
     }
 
     function showTeacherAdminPanel(teacher) {
+      currentTeacher = teacher || currentTeacher;
       showAdminPanel(true);
-      setSuperAdminMode(false);
+      setSuperAdminMode(hasPermission('admin.full'));
       refreshProfileBox();
     }
 
@@ -5256,11 +5669,21 @@
       renderTeacherOnlineClasses();
       renderTeacherDashboardSummary();
       renderPickupList();
-      showTeacherTab('teacher-dashboard');
+      applyRoleAccessToUI();
+      showTeacherTab(findFirstAllowedTeacherTab());
       window.scrollTo({ top: 0, behavior: 'smooth' });
     }
 
     function showTeacherTab(tabId) {
+      if (!canOpenTeacherTab(tabId)) {
+        const fallback = findFirstAllowedTeacherTab();
+        if (fallback && fallback !== tabId) {
+          alert('บัญชีนี้ไม่มีสิทธิ์เข้าเมนูนี้');
+          showTeacherTab(fallback);
+        }
+        return;
+      }
+      applyRoleAccessToUI();
       document.querySelectorAll('.teacher-tab').forEach(function(tab) { tab.classList.add('hidden'); });
       const selectedTab = getElement(tabId);
       if (selectedTab) selectedTab.classList.remove('hidden');
@@ -5274,8 +5697,10 @@
     function getTeacherVisibleCourses() {
       const teacherSubject = currentTeacher && currentTeacher.subject ? String(currentTeacher.subject) : '';
       const teacherRole = currentTeacher && currentTeacher.role ? String(currentTeacher.role) : '';
+      const canSeeAllCourses = hasPermission('admin.full') || hasPermission('admin.courses') || hasPermission('admin.students');
       return courses.filter(function(c) {
         const subjectMatched = !teacherSubject ||
+          canSeeAllCourses ||
           teacherRole === 'Admin' ||
           teacherSubject === '-' ||
           guessSubjectFromCourse(c.name) === teacherSubject ||
@@ -5692,6 +6117,10 @@
             alert('กรุณา Login ด้วยบัญชี Admin ก่อนเข้าใช้งาน หลังบ้าน');
             return;
           }
+          if (!Object.keys(ADMIN_TAB_PERMISSIONS).some(canOpenAdminTab)) {
+            alert('บัญชีนี้ยังไม่มีสิทธิ์ใช้งานหลังบ้าน กรุณาให้ Super Admin เปิดสิทธิ์');
+            return;
+          }
         } else {
           const username = getElement('loginUsername') ? getElement('loginUsername').value.trim() : '';
           const password = getElement('loginPassword') ? getElement('loginPassword').value.trim() : '';
@@ -5708,9 +6137,10 @@
       getElement('adminMenu').classList.add('hidden');
       getElement('profileMenu').classList.remove('hidden');
       getElement('profilePanel').classList.add('hidden');
-      if (!firebaseUserProfile) firebaseUserProfile = { role: 'admin', name: 'Admin IDEA CLUB', email: firebaseUser && firebaseUser.email ? firebaseUser.email : '' };
+      if (!firebaseUserProfile) firebaseUserProfile = { role: 'admin', appRole: 'SuperAdmin', name: 'Admin IDEA CLUB', email: firebaseUser && firebaseUser.email ? firebaseUser.email : '' };
       refreshProfileBox();
-      setSuperAdminMode(true);
+      setSuperAdminMode(hasPermission('admin.full') || getCurrentAppRole() === 'SuperAdmin' || getCurrentAppRole() === 'Admin');
+      applyRoleAccessToUI();
 
       safeRun(renderStudentCourses, 'admin-render-student-courses');
       safeRun(renderAdminExamSetFilters, 'admin-exam-set-filters');
@@ -5725,11 +6155,20 @@
       safeRun(renderAdminReceipts, 'admin-receipts');
       safeRun(renderTodayTeachingList, 'admin-today-teaching');
 
-      showAdminTab('admin-dashboard');
+      showAdminTab(findFirstAllowedAdminTab());
       window.scrollTo({ top: 0, behavior: 'smooth' });
     }
 
     function showAdminTab(tabId) {
+      if (!canOpenAdminTab(tabId)) {
+        const fallback = findFirstAllowedAdminTab();
+        if (fallback && fallback !== tabId) {
+          alert('บัญชีนี้ไม่มีสิทธิ์เข้าเมนูนี้');
+          showAdminTab(fallback);
+        }
+        return;
+      }
+      applyRoleAccessToUI();
       document.querySelectorAll('.admin-tab').forEach(function(tab) { tab.classList.add('hidden'); });
       const selectedTab = getElement(tabId);
       if (selectedTab) selectedTab.classList.remove('hidden');
@@ -6415,7 +6854,9 @@
       }
       tbody.innerHTML = teachers.map(function(t, i) {
         const status = t.status === 'Active' ? '<span class="status-paid">Active</span>' : '<span class="status-absent">Inactive</span>';
-        const role = (t.role || 'Teacher') === 'Admin' ? '<span class="status-parent">Admin</span>' : '<span class="status-paid">Teacher</span>';
+        const normalizedRole = normalizeAppRole(t.appRole || t.role || 'Teacher');
+        const permissionCount = getEffectivePermissions(t).length;
+        const role = '<span class="' + (isAdminLikeRole(normalizedRole) ? 'status-parent' : 'status-paid') + '">' + getRoleLabel(normalizedRole) + '</span><br><span class="mini-muted">' + permissionCount + ' สิทธิ์</span>';
         return '<tr><td>' + (i + 1) + '</td><td>' + t.teacherId + '</td><td>' + t.name + '</td><td>' + t.subject + '</td><td>' + t.username + '</td><td>' + t.branch + '</td><td>' + role + '</td><td>' + status + '</td><td><button class="btn btn-blue" type="button" onclick="' + actionCall('editTeacher', t.id) + '">แก้ไข</button><button class="btn btn-dark" type="button" onclick="' + actionCall('resetTeacherPassword', t.id) + '">Reset 000000</button><button class="btn btn-red" type="button" onclick="' + actionCall('deleteTeacher', t.id) + '">ลบ</button></td></tr>';
       }).join('');
     }
@@ -6432,6 +6873,7 @@
       const username = getElement('teacherUsername').value.trim();
       const branch = getElement('teacherBranch').value;
       const role = getElement('teacherRole') ? getElement('teacherRole').value : 'Teacher';
+      const permissions = getCheckedPermissionValues('.teacher-permission:checked');
       const status = getElement('teacherStatus').value;
       const result = getElement('teacherSaveResult');
 
@@ -6455,7 +6897,10 @@
               username: username,
               email: teacherEmail || t.email || '',
               branch: branch,
-              role: role,
+              role: normalizeAppRole(role),
+              appRole: normalizeAppRole(role),
+              permissions: permissions,
+              permissionMode: 'custom',
               status: status
             });
             await setFirebaseDocument('teachers', t);
@@ -6465,7 +6910,10 @@
                 name: name,
                 email: t.email || teacherEmail || '',
                 phone: username && !username.includes('@') ? username : '',
-                role: (role || 'Teacher') === 'Admin' ? 'admin' : 'teacher',
+                role: isAdminLikeRole(role) ? 'admin' : 'teacher',
+                appRole: normalizeAppRole(role),
+                permissions: permissions,
+                permissionMode: 'custom',
                 status: status === 'Active' ? 'active' : 'inactive',
                 subject: subject,
                 updatedAt: firebase.firestore.FieldValue.serverTimestamp()
@@ -6488,7 +6936,10 @@
                 name: name,
                 email: teacherEmail,
                 phone: username && !username.includes('@') ? username : '',
-                role: (role || 'Teacher') === 'Admin' ? 'admin' : 'teacher',
+                role: isAdminLikeRole(role) ? 'admin' : 'teacher',
+                appRole: normalizeAppRole(role),
+                permissions: permissions,
+                permissionMode: 'custom',
                 status: status === 'Active' ? 'active' : 'inactive',
                 subject: subject,
                 createdBy: firebaseUser ? firebaseUser.uid : '',
@@ -6515,7 +6966,10 @@
             username: username || teacherEmail,
             defaultPassword: '000000',
             branch: branch,
-            role: role,
+            role: normalizeAppRole(role),
+            appRole: normalizeAppRole(role),
+            permissions: permissions,
+            permissionMode: 'custom',
             status: status
           };
           teachers.push(newTeacher);
@@ -6549,9 +7003,10 @@
           '<div><label>สาขา</label><select id="bubbleTeacherBranch"><option' + (t.branch === 'IDEA CLUB ศูนย์ นครสวรรค์' ? ' selected' : '') + '>IDEA CLUB ศูนย์ นครสวรรค์</option><option' + (t.branch === 'IDEA CLUB ศูนย์ หนองฉาง' ? ' selected' : '') + '>IDEA CLUB ศูนย์ หนองฉาง</option></select></div>' +
         '</div>' +
         '<div class="form-row">' +
-          '<div><label>สิทธิ์การใช้งาน</label><select id="bubbleTeacherRole"><option value="Teacher"' + ((t.role || 'Teacher') === 'Teacher' ? ' selected' : '') + '>Teacher</option><option value="Admin"' + ((t.role || 'Teacher') === 'Admin' ? ' selected' : '') + '>Admin</option></select></div>' +
+          '<div><label>สิทธิ์การใช้งาน</label><select id="bubbleTeacherRole" onchange="renderPermissionCheckboxes(\'bubbleTeacherPermissionList\', getDefaultPermissionsForRole(this.value), \'bubble-teacher-permission\')">' + roleOptionsHtml(t.appRole || t.role || 'Teacher') + '</select></div>' +
           '<div><label>สถานะสมาชิก</label><select id="bubbleTeacherStatus"><option value="Active"' + (t.status === 'Active' ? ' selected' : '') + '>Active</option><option value="Inactive"' + (t.status === 'Inactive' ? ' selected' : '') + '>Inactive</option></select></div>' +
-        '</div>',
+        '</div>' +
+        '<div class="permission-panel"><h3 style="font-size:18px;">สิทธิ์ใช้งานแบบละเอียด</h3><p class="mini-muted">ติ๊กเลือกเมนูที่บัญชีนี้สามารถใช้งานได้</p><div id="bubbleTeacherPermissionList" class="permission-grid">' + permissionCheckboxesHtml(getEffectivePermissions(t), 'bubble-teacher-permission') + '</div></div>',
         async function() {
           const name = bubbleValue('bubbleTeacherName');
           const username = bubbleValue('bubbleTeacherUsername');
@@ -6572,7 +7027,10 @@
               username: username,
               email: teacherEmail || t.email || '',
               branch: bubbleSelectValue('bubbleTeacherBranch'),
-              role: bubbleSelectValue('bubbleTeacherRole') || 'Teacher',
+              role: normalizeAppRole(bubbleSelectValue('bubbleTeacherRole') || 'Teacher'),
+              appRole: normalizeAppRole(bubbleSelectValue('bubbleTeacherRole') || 'Teacher'),
+              permissions: getCheckedPermissionValues('.bubble-teacher-permission:checked'),
+              permissionMode: 'custom',
               status: bubbleSelectValue('bubbleTeacherStatus')
             });
             await setFirebaseDocument('teachers', t);
@@ -6582,7 +7040,10 @@
                 name: t.name,
                 email: t.email || '',
                 phone: username && !username.includes('@') ? username : '',
-                role: (t.role || 'Teacher') === 'Admin' ? 'admin' : 'teacher',
+                role: isAdminLikeRole(t.role || t.appRole || 'Teacher') ? 'admin' : 'teacher',
+                appRole: normalizeAppRole(t.appRole || t.role || 'Teacher'),
+                permissions: getEffectivePermissions(t),
+                permissionMode: t.permissionMode || 'custom',
                 status: t.status === 'Active' ? 'active' : 'inactive',
                 subject: t.subject,
                 updatedAt: firebase.firestore.FieldValue.serverTimestamp()
@@ -6630,6 +7091,7 @@
       getElement('teacherUsername').value = '';
       getElement('teacherBranch').value = 'IDEA CLUB ศูนย์ นครสวรรค์';
       if (getElement('teacherRole')) getElement('teacherRole').value = 'Teacher';
+      renderPermissionCheckboxes('teacherPermissionList', getDefaultPermissionsForRole('Teacher'), 'teacher-permission');
       getElement('teacherStatus').value = 'Active';
       updateTeacherIdPreview();
       if (clearMessage !== false) getElement('teacherSaveResult').textContent = '';
@@ -6989,7 +7451,7 @@
       }
       const filtered = courses.filter(function(c) { return c.grade === grade && c.status === 'open'; });
       list.innerHTML = filtered.length ? filtered.map(function(c) {
-        return '<div class="card"><span class="tag">' + c.grade + ' · แถม ' + c.access + '</span><h3>' + c.name + '</h3><p>' + c.desc + '</p><p><strong>สถานที่เรียน:</strong> ' + c.location + '</p><p><strong>วันเรียน:</strong> ' + ((c.days || []).join(' / ') || '-') + '</p><p class="price">' + formatPrice(getCourseMonthlyPrice(c)) + ' / เดือน</p><button class="btn btn-blue" type="button" onclick="' + actionCall('applyCourse', c.id) + '">สมัครคอร์สนี้</button></div>';
+        return '<div class="card"><span class="tag">' + c.grade + ' · แถม ' + c.access + '</span><h3>' + c.name + '</h3><p>' + c.desc + '</p>' + renderCourseFeatureBadges(c) + '<p><strong>สถานที่เรียน:</strong> ' + c.location + '</p><p><strong>วันเรียน:</strong> ' + ((c.days || []).join(' / ') || '-') + '</p><p class="price">' + formatPrice(getCourseMonthlyPrice(c)) + ' / เดือน</p><button class="btn btn-blue" type="button" onclick="' + actionCall('applyCourse', c.id) + '">สมัครคอร์สนี้</button></div>';
       }).join('') : '<div class="card"><h3>ยังไม่มีคอร์สที่เปิดรับสมัคร</h3><p>ระดับชั้น ' + grade + ' ยังไม่มีคอร์สเปิดรับสมัครในขณะนี้</p></div>';
     }
 
@@ -7006,12 +7468,12 @@
       const tbody = getElement('adminCourseTableBody');
       if (!tbody) return;
       if (!Array.isArray(courses) || courses.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="8">ยังไม่มีคอร์สในระบบ ให้เพิ่มคอร์สใหม่จากฟอร์มด้านบน</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="9">ยังไม่มีคอร์สในระบบ ให้เพิ่มคอร์สใหม่จากฟอร์มด้านบน</td></tr>';
         return;
       }
       tbody.innerHTML = courses.map(function(c) {
         const statusText = c.status === 'open' ? '<span class="status-paid">เปิดรับสมัคร</span>' : '<span class="status-absent">ปิดรับสมัคร</span>';
-        return '<tr><td>' + c.grade + '</td><td>' + c.name + '</td><td>' + formatPrice(c.price) + '</td><td>' + c.access + '</td><td>' + c.location + '</td><td>' + ((c.days || []).join(' / ') || '-') + '</td><td>' + statusText + '</td><td><button class="btn btn-blue" type="button" onclick="' + actionCall('editCourse', c.id) + '">แก้ไข</button><button class="btn btn-red" type="button" onclick="' + actionCall('deleteCourse', c.id) + '">ลบ</button></td></tr>';
+        return '<tr><td>' + c.grade + '</td><td>' + c.name + '</td><td>' + formatPrice(c.price) + '</td><td>' + c.access + '</td><td>' + c.location + '</td><td>' + ((c.days || []).join(' / ') || '-') + '</td><td>' + renderCourseFeatureSummary(c) + '</td><td>' + statusText + '</td><td><button class="btn btn-blue" type="button" onclick="' + actionCall('editCourse', c.id) + '">แก้ไข</button><button class="btn btn-red" type="button" onclick="' + actionCall('deleteCourse', c.id) + '">ลบ</button></td></tr>';
       }).join('');
     }
 
@@ -7555,6 +8017,7 @@ function getCourseOnlineDocs(course, includeInactive) {
       const location = getElement('adminCourseLocation').value;
       const days = getSelectedCourseDays();
       const status = getElement('adminCourseStatus').value;
+      const features = getSelectedCourseFeatures('.course-feature');
       const desc = getElement('adminCourseDesc').value.trim();
       const result = getElement('courseSaveResult');
       if (!name || !price) {
@@ -7565,7 +8028,7 @@ function getCourseOnlineDocs(course, includeInactive) {
       if (editingId) {
         const c = courses.find(function(item) { return String(item.id) === String(editingId); });
         if (c) {
-          Object.assign(c, { name: name, grade: grade, price: price, monthlyPrice: price, access: access, location: location, days: days, status: status, desc: desc || 'ไม่มีรายละเอียดเพิ่มเติม' });
+          Object.assign(c, { name: name, grade: grade, price: price, monthlyPrice: price, access: access, location: location, days: days, status: status, features: features, desc: desc || 'ไม่มีรายละเอียดเพิ่มเติม' });
           try {
             await setFirebaseDocument('courses', c);
           } catch (error) {
@@ -7577,7 +8040,7 @@ function getCourseOnlineDocs(course, includeInactive) {
         result.textContent = 'แก้ไขคอร์สเรียบร้อย และบันทึกลง Firebase แล้ว';
       } else {
         const newId = Date.now();
-        const newCourse = { id: newId, firebaseDocId: String(newId), grade: grade, name: name, price: price, monthlyPrice: price, access: access, location: location, days: days, status: status, onlineLink: '', onlineClassDay: '', onlineClassTime: '', roomId: '', roomPassword: '', onDemandSubject: guessSubjectFromCourse(name), onDemandGrade: grade, onDemandTitle: '', onDemandLink: '', desc: desc || 'ไม่มีรายละเอียดเพิ่มเติม' };
+        const newCourse = { id: newId, firebaseDocId: String(newId), grade: grade, name: name, price: price, monthlyPrice: price, access: access, location: location, days: days, status: status, features: features, onlineLink: '', onlineClassDay: '', onlineClassTime: '', roomId: '', roomPassword: '', onDemandSubject: guessSubjectFromCourse(name), onDemandGrade: grade, onDemandTitle: '', onDemandLink: '', desc: desc || 'ไม่มีรายละเอียดเพิ่มเติม' };
         courses.push(newCourse);
         try {
           await setFirebaseDocument('courses', newCourse);
@@ -7623,6 +8086,7 @@ function getCourseOnlineDocs(course, includeInactive) {
           '<div><label>สถานะคอร์ส</label><select id="bubbleCourseStatus"><option value="open"' + (c.status === 'open' ? ' selected' : '') + '>เปิดรับสมัคร</option><option value="closed"' + (c.status === 'closed' ? ' selected' : '') + '>ปิดรับสมัคร</option></select></div>' +
         '</div>' +
         '<label>วันเรียน</label><div style="display:grid; grid-template-columns:repeat(2, minmax(120px,1fr)); gap:8px; background:#f9fafb; padding:12px; border:1px solid #d1d5db; border-radius:12px; margin-bottom:14px;">' + dayCheckboxesHtml(c.days || []) + '</div>' +
+        '<div class="permission-panel"><h3 style="font-size:18px;">เปิด / ปิดฟังก์ชันของคอร์สนี้</h3><p class="mini-muted">กำหนดเมนูที่นักเรียนจะเห็นสำหรับคอร์สนี้</p><div id="bubbleCourseFeatureList" class="course-feature-grid">' + courseFeatureCheckboxesHtml(normalizeCourseFeatures(c), 'bubble-course-feature') + '</div></div>' +
         '<label>รายละเอียดคอร์ส</label><textarea id="bubbleCourseDesc">' + (c.desc || '') + '</textarea>',
         function() {
           const name = bubbleValue('bubbleCourseName');
@@ -7641,6 +8105,7 @@ function getCourseOnlineDocs(course, includeInactive) {
             location: bubbleSelectValue('bubbleCourseLocation'),
             days: Array.from(document.querySelectorAll('.bubbleCourseDay:checked')).map(function(input) { return input.value; }),
             status: bubbleSelectValue('bubbleCourseStatus'),
+            features: getSelectedCourseFeatures('.bubble-course-feature'),
             desc: bubbleValue('bubbleCourseDesc') || 'ไม่มีรายละเอียดเพิ่มเติม'
           });
           setFirebaseDocument('courses', c).catch(function(error) { console.error('save course firebase error:', error); });
@@ -7685,6 +8150,7 @@ function getCourseOnlineDocs(course, includeInactive) {
       getElement('adminCourseLocation').value = 'IDEA CLUB ศูนย์ นครสวรรค์';
       setSelectedCourseDays([]);
       getElement('adminCourseStatus').value = 'open';
+      setSelectedCourseFeatures(getDefaultCourseFeaturesByAccess('Online'), 'Online');
       getElement('adminCourseDesc').value = '';
       if (clearMessage !== false) getElement('courseSaveResult').textContent = '';
     }
@@ -7874,6 +8340,12 @@ function getCourseOnlineDocs(course, includeInactive) {
       const hasRegisteredCourse = !!(currentStudent && currentStudent.courseId && selectedCourse);
       const courseStatus = currentStudent && currentStudent.courseStatus ? currentStudent.courseStatus : '';
       const isCourseApproved = hasRegisteredCourse && (courseStatus === 'อนุมัติแล้ว' || courseStatus === 'Active' || courseStatus === 'สมัครแล้ว');
+      const selectedFeatures = selectedCourse ? normalizeCourseFeatures(selectedCourse) : {};
+      const canUsePayment = hasRegisteredCourse && selectedFeatures.payment !== false;
+      const canUseReceipts = hasRegisteredCourse && selectedFeatures.receipts !== false;
+      const canUseExamArea = isCourseApproved && (selectedFeatures.exams !== false || selectedFeatures.scores !== false);
+      const canUsePickupStatus = hasRegisteredCourse && selectedFeatures.attendance !== false;
+      const canUseAnnouncements = !selectedCourse || selectedFeatures.announcements !== false;
 
       if (selectedCourse) currentStudentCourseId = selectedCourse.id;
 
@@ -7883,19 +8355,28 @@ function getCourseOnlineDocs(course, includeInactive) {
       }
 
       if (getElement('studentCourseSummaryCard')) getElement('studentCourseSummaryCard').classList.toggle('hidden', !hasRegisteredCourse);
-      if (getElement('studentPickupStatusCard')) getElement('studentPickupStatusCard').classList.toggle('hidden', !hasRegisteredCourse);
-      if (getElement('studentPaymentContent')) getElement('studentPaymentContent').classList.toggle('hidden', !hasRegisteredCourse);
-      if (getElement('studentPaymentLocked')) getElement('studentPaymentLocked').classList.toggle('hidden', hasRegisteredCourse);
-      if (getElement('studentExamContent')) getElement('studentExamContent').classList.toggle('hidden', !isCourseApproved);
-      if (getElement('studentExamLocked')) {
-        getElement('studentExamLocked').classList.toggle('hidden', isCourseApproved);
-        if (hasRegisteredCourse && !isCourseApproved) getElement('studentExamLocked').innerHTML = '<h3>แบบทดสอบ / คะแนน</h3><p style="color:#6b7280;">คอร์สนี้อยู่ระหว่างรอเจ้าหน้าที่อนุมัติ หลังตรวจสอบการชำระเงินแล้ว ระบบจะเปิดแบบทดสอบและคะแนนให้</p>';
+      if (getElement('studentPickupStatusCard')) getElement('studentPickupStatusCard').classList.toggle('hidden', !canUsePickupStatus);
+      if (getElement('studentPaymentContent')) getElement('studentPaymentContent').classList.toggle('hidden', !canUsePayment);
+      if (getElement('studentReceiptContent')) getElement('studentReceiptContent').classList.toggle('hidden', !canUseReceipts);
+      if (getElement('studentPaymentLocked')) {
+        getElement('studentPaymentLocked').classList.toggle('hidden', canUsePayment);
+        if (!hasRegisteredCourse) {
+          getElement('studentPaymentLocked').innerHTML = '<h3>ชำระเงิน</h3><p style="color:#6b7280;">กรุณาสมัครคอร์สก่อน ระบบจึงจะแสดงรายละเอียดการชำระเงิน</p>';
+        } else if (!canUsePayment) {
+          getElement('studentPaymentLocked').innerHTML = '<h3>ชำระเงิน</h3><p style="color:#6b7280;">คอร์สนี้ยังปิดเมนูชำระเงินไว้ หากต้องการชำระเงิน กรุณาติดต่อเจ้าหน้าที่</p>';
+        }
       }
-      if (!isCourseApproved && getElement('monthlyExamPage')) getElement('monthlyExamPage').classList.add('hidden');
-      if (!isCourseApproved && getElement('scoreHistoryPage')) getElement('scoreHistoryPage').classList.add('hidden');
+      if (getElement('studentExamContent')) getElement('studentExamContent').classList.toggle('hidden', !canUseExamArea);
+      if (getElement('studentExamLocked')) {
+        getElement('studentExamLocked').classList.toggle('hidden', canUseExamArea);
+        if (hasRegisteredCourse && !isCourseApproved) getElement('studentExamLocked').innerHTML = '<h3>แบบทดสอบ / คะแนน</h3><p style="color:#6b7280;">คอร์สนี้อยู่ระหว่างรอเจ้าหน้าที่อนุมัติ หลังตรวจสอบการชำระเงินแล้ว ระบบจะเปิดแบบทดสอบและคะแนนให้</p>';
+        if (hasRegisteredCourse && isCourseApproved && !canUseExamArea) getElement('studentExamLocked').innerHTML = '<h3>แบบทดสอบ / คะแนน</h3><p style="color:#6b7280;">คอร์สนี้ยังปิดเมนูแบบทดสอบและคะแนนไว้</p>';
+      }
+      if (!canUseExamArea && getElement('monthlyExamPage')) getElement('monthlyExamPage').classList.add('hidden');
+      if ((!isCourseApproved || selectedFeatures.scores === false) && getElement('scoreHistoryPage')) getElement('scoreHistoryPage').classList.add('hidden');
 
       if (getElement('studentDashboardCourseName')) getElement('studentDashboardCourseName').textContent = selectedCourse ? selectedCourse.name : '';
-      if (getElement('studentDashboardCourseAccess')) getElement('studentDashboardCourseAccess').textContent = selectedCourse ? selectedCourse.access : '';
+      if (getElement('studentDashboardCourseAccess')) getElement('studentDashboardCourseAccess').innerHTML = selectedCourse ? (selectedCourse.access + '<br>' + renderCourseFeatureSummary(selectedCourse)) : '';
       if (getElement('studentDashboardGradeText')) getElement('studentDashboardGradeText').textContent = profileGrade;
       if (getElement('studentDashboardPaymentStatus')) {
         const paymentText = hasRegisteredCourse ? getCurrentStudentPaymentStatusText() : '';
@@ -7946,14 +8427,15 @@ function getCourseOnlineDocs(course, includeInactive) {
       const entitledCourses = isCourseApproved && selectedCourse ? [selectedCourse] : [];
       renderStudentOnlineClasses(entitledCourses, profileGrade);
       renderStudentOnDemandClasses(entitledCourses, profileGrade);
-      renderStudentAnnouncements();
+      if (getElement('student-announcements')) getElement('student-announcements').classList.toggle('hidden', !canUseAnnouncements);
+      if (canUseAnnouncements) renderStudentAnnouncements();
     }
 
     function renderStudentOnlineClasses(courseList, grade) {
       const box = getElement('studentOnlineClassList');
       if (!box) return;
       const onlineCourses = courseList.filter(function(c) {
-        return c.access.indexOf('Online') !== -1;
+        return c.access.indexOf('Online') !== -1 && courseFeatureEnabled(c, 'online');
       });
 
       if (!onlineCourses.length) {
@@ -7971,7 +8453,7 @@ function getCourseOnlineDocs(course, includeInactive) {
           '<p><strong>Password:</strong> ' + (c.roomPassword || '-') + '</p>' +
           '<p style="color:#6b7280;">' + (hasLink ? 'ลิงก์ MS Teams พร้อมใช้งานจากหลังบ้าน' : 'ยังไม่มีลิงก์ MS Teams สำหรับคอร์สนี้') + '</p>' +
           '<button class="btn ' + (hasLink ? 'btn-blue' : 'btn-dark') + '" type="button" onclick="' + actionCall('openOnlineClassByCourseId', c.id) + '">เข้าห้องเรียนสด</button>' +
-          renderOnlineDocsForCourse(c) +
+          (courseFeatureEnabled(c, 'onlineDocs') ? renderOnlineDocsForCourse(c) : '<div class="online-doc-group"><p class="mini-muted">คอร์สนี้ปิดการแสดงเอกสาร Online ไว้</p></div>') +
         '</div>';
       }).join('');
     }
@@ -7995,10 +8477,20 @@ function getCourseOnlineDocs(course, includeInactive) {
       if (!box) return;
       renderStudentOnDemandSubjectOptions(grade);
       const subjectFilter = getElement('studentOnDemandSubjectFilter') ? getElement('studentOnDemandSubjectFilter').value : 'ทั้งหมด';
+      const allowedCourseIds = courseList
+        .filter(function(c) { return c.access.indexOf('On-demand') !== -1 && courseFeatureEnabled(c, 'onDemand'); })
+        .map(function(c) { return String(c.id); });
+
+      if (!allowedCourseIds.length) {
+        box.innerHTML = '<div class="notice" style="background:#1f2937; color:white; border-color:#374151;">คอร์สนี้ยังไม่เปิดคลิป On-demand</div>';
+        return;
+      }
+
       const playlists = onDemandชุดคลิปs.filter(function(item) {
         const gradeMatched = item.grade === grade;
         const subjectMatched = subjectFilter === 'ทั้งหมด' || item.subject === subjectFilter;
-        return gradeMatched && subjectMatched;
+        const courseMatched = !item.courseId || allowedCourseIds.includes(String(item.courseId));
+        return gradeMatched && subjectMatched && courseMatched;
       });
 
       if (!playlists.length) {
@@ -8041,6 +8533,10 @@ function getCourseOnlineDocs(course, includeInactive) {
 
     function openOnlineClassByCourseId(id) {
       const c = courses.find(function(item) { return String(item.id) === String(id); });
+      if (c && !courseFeatureEnabled(c, 'online')) {
+        alert('คอร์สนี้ยังปิดห้องเรียน Online ไว้');
+        return;
+      }
       if (!c || !c.onlineLink) {
         alert('ยังไม่ได้เปิดห้องเรียน Online สำหรับคอร์สนี้');
         return;
@@ -8049,6 +8545,11 @@ function getCourseOnlineDocs(course, includeInactive) {
     }
 
     function openOnDemandByCourseId(id) {
+      const c = courses.find(function(course) { return String(course.id) === String(id); });
+      if (c && !courseFeatureEnabled(c, 'onDemand')) {
+        alert('คอร์สนี้ยังปิดคลิป On-demand ไว้');
+        return;
+      }
       const item = onDemandชุดคลิปs.find(function(p) { return String(p.courseId) === String(id); });
       if (!item || !item.link) {
         alert('ยังไม่ได้เพิ่มคลิป On-demand สำหรับคอร์สนี้');
@@ -8059,6 +8560,10 @@ function getCourseOnlineDocs(course, includeInactive) {
 
     function openStudentOnlineClass() {
       const c = getCurrentStudentCourse();
+      if (c && !courseFeatureEnabled(c, 'online')) {
+        alert('คอร์สนี้ยังปิดห้องเรียน Online ไว้');
+        return;
+      }
       if (!c || !c.onlineLink) {
         alert('ยังไม่ได้เปิดห้องเรียน Online สำหรับคอร์สนี้');
         return;
@@ -8281,6 +8786,12 @@ function getCourseOnlineDocs(course, includeInactive) {
         return;
       }
 
+      if (!courseFeatureEnabled(selectedCourse, 'lineGroup')) {
+        text.textContent = 'คอร์สนี้ยังปิดปุ่ม LINE กลุ่มไว้ กรุณาติดต่อเจ้าหน้าที่';
+        button.classList.add('hidden');
+        return;
+      }
+
       const group = getCurrentLineGroup();
       if (group && group.lineUrl) {
         text.textContent = (group.groupName || 'LINE กลุ่มประจำชั้น') + ' · ' + group.grade + ' · ' + group.location;
@@ -8294,6 +8805,11 @@ function getCourseOnlineDocs(course, includeInactive) {
     }
 
     async function openStudentLineGroup() {
+      const selectedCourse = getCurrentStudentCourse ? getCurrentStudentCourse() : null;
+      if (selectedCourse && !courseFeatureEnabled(selectedCourse, 'lineGroup')) {
+        alert('คอร์สนี้ยังปิดปุ่ม LINE กลุ่มไว้ กรุณาติดต่อเจ้าหน้าที่');
+        return;
+      }
       const group = getCurrentLineGroup();
       if (!group || !group.lineUrl) {
         alert('ยังไม่ได้ตั้งค่าลิงก์ LINE กลุ่มสำหรับระดับชั้นและศูนย์นี้');
@@ -9674,8 +10190,13 @@ function receiptStatusText(status) {
     }
 
     function openMonthlyExamPage() {
+      const c = getCurrentStudentCourse ? getCurrentStudentCourse() : null;
       if (!(currentStudent && currentStudent.courseId)) {
         alert('กรุณาสมัครคอร์สก่อนทำแบบทดสอบ');
+        return;
+      }
+      if (c && !courseFeatureEnabled(c, 'exams')) {
+        alert('คอร์สนี้ยังปิดแบบทดสอบไว้');
         return;
       }
       getElement('scoreHistoryPage').classList.add('hidden');
@@ -9686,8 +10207,13 @@ function receiptStatusText(status) {
     }
 
     function openScoreHistory() {
+      const c = getCurrentStudentCourse ? getCurrentStudentCourse() : null;
       if (!(currentStudent && currentStudent.courseId)) {
         alert('กรุณาสมัครคอร์สก่อนดูคะแนนย้อนหลัง');
+        return;
+      }
+      if (c && !courseFeatureEnabled(c, 'scores')) {
+        alert('คอร์สนี้ยังปิดการดูคะแนนย้อนหลังไว้');
         return;
       }
       getElement('monthlyExamPage').classList.add('hidden');
@@ -11562,6 +12088,13 @@ function receiptStatusText(status) {
       await loadCoreDataFromFirebase();
 
       safeRun(loadPaymentQrFromGithubAsset, 'load-payment-qr-github-init');
+      safeRun(function() { renderPermissionCheckboxes('teacherPermissionList', getDefaultPermissionsForRole('Teacher'), 'teacher-permission'); }, 'teacher-permissions-init');
+      safeRun(function() { setSelectedCourseFeatures(getDefaultCourseFeaturesByAccess('Online'), 'Online'); }, 'course-features-init');
+      safeRun(function() {
+        const accessSelect = getElement('adminCourseAccess');
+        if (accessSelect) accessSelect.addEventListener('change', updateCourseFeatureDefaultsFromAccess);
+      }, 'course-feature-access-listener');
+      safeRun(applyRoleAccessToUI, 'role-access-ui-init');
       safeRun(updateMemberIdPreview, 'member-id-preview');
       safeRun(updateTeacherIdPreview, 'teacher-id-preview');
       safeRun(renderAdminDashboard, 'admin-dashboard-init');
