@@ -4093,7 +4093,7 @@
             <div class="form-box">
               <h3>เพิ่มคลิป On-demand</h3>
               <p style="margin-bottom:18px; color:#6b7280;">สร้างและจัดการ ชุดคลิป คลิปย้อนหลัง โดยแยกตามวิชาและระดับชั้น นักเรียนสามารถเลือกวิชาที่ต้องการดูได้ในหน้าคลิป</p>
-              <input id="editingOnDemandชุดคลิปId" type="hidden" value="" />
+              <input id="editingOnDemandClipId" type="hidden" value="" />
 
               <div class="form-row">
                 <div>
@@ -4129,7 +4129,7 @@
                 </div>
                 <div>
                   <label>ชื่อชุดคลิป</label>
-                  <input id="adminOnDemandชุดคลิปName" type="text" placeholder="เช่น วิทยาศาสตร์ ป.6 เทอม 1" />
+                  <input id="adminOnDemandClipName" type="text" placeholder="เช่น วิทยาศาสตร์ ป.6 เทอม 1" />
                 </div>
               </div>
 
@@ -4460,7 +4460,7 @@
       await seedCollectionIfEmpty('students', students);
       await seedCollectionIfEmpty('teachers', teachers);
       await seedCollectionIfEmpty('courses', courses);
-      await seedCollectionIfEmpty('onDemandชุดคลิปs', onDemandชุดคลิปs);
+      await seedCollectionIfEmpty('onDemandClips', onDemandClips);
       await seedCollectionIfEmpty('paymentMonths', paymentMonths);
       await seedCollectionIfEmpty('lineGroups', lineGroups);
       await seedCollectionIfEmpty('receipts', receipts);
@@ -4474,7 +4474,7 @@
       replaceArray(students, await getFirebaseCollection('students'));
       replaceArray(teachers, await getFirebaseCollection('teachers'));
       replaceArray(courses, await getFirebaseCollection('courses'));
-      replaceArray(onDemandชุดคลิปs, await getFirebaseCollection('onDemandชุดคลิปs'));
+      replaceArray(onDemandClips, await getFirebaseCollection('onDemandClips'));
       replaceArray(paymentMonths, await getFirebaseCollection('paymentMonths'));
       replaceArray(lineGroups, await getFirebaseCollection('lineGroups'));
       replaceArray(payments, await getFirebaseCollection('payments'));
@@ -4605,10 +4605,41 @@
 
     function normalizeAppRole(role) {
       const value = String(role || '').trim();
-      if (value === 'admin') return 'Admin';
-      if (value === 'teacher') return 'Teacher';
-      if (value === 'Super Admin') return 'SuperAdmin';
-      return ROLE_DEFINITIONS[value] ? value : 'Teacher';
+      const map = {
+        'super_admin': 'SuperAdmin',
+        'SuperAdmin': 'SuperAdmin',
+        'Super Admin': 'SuperAdmin',
+        'admin': 'Admin',
+        'Admin': 'Admin',
+        'manager': 'Manager',
+        'Manager': 'Manager',
+        'academic': 'Academic',
+        'Academic': 'Academic',
+        'finance': 'Finance',
+        'Finance': 'Finance',
+        'teacher': 'Teacher',
+        'Teacher': 'Teacher',
+        'assistant': 'Assistant',
+        'Assistant': 'Assistant',
+        'viewer': 'Viewer',
+        'Viewer': 'Viewer'
+      };
+      return map[value] || (ROLE_DEFINITIONS[value] ? value : 'Teacher');
+    }
+
+    function toFirebaseRole(role) {
+      const normalized = normalizeAppRole(role);
+      const map = {
+        SuperAdmin: 'super_admin',
+        Admin: 'admin',
+        Manager: 'manager',
+        Academic: 'academic',
+        Finance: 'finance',
+        Teacher: 'teacher',
+        Assistant: 'assistant',
+        Viewer: 'viewer'
+      };
+      return map[normalized] || 'teacher';
     }
 
     function getRoleLabel(role) {
@@ -4821,7 +4852,7 @@
 
     const courses = [];
 
-    const onDemandชุดคลิปs = [];
+    const onDemandClips = [];
 
     let currentStudentCourseId = null;
     let currentStudent = null;
@@ -5141,7 +5172,7 @@
               name: matchedTeacher.name || firebaseEmail || 'Teacher',
               email: matchedTeacher.email || firebaseEmail,
               phone: matchedTeacher.phone || matchedTeacher.username || cleanLoginPhone,
-              role: isAdminLikeRole(matchedTeacher.role || 'Teacher') ? 'admin' : 'teacher',
+              role: toFirebaseRole(matchedTeacher.role || 'Teacher'),
               appRole: normalizeAppRole(matchedTeacher.role || 'Teacher'),
               permissions: getEffectivePermissions(matchedTeacher),
               permissionMode: matchedTeacher.permissionMode || (Array.isArray(matchedTeacher.permissions) ? 'custom' : 'role-default'),
@@ -6910,7 +6941,7 @@
                 name: name,
                 email: t.email || teacherEmail || '',
                 phone: username && !username.includes('@') ? username : '',
-                role: isAdminLikeRole(role) ? 'admin' : 'teacher',
+                role: toFirebaseRole(role),
                 appRole: normalizeAppRole(role),
                 permissions: permissions,
                 permissionMode: 'custom',
@@ -6936,7 +6967,7 @@
                 name: name,
                 email: teacherEmail,
                 phone: username && !username.includes('@') ? username : '',
-                role: isAdminLikeRole(role) ? 'admin' : 'teacher',
+                role: toFirebaseRole(role),
                 appRole: normalizeAppRole(role),
                 permissions: permissions,
                 permissionMode: 'custom',
@@ -7564,10 +7595,10 @@
       if (!select) return;
       const c = courses.find(function(item) { return String(item.id) === String(select.value); });
       if (!c) return;
-      if (!getElement('editingOnDemandชุดคลิปId').value) {
+      if (!getElement('editingOnDemandClipId').value) {
         getElement('adminOnDemandSubject').value = c.onDemandSubject || guessSubjectFromCourse(c.name);
         getElement('adminOnDemandGrade').value = c.onDemandGrade || c.grade || 'ป.6';
-        getElement('adminOnDemandชุดคลิปName').value = c.onDemandTitle ? c.onDemandTitle.replace(' - คลิปย้อนหลัง', '') : c.name;
+        getElement('adminOnDemandClipName').value = c.onDemandTitle ? c.onDemandTitle.replace(' - คลิปย้อนหลัง', '') : c.name;
       }
     }
 
@@ -7693,11 +7724,11 @@ function getCourseOnlineDocs(course, includeInactive) {
       const courseId = Number(getElement('adminOnDemandCourseSelect').value);
       const subject = getElement('adminOnDemandSubject').value;
       const grade = getElement('adminOnDemandGrade').value;
-      const playlistName = getElement('adminOnDemandชุดคลิปName').value.trim();
+      const playlistName = getElement('adminOnDemandClipName').value.trim();
       const clipTitle = getElement('adminOnDemandTitle').value.trim();
       const link = getElement('adminOnDemandLink').value.trim();
       const pdfFiles = parsePdfFilesFromText(getElement('adminOnDemandPdfFiles') ? getElement('adminOnDemandPdfFiles').value : '');
-      const editingId = getElement('editingOnDemandชุดคลิปId').value;
+      const editingId = getElement('editingOnDemandClipId').value;
 
       if (!playlistName || !clipTitle || !link) {
         getElement('videoSaveResult').textContent = 'กรุณากรอกชื่อชุดคลิป ชื่อคลิป และลิงก์วิดีโอให้ครบถ้วน';
@@ -7707,17 +7738,17 @@ function getCourseOnlineDocs(course, includeInactive) {
 
       try {
         if (editingId) {
-          const item = onDemandชุดคลิปs.find(function(p) { return String(p.id) === String(editingId); });
+          const item = onDemandClips.find(function(p) { return String(p.id) === String(editingId); });
           if (item) {
             Object.assign(item, { courseId: courseId, subject: subject, grade: grade, playlistName: playlistName, clipTitle: clipTitle, link: link, pdfFiles: pdfFiles });
-            await setFirebaseDocument('onDemandชุดคลิปs', item);
+            await setFirebaseDocument('onDemandClips', item);
           }
           getElement('videoSaveResult').textContent = 'แก้ไข ชุดคลิป / คลิป On-demand เรียบร้อย';
         } else {
           const newId = Date.now();
           const newItem = { id: newId, firebaseDocId: String(newId), courseId: courseId, subject: subject, grade: grade, playlistName: playlistName, clipTitle: clipTitle, link: link, pdfFiles: pdfFiles };
-          onDemandชุดคลิปs.push(newItem);
-          await setFirebaseDocument('onDemandชุดคลิปs', newItem);
+          onDemandClips.push(newItem);
+          await setFirebaseDocument('onDemandClips', newItem);
           getElement('videoSaveResult').textContent = 'เพิ่ม ชุดคลิป / คลิป On-demand เรียบร้อย';
         }
       } catch (error) {
@@ -7733,13 +7764,13 @@ function getCourseOnlineDocs(course, includeInactive) {
       updateStudentCourseDisplay();
     }
 
-    function getFilteredSortedOnDemandชุดคลิปs() {
+    function getFilteredSortedOnDemandClips() {
       const subjectFilter = getElement('adminOnDemandSubjectViewFilter') ? getElement('adminOnDemandSubjectViewFilter').value : 'ทั้งหมด';
       const gradeFilter = getElement('adminOnDemandGradeViewFilter') ? getElement('adminOnDemandGradeViewFilter').value : 'ทั้งหมด';
       const sortKey = getElement('adminOnDemandSortKey') ? getElement('adminOnDemandSortKey').value : 'id';
       const direction = getElement('adminOnDemandSortDirection') ? getElement('adminOnDemandSortDirection').value : 'asc';
 
-      return onDemandชุดคลิปs
+      return onDemandClips
         .filter(function(item) {
           const subjectMatched = subjectFilter === 'ทั้งหมด' || item.subject === subjectFilter;
           const gradeMatched = gradeFilter === 'ทั้งหมด' || item.grade === gradeFilter;
@@ -7767,15 +7798,15 @@ function getCourseOnlineDocs(course, includeInactive) {
     function renderOnDemandTable() {
       const tbody = getElement('adminOnDemandTableBody');
       if (!tbody) return;
-      const filtered = getFilteredSortedOnDemandชุดคลิปs();
+      const filtered = getFilteredSortedOnDemandClips();
       tbody.innerHTML = filtered.length ? filtered.map(function(item) {
         const course = courses.find(function(c) { return String(c.id) === String(item.courseId); });
-        return '<tr><td>' + item.subject + '</td><td>' + item.grade + '</td><td>' + item.playlistName + '</td><td>' + item.clipTitle + '</td><td>' + (course ? course.name : '-') + '</td><td>' + (item.link ? 'มีลิงก์' : '-') + '</td><td>' + getPdfFileCountText(item) + '</td><td><button class="btn btn-blue" type="button" onclick="' + actionCall('editOnDemand', item.id) + '">แก้ไข</button><button class="btn btn-red" type="button" onclick="' + actionCall('deleteOnDemandชุดคลิป', item.id) + '">ลบ</button></td></tr>';
+        return '<tr><td>' + item.subject + '</td><td>' + item.grade + '</td><td>' + item.playlistName + '</td><td>' + item.clipTitle + '</td><td>' + (course ? course.name : '-') + '</td><td>' + (item.link ? 'มีลิงก์' : '-') + '</td><td>' + getPdfFileCountText(item) + '</td><td><button class="btn btn-blue" type="button" onclick="' + actionCall('editOnDemand', item.id) + '">แก้ไข</button><button class="btn btn-red" type="button" onclick="' + actionCall('deleteOnDemandClip', item.id) + '">ลบ</button></td></tr>';
       }).join('') : '<tr><td colspan="8">ไม่พบคลิป On-demand ตามวิชาและระดับชั้นที่เลือก</td></tr>';
     }
 
     function editOnDemand(id) {
-      const item = onDemandชุดคลิปs.find(function(p) { return String(p.id) === String(id); });
+      const item = onDemandClips.find(function(p) { return String(p.id) === String(id); });
       if (!item) return;
 
       openEditBubble('แก้ไข ชุดคลิป / คลิป On-demand',
@@ -7785,14 +7816,14 @@ function getCourseOnlineDocs(course, includeInactive) {
         '</div>' +
         '<div class="form-row">' +
           '<div><label>ระดับชั้น</label><select id="bubbleOnDemandGrade">' + gradeOptionsHtml(item.grade) + '</select></div>' +
-          '<div><label>ชื่อชุดคลิป</label><input id="bubbleOnDemandชุดคลิปName" type="text" value="' + item.playlistName + '"></div>' +
+          '<div><label>ชื่อชุดคลิป</label><input id="bubbleOnDemandClipName" type="text" value="' + item.playlistName + '"></div>' +
         '</div>' +
         '<label>ชื่อคลิป / บทเรียน</label><input id="bubbleOnDemandTitle" type="text" value="' + item.clipTitle + '">' +
         '<br><br><label>ลิงก์วิดีโอ On-demand</label><input id="bubbleOnDemandLink" type="url" value="' + item.link + '">' +
         '<br><br><label>ไฟล์ PDF ประกอบบทเรียน (Google Drive)</label><textarea id="bubbleOnDemandPdfFiles" placeholder="ชีทเรียน | https://drive.google.com/...">' + pdfFilesToText(item.pdfFiles) + '</textarea>' +
         '<p class="mini-muted">ใส่ 1 ไฟล์ต่อ 1 บรรทัด รูปแบบ: ชื่อไฟล์ | ลิงก์ Google Drive</p>',
         function() {
-          const playlistName = bubbleValue('bubbleOnDemandชุดคลิปName');
+          const playlistName = bubbleValue('bubbleOnDemandClipName');
           const clipTitle = bubbleValue('bubbleOnDemandTitle');
           const link = bubbleValue('bubbleOnDemandLink');
           const pdfFiles = parsePdfFilesFromText(bubbleValue('bubbleOnDemandPdfFiles'));
@@ -7810,7 +7841,7 @@ function getCourseOnlineDocs(course, includeInactive) {
             link: link,
             pdfFiles: pdfFiles
           });
-          setFirebaseDocument('onDemandชุดคลิปs', item).catch(function(error) { console.error('save ondemand firebase error:', error); });
+          setFirebaseDocument('onDemandClips', item).catch(function(error) { console.error('save ondemand firebase error:', error); });
           renderOnDemandTable();
           updateStudentCourseDisplay();
           closeEditBubble();
@@ -7820,12 +7851,12 @@ function getCourseOnlineDocs(course, includeInactive) {
       );
     }
 
-    function deleteOnDemandชุดคลิป(id) {
-      const index = onDemandชุดคลิปs.findIndex(function(p) { return String(p.id) === String(id); });
+    function deleteOnDemandClip(id) {
+      const index = onDemandClips.findIndex(function(p) { return String(p.id) === String(id); });
       if (index === -1) return;
-      const item = onDemandชุดคลิปs[index];
-      deleteFirebaseDocument('onDemandชุดคลิปs', item).catch(function(error) { console.error('delete ondemand firebase error:', error); });
-      onDemandชุดคลิปs.splice(index, 1);
+      const item = onDemandClips[index];
+      deleteFirebaseDocument('onDemandClips', item).catch(function(error) { console.error('delete ondemand firebase error:', error); });
+      onDemandClips.splice(index, 1);
       renderOnDemandTable();
       updateStudentCourseDisplay();
       getElement('videoSaveResult').textContent = 'ลบ ชุดคลิป / คลิป On-demand ออกจาก Firestore เรียบร้อย';
@@ -7833,7 +7864,7 @@ function getCourseOnlineDocs(course, includeInactive) {
     }
 
     function clearOnDemandForm(clearMessage) {
-      getElement('editingOnDemandชุดคลิปId').value = '';
+      getElement('editingOnDemandClipId').value = '';
       getElement('adminOnDemandTitle').value = '';
       getElement('adminOnDemandLink').value = '';
       if (getElement('adminOnDemandPdfFiles')) getElement('adminOnDemandPdfFiles').value = '';
@@ -7841,7 +7872,7 @@ function getCourseOnlineDocs(course, includeInactive) {
       if (course) {
         getElement('adminOnDemandSubject').value = course.onDemandSubject || guessSubjectFromCourse(course.name);
         getElement('adminOnDemandGrade').value = course.onDemandGrade || course.grade || 'ป.6';
-        getElement('adminOnDemandชุดคลิปName').value = course.name;
+        getElement('adminOnDemandClipName').value = course.name;
       }
       if (clearMessage !== false) getElement('videoSaveResult').textContent = '';
     }
@@ -8462,7 +8493,7 @@ function getCourseOnlineDocs(course, includeInactive) {
       const select = getElement('studentOnDemandSubjectFilter');
       if (!select) return;
       const currentValue = select.value || 'ทั้งหมด';
-      const subjects = Array.from(new Set(onDemandชุดคลิปs
+      const subjects = Array.from(new Set(onDemandClips
         .filter(function(item) { return item.grade === grade; })
         .map(function(item) { return item.subject; })
       ));
@@ -8486,7 +8517,7 @@ function getCourseOnlineDocs(course, includeInactive) {
         return;
       }
 
-      const playlists = onDemandชุดคลิปs.filter(function(item) {
+      const playlists = onDemandClips.filter(function(item) {
         const gradeMatched = item.grade === grade;
         const subjectMatched = subjectFilter === 'ทั้งหมด' || item.subject === subjectFilter;
         const courseMatched = !item.courseId || allowedCourseIds.includes(String(item.courseId));
@@ -8514,7 +8545,7 @@ function getCourseOnlineDocs(course, includeInactive) {
             return '<div style="border-top:1px solid #374151; padding-top:10px; margin-top:10px;">' +
               '<p style="color:white;"><strong>' + (index + 1) + '. ' + item.clipTitle + '</strong></p>' +
               '<p style="color:#d1d5db;">' + (item.link ? 'ลิงก์คลิปพร้อมใช้งานจากหลังบ้าน' : 'ยังไม่มีลิงก์คลิปนี้') + '</p>' +
-              '<button class="btn ' + (item.link ? '' : 'btn-dark') + '" type="button" onclick="' + actionCall('openOnDemandชุดคลิปClip', item.id) + '">ดูคลิปนี้</button>' +
+              '<button class="btn ' + (item.link ? '' : 'btn-dark') + '" type="button" onclick="' + actionCall('openOnDemandClipClip', item.id) + '">ดูคลิปนี้</button>' +
               renderPdfButtonsForStudent(item) +
             '</div>';
           }).join('') +
@@ -8522,8 +8553,8 @@ function getCourseOnlineDocs(course, includeInactive) {
       }).join('');
     }
 
-    function openOnDemandชุดคลิปClip(id) {
-      const item = onDemandชุดคลิปs.find(function(p) { return String(p.id) === String(id); });
+    function openOnDemandClipClip(id) {
+      const item = onDemandClips.find(function(p) { return String(p.id) === String(id); });
       if (!item || !item.link) {
         alert('ยังไม่ได้เพิ่มลิงก์คลิปนี้');
         return;
@@ -8550,7 +8581,7 @@ function getCourseOnlineDocs(course, includeInactive) {
         alert('คอร์สนี้ยังปิดคลิป On-demand ไว้');
         return;
       }
-      const item = onDemandชุดคลิปs.find(function(p) { return String(p.courseId) === String(id); });
+      const item = onDemandClips.find(function(p) { return String(p.courseId) === String(id); });
       if (!item || !item.link) {
         alert('ยังไม่ได้เพิ่มคลิป On-demand สำหรับคอร์สนี้');
         return;
@@ -11866,7 +11897,7 @@ function receiptStatusText(status) {
         attendanceHistory: typeof pickupHistory !== 'undefined' ? pickupHistory : [],
         activityLogs: activityLogs || [],
         announcements: announcements || [],
-        onDemandชุดคลิปs: onDemandชุดคลิปs || []
+        onDemandClips: onDemandClips || []
       };
       const blob = new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json;charset=utf-8;' });
       const url = URL.createObjectURL(blob);
