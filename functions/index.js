@@ -111,31 +111,43 @@ async function checkDuplicateReference(referenceNo, currentPaymentId) {
 }
 
 function buildOcrCheckResult({ expectedAmount, ocrAmount, duplicateRef, referenceNo }) {
-  const notes = [];
-  let status = "needs_review";
-
-  if (!referenceNo) notes.push("ไม่พบเลขอ้างอิงจาก OCR");
-  if (duplicateRef) notes.push("พบเลขอ้างอิงซ้ำในรายการอื่น");
-
   const expected = Number(expectedAmount || 0);
   const actual = Number(ocrAmount || 0);
-  if (expected > 0 && actual > 0 && Math.abs(expected - actual) > 0.01) {
-    notes.push(`ยอด OCR (${actual}) ไม่ตรงกับยอดที่ต้องชำระ (${expected})`);
-  }
-  if (!actual) notes.push("ไม่พบยอดเงินจาก OCR");
 
-  if (!notes.length) {
-    status = "passed";
-    notes.push("OCR เบื้องต้นผ่าน: ไม่พบยอดหรือเลขอ้างอิงผิดปกติ");
-  } else if (duplicateRef) {
-    status = "duplicate_reference";
-  } else if (expected > 0 && actual > 0) {
-    status = "amount_mismatch";
+  if (duplicateRef) {
+    return {
+      ocrCheckStatus: "duplicate_reference",
+      ocrCheckNote: "พบเลขอ้างอิงซ้ำในระบบ / กรุณาตรวจสอบก่อนอนุมัติ",
+    };
+  }
+  if (!referenceNo) {
+    return {
+      ocrCheckStatus: "no_reference",
+      ocrCheckNote: "OCR อ่านเลขอ้างอิงไม่ได้ / รอ Admin ตรวจสอบ",
+    };
+  }
+  if (!actual) {
+    return {
+      ocrCheckStatus: "no_amount",
+      ocrCheckNote: "OCR อ่านยอดเงินไม่ได้ / รอ Admin ตรวจสอบ",
+    };
+  }
+  if (expected > 0 && Math.abs(expected - actual) > 0.01) {
+    return {
+      ocrCheckStatus: "amount_mismatch",
+      ocrCheckNote: `ยอด OCR ${actual.toLocaleString("th-TH")} บาท ไม่ตรงกับยอดที่ต้องชำระ ${expected.toLocaleString("th-TH")} บาท`,
+    };
+  }
+  if (!expected) {
+    return {
+      ocrCheckStatus: "need_manual_review",
+      ocrCheckNote: "ไม่พบยอดที่ต้องชำระในระบบ / รอ Admin ตรวจสอบ",
+    };
   }
 
   return {
-    ocrCheckStatus: status,
-    ocrCheckNote: notes.join(" · "),
+    ocrCheckStatus: "passed",
+    ocrCheckNote: "ยอดเงินตรง / เลขอ้างอิงไม่ซ้ำ / รอ Admin ตรวจสอบ",
   };
 }
 
@@ -153,6 +165,17 @@ async function getUserProfile(uid) {
   const userDoc = await db.collection("users").doc(uid).get();
   if (!userDoc.exists) return null;
   return userDoc.data() || null;
+}
+
+async function writeActivityLog(data) {
+  try {
+    await db.collection("activityLogs").add({
+      ...data,
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+  } catch (error) {
+    console.error("write activity log error:", error);
+  }
 }
 
 exports.uploadPaymentSlipToDriveAndOcr = onCall(async (request) => {
@@ -283,6 +306,23 @@ exports.uploadPaymentSlipToDriveAndOcr = onCall(async (request) => {
       { merge: true }
     );
 
+    await writeActivityLog({
+      type: "payment_slip_ocr_success",
+      paymentId: safePaymentId,
+      uid,
+      driveFileId,
+      ocrCheckStatus: checkResult.ocrCheckStatus,
+      ocrCheckNote: checkResult.ocrCheckNote,
+    });
+    if (duplicateRef) {
+      await writeActivityLog({
+        type: "payment_slip_duplicate_reference",
+        paymentId: safePaymentId,
+        uid,
+        referenceNo: parsed.referenceNo,
+      });
+    }
+
     return {
       ok: true,
       driveViewUrl,
@@ -290,6 +330,12 @@ exports.uploadPaymentSlipToDriveAndOcr = onCall(async (request) => {
       ocrCheckNote: checkResult.ocrCheckNote,
     };
   } catch (error) {
+    await writeActivityLog({
+      type: "payment_slip_ocr_failed",
+      paymentId: safePaymentId,
+      uid,
+      error: error.message || String(error),
+    });
     await paymentRef.set(
       {
         slipStatus: "ocr_failed",

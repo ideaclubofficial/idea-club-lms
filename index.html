@@ -2431,6 +2431,28 @@
       return cleanItem;
     }
 
+    async function syncStudentUserProfile(student) {
+      if (!firebaseReady || !db || !student || !student.authUid) return;
+      const memberId = student.memberId || student.studentId || student.id || '';
+      await db.collection('users').doc(String(student.authUid)).set({
+        memberId: memberId,
+        studentId: memberId,
+        name: student.name || '',
+        nickname: student.nickname || '',
+        parentName: student.parentName || '',
+        phone: student.phone || '',
+        lineId: student.lineId || '',
+        contactEmail: student.contactEmail || '',
+        email: student.email || '',
+        school: student.school || '',
+        grade: student.grade || '',
+        preferredLocation: student.preferredLocation || '',
+        role: 'student',
+        status: 'active',
+        updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+      }, { merge: true });
+    }
+
     async function setFirebaseDocument(collectionName, item) {
       if (!firebaseReady || !db || !item) throw new Error('Firebase ยังไม่พร้อมใช้งาน');
       if (PRODUCTION_MODE && !firebaseUser) throw new Error('กรุณา Login ด้วย Firebase Auth ก่อนบันทึกข้อมูล');
@@ -2442,6 +2464,13 @@
       await ref.set(cleanItem, { merge: true });
       item.firebaseDocId = docId;
       item.deleted = cleanItem.deleted;
+      if (collectionName === 'students' && item.authUid) {
+        try {
+          await syncStudentUserProfile(item);
+        } catch (error) {
+          console.error('sync student user profile error:', error);
+        }
+      }
     }
 
     async function deleteFirebaseDocument(collectionName, item) {
@@ -3541,8 +3570,12 @@
 
       try {
         if (PRODUCTION_MODE && firebaseReady && db && authUid) {
+          const studentUserProfileData = Object.assign({}, userProfileData, {
+            memberId: autoMemberId,
+            studentId: autoMemberId
+          });
           const batch = db.batch();
-          batch.set(db.collection('users').doc(authUid), Object.assign({}, userProfileData, {
+          batch.set(db.collection('users').doc(authUid), Object.assign({}, studentUserProfileData, {
             createdAt: firebase.firestore.FieldValue.serverTimestamp(),
             updatedAt: firebase.firestore.FieldValue.serverTimestamp()
           }), { merge: true });
@@ -5240,6 +5273,8 @@
           authUid = await createAuthUserFromAdmin(studentEmail, '000000');
           await db.collection('users').doc(authUid).set({
             name: name,
+            memberId: memberId,
+            studentId: memberId,
             email: studentEmail,
             phone: phone,
             role: 'student',
@@ -5274,6 +5309,8 @@
         if (existing.authUid && db) {
           await db.collection('users').doc(existing.authUid).set({
             name: name,
+            memberId: memberId,
+            studentId: memberId,
             email: existing.email || studentEmail,
             phone: phone,
             role: 'student',
@@ -6936,18 +6973,24 @@ function getCourseOnlineDocs(course, includeInactive) {
 	                  id: paymentId,
 	                  firebaseDocId: paymentId,
                   studentId: currentStudent.id || '',
+                  memberId: currentStudent.memberId || '',
+                  studentName: currentStudent.name || '',
+                  studentAuthUid: currentStudent.authUid || (firebaseUser ? firebaseUser.uid : ''),
                   authUid: currentStudent.authUid || (firebaseUser ? firebaseUser.uid : ''),
                   student: currentStudent.name || '',
                   courseId: currentStudent.courseId || '',
+                  courseName: currentStudent.course || '',
                   course: currentStudent.course || '',
                   month: month,
                   baseAmount: paymentAmount,
+                  expectedAmount: paymentAmount,
                   discount: 0,
                   finalAmount: paymentAmount,
                   amount: paymentAmount,
                   slipUrl: '',
                   slipSource: 'LINE กลุ่มประจำชั้น',
                   slipNote: 'นักเรียนกดเข้ากลุ่ม LINE เพื่อส่งสลิปของเดือน ' + month,
+                  paymentStatus: 'รอตรวจสลิป',
                   status: 'รอตรวจสลิป',
                   createdAtText: new Date().toLocaleString('th-TH')
                 };
@@ -8186,17 +8229,23 @@ function receiptStatusText(status) {
           id: paymentId,
           firebaseDocId: paymentId,
           studentId: currentStudent.id || '',
+          memberId: currentStudent.memberId || '',
+          studentName: currentStudent.name || '',
+          studentAuthUid: currentStudent.authUid || (firebaseUser ? firebaseUser.uid : ''),
           authUid: currentStudent.authUid || (firebaseUser ? firebaseUser.uid : ''),
           student: currentStudent.name || '',
           courseId: currentStudent.courseId || '',
+          courseName: currentStudent.course || '',
           course: currentStudent.course || '',
           month: month,
           baseAmount: getExpectedPaymentAmountForStudent(currentStudent, month),
+          expectedAmount: getExpectedPaymentAmountForStudent(currentStudent, month),
           discount: 0,
           finalAmount: getExpectedPaymentAmountForStudent(currentStudent, month),
           amount: getExpectedPaymentAmountForStudent(currentStudent, month),
           slipUrl: slipUrl,
           slipNote: 'นักเรียนอัปโหลดสลิปของเดือน ' + month,
+          paymentStatus: 'รอตรวจสลิป',
           status: 'รอตรวจสลิป',
           createdAtText: new Date().toLocaleString('th-TH')
         };
@@ -9563,7 +9612,7 @@ function receiptStatusText(status) {
       const amount = manualAmount || baseAmount;
       const discount = Math.max(0, baseAmount - amount);
       const paymentId = createFirebaseDocId('payments');
-      const payment = { id: paymentId, firebaseDocId: paymentId, studentId: student.id, authUid: student.authUid || '', student: student.name || '', courseId: student.courseId || '', course: student.course || '', month: month, studentSelectedMonth: month, baseAmount: baseAmount, discount: discount, finalAmount: amount, amount: amount, slipUrl: '', slipNote: 'Admin บันทึกเอง', adminNote: note, status: status, createdAtText: new Date().toLocaleString('th-TH') };
+      const payment = { id: paymentId, firebaseDocId: paymentId, studentId: student.id, memberId: student.memberId || '', studentName: student.name || '', studentAuthUid: student.authUid || '', authUid: student.authUid || '', student: student.name || '', courseId: student.courseId || '', courseName: student.course || '', course: student.course || '', month: month, studentSelectedMonth: month, baseAmount: baseAmount, expectedAmount: baseAmount, discount: discount, finalAmount: amount, amount: amount, slipUrl: '', slipNote: 'Admin บันทึกเอง', adminNote: note, paymentStatus: status, status: status, createdAtText: new Date().toLocaleString('th-TH') };
       payments.push(payment);
       student.paymentStatus = status;
       student.overdueMonths = Array.isArray(student.overdueMonths) ? student.overdueMonths : [];
@@ -9609,19 +9658,25 @@ function receiptStatusText(status) {
           id: paymentId,
           firebaseDocId: paymentId,
           studentId: student.id,
+          memberId: student.memberId || '',
+          studentName: student.name || '',
+          studentAuthUid: student.authUid || '',
           authUid: student.authUid || '',
           student: student.name || '',
           courseId: student.courseId || '',
+          courseName: student.course || '',
           course: student.course || '',
           month: targetMonth,
           studentSelectedMonth: targetMonth,
           baseAmount: baseAmount,
+          expectedAmount: baseAmount,
           discount: 0,
           finalAmount: baseAmount,
           amount: baseAmount,
           slipUrl: '',
           slipNote: 'ระบบสร้างรายการรอชำระเงินจากราคาคอร์ส',
           adminNote: '',
+          paymentStatus: 'รอชำระเงิน',
           status: 'รอชำระเงิน',
           createdAtText: new Date().toLocaleString('th-TH')
         };
@@ -10022,6 +10077,119 @@ function receiptStatusText(status) {
       openViewBubble('ผลตรวจความพร้อมคอร์ส', '<div class="' + (r.ready ? 'feature-ok' : 'feature-warning') + '"><h3>' + (c ? c.name : '-') + '</h3><p>' + (r.ready ? 'คอร์สนี้พร้อมเปิดใช้งาน' : 'รายการที่ต้องแก้ไข:</p><ul style="margin-left:22px;">' + r.issues.map(function(i){return '<li>' + i + '</li>';}).join('') + '</ul>') + '</div>');
     }
 
+    function getPaymentDocId(payment) {
+      return String((payment && (payment.firebaseDocId || payment.id)) || '');
+    }
+
+    function getPaymentAmountForReadiness(payment) {
+      if (!payment) return 0;
+      return Number(payment.expectedAmount || payment.finalAmount || payment.amount || payment.baseAmount || 0);
+    }
+
+    function findStudentForPaymentReadiness(payment) {
+      if (!payment) return null;
+      const paymentStudentId = String(payment.studentId || '');
+      const paymentMemberId = String(payment.memberId || '');
+      const paymentAuthUid = String(payment.studentAuthUid || payment.authUid || '');
+      const paymentName = normalizeText(payment.studentName || payment.student || '');
+      return (students || []).find(function(student) {
+        const studentId = String(student.id || '');
+        const memberId = String(student.memberId || student.studentId || '');
+        const authUid = String(student.authUid || '');
+        const name = normalizeText(student.name || '');
+        return (paymentStudentId && (paymentStudentId === studentId || paymentStudentId === memberId))
+          || (paymentMemberId && paymentMemberId === memberId)
+          || (paymentAuthUid && paymentAuthUid === authUid)
+          || (paymentName && name && paymentName === name);
+      }) || null;
+    }
+
+    function getPaymentOwnerReadiness(payment) {
+      const matchedStudent = findStudentForPaymentReadiness(payment);
+      const memberId = payment.memberId || (matchedStudent ? matchedStudent.memberId : '');
+      const studentId = payment.studentId || (matchedStudent ? (matchedStudent.id || matchedStudent.memberId) : '');
+      const studentAuthUid = payment.studentAuthUid || payment.authUid || (matchedStudent ? matchedStudent.authUid : '');
+      const expectedAmount = getPaymentAmountForReadiness(payment);
+      return {
+        paymentId: getPaymentDocId(payment),
+        matchedStudent: matchedStudent,
+        memberId: memberId || '',
+        studentId: studentId || '',
+        studentAuthUid: studentAuthUid || '',
+        expectedAmount: expectedAmount,
+        hasMemberOrStudentId: !!(memberId || studentId),
+        hasStudentAuthUid: !!studentAuthUid,
+        hasAmount: expectedAmount > 0
+      };
+    }
+
+    function diagnosePaymentOwnerFields() {
+      const list = payments || [];
+      const readiness = list.map(getPaymentOwnerReadiness);
+      const missingMemberOrStudentId = readiness.filter(function(item) { return !item.hasMemberOrStudentId; });
+      const missingStudentAuthUid = readiness.filter(function(item) { return !item.hasStudentAuthUid; });
+      const missingAmount = readiness.filter(function(item) { return !item.hasAmount; });
+      const readyForOcr = readiness.filter(function(item) { return item.hasMemberOrStudentId && item.hasAmount; });
+      const samples = readiness.filter(function(item) {
+        return !item.hasMemberOrStudentId || !item.hasStudentAuthUid || !item.hasAmount;
+      }).slice(0, 30);
+      const sampleRows = samples.length ? samples.map(function(item) {
+        const payment = list.find(function(p) { return getPaymentDocId(p) === item.paymentId; }) || {};
+        return '<tr><td>' + escapeHtml(item.paymentId || '-') + '</td><td>' + escapeHtml(payment.studentName || payment.student || '-') + '</td><td>' + escapeHtml(item.memberId || '-') + '</td><td>' + escapeHtml(item.studentId || '-') + '</td><td>' + escapeHtml(item.studentAuthUid || '-') + '</td><td>' + escapeHtml(item.expectedAmount || '-') + '</td></tr>';
+      }).join('') : '<tr><td colspan="6">ไม่พบรายการที่ต้องตรวจสอบ</td></tr>';
+
+      openViewBubble('ตรวจ payment ที่ขาดข้อมูลนักเรียน',
+        '<div class="receipt-box">' +
+          '<div class="receipt-header"><div><div class="receipt-title">Payment OCR Data Readiness</div><p>รายงานนี้เป็น diagnostic เท่านั้น ยังไม่แก้ข้อมูลจริง</p></div><span class="status-badge parent">' + readyForOcr.length + ' / ' + list.length + '</span></div>' +
+          '<div class="status-display">' +
+            '<div class="status-display-row"><span class="status-label">payments ทั้งหมด</span><strong>' + list.length + '</strong></div>' +
+            '<div class="status-display-row"><span class="status-label">พร้อมใช้งาน OCR</span><strong class="status-paid">' + readyForOcr.length + '</strong></div>' +
+            '<div class="status-display-row"><span class="status-label">ขาด memberId/studentId</span><strong class="status-absent">' + missingMemberOrStudentId.length + '</strong></div>' +
+            '<div class="status-display-row"><span class="status-label">ขาด studentAuthUid</span><strong class="status-waiting">' + missingStudentAuthUid.length + '</strong></div>' +
+            '<div class="status-display-row"><span class="status-label">ขาด amount/expectedAmount</span><strong class="status-absent">' + missingAmount.length + '</strong></div>' +
+          '</div>' +
+          '<div class="notice" style="margin-top:14px;">Dry run ที่ซ่อมได้: ' + repairPaymentOwnerFieldsDryRun().length + ' รายการ ยังไม่มีการเขียน Firestore จริง</div>' +
+          '<div class="table-wrap" style="margin-top:14px;"><table><thead><tr><th>Payment ID</th><th>นักเรียน</th><th>Member ID</th><th>Student ID</th><th>Auth UID</th><th>Amount</th></tr></thead><tbody>' + sampleRows + '</tbody></table></div>' +
+          '<div class="test-actions"><button class="btn btn-dark" type="button" onclick="closeEditBubble()">ปิด</button></div>' +
+        '</div>'
+      );
+    }
+
+    function repairPaymentOwnerFieldsDryRun() {
+      // DRY RUN ONLY: do not write until Admin confirms in a future phase.
+      return (payments || []).map(function(payment) {
+        const matchedStudent = findStudentForPaymentReadiness(payment);
+        if (!matchedStudent) return null;
+        const before = {
+          memberId: payment.memberId || '',
+          studentId: payment.studentId || '',
+          studentAuthUid: payment.studentAuthUid || '',
+          expectedAmount: payment.expectedAmount || ''
+        };
+        const amount = getPaymentAmountForReadiness(payment);
+        const after = {
+          memberId: payment.memberId || matchedStudent.memberId || '',
+          studentId: payment.studentId || matchedStudent.id || matchedStudent.memberId || '',
+          studentAuthUid: payment.studentAuthUid || payment.authUid || matchedStudent.authUid || '',
+          expectedAmount: payment.expectedAmount || amount || ''
+        };
+        const changed = Object.keys(after).some(function(key) { return String(before[key] || '') !== String(after[key] || ''); });
+        if (!changed) return null;
+        return {
+          paymentId: getPaymentDocId(payment),
+          before: before,
+          after: after,
+          confidence: (matchedStudent.memberId && (payment.memberId === matchedStudent.memberId || payment.studentId === matchedStudent.memberId)) ? 'high' : 'medium'
+        };
+      }).filter(Boolean);
+    }
+
+    function injectPaymentOwnerDiagnosticPanel() {
+      const tab = getElement('admin-payment');
+      if (!tab) return;
+      ensureElement(tab, 'paymentOwnerDiagnosticPanel', '<div id="paymentOwnerDiagnosticPanel" class="form-box"><h3>ตรวจความพร้อม Payment OCR</h3><p style="color:#6b7280; margin-bottom:14px;">ตรวจรายการชำระเงินที่ขาด memberId, studentId, studentAuthUid หรือยอดเงิน โดยยังไม่แก้ข้อมูลจริง</p><button class="btn btn-blue" type="button" onclick="diagnosePaymentOwnerFields()">ตรวจ payment ที่ขาดข้อมูลนักเรียน</button></div>', 'prepend');
+    }
+
     function previewStudentAsAdmin(id) {
       const student = (students || []).find(function(s) { return String(s.id) === String(id); });
       if (!student) return;
@@ -10176,7 +10344,7 @@ function receiptStatusText(status) {
       originalShowAdminTabFinal(tabId);
       if (tabId === 'admin-dashboard') renderAdminDataQualityBox();
       if (tabId === 'admin-courses') { injectCourseReadinessTools(); renderAllCourseReadiness(); }
-      if (tabId === 'admin-payment') injectOverdueDayFilter();
+      if (tabId === 'admin-payment') { injectOverdueDayFilter(); injectPaymentOwnerDiagnosticPanel(); }
       if (tabId === 'admin-settings') { injectBackupButton(); injectAdminRoleSettings(); }
       applyAdminRoleVisibility();
     };
