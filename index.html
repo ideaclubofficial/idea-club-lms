@@ -6312,6 +6312,14 @@ function getCourseOnlineDocs(course, includeInactive) {
       const selectedMonth = getElement('studentPaymentMonth') && getElement('studentPaymentMonth').value
         ? getElement('studentPaymentMonth').value
         : (paymentMonths[0] ? paymentMonths[0].month : '');
+      const selectedPayment = payments.find(function(p) {
+        return isCurrentStudentMatchRecord(p)
+          && (
+            String(p.id || '') === String(selectedMonth)
+            || String(p.firebaseDocId || '') === String(selectedMonth)
+          );
+      });
+      if (selectedPayment) return selectedPayment;
       const matched = payments.filter(function(p) {
         const studentMatched = isCurrentStudentMatchRecord(p);
         const monthMatched = !selectedMonth || p.month === selectedMonth;
@@ -8127,6 +8135,7 @@ function receiptStatusText(status) {
 
     let studentSlipData = '';
 
+    // LEGACY: old manual slip flow retained for compatibility. New OCR upload uses uploadStudentSlipWithOcr().
     function previewStudentSlip() {
       const input = getElement('studentSlipUpload');
       const box = getElement('studentSlipPreview');
@@ -8264,7 +8273,7 @@ function receiptStatusText(status) {
       const payment = getCurrentStudentPaymentForSelectedMonth();
       const paymentId = payment ? String(payment.firebaseDocId || payment.id || '') : '';
       if (!paymentId) {
-        result.textContent = 'ยังไม่พบรายการชำระเงินของเดือนนี้ กรุณากดเข้ากลุ่ม LINE เพื่อแจ้งรอตรวจก่อน หรือให้ Admin สร้างรายการชำระเงิน';
+        result.textContent = 'ไม่พบรายการชำระเงินของเดือนนี้ กรุณาติดต่อเจ้าหน้าที่';
         result.style.color = '#dc2626';
         return;
       }

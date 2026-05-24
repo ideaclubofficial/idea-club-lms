@@ -19,6 +19,14 @@ service cloud.firestore {
         );
     }
 
+    function isFinance() {
+      return signedIn()
+        && (
+          userProfile(request.auth.uid).role in ['finance', 'Finance', 'FinanceAdmin']
+          || userProfile(request.auth.uid).appRole in ['finance', 'Finance', 'FinanceAdmin']
+        );
+    }
+
     function isTeacher() {
       return signedIn()
         && (
@@ -36,6 +44,28 @@ service cloud.firestore {
       return signedIn() && request.resource.data.authUid == request.auth.uid;
     }
 
+    function isPaymentOwner() {
+      return signedIn()
+        && (
+          resource.data.authUid == request.auth.uid
+          || resource.data.studentAuthUid == request.auth.uid
+          || resource.data.slipUploadedByUid == request.auth.uid
+          || resource.data.uploadedByUid == request.auth.uid
+        );
+    }
+
+    function isCreatingOwnPayment() {
+      return signedIn()
+        && (
+          request.resource.data.authUid == request.auth.uid
+          || request.resource.data.studentAuthUid == request.auth.uid
+          || request.resource.data.slipUploadedByUid == request.auth.uid
+          || request.resource.data.uploadedByUid == request.auth.uid
+        )
+        && !(request.resource.data.paymentStatus in ['ชำระแล้ว', 'อนุมัติแล้ว', 'paid', 'approved'])
+        && !(request.resource.data.status in ['ชำระแล้ว', 'อนุมัติแล้ว', 'paid', 'approved']);
+    }
+
     match /users/{userId} {
       allow read: if signedIn() && (request.auth.uid == userId || isAdmin());
       allow create: if signedIn() && request.auth.uid == userId;
@@ -51,9 +81,12 @@ service cloud.firestore {
     }
 
     match /payments/{docId} {
-      allow read: if isAdmin() || ownsExistingDoc();
-      allow create: if signedIn();
-      allow update, delete: if isAdmin();
+      allow read: if isAdmin() || isFinance() || isPaymentOwner();
+      allow create: if isAdmin() || isFinance() || isCreatingOwnPayment();
+      // OCR slip updates are handled by Cloud Functions Admin SDK, not by client.
+      // Students must not directly approve or change payment status from client.
+      allow update: if isAdmin() || isFinance();
+      allow delete: if isAdmin();
     }
 
     match /receipts/{docId} {
