@@ -19,6 +19,21 @@ The payment slip OCR function uploads student slip images to Google Drive and us
 
 - Set `DRIVE_FOLDER_ID` before deploy, or replace the local placeholder only in a safe deployment environment.
 - The code placeholder is `PUT_GOOGLE_DRIVE_FOLDER_ID_HERE`.
+- Production should use environment/secret configuration instead of hardcoding IDs.
+
+### Option A: environment variable
+
+```sh
+DRIVE_FOLDER_ID="xxxx" firebase deploy --only functions:uploadPaymentSlipToDriveAndOcr
+```
+
+### Option B: temporary local constant
+
+```js
+const DRIVE_FOLDER_ID = "xxxx";
+```
+
+Only use Option B in a safe local/deployment branch. Do not commit the real folder ID unless explicitly approved.
 
 ## Deploy Command Later
 

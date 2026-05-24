@@ -19,6 +19,22 @@
 - ห้าม commit ไฟล์จริง
 - ตั้ง `DRIVE_FOLDER_ID`
 
+ตั้งค่า `DRIVE_FOLDER_ID` ได้ 2 ทาง:
+
+ทางเลือก A: ใช้ environment variable
+
+```sh
+DRIVE_FOLDER_ID="xxxx" firebase deploy --only functions:uploadPaymentSlipToDriveAndOcr
+```
+
+ทางเลือก B: แก้ constant ชั่วคราวใน `functions/index.js`
+
+```js
+const DRIVE_FOLDER_ID = "xxxx";
+```
+
+แนะนำ production ให้ใช้ env/secret ไม่ hardcode และห้าม commit Folder ID จริงถ้ายังไม่ได้อนุญาต
+
 ## 4. คำสั่งตรวจ
 
 ```sh
@@ -54,6 +70,24 @@ node --check index.js
 ```sh
 firebase deploy --only functions:uploadPaymentSlipToDriveAndOcr
 ```
+
+## Manual deploy only
+
+1. ตรวจ node/npm/firebase CLI
+2. รัน `npm install`
+3. รัน `node --check index.js`
+4. ตรวจว่า `functions/service-account-drive.json` อยู่ local และถูก gitignore
+5. ตรวจ `DRIVE_FOLDER_ID` ไม่ใช่ placeholder
+6. ตรวจ Google Drive folder share ให้ service account เป็น Editor
+7. Deploy ด้วยคำสั่ง:
+
+```sh
+firebase deploy --only functions:uploadPaymentSlipToDriveAndOcr
+```
+
+ห้าม deploy ถ้า `DRIVE_FOLDER_ID` ยังเป็น placeholder
+ห้าม deploy ถ้ายังไม่มี `service-account-drive.json`
+ห้าม deploy ถ้ายังไม่ได้เปิด Drive API / Vision API / Blaze Plan
 
 ## 7. วิธีทดสอบหลัง deploy
 

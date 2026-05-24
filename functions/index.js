@@ -22,6 +22,15 @@ const DRIVE_FOLDER_ID = process.env.DRIVE_FOLDER_ID || "PUT_GOOGLE_DRIVE_FOLDER_
 const SERVICE_ACCOUNT_PATH = path.join(__dirname, "service-account-drive.json");
 const MAX_FILE_SIZE_BYTES = 8 * 1024 * 1024;
 
+function assertDriveFolderConfigured() {
+  if (!DRIVE_FOLDER_ID || DRIVE_FOLDER_ID === "PUT_GOOGLE_DRIVE_FOLDER_ID_HERE") {
+    throw new HttpsError(
+      "failed-precondition",
+      "ยังไม่ได้ตั้งค่า DRIVE_FOLDER_ID สำหรับ Google Drive folder"
+    );
+  }
+}
+
 function base64ToBuffer(base64) {
   const cleanBase64 = String(base64 || "").replace(/^data:[^;]+;base64,/, "");
   return Buffer.from(cleanBase64, "base64");
@@ -113,11 +122,17 @@ async function checkDuplicateReference(referenceNo, currentPaymentId) {
 function buildOcrCheckResult({ expectedAmount, ocrAmount, duplicateRef, referenceNo }) {
   const expected = Number(expectedAmount || 0);
   const actual = Number(ocrAmount || 0);
+  const notes = [];
 
   if (duplicateRef) {
+    notes.push("พบเลขอ้างอิงซ้ำในระบบ");
+    if (expected > 0 && actual > 0 && Math.abs(expected - actual) > 0.01) {
+      notes.push(`ยอด OCR ${actual.toLocaleString("th-TH")} บาท ไม่ตรงกับยอดที่ต้องชำระ ${expected.toLocaleString("th-TH")} บาท`);
+    }
+    notes.push("กรุณาตรวจสอบก่อนอนุมัติ");
     return {
       ocrCheckStatus: "duplicate_reference",
-      ocrCheckNote: "พบเลขอ้างอิงซ้ำในระบบ / กรุณาตรวจสอบก่อนอนุมัติ",
+      ocrCheckNote: notes.join(" / "),
     };
   }
   if (!referenceNo) {
@@ -170,6 +185,8 @@ async function getUserProfile(uid) {
 async function writeActivityLog(data) {
   try {
     await db.collection("activityLogs").add({
+      source: "cloud_function",
+      functionName: "uploadPaymentSlipToDriveAndOcr",
       ...data,
       createdAt: admin.firestore.FieldValue.serverTimestamp(),
     });
@@ -205,6 +222,17 @@ exports.uploadPaymentSlipToDriveAndOcr = onCall(async (request) => {
   }
 
   const payment = paymentDoc.data() || {};
+  const logBase = {
+    paymentId: safePaymentId,
+    uid,
+    studentId: payment.studentId || "",
+    memberId: payment.memberId || "",
+    studentName: payment.studentName || payment.student || "",
+    paymentMonth: payment.month || "",
+    month: payment.month || "",
+    amount: payment.amount || payment.finalAmount || "",
+    expectedAmount: payment.expectedAmount || payment.finalAmount || payment.amount || payment.baseAmount || "",
+  };
   const ownerFields = [
     payment.studentAuthUid,
     payment.authUid,
@@ -238,9 +266,7 @@ exports.uploadPaymentSlipToDriveAndOcr = onCall(async (request) => {
 
   let tempFilePath = "";
   try {
-    if (!DRIVE_FOLDER_ID || DRIVE_FOLDER_ID === "PUT_GOOGLE_DRIVE_FOLDER_ID_HERE") {
-      throw new HttpsError("failed-precondition", "ยังไม่ได้ตั้งค่า DRIVE_FOLDER_ID");
-    }
+    assertDriveFolderConfigured();
 
     const buffer = base64ToBuffer(fileBase64);
     const extension = getFileExtension(safeMimeType);
@@ -307,19 +333,22 @@ exports.uploadPaymentSlipToDriveAndOcr = onCall(async (request) => {
     );
 
     await writeActivityLog({
+      ...logBase,
       type: "payment_slip_ocr_success",
-      paymentId: safePaymentId,
-      uid,
+      severity: checkResult.ocrCheckStatus === "passed" ? "info" : "warning",
       driveFileId,
+      ocrAmount: parsed.amount || "",
+      ocrReferenceNo: parsed.referenceNo || "",
       ocrCheckStatus: checkResult.ocrCheckStatus,
       ocrCheckNote: checkResult.ocrCheckNote,
     });
     if (duplicateRef) {
       await writeActivityLog({
+        ...logBase,
         type: "payment_slip_duplicate_reference",
-        paymentId: safePaymentId,
-        uid,
+        severity: "warning",
         referenceNo: parsed.referenceNo,
+        ocrReferenceNo: parsed.referenceNo || "",
       });
     }
 
@@ -331,9 +360,9 @@ exports.uploadPaymentSlipToDriveAndOcr = onCall(async (request) => {
     };
   } catch (error) {
     await writeActivityLog({
+      ...logBase,
       type: "payment_slip_ocr_failed",
-      paymentId: safePaymentId,
-      uid,
+      severity: "error",
       error: error.message || String(error),
     });
     await paymentRef.set(
