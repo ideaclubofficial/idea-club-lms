@@ -2229,6 +2229,8 @@
     let firebaseReady = false;
     let firebaseUser = null;
     let firebaseUserProfile = null;
+    let coreDataLoaded = false;
+    let coreDataLoadingPromise = null;
 
     try {
       firebase.initializeApp(firebaseConfig);
@@ -2267,13 +2269,40 @@
 
     async function getFirebaseCollection(collectionName, includeDeleted) {
       if (!firebaseReady || !db) return [];
-      const snapshot = await db.collection(collectionName).get();
+      let query = db.collection(collectionName);
+      if (collectionName === 'activityLogs') {
+        query = query.orderBy('updatedAt', 'desc').limit(100);
+      }
+      let snapshot = null;
+      try {
+        snapshot = await query.get();
+      } catch (error) {
+        console.warn('skip firebase collection:', collectionName, error);
+        return [];
+      }
       return snapshot.docs.map(function(docSnap) {
         const data = docSnap.data();
         return Object.assign({ firebaseDocId: docSnap.id }, data);
       }).filter(function(item) {
         return includeDeleted || item.deleted !== true;
       });
+    }
+
+    async function ensureCoreDataLoaded(options) {
+      options = options || {};
+      if (options.force) {
+        coreDataLoaded = false;
+        coreDataLoadingPromise = null;
+      }
+      if (coreDataLoaded) return;
+      if (!coreDataLoadingPromise) {
+        coreDataLoadingPromise = loadCoreDataFromFirebase().then(function() {
+          coreDataLoaded = true;
+        }).finally(function() {
+          coreDataLoadingPromise = null;
+        });
+      }
+      await coreDataLoadingPromise;
     }
 
     function dataUrlToBlob(dataUrl) {
@@ -2415,35 +2444,55 @@
         return;
       }
 
-      await seedCollectionIfEmpty('students', students);
-      await seedCollectionIfEmpty('teachers', teachers);
-      await seedCollectionIfEmpty('courses', courses);
-      await seedCollectionIfEmpty('onDemandClips', onDemandClips);
-      await seedCollectionIfEmpty('paymentMonths', paymentMonths);
-      await seedCollectionIfEmpty('lineGroups', lineGroups);
-      await seedCollectionIfEmpty('receipts', receipts);
-      await seedCollectionIfEmpty('monthlyQuestions', monthlyQuestions);
-      await seedCollectionIfEmpty('monthlyExamLinks', monthlyExamLinks);
-      await seedCollectionIfEmpty('scoreReports', scoreReports);
-      await seedCollectionIfEmpty('adminScoreRecords', adminScoreRecords);
-      await seedCollectionIfEmpty('announcements', announcements);
-      await seedCollectionIfEmpty('activityLogs', activityLogs);
+      await Promise.all([
+        seedCollectionIfEmpty('students', students),
+        seedCollectionIfEmpty('teachers', teachers),
+        seedCollectionIfEmpty('courses', courses),
+        seedCollectionIfEmpty('onDemandClips', onDemandClips),
+        seedCollectionIfEmpty('paymentMonths', paymentMonths),
+        seedCollectionIfEmpty('lineGroups', lineGroups),
+        seedCollectionIfEmpty('receipts', receipts),
+        seedCollectionIfEmpty('monthlyQuestions', monthlyQuestions),
+        seedCollectionIfEmpty('monthlyExamLinks', monthlyExamLinks),
+        seedCollectionIfEmpty('scoreReports', scoreReports),
+        seedCollectionIfEmpty('adminScoreRecords', adminScoreRecords),
+        seedCollectionIfEmpty('announcements', announcements),
+        seedCollectionIfEmpty('activityLogs', activityLogs)
+      ]);
 
-      replaceArray(students, await getFirebaseCollection('students'));
-      replaceArray(teachers, await getFirebaseCollection('teachers'));
-      replaceArray(courses, await getFirebaseCollection('courses'));
-      replaceArray(onDemandClips, await getFirebaseCollection('onDemandClips'));
-      replaceArray(paymentMonths, await getFirebaseCollection('paymentMonths'));
-      replaceArray(lineGroups, await getFirebaseCollection('lineGroups'));
-      replaceArray(payments, await getFirebaseCollection('payments'));
-      replaceArray(receipts, await getFirebaseCollection('receipts'));
-      replaceArray(monthlyQuestions, await getFirebaseCollection('monthlyQuestions'));
-      replaceArray(monthlyExamLinks, await getFirebaseCollection('monthlyExamLinks'));
-      replaceArray(scoreReports, await getFirebaseCollection('scoreReports'));
-      replaceArray(adminScoreRecords, await getFirebaseCollection('adminScoreRecords'));
-      replaceArray(announcements, await getFirebaseCollection('announcements'));
-      replaceArray(activityLogs, await getFirebaseCollection('activityLogs'));
-      const settingsItems = await getFirebaseCollection('settings');
+      const results = await Promise.all([
+        getFirebaseCollection('students'),
+        getFirebaseCollection('teachers'),
+        getFirebaseCollection('courses'),
+        getFirebaseCollection('onDemandClips'),
+        getFirebaseCollection('paymentMonths'),
+        getFirebaseCollection('lineGroups'),
+        getFirebaseCollection('payments'),
+        getFirebaseCollection('receipts'),
+        getFirebaseCollection('monthlyQuestions'),
+        getFirebaseCollection('monthlyExamLinks'),
+        getFirebaseCollection('scoreReports'),
+        getFirebaseCollection('adminScoreRecords'),
+        getFirebaseCollection('announcements'),
+        getFirebaseCollection('activityLogs'),
+        getFirebaseCollection('settings')
+      ]);
+
+      replaceArray(students, results[0]);
+      replaceArray(teachers, results[1]);
+      replaceArray(courses, results[2]);
+      replaceArray(onDemandClips, results[3]);
+      replaceArray(paymentMonths, results[4]);
+      replaceArray(lineGroups, results[5]);
+      replaceArray(payments, results[6]);
+      replaceArray(receipts, results[7]);
+      replaceArray(monthlyQuestions, results[8]);
+      replaceArray(monthlyExamLinks, results[9]);
+      replaceArray(scoreReports, results[10]);
+      replaceArray(adminScoreRecords, results[11]);
+      replaceArray(announcements, results[12]);
+      replaceArray(activityLogs, results[13]);
+      const settingsItems = results[14];
       const mainSettings = settingsItems.find(function(item) { return item.id === 'main' || item.firebaseDocId === 'main'; });
       if (mainSettings) systemSettings = Object.assign(systemSettings, mainSettings);
       safeRun(repairReceiptMonthsFromPayments, 'repair-receipt-months');
@@ -3063,7 +3112,7 @@
 
           // โหลดข้อมูลหลักก่อน เพื่อให้ระบบสามารถเทียบสิทธิ์จาก students / teachers ได้
           // กรณีมี Auth แล้ว แต่ยังไม่ได้สร้าง users/{uid}
-          await loadCoreDataFromFirebase();
+          await ensureCoreDataLoaded({ force: true });
           safeRun(loadPaymentQrFromGithubAsset, 'load-payment-qr-github');
 
           const firebaseEmail = firebaseUser.email || username;
@@ -3399,6 +3448,7 @@
             createdAt: firebase.firestore.FieldValue.serverTimestamp(),
             updatedAt: firebase.firestore.FieldValue.serverTimestamp()
           }, { merge: true });
+          await ensureCoreDataLoaded({ force: true });
         } catch (error) {
           console.error('register firebase auth error:', error);
           result.textContent = 'สมัครสมาชิกไม่สำเร็จ: ' + (error.message || error.code);
@@ -3653,11 +3703,6 @@
       refreshProfileBox();
       getElement('profilePanel').classList.add('hidden');
       renderTeacherCourseOptions();
-      renderTeacherStudents();
-      renderTodayTeachingList();
-      renderTeacherOnlineClasses();
-      renderTeacherDashboardSummary();
-      renderPickupList();
       applyRoleAccessToUI();
       showTeacherTab(findFirstAllowedTeacherTab());
       window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -4130,19 +4175,6 @@
       refreshProfileBox();
       setSuperAdminMode(hasPermission('admin.full') || getCurrentAppRole() === 'SuperAdmin' || getCurrentAppRole() === 'Admin');
       applyRoleAccessToUI();
-
-      safeRun(renderStudentCourses, 'admin-render-student-courses');
-      safeRun(renderAdminExamSetFilters, 'admin-exam-set-filters');
-      safeRun(renderAdminQuestions, 'admin-questions');
-      safeRun(renderMemberTable, 'member-table');
-      safeRun(renderAdminScoreFilters, 'admin-score-filters');
-      safeRun(renderAdminScoreAdjustTable, 'admin-score-table');
-      safeRun(renderAdminScoreStatsTable, 'admin-score-stats');
-      safeRun(renderPaymentMonths, 'admin-payment-months');
-      safeRun(renderPaymentTable, 'admin-payment-table');
-      safeRun(renderReceiptMonthFilter, 'admin-receipt-month-filter');
-      safeRun(renderAdminReceipts, 'admin-receipts');
-      safeRun(renderTodayTeachingList, 'admin-today-teaching');
 
       showAdminTab(findFirstAllowedAdminTab());
       window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -10074,8 +10106,6 @@ function receiptStatusText(status) {
         }
       }, 'remember-login');
 
-      await loadCoreDataFromFirebase();
-
       safeRun(loadPaymentQrFromGithubAsset, 'load-payment-qr-github-init');
       safeRun(function() { renderPermissionCheckboxes('teacherPermissionList', getDefaultPermissionsForRole('Teacher'), 'teacher-permission'); }, 'teacher-permissions-init');
       safeRun(function() { setSelectedCourseFeatures(getDefaultCourseFeaturesByAccess('Online'), 'Online'); }, 'course-features-init');
@@ -10086,40 +10116,6 @@ function receiptStatusText(status) {
       safeRun(applyRoleAccessToUI, 'role-access-ui-init');
       safeRun(updateMemberIdPreview, 'member-id-preview');
       safeRun(updateTeacherIdPreview, 'teacher-id-preview');
-      safeRun(renderAdminDashboard, 'admin-dashboard-init');
-      safeRun(renderAdminStudents, 'admin-students-init');
-      safeRun(renderPendingCourseApprovalList, 'pending-course-approval-init');
-      safeRun(renderMemberTable, 'member-table-init');
-      safeRun(renderTeachers, 'teachers-init');
-      safeRun(renderAdminCourses, 'courses-init');
-      safeRun(renderAdminStudentCourseOptions, 'admin-student-course-options-init');
-      safeRun(renderOnlineClassCourseSelect, 'online-select-init');
-      safeRun(renderOnlineClassTable, 'online-table-init');
-      safeRun(renderOnDemandCourseSelect, 'ondemand-select-init');
-      safeRun(renderOnDemandTable, 'ondemand-table-init');
-      safeRun(renderStudentCourses, 'student-courses-init');
-      safeRun(renderAdminExamSetFilters, 'admin-exam-set-filters-init');
-      safeRun(renderAdminQuestions, 'questions-init');
-      safeRun(renderAdminScoreFilters, 'admin-score-filters-init');
-      safeRun(renderAdminScoreAdjustTable, 'admin-score-table-init');
-      safeRun(renderAdminScoreStatsTable, 'admin-score-stats-init');
-      safeRun(renderStudentExamFilters, 'student-exam-filters-init');
-      safeRun(renderPaymentMonths, 'payment-months-init');
-      safeRun(renderLineGroups, 'line-groups-init');
-      safeRun(renderStudentLineGroupButton, 'student-line-group-init');
-      safeRun(renderPaymentTable, 'payment-table-init');
-      safeRun(renderAdminTodoList, 'admin-todo-init');
-      safeRun(renderDashboardPaymentSummary, 'dashboard-payment-summary-init');
-      safeRun(renderReceiptMonthFilter, 'receipt-month-filter-init');
-      safeRun(renderAdminReceipts, 'admin-receipts-init');
-      safeRun(renderStudentReceipts, 'student-receipts-init');
-      safeRun(updatePaymentSummary, 'payment-summary-init');
-      safeRun(updateStudentCourseDisplay, 'student-course-display-init');
-      safeRun(renderStudentCourseFilterOptions, 'student-course-filter-init');
-      safeRun(renderManualPaymentStudentOptions, 'manual-payment-students-init');
-      safeRun(renderManualPaymentMonthOptions, 'manual-payment-months-init');
-      safeRun(renderAnnouncements, 'announcements-init');
-      safeRun(renderStudentAnnouncements, 'student-announcements-init');
       safeRun(renderSystemSettingsForm, 'settings-init');
       safeRun(applySystemSettingsToPage, 'settings-apply-init');
     }
