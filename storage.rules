@@ -1,0 +1,47 @@
+rules_version = '2';
+
+service firebase.storage {
+  match /b/{bucket}/o {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function userProfile(uid) {
+      return firestore.get(/databases/(default)/documents/users/$(uid)).data;
+    }
+
+    function isAdmin() {
+      return signedIn()
+        && (
+          userProfile(request.auth.uid).role == 'admin'
+          || userProfile(request.auth.uid).appRole in ['SuperAdmin', 'Admin', 'FinanceAdmin', 'TeacherAdmin', 'Staff']
+          || (userProfile(request.auth.uid).permissions is list && 'admin.full' in userProfile(request.auth.uid).permissions)
+        );
+    }
+
+    function validImageUpload() {
+      return request.resource != null
+        && request.resource.size < 5 * 1024 * 1024
+        && request.resource.contentType.matches('image/.*');
+    }
+
+    match /slips/{userKey}/{fileName} {
+      allow read: if signedIn();
+      allow write: if signedIn() && validImageUpload();
+    }
+
+    match /qr-codes/{fileName} {
+      allow read: if signedIn();
+      allow write: if isAdmin() && validImageUpload();
+    }
+
+    match /question-images/{fileName} {
+      allow read: if signedIn();
+      allow write: if isAdmin() && validImageUpload();
+    }
+
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}

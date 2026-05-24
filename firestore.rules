@@ -1,0 +1,132 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function userProfile(uid) {
+      return get(/databases/$(database)/documents/users/$(uid)).data;
+    }
+
+    function isAdmin() {
+      return signedIn()
+        && (
+          userProfile(request.auth.uid).role == 'admin'
+          || userProfile(request.auth.uid).appRole in ['SuperAdmin', 'Admin', 'FinanceAdmin', 'TeacherAdmin', 'Staff']
+          || (userProfile(request.auth.uid).permissions is list && 'admin.full' in userProfile(request.auth.uid).permissions)
+        );
+    }
+
+    function isTeacher() {
+      return signedIn()
+        && (
+          userProfile(request.auth.uid).role == 'teacher'
+          || userProfile(request.auth.uid).role == 'admin'
+          || userProfile(request.auth.uid).appRole in ['SuperAdmin', 'Admin', 'FinanceAdmin', 'TeacherAdmin', 'Staff', 'Teacher', 'AssistantTeacher']
+        );
+    }
+
+    function ownsExistingDoc() {
+      return signedIn() && resource.data.authUid == request.auth.uid;
+    }
+
+    function ownsIncomingDoc() {
+      return signedIn() && request.resource.data.authUid == request.auth.uid;
+    }
+
+    match /users/{userId} {
+      allow read: if signedIn() && (request.auth.uid == userId || isAdmin());
+      allow create: if signedIn() && request.auth.uid == userId;
+      allow update: if signedIn() && (request.auth.uid == userId || isAdmin());
+      allow delete: if isAdmin();
+    }
+
+    match /students/{docId} {
+      allow read: if isAdmin() || isTeacher() || ownsExistingDoc();
+      allow create: if isAdmin() || ownsIncomingDoc();
+      allow update: if isAdmin() || (ownsExistingDoc() && ownsIncomingDoc());
+      allow delete: if isAdmin();
+    }
+
+    match /payments/{docId} {
+      allow read: if isAdmin() || ownsExistingDoc();
+      allow create: if signedIn();
+      allow update, delete: if isAdmin();
+    }
+
+    match /receipts/{docId} {
+      allow read: if isAdmin() || ownsExistingDoc();
+      allow write: if isAdmin();
+    }
+
+    match /attendanceHistory/{docId} {
+      allow read: if isAdmin() || isTeacher();
+      allow write: if isAdmin() || isTeacher();
+    }
+
+    match /teachers/{docId} {
+      allow read: if isAdmin() || isTeacher();
+      allow write: if isAdmin();
+    }
+
+    match /courses/{docId} {
+      allow read: if signedIn();
+      allow write: if isAdmin();
+    }
+
+    match /onDemandClips/{docId} {
+      allow read: if signedIn();
+      allow write: if isAdmin();
+    }
+
+    match /monthlyQuestions/{docId} {
+      allow read: if signedIn();
+      allow write: if isAdmin();
+    }
+
+    match /monthlyExamLinks/{docId} {
+      allow read: if signedIn();
+      allow write: if isAdmin();
+    }
+
+    match /scoreReports/{docId} {
+      allow read: if signedIn();
+      allow write: if isAdmin();
+    }
+
+    match /adminScoreRecords/{docId} {
+      allow read: if isAdmin() || isTeacher();
+      allow write: if isAdmin();
+    }
+
+    match /announcements/{docId} {
+      allow read: if signedIn();
+      allow write: if isAdmin();
+    }
+
+    match /lineGroups/{docId} {
+      allow read: if signedIn();
+      allow write: if isAdmin();
+    }
+
+    match /paymentMonths/{docId} {
+      allow read: if signedIn();
+      allow write: if isAdmin();
+    }
+
+    match /settings/{docId} {
+      allow read: if signedIn();
+      allow write: if isAdmin();
+    }
+
+    match /activityLogs/{docId} {
+      allow read, write: if isAdmin();
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
