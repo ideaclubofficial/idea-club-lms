@@ -54,18 +54,6 @@ service cloud.firestore {
         );
     }
 
-    function isCreatingOwnPayment() {
-      return signedIn()
-        && (
-          request.resource.data.authUid == request.auth.uid
-          || request.resource.data.studentAuthUid == request.auth.uid
-          || request.resource.data.slipUploadedByUid == request.auth.uid
-          || request.resource.data.uploadedByUid == request.auth.uid
-        )
-        && !(request.resource.data.paymentStatus in ['ชำระแล้ว', 'อนุมัติแล้ว', 'paid', 'approved'])
-        && !(request.resource.data.status in ['ชำระแล้ว', 'อนุมัติแล้ว', 'paid', 'approved']);
-    }
-
     match /users/{userId} {
       allow read: if signedIn() && (request.auth.uid == userId || isAdmin());
       allow create: if signedIn() && request.auth.uid == userId;
@@ -82,7 +70,9 @@ service cloud.firestore {
 
     match /payments/{docId} {
       allow read: if isAdmin() || isFinance() || isPaymentOwner();
-      allow create: if isAdmin() || isFinance() || isCreatingOwnPayment();
+      // Payment records must be created by Admin/Finance or backend workflows only.
+      // Students should not create payment documents directly.
+      allow create: if isAdmin() || isFinance();
       // OCR slip updates are handled by Cloud Functions Admin SDK, not by client.
       // Students must not directly approve or change payment status from client.
       allow update: if isAdmin() || isFinance();

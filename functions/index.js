@@ -148,6 +148,13 @@ async function isBackOfficeUser(uid) {
   return acceptedRoles.includes(data.role) || acceptedRoles.includes(data.appRole);
 }
 
+async function getUserProfile(uid) {
+  if (!uid) return null;
+  const userDoc = await db.collection("users").doc(uid).get();
+  if (!userDoc.exists) return null;
+  return userDoc.data() || null;
+}
+
 exports.uploadPaymentSlipToDriveAndOcr = onCall(async (request) => {
   if (!request.auth || !request.auth.uid) {
     throw new HttpsError("unauthenticated", "กรุณาเข้าสู่ระบบก่อนอัปโหลดสลิป");
@@ -181,7 +188,18 @@ exports.uploadPaymentSlipToDriveAndOcr = onCall(async (request) => {
     payment.slipUploadedByUid,
     payment.uploadedByUid,
   ].filter(Boolean);
-  const canUpload = ownerFields.includes(uid) || (await isBackOfficeUser(uid));
+  const ownsByUid = ownerFields.includes(uid);
+  const userProfileData = await getUserProfile(uid);
+  const ownsByProfile = !!(
+    userProfileData &&
+    (
+      (userProfileData.memberId && payment.memberId === userProfileData.memberId) ||
+      (userProfileData.memberId && payment.studentId === userProfileData.memberId) ||
+      (userProfileData.studentId && payment.studentId === userProfileData.studentId) ||
+      (userProfileData.studentId && payment.memberId === userProfileData.studentId)
+    )
+  );
+  const canUpload = ownsByUid || ownsByProfile || (await isBackOfficeUser(uid));
   if (!canUpload) {
     throw new HttpsError("permission-denied", "ไม่มีสิทธิ์อัปโหลดสลิปสำหรับรายการนี้");
   }
