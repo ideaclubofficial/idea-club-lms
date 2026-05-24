@@ -407,6 +407,13 @@
             <li>เจ้าหน้าที่ตรวจสอบจาก LINE แล้วอัปเดตสถานะ / ใบเสร็จในระบบ</li>
           </ol>
           <p id="studentSlipResult" class="hidden" style="margin-top:14px; font-weight:bold;"></p>
+          <div class="notice" style="margin-top:18px;">
+            <h3>อัปโหลดสลิปผ่านระบบ</h3>
+            <p>ระบบจะเก็บสลิปใน Google Drive และอ่านข้อมูล OCR เบื้องต้น เพื่อช่วยให้ Admin ตรวจเร็วขึ้น</p>
+            <input id="studentSlipFile" type="file" accept="image/*" />
+            <button class="btn btn-blue" type="button" onclick="uploadStudentSlipWithOcr()">อัปโหลดสลิป</button>
+            <p id="studentSlipOcrResult" style="margin-top:14px; font-weight:bold;"></p>
+          </div>
         </div>
       </div>
       </div>
@@ -2199,6 +2206,7 @@
   <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-auth-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-storage-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-functions-compat.js"></script>
   <script>
     function getElement(id) {
       return document.getElementById(id);
@@ -2226,6 +2234,7 @@
     let db = null;
     let auth = null;
     let storage = null;
+    let functionsApi = null;
     let firebaseReady = false;
     let firebaseUser = null;
     let firebaseUserProfile = null;
@@ -2237,6 +2246,7 @@
       auth = firebase.auth();
       db = firebase.firestore();
       storage = firebase.storage();
+      functionsApi = firebase.app().functions("asia-southeast1");
       firebaseReady = true;
       auth.onAuthStateChanged(async function(user) {
         firebaseUser = user || null;
@@ -2329,6 +2339,15 @@
         .replace(/[\r\n]/g, ' ');
     }
 
+    function escapeHtml(value) {
+      return String(value === undefined || value === null ? '' : value)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+    }
+
     function actionCall(functionName, id) {
       return functionName + "('" + jsArg(id) + "')";
     }
@@ -2344,6 +2363,24 @@
       const ref = storage.ref().child(path);
       const snapshot = await ref.put(uploadData);
       return await snapshot.ref.getDownloadURL();
+    }
+
+    function fileToBase64(file) {
+      return new Promise(function(resolve, reject) {
+        if (!file) {
+          reject(new Error('ไม่พบไฟล์'));
+          return;
+        }
+        const reader = new FileReader();
+        reader.onload = function(event) {
+          const result = String(event.target && event.target.result ? event.target.result : '');
+          resolve(result.split(',')[1] || result);
+        };
+        reader.onerror = function() {
+          reject(reader.error || new Error('อ่านไฟล์ไม่สำเร็จ'));
+        };
+        reader.readAsDataURL(file);
+      });
     }
 
     async function deleteFirebaseStorageFile(downloadUrl) {
@@ -7442,14 +7479,69 @@ function getCourseOnlineDocs(course, includeInactive) {
       return '-' + monthNotice + sentAtText;
     }
 
+    function paymentHasOcrData(payment) {
+      return !!(payment && (payment.ocrRawText || payment.ocrCheckNote || payment.ocrReferenceNo || payment.ocrAmount || payment.driveViewUrl));
+    }
+
+    function formatPaymentSlipReviewCell(payment) {
+      if (!payment) return 'ยังไม่มีสลิป';
+      const noteText = payment.ocrCheckNote ? '<br><span class="mini-muted">' + escapeHtml(payment.ocrCheckNote) + '</span>' : '';
+      const statusText = payment.ocrCheckStatus ? '<br><span class="mini-muted">OCR: ' + escapeHtml(payment.ocrCheckStatus) + '</span>' : '';
+      if (payment.driveViewUrl) {
+        return '<a class="btn btn-blue" href="' + escapeHtml(payment.driveViewUrl) + '" target="_blank" rel="noopener">เปิดสลิป</a>' + statusText + noteText;
+      }
+      return 'ยังไม่มีสลิป' + noteText;
+    }
+
+    function viewPaymentOcrDetail(paymentId) {
+      const payment = (payments || []).find(function(p) {
+        return String(p.id || '') === String(paymentId) || String(p.firebaseDocId || '') === String(paymentId);
+      });
+      if (!payment) {
+        alert('ไม่พบรายการชำระเงินนี้');
+        return;
+      }
+      const student = (students || []).find(function(s) {
+        return String(s.id || '') === String(payment.studentId || '') || String(s.authUid || '') === String(payment.authUid || '');
+      }) || {};
+      const rawText = payment.ocrRawText ? escapeHtml(payment.ocrRawText).replace(/\n/g, '<br>') : '-';
+      const driveButton = payment.driveViewUrl
+        ? '<div class="test-actions"><a class="btn btn-blue" href="' + escapeHtml(payment.driveViewUrl) + '" target="_blank" rel="noopener">เปิดสลิปใน Google Drive</a><button class="btn btn-dark" type="button" onclick="closeEditBubble()">ปิด</button></div>'
+        : '<div class="test-actions"><button class="btn btn-dark" type="button" onclick="closeEditBubble()">ปิด</button></div>';
+
+      openViewBubble('รายละเอียด OCR สลิป',
+        '<div class="receipt-box">' +
+          '<div class="receipt-header"><div><div class="receipt-title">Payment Slip OCR</div><p>ข้อมูล OCR เบื้องต้นสำหรับ Admin ตรวจสอบ</p></div><span class="status-badge parent">' + escapeHtml(payment.ocrCheckStatus || 'pending') + '</span></div>' +
+          '<h3>ข้อมูลจากระบบ</h3>' +
+          '<div class="receipt-line"><strong>นักเรียน</strong><span>' + escapeHtml(payment.student || student.name || '-') + '</span></div>' +
+          '<div class="receipt-line"><strong>Member ID</strong><span>' + escapeHtml(student.memberId || payment.memberId || '-') + '</span></div>' +
+          '<div class="receipt-line"><strong>เดือน</strong><span>' + escapeHtml(payment.month || '-') + '</span></div>' +
+          '<div class="receipt-line"><strong>ยอดในระบบ</strong><span>' + escapeHtml(payment.finalAmount || payment.amount || payment.baseAmount || '-') + '</span></div>' +
+          '<h3 style="margin-top:18px;">ข้อมูล OCR</h3>' +
+          '<div class="receipt-line"><strong>ผู้โอน</strong><span>' + escapeHtml(payment.ocrPayerName || '-') + '</span></div>' +
+          '<div class="receipt-line"><strong>ผู้รับ</strong><span>' + escapeHtml(payment.ocrReceiverName || '-') + '</span></div>' +
+          '<div class="receipt-line"><strong>ยอด OCR</strong><span>' + escapeHtml(payment.ocrAmount || '-') + '</span></div>' +
+          '<div class="receipt-line"><strong>วันที่โอน</strong><span>' + escapeHtml(payment.ocrTransferDateText || '-') + '</span></div>' +
+          '<div class="receipt-line"><strong>เวลาโอน</strong><span>' + escapeHtml(payment.ocrTransferTime || '-') + '</span></div>' +
+          '<div class="receipt-line"><strong>เลขอ้างอิง</strong><span>' + escapeHtml(payment.ocrReferenceNo || '-') + '</span></div>' +
+          '<div class="receipt-line"><strong>ผลตรวจ</strong><span>' + escapeHtml(payment.ocrCheckStatus || '-') + '</span></div>' +
+          '<div class="receipt-line"><strong>หมายเหตุ</strong><span>' + escapeHtml(payment.ocrCheckNote || '-') + '</span></div>' +
+          '<h3 style="margin-top:18px;">Raw OCR Text</h3>' +
+          '<div class="notice" style="max-height:260px; overflow:auto; white-space:normal;">' + rawText + '</div>' +
+          driveButton +
+        '</div>'
+      );
+    }
+
     function renderPaymentTable() {
       const tbody = getElement('paymentTableBody');
       if (!tbody) return;
       tbody.innerHTML = payments.length ? payments.map(function(p) {
-        const slipCell = p.slipUrl ? '<a href="' + p.slipUrl + '" target="_blank">ดูสลิป</a>' : (p.slipNote || '-');
+        const slipCell = formatPaymentSlipReviewCell(p);
+        const ocrButton = paymentHasOcrData(p) ? '<button class="btn btn-blue" type="button" onclick="' + actionCall('viewPaymentOcrDetail', p.firebaseDocId || p.id) + '">ดู OCR</button>' : '';
         const statusClass = p.status === 'ชำระแล้ว' ? 'status-paid' : p.status === 'ค้างชำระ' || p.status === 'สลิปไม่ผ่าน' ? 'status-absent' : 'status-waiting';
         const noteText = p.adminNote ? '<br><span class="mini-muted">หมายเหตุ Admin: ' + p.adminNote + '</span>' : '';
-        return '<tr data-payment-id="' + p.id + '"><td>' + (p.student || '-') + '</td><td>' + (p.course || '-') + '</td><td>' + (p.month || '-') + '</td><td>' + renderPaymentAmountText(p) + '</td><td>' + slipCell + '<br><span class="mini-muted">เดือนที่นักเรียนแจ้ง: ' + (p.studentSelectedMonth || p.month || '-') + '</span><br><span class="mini-muted">แจ้งเมื่อ: ' + (p.createdAtText || '-') + '</span>' + noteText + '</td><td><span class="' + statusClass + '">' + (p.status || 'รอชำระเงิน') + '</span></td><td>' + paymentActionButtons(p.status || 'รอชำระเงิน') + '<button class="btn btn-blue" type="button" onclick="editPaymentAmountDiscount(this)">แก้ยอด/ส่วนลด</button><button class="btn btn-dark" type="button" onclick="editPaymentAdminNote(this)">หมายเหตุ</button></td></tr>';
+        return '<tr data-payment-id="' + p.id + '"><td>' + (p.student || '-') + '</td><td>' + (p.course || '-') + '</td><td>' + (p.month || '-') + '</td><td>' + renderPaymentAmountText(p) + '</td><td>' + slipCell + '<br><span class="mini-muted">เดือนที่นักเรียนแจ้ง: ' + (p.studentSelectedMonth || p.month || '-') + '</span><br><span class="mini-muted">แจ้งเมื่อ: ' + (p.createdAtText || '-') + '</span>' + noteText + '</td><td><span class="' + statusClass + '">' + (p.status || 'รอชำระเงิน') + '</span></td><td>' + paymentActionButtons(p.status || 'รอชำระเงิน') + ocrButton + '<button class="btn btn-blue" type="button" onclick="editPaymentAmountDiscount(this)">แก้ยอด/ส่วนลด</button><button class="btn btn-dark" type="button" onclick="editPaymentAdminNote(this)">หมายเหตุ</button></td></tr>';
       }).join('') : '<tr><td colspan="7">ยังไม่มีรายการชำระเงิน</td></tr>';
       filterPaymentStatusByMonth();
     }
@@ -8123,6 +8215,81 @@ function receiptStatusText(status) {
         if (slipUrl) await deleteFirebaseStorageFile(slipUrl);
         console.error('submit slip error:', error);
         result.textContent = 'ส่งสลิปไม่สำเร็จ: ' + (error.message || error.code);
+        result.style.color = '#dc2626';
+      }
+    }
+
+    async function uploadStudentSlipWithOcr() {
+      const result = getElement('studentSlipOcrResult');
+      const monthSelect = getElement('studentPaymentMonth');
+      const fileInput = getElement('studentSlipFile');
+      const month = monthSelect && monthSelect.value ? monthSelect.value : '';
+      const file = fileInput && fileInput.files ? fileInput.files[0] : null;
+
+      if (!result) return;
+      result.textContent = '';
+      result.style.color = '#0f4cbd';
+
+      if (!currentStudent) {
+        result.textContent = 'กรุณา Login ก่อนอัปโหลดสลิป';
+        result.style.color = '#dc2626';
+        return;
+      }
+      if (!month || month.indexOf('ยังไม่มี') !== -1) {
+        result.textContent = 'กรุณาเลือกเดือนที่ชำระก่อนอัปโหลดสลิป';
+        result.style.color = '#dc2626';
+        return;
+      }
+      if (!file) {
+        result.textContent = 'กรุณาเลือกไฟล์สลิปก่อนอัปโหลด';
+        result.style.color = '#dc2626';
+        return;
+      }
+      if (!file.type || file.type.indexOf('image/') !== 0) {
+        result.textContent = 'รองรับเฉพาะไฟล์รูปภาพเท่านั้น';
+        result.style.color = '#dc2626';
+        return;
+      }
+      if (file.size > 8 * 1024 * 1024) {
+        result.textContent = 'ไฟล์สลิปต้องมีขนาดไม่เกิน 8MB';
+        result.style.color = '#dc2626';
+        return;
+      }
+      if (!functionsApi) {
+        result.textContent = 'Firebase Functions ยังไม่พร้อมใช้งาน';
+        result.style.color = '#dc2626';
+        return;
+      }
+
+      const payment = getCurrentStudentPaymentForSelectedMonth();
+      const paymentId = payment ? String(payment.firebaseDocId || payment.id || '') : '';
+      if (!paymentId) {
+        result.textContent = 'ยังไม่พบรายการชำระเงินของเดือนนี้ กรุณากดเข้ากลุ่ม LINE เพื่อแจ้งรอตรวจก่อน หรือให้ Admin สร้างรายการชำระเงิน';
+        result.style.color = '#dc2626';
+        return;
+      }
+
+      try {
+        result.textContent = 'กำลังอัปโหลดสลิปและอ่าน OCR...';
+        const fileBase64 = await fileToBase64(file);
+        const uploadSlip = functionsApi.httpsCallable('uploadPaymentSlipToDriveAndOcr');
+        const response = await uploadSlip({
+          paymentId: paymentId,
+          fileBase64: fileBase64,
+          mimeType: file.type,
+          fileName: file.name
+        });
+        const data = response && response.data ? response.data : {};
+        result.textContent = 'อัปโหลดสลิปแล้ว · ' + (data.ocrCheckNote || 'รอ Admin ตรวจสอบ');
+        result.style.color = data.ocrCheckStatus === 'passed' ? '#16a34a' : '#0f4cbd';
+
+        await loadCoreDataFromFirebase();
+        updateStudentCourseDisplay();
+        renderPaymentTable();
+        renderAdminDashboard();
+      } catch (error) {
+        console.error('upload slip OCR error:', error);
+        result.textContent = 'อัปโหลดสลิปไม่สำเร็จ: ' + (error.message || error.code || error);
         result.style.color = '#dc2626';
       }
     }
