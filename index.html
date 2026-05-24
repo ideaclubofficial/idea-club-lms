@@ -2346,6 +2346,15 @@
       return await snapshot.ref.getDownloadURL();
     }
 
+    async function deleteFirebaseStorageFile(downloadUrl) {
+      if (!downloadUrl || !firebaseReady || !storage) return;
+      try {
+        await storage.refFromURL(downloadUrl).delete();
+      } catch (error) {
+        console.warn('cleanup uploaded file warning:', error);
+      }
+    }
+
     async function saveCollectionItem(collectionName, item) {
       await setFirebaseDocument(collectionName, item);
       return item;
@@ -2359,15 +2368,13 @@
       };
     }
 
-    async function setFirebaseDocument(collectionName, item) {
-      if (!firebaseReady || !db || !item) throw new Error('Firebase ยังไม่พร้อมใช้งาน');
-      if (PRODUCTION_MODE && !firebaseUser) throw new Error('กรุณา Login ด้วย Firebase Auth ก่อนบันทึกข้อมูล');
-      const docId = String(item.firebaseDocId || item.id || Date.now());
-      const auditUser = getFirebaseAuditUser();
-      const ref = db.collection(collectionName).doc(docId);
-      const docSnap = await ref.get();
-      const isNewDoc = !docSnap.exists;
+    function createFirebaseDocId(collectionName) {
+      if (firebaseReady && db && collectionName) return db.collection(collectionName).doc().id;
+      return Date.now() + '-' + Math.random().toString(16).slice(2);
+    }
 
+    function buildFirebasePayload(item, docId, isNewDoc) {
+      const auditUser = getFirebaseAuditUser();
       const cleanItem = Object.assign({}, item, {
         firebaseDocId: docId,
         deleted: item.deleted === true ? true : false,
@@ -2383,6 +2390,17 @@
         cleanItem.createdByEmail = auditUser.email;
         cleanItem.createdByName = auditUser.displayName;
       }
+
+      return cleanItem;
+    }
+
+    async function setFirebaseDocument(collectionName, item) {
+      if (!firebaseReady || !db || !item) throw new Error('Firebase ยังไม่พร้อมใช้งาน');
+      if (PRODUCTION_MODE && !firebaseUser) throw new Error('กรุณา Login ด้วย Firebase Auth ก่อนบันทึกข้อมูล');
+      const docId = String(item.firebaseDocId || item.id || createFirebaseDocId(collectionName));
+      const ref = db.collection(collectionName).doc(docId);
+      const docSnap = await ref.get();
+      const cleanItem = buildFirebasePayload(item, docId, !docSnap.exists);
 
       await ref.set(cleanItem, { merge: true });
       item.firebaseDocId = docId;
@@ -3420,6 +3438,20 @@
 
       let authUid = null;
       const studentEmail = cleanPhone + '@ideaclub.local';
+      const userProfileData = {
+        name: studentName,
+        nickname: nickname,
+        parentName: parentName,
+        phone: phone,
+        lineId: lineId,
+        contactEmail: contactEmail,
+        email: studentEmail,
+        school: school,
+        grade: registerGrade,
+        preferredLocation: registerLocation,
+        role: 'student',
+        status: 'active'
+      };
 
       if (PRODUCTION_MODE) {
         if (!firebaseReady || !auth || !db) {
@@ -3432,23 +3464,6 @@
           const credential = await auth.createUserWithEmailAndPassword(studentEmail, password);
           firebaseUser = credential.user;
           authUid = firebaseUser.uid;
-          await db.collection('users').doc(authUid).set({
-            name: studentName,
-            nickname: nickname,
-            parentName: parentName,
-            phone: phone,
-            lineId: lineId,
-            contactEmail: contactEmail,
-            email: studentEmail,
-            school: school,
-            grade: registerGrade,
-            preferredLocation: registerLocation,
-            role: 'student',
-            status: 'active',
-            createdAt: firebase.firestore.FieldValue.serverTimestamp(),
-            updatedAt: firebase.firestore.FieldValue.serverTimestamp()
-          }, { merge: true });
-          await ensureCoreDataLoaded({ force: true });
         } catch (error) {
           console.error('register firebase auth error:', error);
           result.textContent = 'สมัครสมาชิกไม่สำเร็จ: ' + (error.message || error.code);
@@ -3461,7 +3476,7 @@
       const newId = authUid || Date.now();
       const newStudent = {
         id: newId,
-        firebaseDocId: String(newId),
+        firebaseDocId: newId,
         authUid: authUid,
         email: studentEmail,
         contactEmail: contactEmail,
@@ -3488,7 +3503,18 @@
       currentStudent = newStudent;
 
       try {
-        await setFirebaseDocument('students', newStudent);
+        if (PRODUCTION_MODE && firebaseReady && db && authUid) {
+          const batch = db.batch();
+          batch.set(db.collection('users').doc(authUid), Object.assign({}, userProfileData, {
+            createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+            updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+          }), { merge: true });
+          batch.set(db.collection('students').doc(String(newStudent.firebaseDocId)), buildFirebasePayload(newStudent, String(newStudent.firebaseDocId), true), { merge: true });
+          await batch.commit();
+          await ensureCoreDataLoaded({ force: true });
+        } else {
+          await setFirebaseDocument('students', newStudent);
+        }
       } catch (error) {
         console.error('register student firebase error:', error);
         result.textContent = 'สร้างบัญชีได้แล้ว แต่บันทึกข้อมูลนักเรียนไม่สำเร็จ: ' + (error.message || error.code);
@@ -4122,9 +4148,10 @@
       const selectedCourse = getElement('teacherAttendanceCourseFilter') ? getElement('teacherAttendanceCourseFilter').value : 'ทั้งหมด';
       const selectedGrade = getElement('pickupGradeFilter') ? getElement('pickupGradeFilter').value : 'ทั้งหมด';
 
+      const historyId = createFirebaseDocId('attendanceHistory');
       const historyItem = {
-        id: Date.now(),
-        firebaseDocId: String(Date.now()),
+        id: historyId,
+        firebaseDocId: historyId,
         date: getElement('pickupDate').value,
         courseScope: 'คอร์ส: ' + selectedCourse + ' / ระดับชั้น: ' + selectedGrade,
         total: filtered.length,
@@ -4529,7 +4556,7 @@
           });
           if (existedStudent) throw new Error('เบอร์นี้มีข้อมูลนักเรียนในระบบแล้ว ถ้าต้องการเปลี่ยนข้อมูลให้กด “แก้ไข” จากตารางรายชื่อ');
 
-          const newId = Date.now();
+          const newId = createFirebaseDocId('students');
           const studentEmail = buildLocalEmailFromPhone(phone);
           let authUid = null;
           let authNote = '';
@@ -4944,7 +4971,7 @@
           result.textContent = 'แก้ไขข้อมูลครูเรียบร้อย และบันทึกลง Firebase แล้ว';
         } else {
           const year = String(new Date().getFullYear() + 543).slice(-2);
-          const newId = Date.now();
+          const newId = createFirebaseDocId('teachers');
           let teacherEmail = username && username.includes('@') ? username : buildLocalEmailFromPhone(username);
           if (!teacherEmail) teacherEmail = 'teacher-' + Date.now() + '@ideaclub.local';
           let authUid = null;
@@ -5735,8 +5762,8 @@ function getCourseOnlineDocs(course, includeInactive) {
           }
           getElement('videoSaveResult').textContent = 'แก้ไข ชุดคลิป / คลิป On-demand เรียบร้อย';
         } else {
-          const newId = Date.now();
-          const newItem = { id: newId, firebaseDocId: String(newId), courseId: courseId, subject: subject, grade: grade, playlistName: playlistName, clipTitle: clipTitle, link: link, pdfFiles: pdfFiles };
+          const newId = createFirebaseDocId('onDemandClips');
+          const newItem = { id: newId, firebaseDocId: newId, courseId: courseId, subject: subject, grade: grade, playlistName: playlistName, clipTitle: clipTitle, link: link, pdfFiles: pdfFiles };
           onDemandClips.push(newItem);
           await setFirebaseDocument('onDemandClips', newItem);
           getElement('videoSaveResult').textContent = 'เพิ่ม ชุดคลิป / คลิป On-demand เรียบร้อย';
@@ -6060,8 +6087,8 @@ function getCourseOnlineDocs(course, includeInactive) {
         }
         result.textContent = 'แก้ไขคอร์สเรียบร้อย และบันทึกลง Firebase แล้ว';
       } else {
-        const newId = Date.now();
-        const newCourse = { id: newId, firebaseDocId: String(newId), grade: grade, name: name, price: price, monthlyPrice: price, access: access, location: location, days: days, status: status, features: features, onlineLink: '', onlineClassDay: '', onlineClassTime: '', roomId: '', roomPassword: '', onDemandSubject: guessSubjectFromCourse(name), onDemandGrade: grade, onDemandTitle: '', onDemandLink: '', desc: desc || 'ไม่มีรายละเอียดเพิ่มเติม' };
+        const newId = createFirebaseDocId('courses');
+        const newCourse = { id: newId, firebaseDocId: newId, grade: grade, name: name, price: price, monthlyPrice: price, access: access, location: location, days: days, status: status, features: features, onlineLink: '', onlineClassDay: '', onlineClassTime: '', roomId: '', roomPassword: '', onDemandSubject: guessSubjectFromCourse(name), onDemandGrade: grade, onDemandTitle: '', onDemandLink: '', desc: desc || 'ไม่มีรายละเอียดเพิ่มเติม' };
         courses.push(newCourse);
         try {
           await setFirebaseDocument('courses', newCourse);
@@ -6857,12 +6884,12 @@ function getCourseOnlineDocs(course, includeInactive) {
                 result.classList.add('hidden');
               }
             } else {
-              if (!payment) {
-                const paymentAmount = getExpectedPaymentAmountForStudent(currentStudent, month);
-                const paymentId = Date.now();
-                payment = {
-                  id: paymentId,
-                  firebaseDocId: String(paymentId),
+	              if (!payment) {
+	                const paymentAmount = getExpectedPaymentAmountForStudent(currentStudent, month);
+	                const paymentId = createFirebaseDocId('payments');
+	                payment = {
+	                  id: paymentId,
+	                  firebaseDocId: paymentId,
                   studentId: currentStudent.id || '',
                   authUid: currentStudent.authUid || (firebaseUser ? firebaseUser.uid : ''),
                   student: currentStudent.name || '',
@@ -6884,12 +6911,17 @@ function getCourseOnlineDocs(course, includeInactive) {
                 payment.status = 'รอตรวจสลิป';
                 payment.slipSource = payment.slipSource || 'LINE กลุ่มประจำชั้น';
                 payment.slipNote = 'นักเรียนกดเข้ากลุ่ม LINE เพื่อส่งสลิปของเดือน ' + month;
-                payment.updatedAtText = new Date().toLocaleString('th-TH');
-              }
+	                payment.updatedAtText = new Date().toLocaleString('th-TH');
+	              }
 
-              await setFirebaseDocument('payments', payment);
-              currentStudent.paymentStatus = 'รอตรวจสลิป';
-              await setFirebaseDocument('students', currentStudent);
+	              currentStudent.paymentStatus = 'รอตรวจสลิป';
+	              const studentDocId = String(currentStudent.firebaseDocId || currentStudent.id || currentStudent.authUid || '');
+	              if (!studentDocId) throw new Error('ไม่พบรหัสเอกสารนักเรียนสำหรับบันทึกสถานะชำระเงิน');
+	              const batch = db.batch();
+	              batch.set(db.collection('payments').doc(String(payment.firebaseDocId || payment.id)), buildFirebasePayload(payment, String(payment.firebaseDocId || payment.id), !payment.updatedAtText), { merge: true });
+	              batch.set(db.collection('students').doc(studentDocId), buildFirebasePayload(currentStudent, studentDocId, false), { merge: true });
+	              await batch.commit();
+	              currentStudent.firebaseDocId = studentDocId;
               updateStudentSelectedPaymentMonth();
               renderPaymentTable();
               renderAdminDashboard();
@@ -6959,8 +6991,8 @@ function getCourseOnlineDocs(course, includeInactive) {
             result.style.color = '#dc2626';
             return;
           }
-          const newId = Date.now();
-          const newItem = { id: newId, firebaseDocId: String(newId), location: location, grade: grade, groupName: groupName, lineUrl: lineUrl, status: status };
+          const newId = createFirebaseDocId('lineGroups');
+          const newItem = { id: newId, firebaseDocId: newId, location: location, grade: grade, groupName: groupName, lineUrl: lineUrl, status: status };
           lineGroups.push(newItem);
           await setFirebaseDocument('lineGroups', newItem);
           result.textContent = 'เพิ่ม LINE กลุ่มเรียบร้อย';
@@ -7238,7 +7270,8 @@ function getCourseOnlineDocs(course, includeInactive) {
         return;
       }
 
-      const newItem = { id: Date.now(), firebaseDocId: String(Date.now()), month: month, amount: amount, coursePrices: {} };
+      const paymentMonthId = createFirebaseDocId('paymentMonths');
+      const newItem = { id: paymentMonthId, firebaseDocId: paymentMonthId, month: month, amount: amount, coursePrices: {} };
       paymentMonths.push(newItem);
       await setFirebaseDocument('paymentMonths', newItem);
       monthInput.value = '';
@@ -7548,10 +7581,10 @@ function getCourseOnlineDocs(course, includeInactive) {
         return exists;
       }
 
-      const receiptId = Date.now();
+      const receiptId = createFirebaseDocId('receipts');
       const newReceipt = {
         id: receiptId,
-        firebaseDocId: String(receiptId),
+        firebaseDocId: receiptId,
         paymentId: data.paymentId || '',
         studentId: data.studentId || '',
         authUid: data.authUid || '',
@@ -8042,14 +8075,15 @@ function receiptStatusText(status) {
         result.style.color = '#dc2626';
         return;
       }
+      let slipUrl = '';
       try {
         result.textContent = 'กำลังอัปโหลดสลิป...';
         result.style.color = '#0f4cbd';
-        const slipUrl = await uploadFileToFirebaseStorage('slips/' + getSafeFileName(currentStudent.authUid || currentStudent.id || currentStudent.phone) + '/' + getSafeFileName(month) + '-' + Date.now() + '.png', studentSlipData);
-        const paymentId = Date.now();
+        slipUrl = await uploadFileToFirebaseStorage('slips/' + getSafeFileName(currentStudent.authUid || currentStudent.id || currentStudent.phone) + '/' + getSafeFileName(month) + '-' + Date.now() + '.png', studentSlipData);
+        const paymentId = createFirebaseDocId('payments');
         const payment = {
           id: paymentId,
-          firebaseDocId: String(paymentId),
+          firebaseDocId: paymentId,
           studentId: currentStudent.id || '',
           authUid: currentStudent.authUid || (firebaseUser ? firebaseUser.uid : ''),
           student: currentStudent.name || '',
@@ -8065,10 +8099,17 @@ function receiptStatusText(status) {
           status: 'รอตรวจสลิป',
           createdAtText: new Date().toLocaleString('th-TH')
         };
-        payments.push(payment);
-        await setFirebaseDocument('payments', payment);
         currentStudent.paymentStatus = 'รอตรวจสลิป';
-        await setFirebaseDocument('students', currentStudent);
+
+        const studentDocId = String(currentStudent.firebaseDocId || currentStudent.id || currentStudent.authUid || '');
+        if (!studentDocId) throw new Error('ไม่พบรหัสเอกสารนักเรียนสำหรับบันทึกสถานะชำระเงิน');
+        const batch = db.batch();
+        batch.set(db.collection('payments').doc(payment.firebaseDocId), buildFirebasePayload(payment, payment.firebaseDocId, true), { merge: true });
+        batch.set(db.collection('students').doc(studentDocId), buildFirebasePayload(currentStudent, studentDocId, false), { merge: true });
+        await batch.commit();
+
+        payments.push(payment);
+        currentStudent.firebaseDocId = studentDocId;
         updateStudentCourseDisplay();
         renderPaymentTable();
         renderAdminDashboard();
@@ -8079,6 +8120,7 @@ function receiptStatusText(status) {
           getElement('studentPaymentStatus').className = 'status-waiting';
         }
       } catch (error) {
+        if (slipUrl) await deleteFirebaseStorageFile(slipUrl);
         console.error('submit slip error:', error);
         result.textContent = 'ส่งสลิปไม่สำเร็จ: ' + (error.message || error.code);
         result.style.color = '#dc2626';
@@ -8329,7 +8371,6 @@ function receiptStatusText(status) {
 
       let createdCount = 0;
       let skippedCount = 0;
-      const now = Date.now();
 
       for (let i = 0; i < gradeStudents.length; i++) {
         const student = gradeStudents[i];
@@ -8345,10 +8386,10 @@ function receiptStatusText(status) {
           continue;
         }
 
-        const newId = now + i;
+        const newId = createFirebaseDocId('adminScoreRecords');
         const record = {
           id: newId,
-          firebaseDocId: String(newId),
+          firebaseDocId: newId,
           month: selectedMonth,
           grade: selectedGrade,
           studentId: student.id || '',
@@ -8540,8 +8581,8 @@ function receiptStatusText(status) {
           }
           result.textContent = 'แก้ไขข้อสอบเรียบร้อย';
         } else {
-          const newId = Date.now();
-          const newQuestion = { id: newId, firebaseDocId: String(newId), subject: subject, text: text, choices: { A: choiceA, B: choiceB, C: choiceC, D: choiceD }, correct: correct, image: imageUrl, testDate: testDate, testTime: testTime };
+          const newId = createFirebaseDocId('monthlyQuestions');
+          const newQuestion = { id: newId, firebaseDocId: newId, subject: subject, text: text, choices: { A: choiceA, B: choiceB, C: choiceC, D: choiceD }, correct: correct, image: imageUrl, testDate: testDate, testTime: testTime };
           monthlyQuestions.push(newQuestion);
           await setFirebaseDocument('monthlyQuestions', newQuestion);
           result.textContent = 'เพิ่มข้อสอบเรียบร้อย ตอนนี้มีทั้งหมด ' + monthlyQuestions.length + ' ข้อ คะแนนรวมยังคิดเต็ม 50 คะแนน';
@@ -8974,8 +9015,8 @@ function receiptStatusText(status) {
           }
           if (result) result.textContent = 'แก้ไขลิงก์แบบทดสอบเรียบร้อย';
         } else {
-          const newId = Date.now();
-          const newItem = { id: newId, firebaseDocId: String(newId), title: title, grade: grade, month: month, subject: subject, url: url, status: status, note: note };
+          const newId = createFirebaseDocId('monthlyExamLinks');
+          const newItem = { id: newId, firebaseDocId: newId, title: title, grade: grade, month: month, subject: subject, url: url, status: status, note: note };
           monthlyExamLinks.push(newItem);
           await setFirebaseDocument('monthlyExamLinks', newItem);
           if (result) result.textContent = 'เพิ่มลิงก์แบบทดสอบเรียบร้อย';
@@ -9261,7 +9302,8 @@ function receiptStatusText(status) {
     }
 
     async function addActivityLog(action, detail) {
-      const item = { id: Date.now() + '-' + Math.random().toString(16).slice(2), firebaseDocId: Date.now() + '-' + Math.random().toString(16).slice(2), action: action, detail: detail || '', user: getElement('profileName') ? getElement('profileName').textContent : 'System', createdAtText: new Date().toLocaleString('th-TH') };
+      const logId = createFirebaseDocId('activityLogs');
+      const item = { id: logId, firebaseDocId: logId, action: action, detail: detail || '', user: getElement('profileName') ? getElement('profileName').textContent : 'System', createdAtText: new Date().toLocaleString('th-TH') };
       activityLogs.push(item);
       try { await setFirebaseDocument('activityLogs', item); } catch (error) { console.warn('activity log save warning:', error); }
     }
@@ -9344,16 +9386,21 @@ function receiptStatusText(status) {
       const manualAmount = Number(getElement('manualPaymentAmount') ? getElement('manualPaymentAmount').value || 0 : 0);
       const amount = manualAmount || baseAmount;
       const discount = Math.max(0, baseAmount - amount);
-      const paymentId = Date.now();
-      const payment = { id: paymentId, firebaseDocId: String(paymentId), studentId: student.id, authUid: student.authUid || '', student: student.name || '', courseId: student.courseId || '', course: student.course || '', month: month, studentSelectedMonth: month, baseAmount: baseAmount, discount: discount, finalAmount: amount, amount: amount, slipUrl: '', slipNote: 'Admin บันทึกเอง', adminNote: note, status: status, createdAtText: new Date().toLocaleString('th-TH') };
+      const paymentId = createFirebaseDocId('payments');
+      const payment = { id: paymentId, firebaseDocId: paymentId, studentId: student.id, authUid: student.authUid || '', student: student.name || '', courseId: student.courseId || '', course: student.course || '', month: month, studentSelectedMonth: month, baseAmount: baseAmount, discount: discount, finalAmount: amount, amount: amount, slipUrl: '', slipNote: 'Admin บันทึกเอง', adminNote: note, status: status, createdAtText: new Date().toLocaleString('th-TH') };
       payments.push(payment);
       student.paymentStatus = status;
       student.overdueMonths = Array.isArray(student.overdueMonths) ? student.overdueMonths : [];
       if (status === 'ค้างชำระ' && !student.overdueMonths.includes(month)) student.overdueMonths.push(month);
       if (status !== 'ค้างชำระ') student.overdueMonths = student.overdueMonths.filter(function(m) { return m !== month; });
       try {
-        await setFirebaseDocument('payments', payment);
-        await setFirebaseDocument('students', student);
+        const studentDocId = String(student.firebaseDocId || student.id || student.authUid || '');
+        if (!studentDocId) throw new Error('ไม่พบรหัสเอกสารนักเรียนสำหรับบันทึกสถานะชำระเงิน');
+        const batch = db.batch();
+        batch.set(db.collection('payments').doc(payment.firebaseDocId), buildFirebasePayload(payment, payment.firebaseDocId, true), { merge: true });
+        batch.set(db.collection('students').doc(studentDocId), buildFirebasePayload(student, studentDocId, false), { merge: true });
+        await batch.commit();
+        student.firebaseDocId = studentDocId;
         result.textContent = 'บันทึกการชำระเงินเองเรียบร้อย'; result.style.color = '#16a34a';
         addActivityLog('บันทึกการชำระเงินเอง', student.name + ' · ' + month + ' · ' + status);
         renderPaymentTable(); renderAdminDashboard(); renderAdminStudents(); updateStudentCourseDisplay();
@@ -9381,10 +9428,10 @@ function receiptStatusText(status) {
         });
         if (existed) continue;
         const baseAmount = getExpectedPaymentAmountForStudent(student, targetMonth);
-        const paymentId = Date.now() + created;
+        const paymentId = createFirebaseDocId('payments');
         const payment = {
           id: paymentId,
-          firebaseDocId: String(paymentId),
+          firebaseDocId: paymentId,
           studentId: student.id,
           authUid: student.authUid || '',
           student: student.name || '',
@@ -10057,13 +10104,13 @@ function receiptStatusText(status) {
     };
 
     const originalCreateReceiptFinal = createReceipt;
-    createReceipt = function(data) {
-      originalCreateReceiptFinal(data);
-      const r = receipts && receipts[receipts.length - 1];
-      if (r && !r.status) {
-        r.status = 'ready';
-        setFirebaseDocument('receipts', r).catch(function(error){ console.error('receipt status sync error:', error); });
+    createReceipt = async function(data, options) {
+      const receipt = await originalCreateReceiptFinal(data, options);
+      if (receipt && !receipt.status) {
+        receipt.status = 'ready';
+        await setFirebaseDocument('receipts', receipt).catch(function(error){ console.error('receipt status sync error:', error); });
       }
+      return receipt;
     };
 
     const originalRenderAdminReceiptsFinal = renderAdminReceipts;
