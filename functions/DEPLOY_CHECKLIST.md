@@ -65,6 +65,46 @@ node --check index.js
 }
 ```
 
+## Test payment document
+
+Collection: `payments`
+
+Document ID ตัวอย่าง: `TEST-PAY-P625690001-2026-06`
+
+Fields:
+
+```json
+{
+  "memberId": "P625690001",
+  "studentId": "P625690001",
+  "studentName": "ชื่อนักเรียนทดสอบ",
+  "studentAuthUid": "<Firebase Auth UID ของนักเรียน>",
+  "courseId": "TEST-COURSE-P6",
+  "courseName": "คอร์สทดสอบ ป.6",
+  "month": "มิถุนายน 2569",
+  "amount": 2400,
+  "expectedAmount": 2400,
+  "paymentStatus": "รอชำระเงิน",
+  "status": "รอชำระเงิน"
+}
+```
+
+`users/{uid}` ของนักเรียนควรมี:
+
+```json
+{
+  "role": "student",
+  "status": "active",
+  "memberId": "P625690001",
+  "studentId": "P625690001",
+  "name": "ชื่อนักเรียนทดสอบ"
+}
+```
+
+- `studentAuthUid` ต้องตรงกับ uid ของผู้ใช้ที่ login ในเว็บ
+- `memberId`/`studentId` ใน `users/{uid}` ต้องตรงกับ payment
+- ถ้าไม่ตรง Cloud Function จะ reject ด้วย `permission-denied`
+
 ## 6. คำสั่ง deploy ภายหลัง
 
 ```sh
