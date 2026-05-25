@@ -1,5 +1,9 @@
 # Payment OCR Deploy Checklist
 
+## สถานะปัจจุบัน
+
+ระบบ OCR สลิปถูกพักไว้ก่อน เนื่องจากมีค่าใช้จ่าย API/Cloud Functions ห้าม deploy `uploadPaymentSlipToDriveAndOcr` จนกว่าจะอนุมัติงบ/ค่าใช้จ่าย และเปิด feature flag `ENABLE_PAYMENT_SLIP_OCR` ในหน้าเว็บอีกครั้ง
+
 ## 1. สิ่งที่ต้องเปิดใน Google Cloud/Firebase
 
 - Blaze plan

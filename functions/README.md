@@ -1,5 +1,9 @@
 # IDEA CLUB Functions
 
+## Payment Slip OCR Paused
+
+ระบบ OCR สลิปถูกพักไว้ก่อน เนื่องจากมีค่าใช้จ่าย API/Cloud Functions ห้าม deploy `uploadPaymentSlipToDriveAndOcr` จนกว่าจะอนุมัติงบ/ค่าใช้จ่ายและเปิด feature flag ในหน้าเว็บอีกครั้ง
+
 ## Setup Google Drive OCR
 
 The payment slip OCR function uploads student slip images to Google Drive and uses Cloud Vision OCR for a first-pass review.

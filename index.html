@@ -407,7 +407,10 @@
             <li>เจ้าหน้าที่ตรวจสอบจาก LINE แล้วอัปเดตสถานะ / ใบเสร็จในระบบ</li>
           </ol>
           <p id="studentSlipResult" class="hidden" style="margin-top:14px; font-weight:bold;"></p>
-          <div class="notice" style="margin-top:18px;">
+          <p id="studentSlipOcrPausedNotice" class="mini-muted" style="margin-top:14px; color:#d97706;">
+            ขณะนี้ระบบอัปโหลดสลิปผ่านเว็บยังไม่เปิดใช้งาน กรุณาส่งสลิปผ่าน LINE กลุ่มประจำชั้น
+          </p>
+          <div id="studentSlipOcrUploadBox" class="notice hidden" style="margin-top:18px;">
             <h3>อัปโหลดสลิปผ่านระบบ</h3>
             <p>ระบบจะเก็บสลิปใน Google Drive และอ่านข้อมูล OCR เบื้องต้น เพื่อช่วยให้ Admin ตรวจเร็วขึ้น</p>
             <input id="studentSlipFile" type="file" accept="image/*" />
@@ -2231,6 +2234,7 @@
     };
 
     const PRODUCTION_MODE = true;
+    const ENABLE_PAYMENT_SLIP_OCR = false;
     let db = null;
     let auth = null;
     let storage = null;
@@ -7537,11 +7541,12 @@ function getCourseOnlineDocs(course, includeInactive) {
     function formatPaymentSlipReviewCell(payment) {
       if (!payment) return 'ยังไม่มีสลิป';
       const noteText = payment.ocrCheckNote ? '<br><span class="mini-muted">' + escapeHtml(payment.ocrCheckNote) + '</span>' : '';
+      const pausedText = (!ENABLE_PAYMENT_SLIP_OCR && paymentHasOcrData(payment)) ? '<br><span class="mini-muted">ระบบ OCR ยังไม่เปิดใช้งาน</span>' : '';
       const statusText = payment.ocrCheckStatus ? '<br><span class="mini-muted">OCR: ' + escapeHtml(payment.ocrCheckStatus) + '</span>' : '';
       if (payment.driveViewUrl) {
-        return '<a class="btn btn-blue" href="' + escapeHtml(payment.driveViewUrl) + '" target="_blank" rel="noopener">เปิดสลิป</a>' + statusText + noteText;
+        return '<a class="btn btn-blue" href="' + escapeHtml(payment.driveViewUrl) + '" target="_blank" rel="noopener">เปิดสลิป</a>' + pausedText + statusText + noteText;
       }
-      return 'ยังไม่มีสลิป' + noteText;
+      return 'ยังไม่มีสลิป' + pausedText + noteText;
     }
 
     function viewPaymentOcrDetail(paymentId) {
@@ -7562,7 +7567,7 @@ function getCourseOnlineDocs(course, includeInactive) {
 
       openViewBubble('รายละเอียด OCR สลิป',
         '<div class="receipt-box">' +
-          '<div class="receipt-header"><div><div class="receipt-title">Payment Slip OCR</div><p>ข้อมูล OCR เบื้องต้นสำหรับ Admin ตรวจสอบ</p></div><span class="status-badge parent">' + escapeHtml(payment.ocrCheckStatus || 'pending') + '</span></div>' +
+          '<div class="receipt-header"><div><div class="receipt-title">Payment Slip OCR</div><p>' + (ENABLE_PAYMENT_SLIP_OCR ? 'ข้อมูล OCR เบื้องต้นสำหรับ Admin ตรวจสอบ' : 'ระบบ OCR ยังไม่เปิดใช้งาน ข้อมูลนี้เป็นข้อมูลเดิมหรือข้อมูลสำหรับอนาคต') + '</p></div><span class="status-badge parent">' + escapeHtml(payment.ocrCheckStatus || 'pending') + '</span></div>' +
           '<h3>ข้อมูลจากระบบ</h3>' +
           '<div class="receipt-line"><strong>นักเรียน</strong><span>' + escapeHtml(payment.student || student.name || '-') + '</span></div>' +
           '<div class="receipt-line"><strong>Member ID</strong><span>' + escapeHtml(student.memberId || payment.memberId || '-') + '</span></div>' +
@@ -8277,7 +8282,26 @@ function receiptStatusText(status) {
       }
     }
 
+    function updatePaymentSlipOcrAvailability() {
+      const uploadBox = getElement('studentSlipOcrUploadBox');
+      const pausedNotice = getElement('studentSlipOcrPausedNotice');
+      if (uploadBox) uploadBox.classList.toggle('hidden', !ENABLE_PAYMENT_SLIP_OCR);
+      if (pausedNotice) pausedNotice.classList.toggle('hidden', ENABLE_PAYMENT_SLIP_OCR);
+    }
+
     async function uploadStudentSlipWithOcr() {
+      if (!ENABLE_PAYMENT_SLIP_OCR) {
+        const pausedMessage = 'ขณะนี้ระบบอัปโหลดสลิปผ่านเว็บยังไม่เปิดใช้งาน กรุณาส่งสลิปผ่าน LINE กลุ่มประจำชั้น';
+        const result = getElement('studentSlipOcrResult') || getElement('studentSlipResult');
+        if (result) {
+          result.classList.remove('hidden');
+          result.textContent = pausedMessage;
+          result.style.color = '#d97706';
+        } else {
+          alert(pausedMessage);
+        }
+        return;
+      }
       const result = getElement('studentSlipOcrResult');
       const monthSelect = getElement('studentPaymentMonth');
       const fileInput = getElement('studentSlipFile');
@@ -10509,6 +10533,7 @@ function receiptStatusText(status) {
       safeRun(updateTeacherIdPreview, 'teacher-id-preview');
       safeRun(renderSystemSettingsForm, 'settings-init');
       safeRun(applySystemSettingsToPage, 'settings-apply-init');
+      safeRun(updatePaymentSlipOcrAvailability, 'payment-slip-ocr-availability');
     }
 
     document.addEventListener('DOMContentLoaded', initPage);
