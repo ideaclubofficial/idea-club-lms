@@ -1913,6 +1913,11 @@
                 <div><label>ระดับชั้น</label><select id="announcementGrade"><option value="ทั้งหมด">ทั้งหมด</option><option>ป.4</option><option>ป.5</option><option>ป.6</option><option>ม.1</option><option>ม.2</option><option>ม.3</option><option>ม.4</option><option>ม.5</option><option>ม.6</option></select></div>
                 <div><label>สถานะ</label><select id="announcementStatus"><option value="active">เปิดแสดง</option><option value="inactive">ปิดไว้ก่อน</option></select></div>
               </div>
+              <div class="form-row">
+                <div><label>เริ่มแสดง</label><input id="announcementPublishStartAt" type="datetime-local" /></div>
+                <div><label>หมดอายุ</label><input id="announcementPublishEndAt" type="datetime-local" /></div>
+              </div>
+              <p class="mini-muted">ถ้าไม่ตั้งเวลาเริ่ม ระบบจะแสดงทันที และถ้าไม่ตั้งเวลาหมดอายุ ประกาศจะไม่หมดอายุอัตโนมัติ</p>
               <label>รายละเอียดประกาศ</label>
               <textarea id="announcementBody" placeholder="พิมพ์รายละเอียดประกาศ"></textarea>
               <button class="btn btn-green" type="button" onclick="saveAnnouncement()">บันทึกประกาศ</button>
@@ -1920,7 +1925,7 @@
               <p id="announcementSaveResult" style="margin-top:14px; font-weight:bold;"></p>
             </div>
             <br />
-            <div class="table-wrap"><table><thead><tr><th>หัวข้อ</th><th>ศูนย์</th><th>ระดับชั้น</th><th>สถานะ</th><th>จัดการ</th></tr></thead><tbody id="announcementTableBody"></tbody></table></div>
+            <div class="table-wrap"><table><thead><tr><th>หัวข้อ</th><th>ศูนย์</th><th>ระดับชั้น</th><th>สถานะ</th><th>เริ่มแสดง</th><th>หมดอายุ</th><th>สถานะเวลา</th><th>จัดการ</th></tr></thead><tbody id="announcementTableBody"></tbody></table></div>
           </section>
 
           <section id="admin-settings" class="admin-tab hidden">
@@ -9894,8 +9899,10 @@ function receiptStatusText(status) {
       if (!tbody) return;
       tbody.innerHTML = announcements.length ? announcements.map(function(a) {
         const status = a.status === 'active' ? '<span class="status-paid">เปิดแสดง</span>' : '<span class="status-waiting">ปิดไว้ก่อน</span>';
-        return '<tr><td>' + (a.title || '-') + '</td><td>' + (a.location || 'ทั้งหมด') + '</td><td>' + (a.grade || 'ทั้งหมด') + '</td><td>' + status + '</td><td><button class="btn btn-blue" type="button" onclick="editAnnouncement(\'' + jsArg(a.id) + '\')">แก้ไข</button><button class="btn btn-red" type="button" onclick="deleteAnnouncement(\'' + jsArg(a.id) + '\')">ลบ</button></td></tr>';
-      }).join('') : '<tr><td colspan="5">ยังไม่มีประกาศ</td></tr>';
+        const scheduleStatus = getAnnouncementScheduleStatus(a);
+        const scheduleClass = scheduleStatus === 'กำลังแสดง' ? 'status-paid' : (scheduleStatus === 'หมดอายุ' ? 'status-absent' : 'status-waiting');
+        return '<tr><td>' + (a.title || '-') + '</td><td>' + (a.location || 'ทั้งหมด') + '</td><td>' + (a.grade || 'ทั้งหมด') + '</td><td>' + status + '</td><td>' + formatAnnouncementDisplayDate(a.publishStartAtText || a.publishStartAt) + '</td><td>' + formatAnnouncementDisplayDate(a.publishEndAtText || a.publishEndAt) + '</td><td><span class="' + scheduleClass + '">' + scheduleStatus + '</span></td><td><button class="btn btn-blue" type="button" onclick="editAnnouncement(\'' + jsArg(a.id) + '\')">แก้ไข</button><button class="btn btn-red" type="button" onclick="deleteAnnouncement(\'' + jsArg(a.id) + '\')">ลบ</button></td></tr>';
+      }).join('') : '<tr><td colspan="8">ยังไม่มีประกาศ</td></tr>';
       renderStudentAnnouncements();
     }
 
@@ -9905,6 +9912,38 @@ function receiptStatusText(status) {
       if (getElement('announcementLocation')) getElement('announcementLocation').value = 'ทั้งหมด';
       if (getElement('announcementGrade')) getElement('announcementGrade').value = 'ทั้งหมด';
       if (getElement('announcementStatus')) getElement('announcementStatus').value = 'active';
+      if (getElement('announcementPublishStartAt')) getElement('announcementPublishStartAt').value = '';
+      if (getElement('announcementPublishEndAt')) getElement('announcementPublishEndAt').value = '';
+    }
+
+    function parseAnnouncementDateTime(value) {
+      return parseRecordDate(value);
+    }
+
+    function formatDateTimeLocalInput(value) {
+      const date = parseAnnouncementDateTime(value);
+      if (!date) return '';
+      const pad = function(number) { return String(number).padStart(2, '0'); };
+      return date.getFullYear() + '-' + pad(date.getMonth() + 1) + '-' + pad(date.getDate()) + 'T' + pad(date.getHours()) + ':' + pad(date.getMinutes());
+    }
+
+    function formatAnnouncementDisplayDate(value) {
+      const date = parseAnnouncementDateTime(value);
+      return date ? date.toLocaleString('th-TH') : '-';
+    }
+
+    function getAnnouncementScheduleStatus(announcement) {
+      if ((announcement.status || 'active') !== 'active') return 'ปิดไว้ก่อน';
+      const now = new Date();
+      const start = parseAnnouncementDateTime(announcement.publishStartAtText || announcement.publishStartAt);
+      const end = parseAnnouncementDateTime(announcement.publishEndAtText || announcement.publishEndAt);
+      if (start && now < start) return 'ยังไม่ถึงเวลา';
+      if (end && now > end) return 'หมดอายุ';
+      return 'กำลังแสดง';
+    }
+
+    function isAnnouncementVisibleNow(announcement) {
+      return getAnnouncementScheduleStatus(announcement) === 'กำลังแสดง';
     }
 
     async function saveAnnouncement() {
@@ -9912,10 +9951,17 @@ function receiptStatusText(status) {
       const title = getElement('announcementTitle').value.trim();
       const body = getElement('announcementBody').value.trim();
       const result = getElement('announcementSaveResult');
+      const publishStartAtText = getElement('announcementPublishStartAt') ? getElement('announcementPublishStartAt').value : '';
+      const publishEndAtText = getElement('announcementPublishEndAt') ? getElement('announcementPublishEndAt').value : '';
       if (!title || !body) { result.textContent = 'กรุณากรอกหัวข้อและรายละเอียดประกาศ'; result.style.color = '#dc2626'; return; }
+      if (publishStartAtText && publishEndAtText && parseAnnouncementDateTime(publishStartAtText) > parseAnnouncementDateTime(publishEndAtText)) {
+        result.textContent = 'เวลาเริ่มแสดงต้องไม่ช้ากว่าเวลาหมดอายุ';
+        result.style.color = '#dc2626';
+        return;
+      }
       let item = announcements.find(function(a) { return String(a.id) === String(id); });
       if (!item) { item = { id: id, firebaseDocId: String(id) }; announcements.push(item); }
-      Object.assign(item, { title: title, body: body, location: getElement('announcementLocation').value, grade: getElement('announcementGrade').value, status: getElement('announcementStatus').value, updatedAtText: new Date().toLocaleString('th-TH') });
+      Object.assign(item, { title: title, body: body, location: getElement('announcementLocation').value, grade: getElement('announcementGrade').value, status: getElement('announcementStatus').value, publishStartAtText: publishStartAtText, publishEndAtText: publishEndAtText, updatedAtText: new Date().toLocaleString('th-TH') });
       try { await setFirebaseDocument('announcements', item); result.textContent = 'บันทึกประกาศเรียบร้อย'; result.style.color = '#16a34a'; addActivityLog('บันทึกประกาศ', title); clearAnnouncementForm(); renderAnnouncements(); } catch (error) { result.textContent = 'บันทึกไม่สำเร็จ: ' + (error.message || error.code); result.style.color = '#dc2626'; }
     }
 
@@ -9929,6 +9975,8 @@ function receiptStatusText(status) {
       getElement('announcementLocation').value = item.location || 'ทั้งหมด';
       getElement('announcementGrade').value = item.grade || 'ทั้งหมด';
       getElement('announcementStatus').value = item.status || 'active';
+      if (getElement('announcementPublishStartAt')) getElement('announcementPublishStartAt').value = formatDateTimeLocalInput(item.publishStartAtText || item.publishStartAt);
+      if (getElement('announcementPublishEndAt')) getElement('announcementPublishEndAt').value = formatDateTimeLocalInput(item.publishEndAtText || item.publishEndAt);
     }
 
     async function deleteAnnouncement(id) {
@@ -9946,7 +9994,7 @@ function receiptStatusText(status) {
       const grade = currentStudent ? currentStudent.grade : getProfileGrade();
       const course = getCurrentStudentCourse();
       const location = course ? course.location : '';
-      const list = announcements.filter(function(a) { return a.status === 'active' && (a.grade === 'ทั้งหมด' || a.grade === grade) && (a.location === 'ทั้งหมด' || a.location === location); });
+      const list = announcements.filter(function(a) { return isAnnouncementVisibleNow(a) && (a.grade === 'ทั้งหมด' || a.grade === grade) && (a.location === 'ทั้งหมด' || a.location === location); });
       box.innerHTML = list.length ? list.slice().reverse().map(function(a) { return '<div class="card"><span class="tag">' + (a.grade || 'ทั้งหมด') + ' · ' + (a.location || 'ทั้งหมด') + '</span><h3>' + (a.title || '-') + '</h3><p>' + (a.body || '') + '</p><p class="mini-muted">อัปเดต: ' + (a.updatedAtText || '-') + '</p></div>'; }).join('') : '<div class="card"><h3>ยังไม่มีประกาศ</h3><p>ประกาศใหม่จากสถาบันจะแสดงที่นี่</p></div>';
     }
 
@@ -10188,22 +10236,29 @@ function receiptStatusText(status) {
         parseRecordDate(student.updatedAt);
     }
 
+    function isWithinLastDays(date, days) {
+      if (!date) return false;
+      const now = new Date();
+      const start = new Date(now.getTime() - (days * 24 * 60 * 60 * 1000));
+      return date >= start && date <= now;
+    }
+
     function getRecentNewMembers() {
       const activeStudents = (students || []).filter(isActiveStudentForDashboard);
-      const todayKey = getLocalDateString();
       const decorated = activeStudents.map(function(student, index) {
         const createdDate = getStudentCreatedDate(student);
         return {
           student: student,
           index: index,
           createdDate: createdDate,
-          createdKey: createdDate ? getLocalDateString(createdDate) : '',
           sortValue: createdDate ? createdDate.getTime() : index
         };
+      }).filter(function(item) {
+        return isWithinLastDays(item.createdDate, 7);
+      }).sort(function(a, b) {
+        return b.sortValue - a.sortValue;
       });
-      const today = decorated.filter(function(item) { return item.createdKey === todayKey; });
-      const latest = decorated.slice().sort(function(a, b) { return b.sortValue - a.sortValue; }).slice(0, 5);
-      return { today: today, latest: latest };
+      return { recent7Days: decorated, latest: decorated.slice(0, 5) };
     }
 
     function injectNewMemberNotificationBox() {
@@ -10217,17 +10272,16 @@ function receiptStatusText(status) {
       const box = getElement('adminNewMemberList');
       if (!box) return;
       const recent = getRecentNewMembers();
-      const source = recent.today.length ? recent.today : recent.latest;
-      const title = recent.today.length ? ('สมัครวันนี้ ' + recent.today.length + ' คน') : 'ยังไม่มีสมาชิกใหม่วันนี้ แสดงรายการสมัครล่าสุด';
-      const rows = source.slice(0, 5).map(function(item) {
+      const rows = recent.latest.map(function(item) {
         const s = item.student || {};
         const timeText = item.createdDate ? item.createdDate.toLocaleString('th-TH') : (s.registeredAtText || s.createdAtText || 'ไม่พบเวลาสมัคร');
         return '<div class="feature-warning"><strong>' + escapeHtml(s.name || '-') + '</strong><p>' +
           escapeHtml((s.grade || '-') + ' · ' + (s.phone || '-') + ' · ' + (s.courseStatus || s.course || 'ยังไม่ได้สมัครคอร์ส')) +
           '</p><p class="mini-muted">สมัครเมื่อ: ' + escapeHtml(timeText) + '</p></div>';
       }).join('');
-      box.innerHTML = '<div class="' + (recent.today.length ? 'feature-warning' : 'feature-ok') + '"><strong>' + title + '</strong><p>ตรวจสอบข้อมูลและคอร์สที่ต้องอนุมัติจากหน้านักเรียน</p><button class="btn btn-blue" type="button" onclick="showAdminTab(\'admin-students\')">ไปดูรายชื่อนักเรียน</button></div>' +
-        (rows || '<div class="notice">ยังไม่มีข้อมูลนักเรียนในระบบ</div>');
+      const hasRecent = recent.recent7Days.length > 0;
+      box.innerHTML = '<div class="' + (hasRecent ? 'feature-warning' : 'feature-ok') + '"><strong>สมาชิกใหม่ใน 7 วันล่าสุด' + (hasRecent ? ' ' + recent.recent7Days.length + ' คน' : '') + '</strong><p>' + (hasRecent ? 'ตรวจสอบข้อมูลและคอร์สที่ต้องอนุมัติจากหน้านักเรียน' : 'ไม่มีสมาชิกใหม่ในช่วง 7 วันล่าสุด') + '</p><button class="btn btn-blue" type="button" onclick="showAdminTab(\'admin-students\')">ไปดูรายชื่อนักเรียน</button></div>' +
+        (rows || '<div class="notice">ไม่มีสมาชิกใหม่ในช่วง 7 วันล่าสุด</div>');
     }
 
     function injectAdminDataQualityBox() {
