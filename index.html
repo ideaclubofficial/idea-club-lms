@@ -10544,6 +10544,7 @@ function receiptStatusText(status) {
     }
 
     const HARD_WIPE_TARGETS = [
+      { key: 'wipeAllSystem', label: 'Wipe ทั้งหมด', collections: ['students', 'payments', 'receipts', 'paymentMonths', 'monthlyQuestions', 'monthlyExamLinks', 'scoreReports', 'adminScoreRecords', 'announcements', 'activityLogs', 'onDemandClips', 'attendanceHistory', 'courses', 'teachers', 'lineGroups', 'settings'], studentUsers: true, dangerous: true },
       { key: 'students', label: 'นักเรียน', collections: ['students'] },
       { key: 'studentUsers', label: 'บัญชี users ของนักเรียน', studentUsers: true },
       { key: 'finance', label: 'การเงิน / ใบเสร็จ / รอบชำระเงิน', collections: ['payments', 'receipts', 'paymentMonths'] },
@@ -10557,7 +10558,7 @@ function receiptStatusText(status) {
     function hardWipeTargetChoicesHtml() {
       return '<div class="permission-grid">' + HARD_WIPE_TARGETS.map(function(target) {
         return '<label class="feature-check" style="align-items:flex-start;">' +
-          '<input class="hard-wipe-target" type="checkbox" value="' + target.key + '" checked onchange="renderHardWipeSelectionSummary()" />' +
+          '<input class="hard-wipe-target" type="checkbox" value="' + target.key + '"' + (target.dangerous ? '' : ' checked') + ' onchange="renderHardWipeSelectionSummary()" />' +
           '<span><strong>' + target.label + '</strong><br><span class="mini-muted">' + (target.collections ? target.collections.join(', ') : 'users role student / student authUid') + '</span></span>' +
         '</label>';
       }).join('') + '</div>';
@@ -10569,10 +10570,10 @@ function receiptStatusText(status) {
       ensureElement(settings, 'hardWipePanel',
         '<div id="hardWipePanel" class="form-box" style="border:2px solid #dc2626;">' +
           '<h3 style="color:#dc2626;">Danger Zone / Wipe Data</h3>' +
-          '<p style="color:#6b7280; margin-bottom:14px;">Hard delete เฉพาะรายการที่เลือก โดยระบบจะไม่ลบคอร์ส ครู LINE กลุ่ม และ settings ห้อง Online/เอกสาร Online ที่อยู่ในคอร์สจะยังอยู่</p>' +
+          '<p style="color:#6b7280; margin-bottom:14px;">Hard delete เฉพาะรายการที่เลือก หรือเลือก Wipe ทั้งหมดเพื่อลบทุก collection หลัก โดยยังคง users ของ Admin/ครูไว้</p>' +
           '<div class="notice" style="border-color:#fecaca; background:#fff7f7;">' +
-            '<p><strong>เลือกได้ว่าจะลบอะไร:</strong> นักเรียน, บัญชี users นักเรียน, การเงิน, คะแนน, ประกาศ, logs, คลิป On-demand, ประวัติเข้าเรียน</p>' +
-            '<p><strong>ข้อมูลที่จะเก็บไว้:</strong> courses, teachers, lineGroups, settings และ users ของครู/Admin</p>' +
+            '<p><strong>เลือกได้ว่าจะลบอะไร:</strong> นักเรียน, บัญชี users นักเรียน, การเงิน, คะแนน, ประกาศ, logs, คลิป On-demand, ประวัติเข้าเรียน หรือ Wipe ทั้งหมด</p>' +
+            '<p><strong>Wipe ทั้งหมดจะลบเพิ่ม:</strong> courses, teachers, lineGroups, settings ด้วย แต่ยังเก็บ users ของครู/Admin และไม่ลบ Firebase Auth accounts</p>' +
           '</div>' +
           '<h3 style="font-size:18px;">เลือกรายการที่จะลบ</h3>' +
           '<div class="test-actions">' +
@@ -10597,7 +10598,14 @@ function receiptStatusText(status) {
     function setHardWipeTargetSelection(mode) {
       const checkboxes = Array.from(document.querySelectorAll('.hard-wipe-target'));
       checkboxes.forEach(function(input) {
-        input.checked = mode !== 'none';
+        if (mode === 'none') {
+          input.checked = false;
+        } else if (mode === 'default') {
+          const target = HARD_WIPE_TARGETS.find(function(item) { return item.key === input.value; });
+          input.checked = !(target && target.dangerous);
+        } else {
+          input.checked = true;
+        }
       });
       renderHardWipeSelectionSummary();
     }
@@ -10605,6 +10613,21 @@ function receiptStatusText(status) {
     function getSelectedHardWipeTargets() {
       const selectedKeys = Array.from(document.querySelectorAll('.hard-wipe-target:checked')).map(function(input) { return input.value; });
       return HARD_WIPE_TARGETS.filter(function(target) { return selectedKeys.includes(target.key); });
+    }
+
+    function selectedHardWipeIncludesAll(targets) {
+      return (targets || getSelectedHardWipeTargets()).some(function(target) { return target.key === 'wipeAllSystem'; });
+    }
+
+    function getHardWipeCollectionsToDelete(targets) {
+      const selectedTargets = targets || getSelectedHardWipeTargets();
+      const collectionMap = {};
+      selectedTargets.forEach(function(target) {
+        (target.collections || []).forEach(function(collectionName) {
+          collectionMap[collectionName] = true;
+        });
+      });
+      return Object.keys(collectionMap);
     }
 
     function getHardWipeTargetLabels(targets) {
@@ -10619,7 +10642,10 @@ function receiptStatusText(status) {
         box.innerHTML = '<div class="feature-warning">ยังไม่ได้เลือกรายการที่จะลบ</div>';
         return;
       }
-      box.innerHTML = '<div class="feature-warning"><strong>รายการที่จะถูกลบ ' + targets.length + ' หมวด</strong><p>' + escapeHtml(getHardWipeTargetLabels(targets).join(', ')) + '</p></div>';
+      const wipeAllWarning = selectedHardWipeIncludesAll(targets)
+        ? '<p style="color:#dc2626;"><strong>โหมด Wipe ทั้งหมดจะลบ courses, teachers, lineGroups และ settings ด้วย</strong></p>'
+        : '';
+      box.innerHTML = '<div class="feature-warning"><strong>รายการที่จะถูกลบ ' + targets.length + ' หมวด</strong><p>' + escapeHtml(getHardWipeTargetLabels(targets).join(', ')) + '</p>' + wipeAllWarning + '</div>';
     }
 
     function confirmHardWipeInput() {
@@ -10690,28 +10716,28 @@ function receiptStatusText(status) {
         return;
       }
       const selectedLabels = getHardWipeTargetLabels(selectedTargets);
-      if (!confirm('ยืนยัน Hard Wipe รายการนี้จริงหรือไม่?\n\n' + selectedLabels.join('\n') + '\n\nการลบนี้ย้อนกลับไม่ได้ถ้าไม่มี backup')) return;
+      const includesAll = selectedHardWipeIncludesAll(selectedTargets);
+      const allWarning = includesAll ? '\n\nโหมด Wipe ทั้งหมดจะลบ courses, teachers, lineGroups และ settings ด้วย แต่จะยังเก็บ users ของ Admin/ครูไว้' : '';
+      if (!confirm('ยืนยัน Hard Wipe รายการนี้จริงหรือไม่?\n\n' + selectedLabels.join('\n') + allWarning + '\n\nการลบนี้ย้อนกลับไม่ได้ถ้าไม่มี backup')) return;
 
       result.innerHTML = '<div class="notice">กำลังลบข้อมูล กรุณาอย่าปิดหน้านี้...</div>';
       const studentAuthUids = (students || []).map(function(student) { return student.authUid; }).filter(Boolean);
+      const collectionsToDelete = getHardWipeCollectionsToDelete(selectedTargets);
       const summary = [];
 
       try {
-        for (let i = 0; i < selectedTargets.length; i += 1) {
-          const target = selectedTargets[i];
-          if (target.studentUsers) {
-            const deletedUsers = await deleteStudentUserProfiles(studentAuthUids);
-            summary.push({ label: target.label, count: deletedUsers });
-          }
-          for (let c = 0; c < (target.collections || []).length; c += 1) {
-            const collectionName = target.collections[c];
-            const count = await deleteCollectionInBatches(collectionName);
-            summary.push({ label: collectionName, count: count });
-          }
+        if (selectedTargets.some(function(target) { return target.studentUsers; })) {
+          const deletedUsers = await deleteStudentUserProfiles(studentAuthUids);
+          summary.push({ label: 'users นักเรียน', count: deletedUsers });
+        }
+        for (let i = 0; i < collectionsToDelete.length; i += 1) {
+          const collectionName = collectionsToDelete[i];
+          const count = await deleteCollectionInBatches(collectionName);
+          summary.push({ label: collectionName, count: count });
         }
         await loadCoreDataFromFirebase();
         renderActiveAdminTab();
-        result.innerHTML = '<div class="feature-ok"><strong>Hard Wipe สำเร็จ</strong><p>ลบเฉพาะรายการที่เลือกแล้ว และยังเก็บ courses, teachers, lineGroups, settings ไว้</p></div>' +
+        result.innerHTML = '<div class="feature-ok"><strong>Hard Wipe สำเร็จ</strong><p>' + (includesAll ? 'ล้างทุก collection หลักแล้ว และยังเก็บ users ของ Admin/ครูไว้' : 'ลบเฉพาะรายการที่เลือกแล้ว') + '</p></div>' +
           summary.map(function(item) {
             return '<div class="status-display-row"><span class="status-label">' + escapeHtml(item.label) + '</span><strong>' + item.count + '</strong></div>';
           }).join('');
