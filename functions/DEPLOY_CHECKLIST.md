@@ -154,6 +154,19 @@ firebase deploy --only functions:cleanupDeletedStudentAuthAccounts
 - ลบเฉพาะรายการใน `authCleanupQueue` ที่เป็น `role: "student"` และครบกำหนด
 - Function จะข้าม Admin/ครู และไม่ลบ account ของผู้สั่งงาน
 
+## Site assets on Google Drive
+
+ระบบอัปโหลด QR Code, Logo และ Favicon ไป Google Drive ใช้ callable function:
+
+```sh
+DRIVE_FOLDER_ID="xxxx" firebase deploy --only functions:uploadSiteAssetToDrive
+```
+
+- ใช้จาก Admin Settings
+- เก็บไฟล์ในโฟลเดอร์ `site-assets`
+- Function จะตั้ง permission เป็น Anyone with link can view
+- ต้องตรวจว่า QR/Logo/Favicon แสดงได้บนหน้าเว็บ public หลังอัปโหลด
+
 ## 7. วิธีทดสอบหลัง deploy
 
 - สร้าง payment จริงใน Firestore ที่มี `studentAuthUid` หรือ `memberId`/`studentId` ตรงกับ user

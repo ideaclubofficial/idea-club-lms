@@ -54,6 +54,19 @@ function getFileExtension(mimeType) {
   return map[String(mimeType || "").toLowerCase()] || ".jpg";
 }
 
+function getImageFileExtension(mimeType) {
+  const map = {
+    "image/jpeg": ".jpg",
+    "image/jpg": ".jpg",
+    "image/png": ".png",
+    "image/webp": ".webp",
+    "image/svg+xml": ".svg",
+    "image/x-icon": ".ico",
+    "image/vnd.microsoft.icon": ".ico",
+  };
+  return map[String(mimeType || "").toLowerCase()] || getFileExtension(mimeType);
+}
+
 function getDriveClient() {
   if (!fs.existsSync(SERVICE_ACCOUNT_PATH)) {
     throw new HttpsError(
@@ -313,6 +326,30 @@ async function findOrCreateDriveFolder(drive, name, parentId) {
   };
 }
 
+function getDriveDirectImageUrl(fileId) {
+  return `https://drive.google.com/uc?export=view&id=${fileId}`;
+}
+
+async function makeDriveFilePublic(drive, fileId) {
+  await drive.permissions.create({
+    fileId,
+    requestBody: {
+      role: "reader",
+      type: "anyone",
+    },
+    supportsAllDrives: true,
+  });
+}
+
+function getSiteAssetLabel(assetType) {
+  const map = {
+    payment_qr: "payment-qr",
+    logo: "logo",
+    favicon: "favicon",
+  };
+  return map[assetType] || "";
+}
+
 function getPaymentSlipMonth(payment) {
   return sanitizeDriveFolderName(
     payment.month ||
@@ -530,6 +567,90 @@ exports.uploadPaymentSlipToDrive = onCall(async (request) => {
     if (tempFilePath && fs.existsSync(tempFilePath)) {
       fs.unlinkSync(tempFilePath);
     }
+  }
+});
+
+exports.uploadSiteAssetToDrive = onCall(async (request) => {
+  if (!request.auth || !request.auth.uid) {
+    throw new HttpsError("unauthenticated", "กรุณาเข้าสู่ระบบก่อนอัปโหลดรูป");
+  }
+
+  if (!(await isAuthCleanupAdmin(request.auth.uid))) {
+    throw new HttpsError("permission-denied", "ต้องเป็น Admin/Super Admin จึงจะอัปโหลดรูปตั้งค่าระบบได้");
+  }
+
+  const { assetType, fileBase64, mimeType, fileName } = request.data || {};
+  const safeAssetType = String(assetType || "").trim();
+  const assetLabel = getSiteAssetLabel(safeAssetType);
+  const safeMimeType = String(mimeType || "").trim().toLowerCase();
+
+  if (!assetLabel) {
+    throw new HttpsError("invalid-argument", "assetType ต้องเป็น payment_qr, logo หรือ favicon");
+  }
+  if (!fileBase64) {
+    throw new HttpsError("invalid-argument", "ไม่พบไฟล์รูปสำหรับอัปโหลด");
+  }
+  if (!safeMimeType.startsWith("image/")) {
+    throw new HttpsError("invalid-argument", "รองรับเฉพาะไฟล์รูปภาพเท่านั้น");
+  }
+  if (estimateBase64Size(fileBase64) > MAX_FILE_SIZE_BYTES) {
+    throw new HttpsError("invalid-argument", "ไฟล์รูปต้องมีขนาดไม่เกิน 8MB");
+  }
+
+  assertDriveFolderConfigured();
+
+  const drive = getDriveClient();
+  const assetFolder = await findOrCreateDriveFolder(drive, "site-assets", DRIVE_FOLDER_ID);
+  const extension = getImageFileExtension(safeMimeType);
+  const safeOriginalName = String(fileName || `${assetLabel}${extension}`).replace(/[^\wก-ฮะ-์.\- ]/g, "-");
+  const driveFileName = `${assetLabel}-${Date.now()}-${safeOriginalName}`;
+  const tempFilePath = path.join(os.tmpdir(), driveFileName.endsWith(extension) ? driveFileName : `${driveFileName}${extension}`);
+
+  try {
+    fs.writeFileSync(tempFilePath, base64ToBuffer(fileBase64));
+    const uploadResult = await drive.files.create({
+      requestBody: {
+        name: driveFileName,
+        parents: [assetFolder.id],
+      },
+      media: {
+        mimeType: safeMimeType,
+        body: fs.createReadStream(tempFilePath),
+      },
+      fields: "id, webViewLink",
+      supportsAllDrives: true,
+    });
+
+    const driveFileId = uploadResult.data.id;
+    await makeDriveFilePublic(drive, driveFileId);
+    const driveViewUrl = uploadResult.data.webViewLink || `https://drive.google.com/file/d/${driveFileId}/view`;
+    const directImageUrl = getDriveDirectImageUrl(driveFileId);
+
+    await writeActivityLog({
+      functionName: "uploadSiteAssetToDrive",
+      type: "site_asset_uploaded",
+      severity: "info",
+      uid: request.auth.uid,
+      assetType: safeAssetType,
+      driveFileId,
+      driveViewUrl,
+      directImageUrl,
+    });
+
+    return {
+      ok: true,
+      assetType: safeAssetType,
+      driveFileId,
+      driveViewUrl,
+      directImageUrl,
+      folderId: assetFolder.id,
+      folderName: assetFolder.name,
+    };
+  } catch (error) {
+    if (error instanceof HttpsError) throw error;
+    throw new HttpsError("internal", error.message || "อัปโหลดรูปไป Google Drive ไม่สำเร็จ");
+  } finally {
+    if (fs.existsSync(tempFilePath)) fs.unlinkSync(tempFilePath);
   }
 });
 

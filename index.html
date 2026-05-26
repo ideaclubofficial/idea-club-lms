@@ -4,6 +4,8 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>IDEA CLUB</title>
+  <link id="dynamicFavicon" rel="icon" href="assets/favicon.png" />
+  <link id="dynamicAppleTouchIcon" rel="apple-touch-icon" href="assets/favicon.png" />
   <link rel="stylesheet" href="assets/styles.css" />
 </head>
 <body>
@@ -1924,7 +1926,20 @@
               <div class="form-row">
                 <div><label>รหัสผ่านเริ่มต้น</label><input id="settingDefaultPassword" type="text" placeholder="000000" /></div>
                 <div><label>Logo URL</label><input id="settingLogoUrl" type="url" placeholder="https://..." /></div>
+                <div><label>Favicon URL</label><input id="settingFaviconUrl" type="url" placeholder="https://..." /></div>
                 <div><label>QR Code URL</label><input id="settingQrUrl" type="url" placeholder="https://..." /></div>
+              </div>
+              <div class="form-row">
+                <div>
+                  <label>อัปโหลด Logo ไป Google Drive</label>
+                  <input id="settingLogoUpload" type="file" accept="image/*" onchange="previewSiteAsset('settingLogoUpload','settingLogoPreview')" />
+                  <div id="settingLogoPreview" class="notice" style="margin-top:10px;">ยังไม่ได้เลือกรูป</div>
+                </div>
+                <div>
+                  <label>อัปโหลด Favicon ไป Google Drive</label>
+                  <input id="settingFaviconUpload" type="file" accept="image/*" onchange="previewSiteAsset('settingFaviconUpload','settingFaviconPreview')" />
+                  <div id="settingFaviconPreview" class="notice" style="margin-top:10px;">ยังไม่ได้เลือกรูป</div>
+                </div>
               </div>
               <label>ข้อความท้ายใบเสร็จ</label>
               <textarea id="settingReceiptFooter" placeholder="ข้อความท้ายใบเสร็จ"></textarea>
@@ -1944,7 +1959,7 @@
 
             <div class="form-box">
               <h3>ตั้งค่า QR Code รับชำระเงิน</h3>
-              <p style="margin-bottom:18px; color:#6b7280;">อัปโหลด QR Code กลางของสถาบัน เพื่อให้นักเรียนใช้สแกนชำระเงินรายเดือน</p>
+              <p style="margin-bottom:18px; color:#6b7280;">อัปโหลด QR Code ไปเก็บใน Google Drive เพื่อให้นักเรียนใช้สแกนชำระเงินรายเดือน</p>
               <div class="form-row">
                 <div>
                   <label>อัปโหลด QR Code</label>
@@ -2634,6 +2649,7 @@
       lineOfficial: '@ideaclub',
       phone: '',
       logoUrl: '',
+      faviconUrl: '',
       qrUrl: '',
       receiptFooter: 'เอกสารนี้เป็นใบยืนยันการชำระเงินจากสถาบัน IDEA CLUB ไม่ใช่สลิปโอนเงินธนาคาร',
       academicYear: String(new Date().getFullYear() + 543),
@@ -8763,25 +8779,59 @@ function receiptStatusText(status) {
     }
 
     function loadPaymentQrFromGithubAsset() {
+      if (systemSettings && systemSettings.qrUrl) {
+        setPaymentQrImage(systemSettings.qrUrl);
+        return;
+      }
       tryLoadQrPath(0);
     }
 
-    function previewAdminQr() {
-      const input = getElement('adminQrUpload');
-      const box = getElement('adminQrPreview');
+    function previewImageFile(inputId, previewId, emptyText) {
+      const input = getElement(inputId);
+      const box = getElement(previewId);
       const file = input && input.files ? input.files[0] : null;
-      if (!file || !box) return;
+      if (!box) return;
+      if (!file) {
+        box.innerHTML = emptyText || 'ยังไม่ได้เลือกรูป';
+        return;
+      }
       const reader = new FileReader();
       reader.onload = function(event) {
-        paymentQrData = event.target.result;
-        box.innerHTML = '<img src="' + event.target.result + '" alt="QR Code">';
+        box.innerHTML = '<img src="' + event.target.result + '" alt="Preview">';
       };
       reader.readAsDataURL(file);
     }
 
+    function previewAdminQr() {
+      previewImageFile('adminQrUpload', 'adminQrPreview', 'ยังไม่ได้อัปโหลด QR');
+    }
+
+    function previewSiteAsset(inputId, previewId) {
+      previewImageFile(inputId, previewId, 'ยังไม่ได้เลือกรูป');
+    }
+
+    async function uploadSiteAssetToDrive(assetType, inputId, resultElement) {
+      const input = getElement(inputId);
+      const file = input && input.files ? input.files[0] : null;
+      if (!file) return '';
+      if (!file.type || file.type.indexOf('image/') !== 0) throw new Error('รองรับเฉพาะไฟล์รูปภาพเท่านั้น');
+      if (file.size > 8 * 1024 * 1024) throw new Error('ไฟล์รูปต้องมีขนาดไม่เกิน 8MB');
+      if (!functionsApi) throw new Error('Firebase Functions ยังไม่พร้อมใช้งาน');
+      if (resultElement) resultElement.textContent = 'กำลังอัปโหลดรูปไป Google Drive...';
+      const callable = functionsApi.httpsCallable('uploadSiteAssetToDrive');
+      const response = await callable({
+        assetType: assetType,
+        fileBase64: await fileToBase64(file),
+        mimeType: file.type,
+        fileName: file.name
+      });
+      return response && response.data ? (response.data.directImageUrl || response.data.driveViewUrl || '') : '';
+    }
+
     async function savePaymentQr() {
       const result = getElement('qrSaveResult');
-      if (!paymentQrData) {
+      const hasFile = !!(getElement('adminQrUpload') && getElement('adminQrUpload').files && getElement('adminQrUpload').files[0]);
+      if (!paymentQrData && !hasFile && !(systemSettings && systemSettings.qrUrl)) {
         result.textContent = 'กรุณาอัปโหลด QR Code ก่อนบันทึก';
         result.style.color = '#dc2626';
         return;
@@ -8789,14 +8839,14 @@ function receiptStatusText(status) {
       try {
         result.textContent = 'กำลังบันทึก QR Code...';
         result.style.color = '#0f4cbd';
-        let qrUrl = paymentQrData;
-        if (String(paymentQrData || '').startsWith('data:')) {
-          qrUrl = await uploadFileToFirebaseStorage('qr-codes/payment-qr-' + Date.now() + '.png', paymentQrData);
-        }
+        let qrUrl = hasFile ? await uploadSiteAssetToDrive('payment_qr', 'adminQrUpload', result) : (systemSettings.qrUrl || paymentQrData);
         const qrSetting = { id: 'main-payment-qr', firebaseDocId: 'main-payment-qr', type: 'paymentQr', qrUrl: qrUrl, updatedAtText: new Date().toLocaleString('th-TH') };
         await setFirebaseDocument('settings', qrSetting);
+        systemSettings = Object.assign(systemSettings, { id: 'main', firebaseDocId: 'main', qrUrl: qrUrl });
+        await setFirebaseDocument('settings', systemSettings);
         setPaymentQrImage(qrUrl);
-        result.textContent = 'บันทึก QR Code เรียบร้อย และอัปเดตไปยังหน้าชำระเงินของนักเรียนแล้ว';
+        if (getElement('settingQrUrl')) getElement('settingQrUrl').value = qrUrl;
+        result.textContent = 'บันทึก QR Code ใน Google Drive เรียบร้อย';
         result.style.color = '#16a34a';
       } catch (error) {
         console.error('save payment qr error:', error);
@@ -9110,21 +9160,6 @@ function receiptStatusText(status) {
       getElement('questionNumber').value = monthlyQuestions.length + 1;
     }
 
-    function previewQuestionImage() {
-      const input = getElement('questionImage');
-      const box = getElement('questionImagePreviewBox');
-      const file = input && input.files ? input.files[0] : null;
-      if (!file) { box.innerHTML = 'ยังไม่ได้เลือกรูปภาพ'; return; }
-      const reader = new FileReader();
-      reader.onload = function(event) { box.innerHTML = '<img class="question-image-preview" src="' + event.target.result + '" alt="รูปประกอบคำถาม">'; };
-      reader.readAsDataURL(file);
-    }
-
-    function getQuestionImageData() {
-      const img = document.querySelector('#questionImagePreviewBox img');
-      return img ? img.src : '';
-    }
-
     async function saveQuestion() {
       const editingId = getElement('editingQuestionId').value;
       const subject = getElement('questionSubject').value;
@@ -9134,7 +9169,6 @@ function receiptStatusText(status) {
       const choiceC = getElement('choiceC').value.trim();
       const choiceD = getElement('choiceD').value.trim();
       const correct = getElement('correctChoice').value;
-      const image = getQuestionImageData();
       const testDate = getElement('monthlyTestDate').value;
       const testTime = getElement('monthlyTestTime') ? getElement('monthlyTestTime').value : '09:00';
       const result = getElement('questionSaveResult');
@@ -9144,20 +9178,17 @@ function receiptStatusText(status) {
         return;
       }
       try {
-        let imageUrl = image;
-        if (image && image.startsWith('data:')) {
-          imageUrl = await uploadFileToFirebaseStorage('question-images/' + getSafeFileName(subject) + '-' + Date.now() + '.png', image);
-        }
         if (editingId) {
           const q = monthlyQuestions.find(function(item) { return String(item.id) === String(editingId); });
           if (q) {
-            Object.assign(q, { subject: subject, text: text, choices: { A: choiceA, B: choiceB, C: choiceC, D: choiceD }, correct: correct, image: imageUrl || q.image, testDate: testDate, testTime: testTime });
+            Object.assign(q, { subject: subject, text: text, choices: { A: choiceA, B: choiceB, C: choiceC, D: choiceD }, correct: correct, testDate: testDate, testTime: testTime });
+            delete q.image;
             await setFirebaseDocument('monthlyQuestions', q);
           }
           result.textContent = 'แก้ไขข้อสอบเรียบร้อย';
         } else {
           const newId = createFirebaseDocId('monthlyQuestions');
-          const newQuestion = { id: newId, firebaseDocId: newId, subject: subject, text: text, choices: { A: choiceA, B: choiceB, C: choiceC, D: choiceD }, correct: correct, image: imageUrl, testDate: testDate, testTime: testTime };
+          const newQuestion = { id: newId, firebaseDocId: newId, subject: subject, text: text, choices: { A: choiceA, B: choiceB, C: choiceC, D: choiceD }, correct: correct, testDate: testDate, testTime: testTime };
           monthlyQuestions.push(newQuestion);
           await setFirebaseDocument('monthlyQuestions', newQuestion);
           result.textContent = 'เพิ่มข้อสอบเรียบร้อย ตอนนี้มีทั้งหมด ' + monthlyQuestions.length + ' ข้อ คะแนนรวมยังคิดเต็ม 50 คะแนน';
@@ -9184,8 +9215,6 @@ function receiptStatusText(status) {
       getElement('choiceC').value = '';
       getElement('choiceD').value = '';
       getElement('correctChoice').value = 'A';
-      getElement('questionImage').value = '';
-      getElement('questionImagePreviewBox').innerHTML = 'ยังไม่ได้เลือกรูปภาพ';
       updateQuestionNumber();
       if (clearMessage !== false) getElement('questionSaveResult').textContent = '';
     }
@@ -9206,7 +9235,6 @@ function receiptStatusText(status) {
       getElement('choiceC').value = q.choices.C;
       getElement('choiceD').value = q.choices.D;
       getElement('correctChoice').value = q.correct;
-      getElement('questionImagePreviewBox').innerHTML = q.image ? '<img class="question-image-preview" src="' + q.image + '" alt="รูปประกอบคำถาม">' : 'ยังไม่ได้เลือกรูปภาพ';
       getElement('questionSaveResult').textContent = 'กำลังแก้ไขข้อสอบ';
       getElement('questionSaveResult').style.color = '#0f4cbd';
       getElement('questionFormBox').scrollIntoView({ behavior: 'smooth' });
@@ -9240,9 +9268,8 @@ function receiptStatusText(status) {
         return subjectMatched && monthMatched && timeMatched;
       });
       tbody.innerHTML = filtered.length ? filtered.map(function(q, i) {
-        const img = q.image ? '<img class="question-thumb" src="' + q.image + '" alt="รูปประกอบคำถาม">' : '-';
-        return '<tr><td>' + (i + 1) + '</td><td>' + (q.testDate || '-') + '</td><td>' + (q.testTime || '-') + '</td><td>' + q.subject + '</td><td>' + q.text + '</td><td>' + img + '</td><td>' + q.correct + '</td><td><button class="btn btn-blue" type="button" onclick="' + actionCall('editQuestion', q.id) + '">แก้ไข</button><button class="btn btn-red" type="button" onclick="' + actionCall('deleteQuestion', q.id) + '">ลบ</button></td></tr>';
-      }).join('') : '<tr><td colspan="8">ยังไม่มีข้อสอบในเดือน เวลา และวิชาที่เลือก</td></tr>';
+        return '<tr><td>' + (i + 1) + '</td><td>' + (q.testDate || '-') + '</td><td>' + (q.testTime || '-') + '</td><td>' + q.subject + '</td><td>' + q.text + '</td><td>' + q.correct + '</td><td><button class="btn btn-blue" type="button" onclick="' + actionCall('editQuestion', q.id) + '">แก้ไข</button><button class="btn btn-red" type="button" onclick="' + actionCall('deleteQuestion', q.id) + '">ลบ</button></td></tr>';
+      }).join('') : '<tr><td colspan="7">ยังไม่มีข้อสอบในเดือน เวลา และวิชาที่เลือก</td></tr>';
     }
 
     function renderAdminExamSetFilters() {
@@ -9357,8 +9384,7 @@ function receiptStatusText(status) {
       }
       const point = Math.round((50 / examQuestions.length) * 100) / 100;
       list.innerHTML = examQuestions.map(function(q, i) {
-        const img = q.image ? '<img class="question-image-preview" src="' + q.image + '" alt="รูปประกอบคำถาม">' : '';
-        return '<div id="question-card-' + q.id + '" class="card" style="box-shadow:none; border:1px solid #e5e7eb; margin-bottom:14px;"><p><strong>' + (i + 1) + '.</strong> ' + q.text + '</p>' + img + '<p style="color:#6b7280; font-size:14px; margin-bottom:8px;">ข้อละประมาณ ' + point + ' คะแนน จากคะแนนเต็มรวม 50</p><label><input type="radio" name="mq' + q.id + '" value="A" style="width:auto;"> 1. ' + q.choices.A + '</label><label><input type="radio" name="mq' + q.id + '" value="B" style="width:auto;"> 2. ' + q.choices.B + '</label><label><input type="radio" name="mq' + q.id + '" value="C" style="width:auto;"> 3. ' + q.choices.C + '</label><label><input type="radio" name="mq' + q.id + '" value="D" style="width:auto;"> 4. ' + q.choices.D + '</label><div id="feedback-q-' + q.id + '"></div></div>';
+        return '<div id="question-card-' + q.id + '" class="card" style="box-shadow:none; border:1px solid #e5e7eb; margin-bottom:14px;"><p><strong>' + (i + 1) + '.</strong> ' + q.text + '</p><p style="color:#6b7280; font-size:14px; margin-bottom:8px;">ข้อละประมาณ ' + point + ' คะแนน จากคะแนนเต็มรวม 50</p><label><input type="radio" name="mq' + q.id + '" value="A" style="width:auto;"> 1. ' + q.choices.A + '</label><label><input type="radio" name="mq' + q.id + '" value="B" style="width:auto;"> 2. ' + q.choices.B + '</label><label><input type="radio" name="mq' + q.id + '" value="C" style="width:auto;"> 3. ' + q.choices.C + '</label><label><input type="radio" name="mq' + q.id + '" value="D" style="width:auto;"> 4. ' + q.choices.D + '</label><div id="feedback-q-' + q.id + '"></div></div>';
       }).join('');
     }
 
@@ -10201,21 +10227,60 @@ function receiptStatusText(status) {
       getElement('settingLineOfficial').value = systemSettings.lineOfficial || '';
       getElement('settingPhone').value = systemSettings.phone || '';
       getElement('settingLogoUrl').value = systemSettings.logoUrl || '';
+      if (getElement('settingFaviconUrl')) getElement('settingFaviconUrl').value = systemSettings.faviconUrl || '';
       getElement('settingQrUrl').value = systemSettings.qrUrl || '';
       getElement('settingReceiptFooter').value = systemSettings.receiptFooter || '';
       getElement('settingAcademicYear').value = systemSettings.academicYear || '';
       getElement('settingDefaultPassword').value = systemSettings.defaultPassword || '000000';
+      if (getElement('settingLogoPreview')) getElement('settingLogoPreview').innerHTML = systemSettings.logoUrl ? '<img src="' + systemSettings.logoUrl + '" alt="Logo Preview">' : 'ยังไม่ได้เลือกรูป';
+      if (getElement('settingFaviconPreview')) getElement('settingFaviconPreview').innerHTML = systemSettings.faviconUrl ? '<img src="' + systemSettings.faviconUrl + '" alt="Favicon Preview">' : 'ยังไม่ได้เลือกรูป';
     }
 
     async function saveSystemSettings() {
       const result = getElement('settingsSaveResult');
-      systemSettings = Object.assign(systemSettings, { id: 'main', firebaseDocId: 'main', instituteName: getElement('settingInstituteName').value.trim() || 'IDEA CLUB', lineOfficial: getElement('settingLineOfficial').value.trim(), phone: getElement('settingPhone').value.trim(), logoUrl: getElement('settingLogoUrl').value.trim(), qrUrl: getElement('settingQrUrl').value.trim(), receiptFooter: getElement('settingReceiptFooter').value.trim(), academicYear: getElement('settingAcademicYear').value.trim(), defaultPassword: getElement('settingDefaultPassword').value.trim() || '000000' });
-      try { await setFirebaseDocument('settings', systemSettings); result.textContent = 'บันทึกตั้งค่าระบบเรียบร้อย'; result.style.color = '#16a34a'; addActivityLog('บันทึกตั้งค่าระบบ', 'อัปเดตข้อมูลระบบกลาง'); applySystemSettingsToPage(); } catch (error) { result.textContent = 'บันทึกไม่สำเร็จ: ' + (error.message || error.code); result.style.color = '#dc2626'; }
+      try {
+        result.textContent = 'กำลังบันทึกตั้งค่าระบบ...';
+        result.style.color = '#0f4cbd';
+        const uploadedLogoUrl = await uploadSiteAssetToDrive('logo', 'settingLogoUpload', result);
+        const uploadedFaviconUrl = await uploadSiteAssetToDrive('favicon', 'settingFaviconUpload', result);
+        systemSettings = Object.assign(systemSettings, {
+          id: 'main',
+          firebaseDocId: 'main',
+          instituteName: getElement('settingInstituteName').value.trim() || 'IDEA CLUB',
+          lineOfficial: getElement('settingLineOfficial').value.trim(),
+          phone: getElement('settingPhone').value.trim(),
+          logoUrl: uploadedLogoUrl || getElement('settingLogoUrl').value.trim(),
+          faviconUrl: uploadedFaviconUrl || (getElement('settingFaviconUrl') ? getElement('settingFaviconUrl').value.trim() : ''),
+          qrUrl: getElement('settingQrUrl').value.trim(),
+          receiptFooter: getElement('settingReceiptFooter').value.trim(),
+          academicYear: getElement('settingAcademicYear').value.trim(),
+          defaultPassword: getElement('settingDefaultPassword').value.trim() || '000000'
+        });
+        await setFirebaseDocument('settings', systemSettings);
+        if (getElement('settingLogoUrl')) getElement('settingLogoUrl').value = systemSettings.logoUrl || '';
+        if (getElement('settingFaviconUrl')) getElement('settingFaviconUrl').value = systemSettings.faviconUrl || '';
+        result.textContent = 'บันทึกตั้งค่าระบบเรียบร้อย';
+        result.style.color = '#16a34a';
+        addActivityLog('บันทึกตั้งค่าระบบ', 'อัปเดตข้อมูลระบบกลาง');
+        applySystemSettingsToPage();
+      } catch (error) {
+        result.textContent = 'บันทึกไม่สำเร็จ: ' + (error.message || error.code);
+        result.style.color = '#dc2626';
+      }
     }
 
     function applySystemSettingsToPage() {
       const name = systemSettings.instituteName || 'IDEA CLUB';
-      document.querySelectorAll('.logo, footer strong').forEach(function(el) { el.textContent = name; });
+      document.querySelectorAll('.logo').forEach(function(el) {
+        el.innerHTML = systemSettings.logoUrl
+          ? '<img class="site-logo-img" src="' + systemSettings.logoUrl + '" alt="' + escapeHtml(name) + '"><span>' + escapeHtml(name) + '</span>'
+          : escapeHtml(name);
+      });
+      document.querySelectorAll('footer strong').forEach(function(el) { el.textContent = name; });
+      if (systemSettings.faviconUrl) {
+        if (getElement('dynamicFavicon')) getElement('dynamicFavicon').href = systemSettings.faviconUrl;
+        if (getElement('dynamicAppleTouchIcon')) getElement('dynamicAppleTouchIcon').href = systemSettings.faviconUrl;
+      }
       if (systemSettings.qrUrl) {
         paymentQrData = systemSettings.qrUrl;
         if (getElement('studentQrBox')) getElement('studentQrBox').innerHTML = '<img src="' + systemSettings.qrUrl + '" alt="QR Code สำหรับชำระเงิน">';

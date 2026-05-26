@@ -8,6 +8,10 @@
 
 ระบบอัปโหลดสลิปผ่านเว็บแบบไม่ใช้ OCR ใช้ callable function `uploadPaymentSlipToDrive` เพื่อเก็บสลิปใน Google Drive ตามโครงสร้าง `DRIVE_FOLDER_ID / เดือน / ระดับชั้น` และบันทึกผู้อัปโหลดกลับไปที่ `payments/{paymentId}`.
 
+## Site Assets on Google Drive
+
+รูปตั้งค่าระบบ เช่น QR Code, Logo และ Favicon ใช้ callable function `uploadSiteAssetToDrive` เพื่อเก็บใน Google Drive โฟลเดอร์ `site-assets` แทน Firebase Storage.
+
 ## Setup Google Drive OCR
 
 The payment slip OCR function uploads student slip images to Google Drive and uses Cloud Vision OCR for a first-pass review.
@@ -39,6 +43,12 @@ DRIVE_FOLDER_ID="xxxx" firebase deploy --only functions:uploadPaymentSlipToDrive
 
 ```sh
 DRIVE_FOLDER_ID="xxxx" firebase deploy --only functions:uploadPaymentSlipToDrive
+```
+
+สำหรับระบบอัปโหลด QR/Logo/Favicon ไป Google Drive ให้ deploy เฉพาะ:
+
+```sh
+DRIVE_FOLDER_ID="xxxx" firebase deploy --only functions:uploadSiteAssetToDrive
 ```
 
 ### Option B: temporary local constant
