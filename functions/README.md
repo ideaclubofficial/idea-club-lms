@@ -4,6 +4,10 @@
 
 ระบบ OCR สลิปถูกพักไว้ก่อน เนื่องจากมีค่าใช้จ่าย API/Cloud Functions ห้าม deploy `uploadPaymentSlipToDriveAndOcr` จนกว่าจะอนุมัติงบ/ค่าใช้จ่ายและเปิด feature flag ในหน้าเว็บอีกครั้ง
 
+## Payment Slip Web Upload
+
+ระบบอัปโหลดสลิปผ่านเว็บแบบไม่ใช้ OCR ใช้ callable function `uploadPaymentSlipToDrive` เพื่อเก็บสลิปใน Google Drive ตามโครงสร้าง `DRIVE_FOLDER_ID / เดือน / ระดับชั้น` และบันทึกผู้อัปโหลดกลับไปที่ `payments/{paymentId}`.
+
 ## Setup Google Drive OCR
 
 The payment slip OCR function uploads student slip images to Google Drive and uses Cloud Vision OCR for a first-pass review.
@@ -29,6 +33,12 @@ The payment slip OCR function uploads student slip images to Google Drive and us
 
 ```sh
 DRIVE_FOLDER_ID="xxxx" firebase deploy --only functions:uploadPaymentSlipToDriveAndOcr
+```
+
+สำหรับระบบอัปโหลดสลิปแบบไม่ใช้ OCR ให้ deploy เฉพาะ:
+
+```sh
+DRIVE_FOLDER_ID="xxxx" firebase deploy --only functions:uploadPaymentSlipToDrive
 ```
 
 ### Option B: temporary local constant

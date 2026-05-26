@@ -64,7 +64,7 @@ function getDriveClient() {
 
   const auth = new google.auth.GoogleAuth({
     keyFile: SERVICE_ACCOUNT_PATH,
-    scopes: ["https://www.googleapis.com/auth/drive.file"],
+    scopes: ["https://www.googleapis.com/auth/drive"],
   });
 
   return google.drive({ version: "v3", auth });
@@ -182,11 +182,34 @@ async function getUserProfile(uid) {
   return userDoc.data() || null;
 }
 
+async function getStudentProfileForPayment(payment, uid) {
+  const candidates = [
+    payment.studentAuthUid,
+    payment.authUid,
+    uid,
+  ].filter(Boolean);
+
+  for (const authUid of candidates) {
+    const snapshot = await db.collection("students").where("authUid", "==", authUid).limit(1).get();
+    if (!snapshot.empty) return snapshot.docs[0].data() || null;
+  }
+
+  const memberId = payment.memberId || payment.studentId;
+  if (memberId) {
+    const byMember = await db.collection("students").where("memberId", "==", memberId).limit(1).get();
+    if (!byMember.empty) return byMember.docs[0].data() || null;
+    const byStudentId = await db.collection("students").where("id", "==", memberId).limit(1).get();
+    if (!byStudentId.empty) return byStudentId.docs[0].data() || null;
+  }
+
+  return null;
+}
+
 async function writeActivityLog(data) {
   try {
     await db.collection("activityLogs").add({
       source: "cloud_function",
-      functionName: "uploadPaymentSlipToDriveAndOcr",
+      functionName: data.functionName || "uploadPaymentSlipToDriveAndOcr",
       ...data,
       createdAt: admin.firestore.FieldValue.serverTimestamp(),
     });
@@ -194,6 +217,277 @@ async function writeActivityLog(data) {
     console.error("write activity log error:", error);
   }
 }
+
+function sanitizeDriveFolderName(name) {
+  return String(name || "")
+    .trim()
+    .replace(/[\\/:*?"<>|#%\u0000-\u001f]/g, "-")
+    .replace(/\s+/g, " ")
+    .slice(0, 120) || "ไม่ระบุ";
+}
+
+async function findOrCreateDriveFolder(drive, name, parentId) {
+  const folderName = sanitizeDriveFolderName(name);
+  const escapedName = folderName.replace(/\\/g, "\\\\").replace(/'/g, "\\'");
+  const escapedParent = String(parentId || "").replace(/\\/g, "\\\\").replace(/'/g, "\\'");
+  const query = [
+    "mimeType = 'application/vnd.google-apps.folder'",
+    `name = '${escapedName}'`,
+    `'${escapedParent}' in parents`,
+    "trashed = false",
+  ].join(" and ");
+
+  const existing = await drive.files.list({
+    q: query,
+    fields: "files(id, name, webViewLink)",
+    pageSize: 1,
+    supportsAllDrives: true,
+    includeItemsFromAllDrives: true,
+  });
+  const folder = existing.data.files && existing.data.files[0];
+  if (folder && folder.id) {
+    return {
+      id: folder.id,
+      name: folder.name || folderName,
+      webViewLink: folder.webViewLink || `https://drive.google.com/drive/folders/${folder.id}`,
+    };
+  }
+
+  const created = await drive.files.create({
+    requestBody: {
+      name: folderName,
+      mimeType: "application/vnd.google-apps.folder",
+      parents: [parentId],
+    },
+    fields: "id, name, webViewLink",
+    supportsAllDrives: true,
+  });
+  return {
+    id: created.data.id,
+    name: created.data.name || folderName,
+    webViewLink: created.data.webViewLink || `https://drive.google.com/drive/folders/${created.data.id}`,
+  };
+}
+
+function getPaymentSlipMonth(payment) {
+  return sanitizeDriveFolderName(
+    payment.month ||
+    payment.paymentMonth ||
+    payment.studentSelectedMonth ||
+    "ไม่ระบุเดือน"
+  );
+}
+
+function getPaymentSlipGrade(payment, userProfile, studentProfile) {
+  return sanitizeDriveFolderName(
+    payment.grade ||
+    payment.studentGrade ||
+    payment.classLevel ||
+    payment.level ||
+    (studentProfile && (studentProfile.grade || studentProfile.studentGrade || studentProfile.classLevel || studentProfile.level)) ||
+    (userProfile && (userProfile.grade || userProfile.studentGrade || userProfile.classLevel || userProfile.level)) ||
+    "ไม่ระบุระดับชั้น"
+  );
+}
+
+function getUploadedByName(userProfile, payment, uid) {
+  return (
+    (userProfile && (userProfile.name || userProfile.displayName || userProfile.studentName)) ||
+    payment.studentName ||
+    payment.student ||
+    uid
+  );
+}
+
+function buildSlipLogBase(payment, paymentId, uid) {
+  return {
+    paymentId,
+    uid,
+    studentId: payment.studentId || "",
+    memberId: payment.memberId || "",
+    studentName: payment.studentName || payment.student || "",
+    paymentMonth: payment.month || "",
+    month: payment.month || "",
+    amount: payment.amount || payment.finalAmount || "",
+    expectedAmount: payment.expectedAmount || payment.finalAmount || payment.amount || payment.baseAmount || "",
+  };
+}
+
+function userOwnsPaymentByProfile(payment, userProfileData) {
+  return !!(
+    userProfileData &&
+    (
+      (userProfileData.memberId && payment.memberId === userProfileData.memberId) ||
+      (userProfileData.memberId && payment.studentId === userProfileData.memberId) ||
+      (userProfileData.studentId && payment.studentId === userProfileData.studentId) ||
+      (userProfileData.studentId && payment.memberId === userProfileData.studentId)
+    )
+  );
+}
+
+async function assertCanUploadPaymentSlip(payment, uid, userProfileData, studentProfileData) {
+  const ownerFields = [
+    payment.studentAuthUid,
+    payment.authUid,
+    payment.slipUploadedByUid,
+    payment.uploadedByUid,
+  ].filter(Boolean);
+  const ownsByUid = ownerFields.includes(uid);
+  const ownsByProfile = userOwnsPaymentByProfile(payment, userProfileData) || userOwnsPaymentByProfile(payment, studentProfileData);
+  const canUpload = ownsByUid || ownsByProfile || (await isBackOfficeUser(uid));
+  if (!canUpload) {
+    throw new HttpsError("permission-denied", "ไม่มีสิทธิ์อัปโหลดสลิปสำหรับรายการนี้");
+  }
+}
+
+exports.uploadPaymentSlipToDrive = onCall(async (request) => {
+  if (!request.auth || !request.auth.uid) {
+    throw new HttpsError("unauthenticated", "กรุณาเข้าสู่ระบบก่อนอัปโหลดสลิป");
+  }
+
+  const uid = request.auth.uid;
+  const { paymentId, fileBase64, mimeType, fileName } = request.data || {};
+  const safePaymentId = String(paymentId || "").trim();
+  const safeMimeType = String(mimeType || "").trim();
+
+  if (!safePaymentId || !fileBase64) {
+    throw new HttpsError("invalid-argument", "ต้องระบุ paymentId และ fileBase64");
+  }
+  if (!safeMimeType.startsWith("image/")) {
+    throw new HttpsError("invalid-argument", "รองรับเฉพาะไฟล์รูปภาพเท่านั้น");
+  }
+  if (estimateBase64Size(fileBase64) > MAX_FILE_SIZE_BYTES) {
+    throw new HttpsError("invalid-argument", "ไฟล์สลิปต้องมีขนาดไม่เกิน 8MB");
+  }
+
+  const paymentRef = db.collection("payments").doc(safePaymentId);
+  const paymentDoc = await paymentRef.get();
+  if (!paymentDoc.exists) {
+    throw new HttpsError("not-found", "ไม่พบรายการชำระเงินนี้");
+  }
+
+  const payment = paymentDoc.data() || {};
+  const userProfileData = await getUserProfile(uid);
+  const studentProfileData = await getStudentProfileForPayment(payment, uid);
+  await assertCanUploadPaymentSlip(payment, uid, userProfileData, studentProfileData);
+
+  const logBase = buildSlipLogBase(payment, safePaymentId, uid);
+  const uploadedByName = getUploadedByName(userProfileData, payment, uid);
+
+  await paymentRef.set(
+    {
+      slipStatus: "uploading",
+      slipUploadedByUid: uid,
+      slipUploadedByName: uploadedByName,
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    },
+    { merge: true }
+  );
+
+  let tempFilePath = "";
+  try {
+    assertDriveFolderConfigured();
+
+    const drive = getDriveClient();
+    const monthFolderName = getPaymentSlipMonth(payment);
+    const gradeFolderName = getPaymentSlipGrade(payment, userProfileData, studentProfileData);
+    const monthFolder = await findOrCreateDriveFolder(drive, monthFolderName, DRIVE_FOLDER_ID);
+    const gradeFolder = await findOrCreateDriveFolder(drive, gradeFolderName, monthFolder.id);
+
+    const buffer = base64ToBuffer(fileBase64);
+    const extension = getFileExtension(safeMimeType);
+    const originalName = String(fileName || `payment-slip-${safePaymentId}${extension}`).replace(/[^\wก-ฮะ-์.\- ]/g, "-");
+    const driveFileName = `${safePaymentId}-${Date.now()}-${originalName}`;
+    tempFilePath = path.join(os.tmpdir(), driveFileName.endsWith(extension) ? driveFileName : `${driveFileName}${extension}`);
+    fs.writeFileSync(tempFilePath, buffer);
+
+    const uploadResult = await drive.files.create({
+      requestBody: {
+        name: driveFileName,
+        parents: [gradeFolder.id],
+      },
+      media: {
+        mimeType: safeMimeType,
+        body: fs.createReadStream(tempFilePath),
+      },
+      fields: "id, webViewLink",
+      supportsAllDrives: true,
+    });
+
+    const driveFileId = uploadResult.data.id;
+    const driveViewUrl = uploadResult.data.webViewLink || `https://drive.google.com/file/d/${driveFileId}/view`;
+
+    await paymentRef.set(
+      {
+        slipStorageType: "google_drive",
+        driveFileId,
+        driveViewUrl,
+        driveFolderId: gradeFolder.id,
+        driveFolderName: `${monthFolder.name} / ${gradeFolder.name}`,
+        studentGrade: payment.studentGrade || payment.grade || (studentProfileData && studentProfileData.grade) || "",
+        driveMonthFolderId: monthFolder.id,
+        driveMonthFolderName: monthFolder.name,
+        driveGradeFolderId: gradeFolder.id,
+        driveGradeFolderName: gradeFolder.name,
+        driveFolderUrl: gradeFolder.webViewLink,
+        slipUploadedByUid: uid,
+        slipUploadedByName: uploadedByName,
+        slipUploadedAt: admin.firestore.FieldValue.serverTimestamp(),
+        slipStatus: "waiting_admin_review",
+        adminReviewStatus: "pending",
+        paymentStatus: "รอตรวจสลิป",
+        status: "รอตรวจสลิป",
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      },
+      { merge: true }
+    );
+
+    await writeActivityLog({
+      ...logBase,
+      functionName: "uploadPaymentSlipToDrive",
+      type: "payment_slip_uploaded",
+      severity: "info",
+      uploadedByName,
+      driveFileId,
+      driveViewUrl,
+      driveFolderId: gradeFolder.id,
+      driveFolderName: `${monthFolder.name} / ${gradeFolder.name}`,
+      paymentGrade: gradeFolder.name,
+    });
+
+    return {
+      ok: true,
+      driveViewUrl,
+      driveFolderId: gradeFolder.id,
+      driveFolderName: `${monthFolder.name} / ${gradeFolder.name}`,
+      slipStatus: "waiting_admin_review",
+      message: "อัปโหลดสลิปเรียบร้อย รอเจ้าหน้าที่ตรวจสอบ",
+    };
+  } catch (error) {
+    await writeActivityLog({
+      ...logBase,
+      functionName: "uploadPaymentSlipToDrive",
+      type: "payment_slip_upload_failed",
+      severity: "error",
+      uploadedByName,
+      error: error.message || String(error),
+    });
+    await paymentRef.set(
+      {
+        slipStatus: "upload_failed",
+        slipUploadError: error.message || String(error),
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      },
+      { merge: true }
+    );
+    if (error instanceof HttpsError) throw error;
+    throw new HttpsError("internal", error.message || "อัปโหลดสลิปไม่สำเร็จ");
+  } finally {
+    if (tempFilePath && fs.existsSync(tempFilePath)) {
+      fs.unlinkSync(tempFilePath);
+    }
+  }
+});
 
 exports.uploadPaymentSlipToDriveAndOcr = onCall(async (request) => {
   if (!request.auth || !request.auth.uid) {

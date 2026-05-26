@@ -4,6 +4,8 @@
 
 ระบบ OCR สลิปถูกพักไว้ก่อน เนื่องจากมีค่าใช้จ่าย API/Cloud Functions ห้าม deploy `uploadPaymentSlipToDriveAndOcr` จนกว่าจะอนุมัติงบ/ค่าใช้จ่าย และเปิด feature flag `ENABLE_PAYMENT_SLIP_OCR` ในหน้าเว็บอีกครั้ง
 
+ระบบอัปโหลดสลิปผ่านเว็บแบบไม่ใช้ OCR ใช้ function `uploadPaymentSlipToDrive` และสร้างโฟลเดอร์ Google Drive ตาม `เดือน / ระดับชั้น`
+
 ## 1. สิ่งที่ต้องเปิดใน Google Cloud/Firebase
 
 - Blaze plan
@@ -29,6 +31,12 @@
 
 ```sh
 DRIVE_FOLDER_ID="xxxx" firebase deploy --only functions:uploadPaymentSlipToDriveAndOcr
+```
+
+ถ้าต้อง deploy เฉพาะระบบอัปโหลดสลิปแบบไม่ใช้ OCR:
+
+```sh
+DRIVE_FOLDER_ID="xxxx" firebase deploy --only functions:uploadPaymentSlipToDrive
 ```
 
 ทางเลือก B: แก้ constant ชั่วคราวใน `functions/index.js`
