@@ -2610,7 +2610,10 @@
       defaultPassword: '000000'
     };
 
-    const sortState = {};
+    const sortState = {
+      students: { key: 'id', direction: 'asc' },
+      teachers: { key: 'id', direction: 'asc' }
+    };
     let isSuperAdmin = false;
 
     const PERMISSION_DEFINITIONS = [
@@ -3047,14 +3050,34 @@
       return direction === 'asc' ? result : -result;
     }
 
+    function getTableSortState(type) {
+      if (!sortState[type] || typeof sortState[type] !== 'object') {
+        sortState[type] = { key: 'id', direction: 'asc' };
+      }
+      return sortState[type];
+    }
+
+    function sortRecordsForTable(items, type) {
+      const state = getTableSortState(type);
+      return (items || []).slice().sort(function(a, b) {
+        return compareValues(a[state.key], b[state.key], state.direction);
+      });
+    }
+
     function sortData(type, key) {
+      if (type === 'students' || type === 'teachers') {
+        const current = getTableSortState(type);
+        const direction = current.key === key && current.direction === 'asc' ? 'desc' : 'asc';
+        sortState[type] = { key: key, direction: direction };
+        if (type === 'students') renderAdminStudents();
+        if (type === 'teachers') renderTeachers();
+        return;
+      }
       const stateKey = type + ':' + key;
       const direction = sortState[stateKey] === 'asc' ? 'desc' : 'asc';
       sortState[stateKey] = direction;
-      const target = type === 'students' ? students : type === 'teachers' ? teachers : courses;
+      const target = type === 'courses' ? courses : [];
       target.sort(function(a, b) { return compareValues(a[key], b[key], direction); });
-      if (type === 'students') renderAdminStudents();
-      if (type === 'teachers') renderTeachers();
       if (type === 'courses') renderAdminCourses();
     }
 
@@ -4565,7 +4588,7 @@
       const tbody = getElement('adminStudentTableBody');
       if (!tbody) return;
       renderStudentCourseFilterOptions();
-      const filtered = getVisibleAdminStudents();
+      const filtered = sortRecordsForTable(getVisibleAdminStudents(), 'students');
       const totalPages = Math.max(1, Math.ceil(filtered.length / adminStudentPerPage));
       if (adminStudentCurrentPage > totalPages) adminStudentCurrentPage = totalPages;
       const start = (adminStudentCurrentPage - 1) * adminStudentPerPage;
@@ -5034,7 +5057,8 @@
         tbody.innerHTML = '<tr><td colspan="9">ยังไม่มีสมาชิกครูในระบบ</td></tr>';
         return;
       }
-      tbody.innerHTML = teachers.map(function(t, i) {
+      const sortedTeachers = sortRecordsForTable(teachers, 'teachers');
+      tbody.innerHTML = sortedTeachers.map(function(t, i) {
         const status = t.status === 'Active' ? '<span class="status-paid">Active</span>' : '<span class="status-absent">Inactive</span>';
         const normalizedRole = normalizeAppRole(t.appRole || t.role || 'Teacher');
         const permissionCount = getEffectivePermissions(t).length;
