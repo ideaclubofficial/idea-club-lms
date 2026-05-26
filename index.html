@@ -2119,6 +2119,12 @@
 เฉลยแบบฝึกหัด | https://drive.google.com/..."></textarea>
               <p class="mini-muted">หมายเหตุ: เอกสารที่ใส่ตรงนี้จะผูกกับคลิปนี้โดยตรง และจะแสดงใต้คลิปนี้ในฝั่งนักเรียน ต้องตั้งสิทธิ์ Google Drive เป็น Anyone with the link can view ก่อน</p>
 
+              <div id="adminOnDemandLinkedDocsBox" class="notice" style="margin-top:14px;">
+                <h3>เลือกเอกสารจากวันเรียน</h3>
+                <p class="mini-muted">เลือกเอกสาร Online รายวันที่บันทึกไว้ในคอร์สนี้ เพื่อผูกกับคลิปนี้โดยตรง</p>
+                <div id="adminOnDemandLinkedDocsList" class="status-display"></div>
+              </div>
+
               <button class="btn btn-blue" type="button" onclick="saveOnDemandSettings()">บันทึก ชุดคลิป / คลิป</button>
               <button class="btn btn-dark" type="button" onclick="clearOnDemandForm()">ล้างฟอร์ม</button>
               <p id="videoSaveResult" style="margin-top:14px; font-weight:bold;"></p>
@@ -5743,13 +5749,73 @@
     function loadOnDemandForm() {
       const select = getElement('adminOnDemandCourseSelect');
       if (!select) return;
-      const c = courses.find(function(item) { return String(item.id) === String(select.value); });
+      const c = getSelectedOnDemandCourse();
       if (!c) return;
       if (!getElement('editingOnDemandClipId').value) {
         getElement('adminOnDemandSubject').value = c.onDemandSubject || guessSubjectFromCourse(c.name);
         getElement('adminOnDemandGrade').value = c.onDemandGrade || c.grade || 'ป.6';
         getElement('adminOnDemandClipName').value = c.onDemandTitle ? c.onDemandTitle.replace(' - คลิปย้อนหลัง', '') : c.name;
       }
+      renderOnDemandLinkedDocChoices('adminOnDemandLinkedDocsList', c, getSelectedOnDemandLinkedDocIds('adminOnDemandLinkedDoc'));
+    }
+
+    function getSelectedOnDemandCourse() {
+      const select = getElement('adminOnDemandCourseSelect');
+      return select ? courses.find(function(item) { return String(item.id) === String(select.value); }) : null;
+    }
+
+    function getSelectedOnDemandLinkedDocIds(className) {
+      return Array.from(document.querySelectorAll('.' + className + ':checked')).map(function(input) {
+        return String(input.value);
+      });
+    }
+
+    function getOnlineDocFileCount(doc) {
+      return Array.isArray(doc && doc.files) ? doc.files.filter(function(file) { return file && file.url; }).length : 0;
+    }
+
+    function renderOnDemandLinkedDocChoices(containerId, course, selectedIds) {
+      const box = getElement(containerId);
+      if (!box) return;
+      const docs = getCourseOnlineDocs(course, true);
+      const selected = (selectedIds || []).map(String);
+      const inputClass = containerId === 'bubbleOnDemandLinkedDocsList' ? 'bubbleOnDemandLinkedDoc' : 'adminOnDemandLinkedDoc';
+      if (!docs.length) {
+        box.innerHTML = '<div class="notice">ยังไม่มีเอกสาร Online รายวันในคอร์สนี้ ให้เพิ่มจากเมนูห้องเรียน Online ก่อน</div>';
+        return;
+      }
+      box.innerHTML = docs.map(function(doc) {
+        const docId = String(doc.id || '');
+        const checked = selected.includes(docId) ? ' checked' : '';
+        return '<label class="feature-check" style="align-items:flex-start;">' +
+          '<input class="' + inputClass + '" type="checkbox" value="' + jsArg(docId) + '"' + checked + ' />' +
+          '<span><strong>' + onlineDocDateText(doc.classDate) + '</strong> · ' + escapeHtml(doc.topic || '-') +
+          '<br><span class="mini-muted">' + getOnlineDocFileCount(doc) + ' ไฟล์</span></span>' +
+        '</label>';
+      }).join('');
+    }
+
+    function getLinkedOnlineDocFiles(item) {
+      const course = courses.find(function(c) { return String(c.id) === String(item && item.courseId); });
+      const selectedIds = (Array.isArray(item && item.linkedOnlineDocIds) ? item.linkedOnlineDocIds : []).map(String);
+      if (!course || !selectedIds.length) return [];
+      const docs = getCourseOnlineDocs(course, false).filter(function(doc) {
+        return selectedIds.includes(String(doc.id || ''));
+      });
+      const files = [];
+      docs.forEach(function(doc) {
+        (Array.isArray(doc.files) ? doc.files : []).forEach(function(file) {
+          if (file && file.url) {
+            files.push({
+              title: (doc.topic ? doc.topic + ' · ' : '') + (file.title || 'เปิดเอกสาร'),
+              url: file.url,
+              source: 'linked-online-doc',
+              classDate: doc.classDate || ''
+            });
+          }
+        });
+      });
+      return files;
     }
 
     function parsePdfFilesFromText(text) {
@@ -5774,7 +5840,9 @@
     }
 
     function getPdfFileCountText(item) {
-      const count = Array.isArray(item && item.pdfFiles) ? item.pdfFiles.filter(function(file) { return file && file.url; }).length : 0;
+      const directCount = Array.isArray(item && item.pdfFiles) ? item.pdfFiles.filter(function(file) { return file && file.url; }).length : 0;
+      const linkedCount = getLinkedOnlineDocFiles(item).length;
+      const count = directCount + linkedCount;
       return count ? 'มี ' + count + ' ไฟล์' : 'ยังไม่มีไฟล์';
     }
 
@@ -5782,28 +5850,10 @@
       const ownFiles = Array.isArray(item && item.pdfFiles)
         ? item.pdfFiles.filter(function(file) { return file && file.url; })
         : [];
-      if (ownFiles.length) return ownFiles.map(function(file) {
+      const files = ownFiles.map(function(file) {
         return Object.assign({ source: 'clip' }, file);
       });
-
-      // fallback: ถ้าคลิปยังไม่มีไฟล์แนบโดยตรง ให้ดึงเอกสาร Online รายครั้งของคอร์สเดียวกันมาแสดงเป็นเอกสารที่เกี่ยวข้อง
-      const course = courses.find(function(c) { return String(c.id) === String(item && item.courseId); });
-      const docs = getCourseOnlineDocs(course, false);
-      const relatedFiles = [];
-      docs.forEach(function(doc) {
-        const files = Array.isArray(doc.files) ? doc.files : [];
-        files.forEach(function(file) {
-          if (file && file.url) {
-            relatedFiles.push({
-              title: (doc.topic ? doc.topic + ' · ' : '') + (file.title || 'เปิดเอกสาร'),
-              url: file.url,
-              source: 'course-doc',
-              classDate: doc.classDate || ''
-            });
-          }
-        });
-      });
-      return relatedFiles;
+      return files.concat(getLinkedOnlineDocFiles(item));
     }
 
     function renderPdfButtonsForStudent(item) {
@@ -5811,8 +5861,9 @@
       if (!files.length) return '<p style="color:#d1d5db; margin-top:8px;">ยังไม่มีเอกสารประกอบสำหรับคลิปนี้</p>';
 
       const hasOwnFiles = Array.isArray(item && item.pdfFiles) && item.pdfFiles.some(function(file) { return file && file.url; });
+      const hasLinkedFiles = getLinkedOnlineDocFiles(item).length > 0;
       return '<div style="margin-top:10px;">' +
-        '<p style="color:#d1d5db; font-weight:bold; margin-bottom:6px;">' + (hasOwnFiles ? 'เอกสารที่แนบกับคลิปนี้' : 'เอกสารที่เกี่ยวข้องกับคอร์สนี้') + '</p>' +
+        '<p style="color:#d1d5db; font-weight:bold; margin-bottom:6px;">' + (hasOwnFiles && hasLinkedFiles ? 'เอกสารประกอบคลิปและเอกสารจากวันเรียน' : (hasOwnFiles ? 'เอกสารที่แนบกับคลิปนี้' : 'เอกสารจากวันเรียนที่ผูกกับคลิปนี้')) + '</p>' +
         files.map(function(file) {
           const dateText = file.classDate ? ' (' + onlineDocDateText(file.classDate) + ')' : '';
           return '<button class="btn btn-blue" type="button" onclick="openExternalLink(\'' + jsArg(file.url) + '\')">📄 ' + (file.title || 'เปิดไฟล์') + dateText + '</button>';
@@ -5878,6 +5929,7 @@ function getCourseOnlineDocs(course, includeInactive) {
       const clipTitle = getElement('adminOnDemandTitle').value.trim();
       const link = getElement('adminOnDemandLink').value.trim();
       const pdfFiles = parsePdfFilesFromText(getElement('adminOnDemandPdfFiles') ? getElement('adminOnDemandPdfFiles').value : '');
+      const linkedOnlineDocIds = getSelectedOnDemandLinkedDocIds('adminOnDemandLinkedDoc');
       const editingId = getElement('editingOnDemandClipId').value;
 
       if (!playlistName || !clipTitle || !link) {
@@ -5890,13 +5942,13 @@ function getCourseOnlineDocs(course, includeInactive) {
         if (editingId) {
           const item = onDemandClips.find(function(p) { return String(p.id) === String(editingId); });
           if (item) {
-            Object.assign(item, { courseId: courseId, subject: subject, grade: grade, playlistName: playlistName, clipTitle: clipTitle, link: link, pdfFiles: pdfFiles });
+            Object.assign(item, { courseId: courseId, subject: subject, grade: grade, playlistName: playlistName, clipTitle: clipTitle, link: link, pdfFiles: pdfFiles, linkedOnlineDocIds: linkedOnlineDocIds });
             await setFirebaseDocument('onDemandClips', item);
           }
           getElement('videoSaveResult').textContent = 'แก้ไข ชุดคลิป / คลิป On-demand เรียบร้อย';
         } else {
           const newId = createFirebaseDocId('onDemandClips');
-          const newItem = { id: newId, firebaseDocId: newId, courseId: courseId, subject: subject, grade: grade, playlistName: playlistName, clipTitle: clipTitle, link: link, pdfFiles: pdfFiles };
+          const newItem = { id: newId, firebaseDocId: newId, courseId: courseId, subject: subject, grade: grade, playlistName: playlistName, clipTitle: clipTitle, link: link, pdfFiles: pdfFiles, linkedOnlineDocIds: linkedOnlineDocIds };
           onDemandClips.push(newItem);
           await setFirebaseDocument('onDemandClips', newItem);
           getElement('videoSaveResult').textContent = 'เพิ่ม ชุดคลิป / คลิป On-demand เรียบร้อย';
@@ -5971,12 +6023,18 @@ function getCourseOnlineDocs(course, includeInactive) {
         '<label>ชื่อคลิป / บทเรียน</label><input id="bubbleOnDemandTitle" type="text" value="' + item.clipTitle + '">' +
         '<br><br><label>ลิงก์วิดีโอ On-demand</label><input id="bubbleOnDemandLink" type="url" value="' + item.link + '">' +
         '<br><br><label>ไฟล์ PDF ประกอบบทเรียน (Google Drive)</label><textarea id="bubbleOnDemandPdfFiles" placeholder="ชีทเรียน | https://drive.google.com/...">' + pdfFilesToText(item.pdfFiles) + '</textarea>' +
-        '<p class="mini-muted">ใส่ 1 ไฟล์ต่อ 1 บรรทัด รูปแบบ: ชื่อไฟล์ | ลิงก์ Google Drive</p>',
+        '<p class="mini-muted">ใส่ 1 ไฟล์ต่อ 1 บรรทัด รูปแบบ: ชื่อไฟล์ | ลิงก์ Google Drive</p>' +
+        '<br><div class="notice">' +
+          '<h3>เลือกเอกสารจากวันเรียน</h3>' +
+          '<p class="mini-muted">เลือกเอกสาร Online รายวันที่บันทึกไว้ในคอร์สนี้ เพื่อผูกกับคลิปนี้โดยตรง</p>' +
+          '<div id="bubbleOnDemandLinkedDocsList" class="status-display"></div>' +
+        '</div>',
         function() {
           const playlistName = bubbleValue('bubbleOnDemandClipName');
           const clipTitle = bubbleValue('bubbleOnDemandTitle');
           const link = bubbleValue('bubbleOnDemandLink');
           const pdfFiles = parsePdfFilesFromText(bubbleValue('bubbleOnDemandPdfFiles'));
+          const linkedOnlineDocIds = getSelectedOnDemandLinkedDocIds('bubbleOnDemandLinkedDoc');
           if (!playlistName || !clipTitle || !link) {
             getElement('editBubbleResult').textContent = 'กรุณากรอกชื่อชุดคลิป ชื่อคลิป และลิงก์วิดีโอให้ครบถ้วน';
             getElement('editBubbleResult').style.color = '#dc2626';
@@ -5989,7 +6047,8 @@ function getCourseOnlineDocs(course, includeInactive) {
             playlistName: playlistName,
             clipTitle: clipTitle,
             link: link,
-            pdfFiles: pdfFiles
+            pdfFiles: pdfFiles,
+            linkedOnlineDocIds: linkedOnlineDocIds
           });
           setFirebaseDocument('onDemandClips', item).catch(function(error) { console.error('save ondemand firebase error:', error); });
           renderOnDemandTable();
@@ -5999,6 +6058,15 @@ function getCourseOnlineDocs(course, includeInactive) {
           getElement('videoSaveResult').style.color = '#16a34a';
         }
       );
+      const bubbleCourse = courses.find(function(c) { return String(c.id) === String(item.courseId); });
+      renderOnDemandLinkedDocChoices('bubbleOnDemandLinkedDocsList', bubbleCourse, item.linkedOnlineDocIds || []);
+      const bubbleCourseSelect = getElement('bubbleOnDemandCourse');
+      if (bubbleCourseSelect) {
+        bubbleCourseSelect.addEventListener('change', function() {
+          const selectedCourse = courses.find(function(c) { return String(c.id) === String(bubbleCourseSelect.value); });
+          renderOnDemandLinkedDocChoices('bubbleOnDemandLinkedDocsList', selectedCourse, []);
+        });
+      }
     }
 
     function deleteOnDemandClip(id) {
@@ -6024,6 +6092,7 @@ function getCourseOnlineDocs(course, includeInactive) {
         getElement('adminOnDemandGrade').value = course.onDemandGrade || course.grade || 'ป.6';
         getElement('adminOnDemandClipName').value = course.name;
       }
+      renderOnDemandLinkedDocChoices('adminOnDemandLinkedDocsList', course, []);
       if (clearMessage !== false) getElement('videoSaveResult').textContent = '';
     }
 
