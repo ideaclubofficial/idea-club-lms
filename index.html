@@ -2489,6 +2489,52 @@
       }, { merge: true });
     }
 
+    function buildStudentAuthCleanupQueueData(student, source, olderThanDays) {
+      if (!student || !student.authUid) return null;
+      const days = Number.isFinite(Number(olderThanDays)) ? Math.max(0, Number(olderThanDays)) : 30;
+      const deletedAt = new Date();
+      const eligibleAfter = new Date(deletedAt.getTime() + days * 24 * 60 * 60 * 1000);
+      return {
+        uid: String(student.authUid),
+        email: student.email || buildLocalEmailFromPhone(student.phone || ''),
+        role: 'student',
+        studentName: student.name || '',
+        memberId: student.memberId || student.studentId || '',
+        phone: student.phone || '',
+        source: source || 'delete_student',
+        status: 'queued',
+        deletedAt: firebase.firestore.Timestamp.fromDate(deletedAt),
+        eligibleAfter: firebase.firestore.Timestamp.fromDate(eligibleAfter),
+        queuedByUid: firebaseUser ? firebaseUser.uid : '',
+        queuedByName: getElement('profileName') ? getElement('profileName').textContent : '',
+        updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+      };
+    }
+
+    async function queueStudentAuthCleanup(student, source, olderThanDays) {
+      if (!firebaseReady || !db || !student || !student.authUid) return false;
+      const data = buildStudentAuthCleanupQueueData(student, source, olderThanDays);
+      if (!data) return false;
+      await db.collection('authCleanupQueue').doc(String(student.authUid)).set(data, { merge: true });
+      return true;
+    }
+
+    async function queueStudentAuthCleanupForStudents(studentList, source, olderThanDays) {
+      const items = (studentList || []).filter(function(student) { return student && student.authUid; });
+      let queued = 0;
+      for (let i = 0; i < items.length; i += 450) {
+        const batch = db.batch();
+        items.slice(i, i + 450).forEach(function(student) {
+          const data = buildStudentAuthCleanupQueueData(student, source, olderThanDays);
+          if (!data) return;
+          batch.set(db.collection('authCleanupQueue').doc(String(student.authUid)), data, { merge: true });
+          queued += 1;
+        });
+        await batch.commit();
+      }
+      return queued;
+    }
+
     async function seedCollectionIfEmpty(collectionName, localArray) {
       if (PRODUCTION_MODE) return;
       if (!firebaseReady || !db) return;
@@ -5105,13 +5151,20 @@
       const index = students.findIndex(function(item) { return String(item.id) === String(id); });
       if (index === -1) return;
       const name = students[index].name;
-      if (!confirm('ต้องการลบนักเรียน ' + name + ' ใช่หรือไม่?\n\nการลบนี้จะลบข้อมูลในระบบเว็บ / Firestore เท่านั้น\nหากต้องการไม่ให้เข้าสู่ระบบได้ ต้องเข้า Firebase Authentication แล้วลบบัญชีนี้อีกครั้ง')) return;
+      if (!confirm('ต้องการลบนักเรียน ' + name + ' ใช่หรือไม่?\n\nระบบจะลบข้อมูลในเว็บ/Firestore และเพิ่มคิวล้าง Firebase Auth ภายหลัง')) return;
       const item = students[index];
+      try {
+        await queueStudentAuthCleanup(item, 'delete_student', 30);
+      } catch (queueError) {
+        console.error('queue student auth cleanup error:', queueError);
+        alert('บันทึกคิวล้าง Firebase Auth ไม่สำเร็จ ระบบจะยังไม่ลบนักเรียนเพื่อความปลอดภัย: ' + (queueError.message || queueError.code || 'ไม่ทราบสาเหตุ'));
+        return;
+      }
       await deleteFirebaseDocument('students', item);
       students.splice(index, 1);
       addActivityLog('ลบนักเรียน', name);
       renderAdminStudents();
-      getElement('studentSaveResult').textContent = 'ลบนักเรียน ' + name + ' ออกจากระบบเว็บเรียบร้อยแล้ว หากต้องการปิดการเข้าสู่ระบบ ให้เข้า Firebase Console > Authentication แล้วลบบัญชีนี้ด้วย';
+      getElement('studentSaveResult').textContent = 'ลบนักเรียน ' + name + ' ออกจากระบบเว็บแล้ว และเพิ่มคิวล้าง Firebase Auth ภายหลัง';
       getElement('studentSaveResult').style.color = '#dc2626';
     }
 
@@ -10733,6 +10786,92 @@ function receiptStatusText(status) {
       return hasPermission('admin.full') || getCurrentAppRole() === 'SuperAdmin';
     }
 
+    function authCleanupPanelHtml() {
+      return '<div id="authCleanupPanel" class="form-box" style="border:2px solid #f59e0b;">' +
+        '<h3>ล้างบัญชี Firebase Auth นักเรียนที่ถูกลบแล้ว</h3>' +
+        '<p style="color:#6b7280; margin-bottom:14px;">ระบบจะลบเฉพาะบัญชีนักเรียนในคิวที่ครบกำหนด ไม่ลบ Admin/ครู</p>' +
+        '<div class="form-row">' +
+          '<div><label>ล้างรายการที่ถูกลบมาแล้วอย่างน้อย</label><select id="authCleanupOlderThanDays"><option value="30">30 วัน</option><option value="7">7 วัน</option><option value="0">0 วัน (ทดสอบ)</option></select></div>' +
+        '</div>' +
+        '<div class="test-actions">' +
+          '<button class="btn btn-blue" type="button" onclick="previewDeletedStudentAuthCleanup()">ตรวจรายการที่จะลบ</button>' +
+          '<button class="btn btn-red" type="button" onclick="runDeletedStudentAuthCleanup()">ลบ Auth ที่ครบกำหนด</button>' +
+        '</div>' +
+        '<div class="notice" style="border-color:#fde68a;"><strong>ต้อง deploy Cloud Function ก่อนใช้งาน</strong><p>ห้ามใช้ปุ่มลบจริงถ้ายังไม่ได้ deploy function cleanupDeletedStudentAuthAccounts</p></div>' +
+        '<div id="authCleanupResult" class="status-display" style="margin-top:14px;"></div>' +
+      '</div>';
+    }
+
+    function injectAuthCleanupPanel() {
+      const settings = getElement('admin-settings');
+      if (!settings || !canRunHardWipeData()) return;
+      ensureElement(settings, 'authCleanupPanel', authCleanupPanelHtml());
+    }
+
+    function getAuthCleanupOlderThanDays() {
+      const select = getElement('authCleanupOlderThanDays');
+      return Number(select && select.value !== '' ? select.value : 30);
+    }
+
+    function renderAuthCleanupResult(data, isDeleteRun) {
+      const box = getElement('authCleanupResult');
+      if (!box) return;
+      const candidates = data && Array.isArray(data.candidates) ? data.candidates : [];
+      const skipped = data && Array.isArray(data.skipped) ? data.skipped : [];
+      const results = data && Array.isArray(data.results) ? data.results : [];
+      const rows = (isDeleteRun ? results : candidates).slice(0, 20).map(function(item) {
+        return '<div class="status-display-row"><span class="status-label">' +
+          escapeHtml((item.studentName || '-') + ' · ' + (item.memberId || '-') + ' · ' + (item.email || item.uid || '-')) +
+          '</span><strong>' + escapeHtml(item.status || 'พร้อมลบ') + '</strong></div>';
+      }).join('');
+      const skippedRows = skipped.slice(0, 10).map(function(item) {
+        return '<div class="status-display-row"><span class="status-label">' + escapeHtml(item.email || item.uid || '-') + '</span><strong>' + escapeHtml(item.reason || 'ข้าม') + '</strong></div>';
+      }).join('');
+      box.innerHTML = '<div class="' + (isDeleteRun ? 'feature-ok' : 'notice') + '"><strong>' +
+        (isDeleteRun ? 'ผลลบ Firebase Auth' : 'รายการที่พร้อมลบ') + ': ' + (isDeleteRun ? results.length : candidates.length) +
+        ' รายการ</strong><p>ข้าม ' + skipped.length + ' รายการ</p></div>' +
+        rows +
+        (skippedRows ? '<h3 style="font-size:16px; margin-top:14px;">รายการที่ข้าม</h3>' + skippedRows : '');
+    }
+
+    async function callDeletedStudentAuthCleanup(dryRun) {
+      const box = getElement('authCleanupResult');
+      if (!box) return null;
+      if (!functionsApi) {
+        box.innerHTML = '<div class="feature-warning">Firebase Functions ยังไม่พร้อมใช้งาน</div>';
+        return null;
+      }
+      const callable = functionsApi.httpsCallable('cleanupDeletedStudentAuthAccounts');
+      const response = await callable({
+        dryRun: dryRun,
+        olderThanDays: getAuthCleanupOlderThanDays()
+      });
+      return response.data || {};
+    }
+
+    async function previewDeletedStudentAuthCleanup() {
+      const box = getElement('authCleanupResult');
+      if (box) box.innerHTML = '<div class="notice">กำลังตรวจรายการ...</div>';
+      try {
+        const data = await callDeletedStudentAuthCleanup(true);
+        if (data) renderAuthCleanupResult(data, false);
+      } catch (error) {
+        if (box) box.innerHTML = '<div class="feature-warning"><strong>ตรวจรายการไม่สำเร็จ</strong><p>' + escapeHtml(error.message || error.code || String(error)) + '</p></div>';
+      }
+    }
+
+    async function runDeletedStudentAuthCleanup() {
+      if (!confirm('ยืนยันลบ Firebase Auth ของนักเรียนที่ถูกลบแล้วและครบกำหนดจริงหรือไม่?\n\nการลบ Auth ทำให้นำเบอร์เดิมไปสมัครใหม่ได้ แต่ย้อนกลับไม่ได้')) return;
+      const box = getElement('authCleanupResult');
+      if (box) box.innerHTML = '<div class="notice">กำลังลบ Firebase Auth...</div>';
+      try {
+        const data = await callDeletedStudentAuthCleanup(false);
+        if (data) renderAuthCleanupResult(data, true);
+      } catch (error) {
+        if (box) box.innerHTML = '<div class="feature-warning"><strong>ลบ Auth ไม่สำเร็จ</strong><p>' + escapeHtml(error.message || error.code || String(error)) + '</p></div>';
+      }
+    }
+
     const HARD_WIPE_TARGETS = [
       { key: 'wipeAllSystem', label: 'Wipe ทั้งหมด', collections: ['students', 'payments', 'receipts', 'paymentMonths', 'monthlyQuestions', 'monthlyExamLinks', 'scoreReports', 'adminScoreRecords', 'announcements', 'activityLogs', 'onDemandClips', 'attendanceHistory', 'courses', 'teachers', 'lineGroups', 'settings'], studentUsers: true, dangerous: true },
       { key: 'students', label: 'นักเรียน', collections: ['students'] },
@@ -10911,11 +11050,16 @@ function receiptStatusText(status) {
       if (!confirm('ยืนยัน Hard Wipe รายการนี้จริงหรือไม่?\n\n' + selectedLabels.join('\n') + allWarning + '\n\nการลบนี้ย้อนกลับไม่ได้ถ้าไม่มี backup')) return;
 
       result.innerHTML = '<div class="notice">กำลังลบข้อมูล กรุณาอย่าปิดหน้านี้...</div>';
-      const studentAuthUids = (students || []).map(function(student) { return student.authUid; }).filter(Boolean);
+      const studentSnapshotForAuthCleanup = (students || []).slice();
+      const studentAuthUids = studentSnapshotForAuthCleanup.map(function(student) { return student.authUid; }).filter(Boolean);
       const collectionsToDelete = getHardWipeCollectionsToDelete(selectedTargets);
       const summary = [];
 
       try {
+        if (selectedTargets.some(function(target) { return target.studentUsers || (target.collections || []).includes('students'); })) {
+          const queuedAuth = await queueStudentAuthCleanupForStudents(studentSnapshotForAuthCleanup, includesAll ? 'hard_wipe_all' : 'hard_wipe', 30);
+          summary.push({ label: 'คิวล้าง Firebase Auth', count: queuedAuth });
+        }
         if (selectedTargets.some(function(target) { return target.studentUsers; })) {
           const deletedUsers = await deleteStudentUserProfiles(studentAuthUids);
           summary.push({ label: 'users นักเรียน', count: deletedUsers });
@@ -10986,7 +11130,7 @@ function receiptStatusText(status) {
       if (tabId === 'admin-dashboard') { renderNewMemberNotificationBox(); renderAdminDataQualityBox(); }
       if (tabId === 'admin-courses') { injectCourseReadinessTools(); renderAllCourseReadiness(); }
       if (tabId === 'admin-payment') { injectOverdueDayFilter(); injectPaymentOwnerDiagnosticPanel(); }
-      if (tabId === 'admin-settings') { injectBackupButton(); injectHardWipePanel(); injectAdminRoleSettings(); }
+      if (tabId === 'admin-settings') { injectBackupButton(); injectAuthCleanupPanel(); injectHardWipePanel(); injectAdminRoleSettings(); }
       applyAdminRoleVisibility();
     };
 

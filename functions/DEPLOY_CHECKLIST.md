@@ -141,6 +141,19 @@ firebase deploy --only functions:uploadPaymentSlipToDriveAndOcr
 ห้าม deploy ถ้ายังไม่มี `service-account-drive.json`
 ห้าม deploy ถ้ายังไม่ได้เปิด Drive API / Vision API / Blaze Plan
 
+## Firebase Auth cleanup
+
+ระบบล้างบัญชี Firebase Auth ของนักเรียนที่ถูกลบแล้วใช้ callable function:
+
+```sh
+firebase deploy --only functions:cleanupDeletedStudentAuthAccounts
+```
+
+- ใช้จาก Admin Settings > ล้างบัญชี Firebase Auth นักเรียนที่ถูกลบแล้ว
+- กด `ตรวจรายการที่จะลบ` ก่อนเสมอ
+- ลบเฉพาะรายการใน `authCleanupQueue` ที่เป็น `role: "student"` และครบกำหนด
+- Function จะข้าม Admin/ครู และไม่ลบ account ของผู้สั่งงาน
+
 ## 7. วิธีทดสอบหลัง deploy
 
 - สร้าง payment จริงใน Firestore ที่มี `studentAuthUid` หรือ `memberId`/`studentId` ตรงกับ user

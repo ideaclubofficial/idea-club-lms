@@ -175,6 +175,17 @@ async function isBackOfficeUser(uid) {
   return acceptedRoles.includes(data.role) || acceptedRoles.includes(data.appRole);
 }
 
+async function isAuthCleanupAdmin(uid) {
+  if (!uid) return false;
+  const userDoc = await db.collection("users").doc(uid).get();
+  if (!userDoc.exists) return false;
+  const data = userDoc.data() || {};
+  const acceptedRoles = ["super_admin", "admin", "SuperAdmin", "Admin"];
+  return acceptedRoles.includes(data.role) ||
+    acceptedRoles.includes(data.appRole) ||
+    (Array.isArray(data.permissions) && data.permissions.includes("admin.full"));
+}
+
 async function getUserProfile(uid) {
   if (!uid) return null;
   const userDoc = await db.collection("users").doc(uid).get();
@@ -216,6 +227,39 @@ async function writeActivityLog(data) {
   } catch (error) {
     console.error("write activity log error:", error);
   }
+}
+
+function timestampToMillis(value) {
+  if (!value) return 0;
+  if (value.toMillis) return value.toMillis();
+  if (value.toDate) return value.toDate().getTime();
+  const parsed = Date.parse(value);
+  return Number.isNaN(parsed) ? 0 : parsed;
+}
+
+function normalizeCleanupDays(value) {
+  const days = Number(value);
+  if (!Number.isFinite(days) || days < 0) return 30;
+  return Math.min(Math.floor(days), 365);
+}
+
+async function shouldSkipAuthCleanup(uid, requesterUid) {
+  if (!uid || uid === requesterUid) return "ข้ามบัญชีผู้สั่งงานหรือ uid ว่าง";
+
+  const userDoc = await db.collection("users").doc(uid).get();
+  if (userDoc.exists) {
+    const userData = userDoc.data() || {};
+    const role = String(userData.role || "").toLowerCase();
+    const appRole = String(userData.appRole || "");
+    if (role !== "student" || ["SuperAdmin", "Admin", "Teacher", "Finance", "Manager"].includes(appRole)) {
+      return "ข้ามเพราะ users/{uid} ไม่ใช่นักเรียน";
+    }
+  }
+
+  const teacherSnapshot = await db.collection("teachers").where("authUid", "==", uid).limit(1).get();
+  if (!teacherSnapshot.empty) return "ข้ามเพราะ uid ยังอยู่ใน teachers";
+
+  return "";
 }
 
 function sanitizeDriveFolderName(name) {
@@ -487,6 +531,134 @@ exports.uploadPaymentSlipToDrive = onCall(async (request) => {
       fs.unlinkSync(tempFilePath);
     }
   }
+});
+
+exports.cleanupDeletedStudentAuthAccounts = onCall(async (request) => {
+  if (!request.auth || !request.auth.uid) {
+    throw new HttpsError("unauthenticated", "กรุณาเข้าสู่ระบบก่อนล้างบัญชี Auth");
+  }
+
+  const requesterUid = request.auth.uid;
+  if (!(await isAuthCleanupAdmin(requesterUid))) {
+    throw new HttpsError("permission-denied", "ต้องเป็น Super Admin/Admin จึงจะล้าง Firebase Auth ได้");
+  }
+
+  const dryRun = request.data && request.data.dryRun !== false;
+  const olderThanDays = normalizeCleanupDays(request.data && request.data.olderThanDays);
+  const nowMs = Date.now();
+  const eligibleBeforeMs = nowMs - olderThanDays * 24 * 60 * 60 * 1000;
+
+  const snapshot = await db.collection("authCleanupQueue")
+    .where("role", "==", "student")
+    .where("status", "==", "queued")
+    .limit(500)
+    .get();
+
+  const candidates = [];
+  const skipped = [];
+
+  for (const doc of snapshot.docs) {
+    const item = doc.data() || {};
+    const uid = String(item.uid || "").trim();
+    const eligibleAtMs = timestampToMillis(item.eligibleAfter || item.deletedAt);
+    const deletedAtMs = timestampToMillis(item.deletedAt);
+    const isOldEnough = eligibleAtMs ? eligibleAtMs <= nowMs : deletedAtMs <= eligibleBeforeMs;
+
+    if (!uid || !isOldEnough) {
+      skipped.push({
+        uid,
+        email: item.email || "",
+        reason: uid ? "ยังไม่ครบกำหนดล้าง Auth" : "ไม่มี uid",
+      });
+      continue;
+    }
+
+    const skipReason = await shouldSkipAuthCleanup(uid, requesterUid);
+    if (skipReason) {
+      skipped.push({
+        uid,
+        email: item.email || "",
+        reason: skipReason,
+      });
+      continue;
+    }
+
+    candidates.push({
+      doc,
+      uid,
+      email: item.email || "",
+      studentName: item.studentName || "",
+      memberId: item.memberId || "",
+      source: item.source || "",
+    });
+  }
+
+  const results = [];
+  if (!dryRun) {
+    for (const candidate of candidates) {
+      try {
+        await admin.auth().deleteUser(candidate.uid);
+        await candidate.doc.ref.set({
+          status: "deleted",
+          deletedAuthAt: admin.firestore.FieldValue.serverTimestamp(),
+          deletedByUid: requesterUid,
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        }, { merge: true });
+        results.push({
+          uid: candidate.uid,
+          email: candidate.email,
+          studentName: candidate.studentName,
+          memberId: candidate.memberId,
+          status: "deleted",
+        });
+      } catch (error) {
+        const code = String(error.code || error.message || "");
+        const missing = code.includes("auth/user-not-found") || code.includes("no user record");
+        await candidate.doc.ref.set({
+          status: missing ? "already_deleted" : "failed",
+          cleanupError: error.message || String(error),
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        }, { merge: true });
+        results.push({
+          uid: candidate.uid,
+          email: candidate.email,
+          studentName: candidate.studentName,
+          memberId: candidate.memberId,
+          status: missing ? "already_deleted" : "failed",
+          error: error.message || String(error),
+        });
+      }
+    }
+
+    await writeActivityLog({
+      functionName: "cleanupDeletedStudentAuthAccounts",
+      type: "student_auth_cleanup",
+      severity: results.some((item) => item.status === "failed") ? "warning" : "info",
+      uid: requesterUid,
+      dryRun,
+      olderThanDays,
+      candidateCount: candidates.length,
+      deletedCount: results.filter((item) => item.status === "deleted").length,
+      failedCount: results.filter((item) => item.status === "failed").length,
+    });
+  }
+
+  return {
+    ok: true,
+    dryRun,
+    olderThanDays,
+    candidateCount: candidates.length,
+    skippedCount: skipped.length,
+    candidates: candidates.map((candidate) => ({
+      uid: candidate.uid,
+      email: candidate.email,
+      studentName: candidate.studentName,
+      memberId: candidate.memberId,
+      source: candidate.source,
+    })),
+    skipped,
+    results,
+  };
 });
 
 exports.uploadPaymentSlipToDriveAndOcr = onCall(async (request) => {
