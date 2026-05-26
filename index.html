@@ -2614,6 +2614,7 @@
       students: { key: 'id', direction: 'asc' },
       teachers: { key: 'id', direction: 'asc' }
     };
+    let lastFullBackupExportedAt = null;
     let isSuperAdmin = false;
 
     const PERMISSION_DEFINITIONS = [
@@ -10525,6 +10526,10 @@ function receiptStatusText(status) {
       a.click();
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
+      lastFullBackupExportedAt = new Date();
+      if (getElement('hardWipeBackupStatus')) {
+        getElement('hardWipeBackupStatus').textContent = 'Backup ล่าสุด: ' + lastFullBackupExportedAt.toLocaleString('th-TH');
+      }
       addActivityLog('Export Backup ทั้งระบบ', 'ดาวน์โหลด JSON backup');
     }
 
@@ -10532,6 +10537,135 @@ function receiptStatusText(status) {
       const settings = getElement('admin-settings');
       if (!settings) return;
       ensureElement(settings, 'systemBackupPanel', '<div id="systemBackupPanel" class="form-box"><h3>Backup / Export ข้อมูลทั้งหมด</h3><p style="color:#6b7280; margin-bottom:14px;">ดาวน์โหลดข้อมูลสำรองเป็น JSON รวม students, courses, payments, receipts, scores, attendance และ activityLogs</p><button class="btn btn-blue" type="button" onclick="exportAllDataBackup()">Export ข้อมูลทั้งหมด</button></div>');
+    }
+
+    function canRunHardWipeData() {
+      return hasPermission('admin.full') || getCurrentAppRole() === 'SuperAdmin';
+    }
+
+    function injectHardWipePanel() {
+      const settings = getElement('admin-settings');
+      if (!settings || !canRunHardWipeData()) return;
+      ensureElement(settings, 'hardWipePanel',
+        '<div id="hardWipePanel" class="form-box" style="border:2px solid #dc2626;">' +
+          '<h3 style="color:#dc2626;">Danger Zone / Wipe Data</h3>' +
+          '<p style="color:#6b7280; margin-bottom:14px;">Hard delete ข้อมูลใช้งานจริง โดยเก็บเฉพาะคอร์ส ครู LINE กลุ่ม และ settings ห้อง Online/เอกสาร Online ที่อยู่ในคอร์สจะยังอยู่</p>' +
+          '<div class="notice" style="border-color:#fecaca; background:#fff7f7;">' +
+            '<p><strong>ข้อมูลที่จะถูกลบ:</strong> students, payments, receipts, paymentMonths, monthlyQuestions, monthlyExamLinks, scoreReports, adminScoreRecords, announcements, activityLogs, onDemandClips, attendanceHistory และ users ของนักเรียน</p>' +
+            '<p><strong>ข้อมูลที่จะเก็บไว้:</strong> courses, teachers, lineGroups, settings และ users ของครู/Admin</p>' +
+          '</div>' +
+          '<div class="test-actions"><button class="btn btn-blue" type="button" onclick="exportAllDataBackup()">1. Export Backup ก่อน</button><span id="hardWipeBackupStatus" class="mini-muted">ยังไม่ได้ backup ใน session นี้</span></div>' +
+          '<label>พิมพ์คำยืนยัน: WIPE IDEA CLUB DATA</label>' +
+          '<input id="hardWipeConfirmText" type="text" placeholder="WIPE IDEA CLUB DATA" />' +
+          '<button class="btn btn-red" type="button" onclick="runHardWipeData()">Hard Wipe ข้อมูล</button>' +
+          '<div id="hardWipeResult" class="status-display" style="margin-top:14px;"></div>' +
+        '</div>');
+      if (lastFullBackupExportedAt && getElement('hardWipeBackupStatus')) {
+        getElement('hardWipeBackupStatus').textContent = 'Backup ล่าสุด: ' + lastFullBackupExportedAt.toLocaleString('th-TH');
+      }
+    }
+
+    function confirmHardWipeInput() {
+      const input = getElement('hardWipeConfirmText');
+      return input && input.value.trim() === 'WIPE IDEA CLUB DATA';
+    }
+
+    async function deleteRefsInBatches(refs) {
+      let deleted = 0;
+      for (let i = 0; i < refs.length; i += 450) {
+        const batch = db.batch();
+        refs.slice(i, i + 450).forEach(function(ref) { batch.delete(ref); });
+        await batch.commit();
+        deleted += Math.min(450, refs.length - i);
+      }
+      return deleted;
+    }
+
+    async function deleteCollectionInBatches(collectionName) {
+      let deleted = 0;
+      while (true) {
+        const snapshot = await db.collection(collectionName).limit(450).get();
+        if (snapshot.empty) break;
+        const refs = [];
+        snapshot.forEach(function(doc) { refs.push(doc.ref); });
+        deleted += await deleteRefsInBatches(refs);
+        if (snapshot.size < 450) break;
+      }
+      return deleted;
+    }
+
+    async function deleteStudentUserProfiles(studentAuthUids) {
+      const refsByPath = {};
+      const addRef = function(ref) { refsByPath[ref.path] = ref; };
+
+      (studentAuthUids || []).filter(Boolean).forEach(function(uid) {
+        addRef(db.collection('users').doc(String(uid)));
+      });
+
+      const roleSnapshot = await db.collection('users').where('role', '==', 'student').get();
+      roleSnapshot.forEach(function(doc) { addRef(doc.ref); });
+
+      return deleteRefsInBatches(Object.keys(refsByPath).map(function(path) { return refsByPath[path]; }));
+    }
+
+    async function runHardWipeData() {
+      const result = getElement('hardWipeResult');
+      if (!result) return;
+      if (!canRunHardWipeData()) {
+        result.innerHTML = '<div class="feature-warning">สิทธิ์ไม่เพียงพอ ต้องเป็น Super Admin เท่านั้น</div>';
+        return;
+      }
+      if (!firebaseReady || !db) {
+        result.innerHTML = '<div class="feature-warning">Firebase ยังไม่พร้อมใช้งาน</div>';
+        return;
+      }
+      if (!lastFullBackupExportedAt) {
+        result.innerHTML = '<div class="feature-warning">กรุณา Export Backup ก่อน wipe ข้อมูล</div>';
+        return;
+      }
+      if (!confirmHardWipeInput()) {
+        result.innerHTML = '<div class="feature-warning">กรุณาพิมพ์คำยืนยันให้ตรง: WIPE IDEA CLUB DATA</div>';
+        return;
+      }
+      if (!confirm('ยืนยัน Hard Wipe ข้อมูลจริงหรือไม่? การลบนี้ย้อนกลับไม่ได้ถ้าไม่มี backup')) return;
+
+      result.innerHTML = '<div class="notice">กำลังลบข้อมูล กรุณาอย่าปิดหน้านี้...</div>';
+      const collectionsToDelete = [
+        'students',
+        'payments',
+        'receipts',
+        'paymentMonths',
+        'monthlyQuestions',
+        'monthlyExamLinks',
+        'scoreReports',
+        'adminScoreRecords',
+        'announcements',
+        'activityLogs',
+        'onDemandClips',
+        'attendanceHistory'
+      ];
+      const studentAuthUids = (students || []).map(function(student) { return student.authUid; }).filter(Boolean);
+      const summary = [];
+
+      try {
+        const deletedUsers = await deleteStudentUserProfiles(studentAuthUids);
+        summary.push({ label: 'users นักเรียน', count: deletedUsers });
+        for (let i = 0; i < collectionsToDelete.length; i += 1) {
+          const collectionName = collectionsToDelete[i];
+          const count = await deleteCollectionInBatches(collectionName);
+          summary.push({ label: collectionName, count: count });
+        }
+        await loadCoreDataFromFirebase();
+        renderActiveAdminTab();
+        result.innerHTML = '<div class="feature-ok"><strong>Hard Wipe สำเร็จ</strong><p>เก็บ courses, teachers, lineGroups, settings ไว้แล้ว</p></div>' +
+          summary.map(function(item) {
+            return '<div class="status-display-row"><span class="status-label">' + escapeHtml(item.label) + '</span><strong>' + item.count + '</strong></div>';
+          }).join('');
+        if (getElement('hardWipeConfirmText')) getElement('hardWipeConfirmText').value = '';
+      } catch (error) {
+        console.error('hard wipe error:', error);
+        result.innerHTML = '<div class="feature-warning"><strong>Hard Wipe ไม่สำเร็จ</strong><p>' + escapeHtml(error.message || error.code || String(error)) + '</p></div>';
+      }
     }
 
     function injectStudentGuide() {
@@ -10582,7 +10716,7 @@ function receiptStatusText(status) {
       if (tabId === 'admin-dashboard') { renderNewMemberNotificationBox(); renderAdminDataQualityBox(); }
       if (tabId === 'admin-courses') { injectCourseReadinessTools(); renderAllCourseReadiness(); }
       if (tabId === 'admin-payment') { injectOverdueDayFilter(); injectPaymentOwnerDiagnosticPanel(); }
-      if (tabId === 'admin-settings') { injectBackupButton(); injectAdminRoleSettings(); }
+      if (tabId === 'admin-settings') { injectBackupButton(); injectHardWipePanel(); injectAdminRoleSettings(); }
       applyAdminRoleVisibility();
     };
 
