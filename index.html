@@ -3433,6 +3433,7 @@
         return;
       }
       currentStudent = student;
+      currentTeacher = null;
       getElement('studentLoginResult').textContent = 'Login สำเร็จ';
       getElement('studentLoginResult').style.color = '#0f4cbd';
       getElement('mainMenu').classList.add('hidden');
@@ -3565,6 +3566,7 @@
         courseStatus: 'ยังไม่ได้สมัครคอร์ส',
         paymentStatus: 'ยังไม่ได้สมัครคอร์ส',
         preferredLocation: registerLocation,
+        registeredAtText: new Date().toLocaleString('th-TH'),
         status: 'เรียนอยู่',
         learningStatus: 'เรียนอยู่',
         role: 'student'
@@ -3599,6 +3601,11 @@
 
       result.textContent = 'สมัครสมาชิกเรียบร้อย ระบบเข้าสู่หน้าสมาชิกให้อัตโนมัติ';
       result.style.color = '#16a34a';
+      try {
+        await addActivityLog('สมัครสมาชิกใหม่', studentName + ' · ' + registerGrade + ' · ' + phone);
+      } catch (logError) {
+        console.warn('new member activity log warning:', logError);
+      }
       safeRun(renderAdminStudents, 'render-admin-students-after-register');
       safeRun(renderMemberTable, 'render-member-table-after-register');
       safeRun(updateMemberIdPreview, 'update-member-preview-after-register');
@@ -3626,6 +3633,7 @@
       firebaseUser = null;
       firebaseUserProfile = null;
       currentStudent = null;
+      currentTeacher = null;
       setSuperAdminMode(false);
       getElement('profileMenu').classList.add('hidden');
       getElement('profilePanel').classList.add('hidden');
@@ -3649,20 +3657,34 @@
       return { type: 'guest', roleText: 'ผู้ใช้งาน', record: {} };
     }
 
-    function refreshProfileBox() {
+    function getActiveProfileDisplayInfo() {
       const info = getActiveProfileRecord();
       const record = info.record || {};
-      const displayName = record.name || record.nickname || record.parentName || (firebaseUser && firebaseUser.email) || 'ผู้ใช้งาน';
+      const displayName = record.name || record.nickname || record.parentName || (firebaseUserProfile && firebaseUserProfile.name) || (firebaseUser && firebaseUser.email) || 'ผู้ใช้งาน';
       const displayId = info.type === 'student' ? (record.memberId || record.id || '-') :
         info.type === 'teacher' ? (record.teacherId || record.id || record.username || '-') :
         info.type === 'admin' ? 'ADMIN' : '-';
       const loginText = record.phone || record.username || record.email || (firebaseUser && firebaseUser.email) || '-';
+      return {
+        type: info.type,
+        record: record,
+        displayName: displayName,
+        roleText: info.roleText,
+        headerText: displayName + ' · ' + info.roleText,
+        displayId: displayId,
+        loginText: loginText
+      };
+    }
 
-      if (getElement('profileName')) getElement('profileName').textContent = displayName;
-      if (getElement('profileDisplayName')) getElement('profileDisplayName').textContent = displayName;
-      if (getElement('profileDisplayId')) getElement('profileDisplayId').textContent = displayId;
-      if (getElement('profileDisplayRole')) getElement('profileDisplayRole').textContent = info.roleText;
-      if (getElement('profileDisplayLogin')) getElement('profileDisplayLogin').textContent = loginText;
+    function refreshProfileBox() {
+      const display = getActiveProfileDisplayInfo();
+      const record = display.record || {};
+
+      if (getElement('profileName')) getElement('profileName').textContent = display.headerText;
+      if (getElement('profileDisplayName')) getElement('profileDisplayName').textContent = display.displayName;
+      if (getElement('profileDisplayId')) getElement('profileDisplayId').textContent = display.displayId;
+      if (getElement('profileDisplayRole')) getElement('profileDisplayRole').textContent = display.roleText;
+      if (getElement('profileDisplayLogin')) getElement('profileDisplayLogin').textContent = display.loginText;
 
       if (getElement('profileNickname')) getElement('profileNickname').value = record.nickname || '';
       if (getElement('profileParentName')) getElement('profileParentName').value = record.parentName || '';
@@ -3784,6 +3806,7 @@
     }
 
     function showTeacherAdminPanel(teacher) {
+      currentStudent = null;
       currentTeacher = teacher || currentTeacher;
       showAdminPanel(true);
       setSuperAdminMode(hasPermission('admin.full'));
@@ -3795,6 +3818,7 @@
     }
 
     function showTeacherPanel(teacher) {
+      currentStudent = null;
       currentTeacher = teacher || null;
       hideAllMain();
       getElement('teacherInterface').classList.remove('hidden');
@@ -10040,6 +10064,73 @@ function receiptStatusText(status) {
       return { noCourseStudents, pendingCourses, coursesWithoutOnline, coursesWithoutLine, qrMissing, monthMissing };
     }
 
+    function parseRecordDate(value) {
+      if (!value) return null;
+      if (typeof value.toDate === 'function') return value.toDate();
+      if (typeof value.seconds === 'number') return new Date(value.seconds * 1000);
+      if (typeof value === 'number') return new Date(value);
+      const text = String(value || '').trim();
+      if (!text) return null;
+      const parsed = new Date(text);
+      if (!isNaN(parsed.getTime())) return parsed;
+      const thaiMatch = text.match(/(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})(?:\s+(\d{1,2}):(\d{2}))?/);
+      if (thaiMatch) {
+        const year = Number(thaiMatch[3]) > 2400 ? Number(thaiMatch[3]) - 543 : Number(thaiMatch[3]);
+        return new Date(year, Number(thaiMatch[2]) - 1, Number(thaiMatch[1]), Number(thaiMatch[4] || 0), Number(thaiMatch[5] || 0));
+      }
+      return null;
+    }
+
+    function getStudentCreatedDate(student) {
+      return parseRecordDate(student.createdAt) ||
+        parseRecordDate(student.registeredAt) ||
+        parseRecordDate(student.registeredAtText) ||
+        parseRecordDate(student.createdAtText) ||
+        parseRecordDate(student.updatedAt);
+    }
+
+    function getRecentNewMembers() {
+      const activeStudents = (students || []).filter(isActiveStudentForDashboard);
+      const todayKey = getLocalDateString();
+      const decorated = activeStudents.map(function(student, index) {
+        const createdDate = getStudentCreatedDate(student);
+        return {
+          student: student,
+          index: index,
+          createdDate: createdDate,
+          createdKey: createdDate ? getLocalDateString(createdDate) : '',
+          sortValue: createdDate ? createdDate.getTime() : index
+        };
+      });
+      const today = decorated.filter(function(item) { return item.createdKey === todayKey; });
+      const latest = decorated.slice().sort(function(a, b) { return b.sortValue - a.sortValue; }).slice(0, 5);
+      return { today: today, latest: latest };
+    }
+
+    function injectNewMemberNotificationBox() {
+      const dashboard = getElement('admin-dashboard');
+      if (!dashboard) return;
+      ensureElement(dashboard, 'adminNewMemberBox', '<div id="adminNewMemberBox" class="form-box"><h3>สมาชิกใหม่</h3><p style="color:#6b7280; margin-bottom:14px;">แจ้งเตือนนักเรียน/ผู้ปกครองที่สมัครสมาชิกเข้ามาล่าสุด</p><div id="adminNewMemberList" class="status-display"></div></div>', 'prepend');
+    }
+
+    function renderNewMemberNotificationBox() {
+      injectNewMemberNotificationBox();
+      const box = getElement('adminNewMemberList');
+      if (!box) return;
+      const recent = getRecentNewMembers();
+      const source = recent.today.length ? recent.today : recent.latest;
+      const title = recent.today.length ? ('สมัครวันนี้ ' + recent.today.length + ' คน') : 'ยังไม่มีสมาชิกใหม่วันนี้ แสดงรายการสมัครล่าสุด';
+      const rows = source.slice(0, 5).map(function(item) {
+        const s = item.student || {};
+        const timeText = item.createdDate ? item.createdDate.toLocaleString('th-TH') : (s.registeredAtText || s.createdAtText || 'ไม่พบเวลาสมัคร');
+        return '<div class="feature-warning"><strong>' + escapeHtml(s.name || '-') + '</strong><p>' +
+          escapeHtml((s.grade || '-') + ' · ' + (s.phone || '-') + ' · ' + (s.courseStatus || s.course || 'ยังไม่ได้สมัครคอร์ส')) +
+          '</p><p class="mini-muted">สมัครเมื่อ: ' + escapeHtml(timeText) + '</p></div>';
+      }).join('');
+      box.innerHTML = '<div class="' + (recent.today.length ? 'feature-warning' : 'feature-ok') + '"><strong>' + title + '</strong><p>ตรวจสอบข้อมูลและคอร์สที่ต้องอนุมัติจากหน้านักเรียน</p><button class="btn btn-blue" type="button" onclick="showAdminTab(\'admin-students\')">ไปดูรายชื่อนักเรียน</button></div>' +
+        (rows || '<div class="notice">ยังไม่มีข้อมูลนักเรียนในระบบ</div>');
+    }
+
     function injectAdminDataQualityBox() {
       const dashboard = getElement('admin-dashboard');
       if (!dashboard) return;
@@ -10361,13 +10452,14 @@ function receiptStatusText(status) {
     const originalRenderAdminDashboardFinal = renderAdminDashboard;
     renderAdminDashboard = function() {
       originalRenderAdminDashboardFinal();
+      renderNewMemberNotificationBox();
       renderAdminDataQualityBox();
     };
 
     const originalShowAdminTabFinal = showAdminTab;
     showAdminTab = function(tabId) {
       originalShowAdminTabFinal(tabId);
-      if (tabId === 'admin-dashboard') renderAdminDataQualityBox();
+      if (tabId === 'admin-dashboard') { renderNewMemberNotificationBox(); renderAdminDataQualityBox(); }
       if (tabId === 'admin-courses') { injectCourseReadinessTools(); renderAllCourseReadiness(); }
       if (tabId === 'admin-payment') { injectOverdueDayFilter(); injectPaymentOwnerDiagnosticPanel(); }
       if (tabId === 'admin-settings') { injectBackupButton(); injectAdminRoleSettings(); }
