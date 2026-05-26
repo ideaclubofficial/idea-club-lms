@@ -3158,6 +3158,74 @@
       return value.replace(/[^0-9]/g, '') || value;
     }
 
+    function cleanLoginDigits(value) {
+      return String(value || '').replace(/[^0-9]/g, '');
+    }
+
+    function normalizeLoginCompare(value) {
+      return String(value || '').trim().toLowerCase();
+    }
+
+    function findTeacherByLoginId(rawLogin, normalizedLogin, displayLoginId) {
+      const cleanLogin = cleanLoginDigits(displayLoginId || rawLogin);
+      const loginText = normalizeLoginCompare(rawLogin);
+      const normalizedText = normalizeLoginCompare(normalizedLogin);
+      const displayText = normalizeLoginCompare(displayLoginId);
+      return teachers.find(function(t) {
+        const teacherPhone = cleanLoginDigits(t.phone || t.username || '');
+        return normalizeLoginCompare(t.authUid) === displayText ||
+          normalizeLoginCompare(t.email) === normalizedText ||
+          normalizeLoginCompare(t.email) === loginText ||
+          normalizeLoginCompare(t.username) === normalizedText ||
+          normalizeLoginCompare(t.username) === loginText ||
+          normalizeLoginCompare(t.username) === displayText ||
+          normalizeLoginCompare(t.teacherId) === loginText ||
+          normalizeLoginCompare(t.teacherId) === displayText ||
+          normalizeLoginCompare(t.id) === loginText ||
+          normalizeLoginCompare(t.id) === displayText ||
+          (cleanLogin && teacherPhone === cleanLogin);
+      }) || null;
+    }
+
+    function findStudentByLoginId(rawLogin, normalizedLogin, displayLoginId) {
+      const cleanLogin = cleanLoginDigits(displayLoginId || rawLogin);
+      const loginText = normalizeLoginCompare(rawLogin);
+      const normalizedText = normalizeLoginCompare(normalizedLogin);
+      const displayText = normalizeLoginCompare(displayLoginId);
+      return students.find(function(s) {
+        const studentPhone = cleanLoginDigits(s.phone || '');
+        return normalizeLoginCompare(s.authUid) === displayText ||
+          normalizeLoginCompare(s.email) === normalizedText ||
+          normalizeLoginCompare(s.email) === loginText ||
+          normalizeLoginCompare(s.memberId) === loginText ||
+          normalizeLoginCompare(s.memberId) === displayText ||
+          normalizeLoginCompare(s.studentId) === loginText ||
+          normalizeLoginCompare(s.studentId) === displayText ||
+          normalizeLoginCompare(s.id) === loginText ||
+          normalizeLoginCompare(s.id) === displayText ||
+          (cleanLogin && studentPhone === cleanLogin);
+      }) || null;
+    }
+
+    function addUniqueLoginCandidate(list, value) {
+      const candidate = String(value || '').trim();
+      if (candidate && !list.includes(candidate)) list.push(candidate);
+    }
+
+    function buildAuthLoginCandidates(normalizedLogin, matchedTeacher, matchedStudent) {
+      const candidates = [];
+      addUniqueLoginCandidate(candidates, normalizedLogin);
+      if (matchedTeacher) {
+        addUniqueLoginCandidate(candidates, matchedTeacher.email);
+        addUniqueLoginCandidate(candidates, matchedTeacher.username && matchedTeacher.username.includes('@') ? matchedTeacher.username : buildLocalEmailFromPhone(matchedTeacher.username || matchedTeacher.phone));
+      }
+      if (matchedStudent) {
+        addUniqueLoginCandidate(candidates, matchedStudent.email);
+        addUniqueLoginCandidate(candidates, buildLocalEmailFromPhone(matchedStudent.phone));
+      }
+      return candidates;
+    }
+
     function toggleLoginPassword() {
       const input = getElement('loginPassword');
       if (!input) return;
@@ -3207,21 +3275,35 @@
           result.textContent = 'กำลังเข้าสู่ระบบ...';
           result.style.color = '#0f4cbd';
 
+          await ensureCoreDataLoaded({ force: true });
+          const preMatchedTeacher = findTeacherByLoginId(rawUsername, username, displayLoginId);
+          const preMatchedStudent = findStudentByLoginId(rawUsername, username, displayLoginId);
+          const loginCandidates = buildAuthLoginCandidates(username, preMatchedTeacher, preMatchedStudent);
           let credential = null;
-          try {
-            credential = await auth.signInWithEmailAndPassword(username, password);
-          } catch (signInError) {
-            const code = String(signInError.code || signInError.message || '');
-            const isWrongPassword = code.includes('wrong-password') || code.includes('invalid-credential') || code.includes('INVALID_LOGIN_CREDENTIALS');
+          let lastSignInError = null;
+          for (const candidate of loginCandidates) {
+            try {
+              credential = await auth.signInWithEmailAndPassword(candidate, password);
+              break;
+            } catch (signInError) {
+              const code = String(signInError.code || signInError.message || '');
+              const isWrongPassword = code.includes('wrong-password') || code.includes('invalid-credential') || code.includes('INVALID_LOGIN_CREDENTIALS');
 
-            // รองรับบัญชีที่เคยสร้างจากโค้ดเวอร์ชันเก่า ซึ่งใช้รหัสเริ่มต้น 0000
-            // ส่วนเวอร์ชันใหม่ใช้ 000000 เพื่อให้ผ่านเงื่อนไขรหัสผ่านขั้นต่ำของ Firebase
-            if (password === '000000' && isWrongPassword) {
-              credential = await auth.signInWithEmailAndPassword(username, '0000');
-            } else {
-              throw signInError;
+              // รองรับบัญชีที่เคยสร้างจากโค้ดเวอร์ชันเก่า ซึ่งใช้รหัสเริ่มต้น 0000
+              // ส่วนเวอร์ชันใหม่ใช้ 000000 เพื่อให้ผ่านเงื่อนไขรหัสผ่านขั้นต่ำของ Firebase
+              if (password === '000000' && isWrongPassword) {
+                try {
+                  credential = await auth.signInWithEmailAndPassword(candidate, '0000');
+                  break;
+                } catch (legacySignInError) {
+                  lastSignInError = legacySignInError;
+                }
+              } else {
+                lastSignInError = signInError;
+              }
             }
           }
+          if (!credential) throw lastSignInError || new Error('ไม่สามารถเข้าสู่ระบบได้');
           firebaseUser = credential.user;
 
           // โหลดข้อมูลหลักก่อน เพื่อให้ระบบสามารถเทียบสิทธิ์จาก students / teachers ได้
@@ -3270,22 +3352,12 @@
 
           // 4) ถ้ายังไม่เจอ ให้ผูกสิทธิ์จากข้อมูลครู/นักเรียนที่ Admin เพิ่มไว้ในหลังบ้าน
           // แล้วสร้าง users/{uid} ให้อัตโนมัติ เพื่อไม่ต้องไปใส่ UID เองทุกครั้ง
-          let matchedTeacher = teachers.find(function(t) {
-            const teacherPhone = String(t.phone || t.username || '').replace(/[^0-9]/g, '');
-            return t.authUid === firebaseUser.uid ||
-              t.email === firebaseEmail ||
-              t.username === firebaseEmail ||
-              teacherPhone === cleanLoginPhone ||
-              t.username === displayLoginId ||
-              t.teacherId === displayLoginId;
+          let matchedTeacher = findTeacherByLoginId(rawUsername, firebaseEmail, displayLoginId) || teachers.find(function(t) {
+            return t.authUid === firebaseUser.uid || t.email === firebaseEmail || t.username === firebaseEmail;
           });
 
-          let matchedStudent = students.find(function(s) {
-            const studentPhone = String(s.phone || '').replace(/[^0-9]/g, '');
-            return s.authUid === firebaseUser.uid ||
-              s.email === firebaseEmail ||
-              studentPhone === cleanLoginPhone ||
-              s.phone === rawUsername;
+          let matchedStudent = findStudentByLoginId(rawUsername, firebaseEmail, displayLoginId) || students.find(function(s) {
+            return s.authUid === firebaseUser.uid || s.email === firebaseEmail;
           });
 
           if (!profileData && matchedTeacher) {
@@ -3308,6 +3380,8 @@
               nickname: matchedStudent.nickname || '',
               email: matchedStudent.email || firebaseEmail,
               phone: matchedStudent.phone || cleanLoginPhone,
+              memberId: matchedStudent.memberId || matchedStudent.studentId || '',
+              studentId: matchedStudent.studentId || matchedStudent.memberId || '',
               role: 'student',
               status: 'active'
             };
@@ -3344,8 +3418,11 @@
           }
 
           const userRole = firebaseUserProfile.role || 'student';
-          const activeAppRole = normalizeAppRole(firebaseUserProfile.appRole || (matchedTeacher ? matchedTeacher.role : (userRole === 'admin' ? 'SuperAdmin' : 'Teacher')));
-          firebaseUserProfile.appRole = activeAppRole;
+          const activeAppRole = userRole === 'student'
+            ? ''
+            : normalizeAppRole(firebaseUserProfile.appRole || (matchedTeacher ? matchedTeacher.role : (userRole === 'admin' ? 'SuperAdmin' : 'Teacher')));
+          if (activeAppRole) firebaseUserProfile.appRole = activeAppRole;
+          if (userRole === 'student' && firebaseUserProfile.appRole) delete firebaseUserProfile.appRole;
           if (matchedTeacher && (!Array.isArray(firebaseUserProfile.permissions) || !firebaseUserProfile.permissions.length)) {
             firebaseUserProfile.permissions = getEffectivePermissions(matchedTeacher);
             firebaseUserProfile.permissionMode = matchedTeacher.permissionMode || (Array.isArray(matchedTeacher.permissions) ? 'custom' : 'role-default');
@@ -3381,12 +3458,8 @@
             return;
           }
 
-          const student = matchedStudent || students.find(function(s) {
-            const studentPhone = String(s.phone || '').replace(/[^0-9]/g, '');
-            return s.authUid === firebaseUser.uid ||
-              s.email === firebaseEmail ||
-              studentPhone === cleanLoginPhone ||
-              s.phone === rawUsername;
+          const student = matchedStudent || findStudentByLoginId(rawUsername, firebaseEmail, displayLoginId) || students.find(function(s) {
+            return s.authUid === firebaseUser.uid || s.email === firebaseEmail;
           });
 
           if (!student) {
@@ -3432,7 +3505,16 @@
         return;
       }
 
-      if ((displayLoginId === 'test1' && password === '000000') || students.some(function(s) { return s.phone === displayLoginId || s.email === username; })) {
+      if ((displayLoginId === 'test1' && password === '000000') || students.some(function(s) {
+        return s.phone === displayLoginId ||
+          s.email === username ||
+          String(s.memberId || '').toLowerCase() === rawUsername.toLowerCase() ||
+          String(s.memberId || '') === displayLoginId ||
+          String(s.studentId || '').toLowerCase() === rawUsername.toLowerCase() ||
+          String(s.studentId || '') === displayLoginId ||
+          String(s.id || '').toLowerCase() === rawUsername.toLowerCase() ||
+          String(s.id || '') === displayLoginId;
+      })) {
         setSuperAdminMode(false);
         studentLogin(displayLoginId);
         return;
@@ -3448,6 +3530,15 @@
         const studentPhone = String(s.phone || '').replace(/[^0-9]/g, '');
         return s.phone === username ||
           s.email === username ||
+          String(s.memberId || '').toLowerCase() === String(username || '').toLowerCase() ||
+          String(s.memberId || '') === username ||
+          String(s.studentId || '').toLowerCase() === String(username || '').toLowerCase() ||
+          String(s.studentId || '') === username ||
+          String(s.id || '').toLowerCase() === String(username || '').toLowerCase() ||
+          String(s.id || '') === username ||
+          String(s.memberId || '') === cleanUsername ||
+          String(s.studentId || '') === cleanUsername ||
+          String(s.id || '') === cleanUsername ||
           studentPhone === cleanUsername ||
           (firebaseUser && s.authUid === firebaseUser.uid) ||
           (firebaseUser && s.email === firebaseUser.email);
