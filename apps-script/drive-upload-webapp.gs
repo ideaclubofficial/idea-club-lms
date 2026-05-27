@@ -34,18 +34,26 @@ function doPost(e) {
     const bytes = Utilities.base64Decode(fileBase64);
     const blob = Utilities.newBlob(bytes, mimeType, buildFileName(fileName, data));
     const file = targetFolder.createFile(blob);
+    let sharingWarning = "";
 
     if (folderType === "site-assets" || assetType) {
-      file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+      try {
+        file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+      } catch (sharingError) {
+        sharingWarning = sharingError && sharingError.message ? sharingError.message : String(sharingError);
+      }
     }
 
+    const fileId = file.getId();
     return jsonResponse({
       ok: true,
-      fileId: file.getId(),
+      fileId: fileId,
       viewUrl: file.getUrl(),
-      directImageUrl: "https://drive.google.com/uc?export=view&id=" + file.getId(),
+      directImageUrl: "https://drive.google.com/uc?export=view&id=" + fileId,
+      thumbnailUrl: "https://drive.google.com/thumbnail?id=" + fileId + "&sz=w1000",
       folderId: targetFolder.getId(),
-      folderName: targetFolder.getName()
+      folderName: targetFolder.getName(),
+      sharingWarning: sharingWarning
     });
   } catch (error) {
     return jsonResponse({

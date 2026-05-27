@@ -80,6 +80,8 @@
 - ห้ามใส่ private key หรือ service account key ใน Apps Script หรือ `index.html`
 - Apps Script ใช้สิทธิ์ของ Google account ที่ deploy Web App
 - Logo, QR และ Favicon จะถูกตั้งค่าเป็น anyone with link view
+- ถ้า Apps Script อัปโหลดไฟล์สำเร็จ แต่ตั้งค่า anyone with link ไม่สำเร็จ ระบบจะยังคืน URL กลับมาและแสดงคำเตือนในหน้าเว็บ ให้ไปตรวจสิทธิ์ไฟล์ใน Google Drive เพิ่ม
+- หน้าเว็บใช้ `thumbnailUrl` จาก Google Drive สำหรับ QR, Logo และ Favicon ก่อน เพราะแสดงรูปใน browser ได้เสถียรกว่า URL แบบเปิดดูไฟล์
 - สลิปจะไม่ถูกตั้ง public โดยอัตโนมัติ
 - Apps Script มี quota การใช้งานรายวัน ถ้า upload จำนวนมากอาจติด quota
 - ถ้า browser แจ้ง CORS หรือ permission error ให้ copy error message เต็มกลับมาตรวจ
