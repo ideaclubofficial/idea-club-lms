@@ -17,6 +17,7 @@
 8. นำ URL ไปใส่ใน `index.html`:
    `GOOGLE_APPS_SCRIPT_UPLOAD_URL`
 9. Commit และทดสอบอัปโหลด QR, Logo และสลิป
+10. ถ้าแก้โค้ด Apps Script ภายหลัง ให้กด Deploy > Manage deployments > Edit > New version แล้ว Deploy ซ้ำ
 
 ## หลัง Deploy Apps Script
 
@@ -43,8 +44,8 @@
   - Favicon
 - `payment-slips`
   - เดือน
-    - ระดับชั้น
-      - ไฟล์สลิป
+    - คอร์ส
+      - ไฟล์สลิป เช่น `P6690001-ชื่อนักเรียน-มิถุนายน 2569-20260527-143000.jpg`
 
 ## หมายเหตุสำคัญ
 
@@ -61,4 +62,6 @@
 2. Admin Settings > อัปโหลด Favicon > บันทึกตั้งค่าระบบ
 3. ตั้งค่า QR Code > อัปโหลด QR Code > บันทึก QR Code
 4. Student Payment > เลือกเดือน > อัปโหลดสลิป
-5. ตรวจ Firestore `payments/{paymentId}` ต้องมี `driveViewUrl` และสถานะ `รอตรวจสลิป`
+5. ตรวจ Google Drive ว่าไฟล์อยู่ใน `payment-slips / เดือน / คอร์ส`
+6. ตรวจชื่อไฟล์ว่ามีรหัสและชื่อนักเรียน
+7. ตรวจ Firestore `payments/{paymentId}` ต้องมี `driveViewUrl` และสถานะ `รอตรวจสลิป`

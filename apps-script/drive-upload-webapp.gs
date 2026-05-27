@@ -54,9 +54,9 @@ function getTargetFolder(baseFolder, data) {
   }
 
   const monthName = sanitizeName(data.month || "ไม่ระบุเดือน");
-  const gradeName = sanitizeName(data.grade || "ไม่ระบุระดับชั้น");
+  const courseName = sanitizeName(data.courseName || data.courseId || "ไม่ระบุคอร์ส");
   const monthFolder = getOrCreateFolder(baseFolder, monthName);
-  return getOrCreateFolder(monthFolder, gradeName);
+  return getOrCreateFolder(monthFolder, courseName);
 }
 
 function getOrCreateFolder(parent, name) {
@@ -67,6 +67,10 @@ function getOrCreateFolder(parent, name) {
 }
 
 function buildFileName(fileName, data) {
+  if (String(data.folderType || "") === "payment-slips") {
+    return buildPaymentSlipFileName(fileName, data);
+  }
+
   const prefixParts = [];
   if (data.assetType) prefixParts.push(sanitizeName(data.assetType));
   if (data.paymentId) prefixParts.push(sanitizeName(data.paymentId));
@@ -74,6 +78,23 @@ function buildFileName(fileName, data) {
   prefixParts.push(String(Date.now()));
   prefixParts.push(fileName);
   return prefixParts.filter(Boolean).join("-");
+}
+
+function buildPaymentSlipFileName(fileName, data) {
+  const extension = getFileExtension(fileName);
+  const timestamp = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "yyyyMMdd-HHmmss");
+  const parts = [
+    sanitizeName(data.studentId || "ไม่ระบุรหัส"),
+    sanitizeName(data.studentName || "ไม่ระบุชื่อนักเรียน"),
+    sanitizeName(data.month || "ไม่ระบุเดือน"),
+    timestamp
+  ];
+  return parts.filter(Boolean).join("-") + extension;
+}
+
+function getFileExtension(fileName) {
+  const match = String(fileName || "").match(/(\.[A-Za-z0-9]+)$/);
+  return match ? match[1].toLowerCase() : "";
 }
 
 function sanitizeName(value) {
