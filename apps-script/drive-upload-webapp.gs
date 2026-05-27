@@ -3,6 +3,13 @@
 // Do not put private keys in this file. This script uses the Google account that deploys the Web App.
 const ROOT_FOLDER_ID = "1duCUjn4tKYPwZSgxJoo_83DQ34rztk7w";
 
+// Run this once from the Apps Script editor after copying the code.
+// It forces Google to ask for Drive permission and confirms that ROOT_FOLDER_ID is accessible.
+function testDriveAccess() {
+  const root = DriveApp.getFolderById(ROOT_FOLDER_ID);
+  Logger.log("Drive access OK: " + root.getName());
+}
+
 function doPost(e) {
   try {
     const body = e && e.postData && e.postData.contents ? e.postData.contents : "{}";

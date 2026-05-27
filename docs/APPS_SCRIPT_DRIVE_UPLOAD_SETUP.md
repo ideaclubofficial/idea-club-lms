@@ -8,16 +8,44 @@
 2. คัดลอกโค้ดจาก `apps-script/drive-upload-webapp.gs` ไปวาง
 3. ตรวจค่า `ROOT_FOLDER_ID` ให้เป็น:
    `1duCUjn4tKYPwZSgxJoo_83DQ34rztk7w`
-4. กด Deploy > New deployment > Web app
-5. ตั้งค่า:
+4. กด Save
+5. เลือกฟังก์ชัน `testDriveAccess` แล้วกด Run
+6. ระบบจะให้ Authorize:
+   - กด Review permissions
+   - เลือกบัญชี Google ที่มีสิทธิ์ใน Drive folder
+   - ถ้าขึ้นเตือนว่าแอปยังไม่ได้ verify ให้กด Advanced > Go to project
+   - กด Allow
+7. เปิด Executions/Logs แล้วต้องเห็นข้อความประมาณ:
+   `Drive access OK: <ชื่อโฟลเดอร์>`
+8. ถ้า `testDriveAccess` ขึ้นว่าไม่ได้รับอนุญาตหรือหา folder ไม่เจอ ให้ตรวจว่า Google account นี้มีสิทธิ์ Editor ใน folder:
+   `1duCUjn4tKYPwZSgxJoo_83DQ34rztk7w`
+9. กด Deploy > New deployment > Web app
+10. ตั้งค่า:
    - Execute as: Me
    - Who has access: Anyone with the link
-6. กด Deploy และอนุญาตสิทธิ์ Google Drive
-7. Copy Web App URL
-8. นำ URL ไปใส่ใน `index.html`:
+11. กด Deploy
+12. Copy Web App URL
+13. นำ URL ไปใส่ใน `index.html`:
    `GOOGLE_APPS_SCRIPT_UPLOAD_URL`
-9. Commit และทดสอบอัปโหลด QR, Logo และสลิป
-10. ถ้าแก้โค้ด Apps Script ภายหลัง ให้กด Deploy > Manage deployments > Edit > New version แล้ว Deploy ซ้ำ
+14. Commit และทดสอบอัปโหลด QR, Logo และสลิป
+15. ถ้าแก้โค้ด Apps Script ภายหลัง ให้กด Deploy > Manage deployments > Edit > New version แล้ว Deploy ซ้ำ
+
+## แก้ Error: ไม่ได้รับอนุญาตให้เข้าถึง DriveApp
+
+ถ้าเว็บขึ้น error เช่น `ไม่ได้รับอนุญาตให้เข้าถึง: DriveApp` ให้ทำตามนี้:
+
+1. กลับไปที่ Apps Script editor
+2. ตรวจว่ามีฟังก์ชัน `testDriveAccess`
+3. กด Run `testDriveAccess`
+4. กด Authorize ให้ครบ
+5. ตรวจว่า account ที่เลือกเป็น account เดียวกับที่มีสิทธิ์เข้าถึง Google Drive folder
+6. Deploy ใหม่ด้วย:
+   - Manage deployments > Edit
+   - Version: New version
+   - Execute as: Me
+   - Who has access: Anyone with the link
+7. ใช้ URL `/exec` จาก deployment ล่าสุด
+8. กลับไปทดสอบอัปโหลดในเว็บอีกครั้ง
 
 ## หลัง Deploy Apps Script
 
