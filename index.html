@@ -2240,6 +2240,8 @@
     const PRODUCTION_MODE = true;
     const ENABLE_PAYMENT_SLIP_OCR = false;
     const ENABLE_PAYMENT_SLIP_WEB_UPLOAD = true;
+    const USE_APPS_SCRIPT_DRIVE_UPLOAD = true;
+    const GOOGLE_APPS_SCRIPT_UPLOAD_URL = "";
     let db = null;
     let auth = null;
     let storage = null;
@@ -2390,6 +2392,42 @@
         };
         reader.readAsDataURL(file);
       });
+    }
+
+    async function uploadFileToDriveViaAppsScript(options) {
+      const configUrl = String(GOOGLE_APPS_SCRIPT_UPLOAD_URL || '').trim();
+      if (!configUrl) throw new Error('ยังไม่ได้ตั้งค่า Apps Script Upload URL');
+
+      const payload = {
+        action: 'uploadFile',
+        fileBase64: options.fileBase64 || '',
+        fileName: options.fileName || '',
+        mimeType: options.mimeType || '',
+        folderType: options.folderType || '',
+        studentId: options.studentId || '',
+        studentName: options.studentName || '',
+        paymentId: options.paymentId || '',
+        month: options.month || '',
+        grade: options.grade || '',
+        assetType: options.assetType || ''
+      };
+
+      const response = await fetch(configUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify(payload)
+      });
+      const text = await response.text();
+      let data = null;
+      try {
+        data = JSON.parse(text);
+      } catch (error) {
+        throw new Error('Apps Script response ไม่ใช่ JSON: ' + text.slice(0, 120));
+      }
+      if (!response.ok || !data || data.ok !== true) {
+        throw new Error((data && (data.error || data.message)) || ('Apps Script upload failed: ' + response.status));
+      }
+      return data;
     }
 
     async function deleteFirebaseStorageFile(downloadUrl) {
@@ -8591,7 +8629,7 @@ function receiptStatusText(status) {
         result.style.color = '#dc2626';
         return;
       }
-      if (!functionsApi) {
+      if (!USE_APPS_SCRIPT_DRIVE_UPLOAD && !functionsApi) {
         result.textContent = 'Firebase Functions ยังไม่พร้อมใช้งาน';
         result.style.color = '#dc2626';
         return;
@@ -8608,14 +8646,46 @@ function receiptStatusText(status) {
       try {
         result.textContent = 'กำลังอัปโหลดสลิป...';
         const fileBase64 = await fileToBase64(file);
-        const uploadSlip = functionsApi.httpsCallable('uploadPaymentSlipToDrive');
-        const response = await uploadSlip({
-          paymentId: paymentId,
-          fileBase64: fileBase64,
-          mimeType: file.type,
-          fileName: file.name
-        });
-        const data = response && response.data ? response.data : {};
+        let data = {};
+        if (USE_APPS_SCRIPT_DRIVE_UPLOAD) {
+          data = await uploadFileToDriveViaAppsScript({
+            file: file,
+            fileBase64: fileBase64,
+            fileName: file.name,
+            mimeType: file.type,
+            folderType: 'payment-slips',
+            studentId: currentStudent.memberId || currentStudent.studentId || currentStudent.id || '',
+            studentName: currentStudent.name || '',
+            paymentId: paymentId,
+            month: payment.month || month,
+            grade: currentStudent.grade || payment.studentGrade || payment.grade || '',
+          });
+          Object.assign(payment, {
+            slipStorageType: 'google_drive',
+            driveFileId: data.fileId || '',
+            driveViewUrl: data.viewUrl || data.driveViewUrl || '',
+            driveFolderId: data.folderId || '',
+            driveFolderName: data.folderName || '',
+            slipUploadedByUid: firebaseUser ? firebaseUser.uid : (currentStudent.authUid || ''),
+            slipUploadedByName: getActiveProfileDisplayInfo().displayName || currentStudent.name || '',
+            slipUploadedAt: firebase.firestore.FieldValue.serverTimestamp(),
+            slipUploadedAtText: new Date().toLocaleString('th-TH'),
+            slipStatus: 'waiting_admin_review',
+            adminReviewStatus: 'pending',
+            paymentStatus: 'รอตรวจสลิป',
+            status: 'รอตรวจสลิป'
+          });
+          await setFirebaseDocument('payments', payment);
+        } else {
+          const uploadSlip = functionsApi.httpsCallable('uploadPaymentSlipToDrive');
+          const response = await uploadSlip({
+            paymentId: paymentId,
+            fileBase64: fileBase64,
+            mimeType: file.type,
+            fileName: file.name
+          });
+          data = response && response.data ? response.data : {};
+        }
         result.textContent = data.message || 'อัปโหลดสลิปเรียบร้อย รอเจ้าหน้าที่ตรวจสอบ';
         result.style.color = '#16a34a';
         if (fileInput) fileInput.value = '';
@@ -8816,12 +8886,25 @@ function receiptStatusText(status) {
       if (!file) return '';
       if (!file.type || file.type.indexOf('image/') !== 0) throw new Error('รองรับเฉพาะไฟล์รูปภาพเท่านั้น');
       if (file.size > 8 * 1024 * 1024) throw new Error('ไฟล์รูปต้องมีขนาดไม่เกิน 8MB');
+      const fileBase64 = await fileToBase64(file);
+      if (USE_APPS_SCRIPT_DRIVE_UPLOAD) {
+        if (resultElement) resultElement.textContent = 'กำลังอัปโหลดรูปไป Google Drive...';
+        const data = await uploadFileToDriveViaAppsScript({
+          file: file,
+          fileBase64: fileBase64,
+          fileName: file.name,
+          mimeType: file.type,
+          folderType: 'site-assets',
+          assetType: assetType
+        });
+        return data.directImageUrl || data.viewUrl || '';
+      }
       if (!functionsApi) throw new Error('Firebase Functions ยังไม่พร้อมใช้งาน');
       if (resultElement) resultElement.textContent = 'กำลังอัปโหลดรูปไป Google Drive...';
       const callable = functionsApi.httpsCallable('uploadSiteAssetToDrive');
       const response = await callable({
         assetType: assetType,
-        fileBase64: await fileToBase64(file),
+        fileBase64: fileBase64,
         mimeType: file.type,
         fileName: file.name
       });
