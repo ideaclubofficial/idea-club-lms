@@ -54,6 +54,39 @@ service cloud.firestore {
         );
     }
 
+    function isStudentSlipUploadUpdate(docId) {
+      return signedIn()
+        && isPaymentOwner()
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'firebaseDocId',
+          'deleted',
+          'slipStorageType',
+          'driveFileId',
+          'driveViewUrl',
+          'driveFolderId',
+          'driveFolderName',
+          'slipUploadedByUid',
+          'slipUploadedByName',
+          'slipUploadedAt',
+          'slipUploadedAtText',
+          'slipStatus',
+          'adminReviewStatus',
+          'paymentStatus',
+          'status',
+          'updatedAt',
+          'updatedBy',
+          'updatedByEmail',
+          'updatedByName'
+        ])
+        && request.resource.data.firebaseDocId == docId
+        && request.resource.data.deleted == false
+        && request.resource.data.slipUploadedByUid == request.auth.uid
+        && request.resource.data.slipStatus == 'waiting_admin_review'
+        && request.resource.data.adminReviewStatus == 'pending'
+        && request.resource.data.paymentStatus == 'รอตรวจสลิป'
+        && request.resource.data.status == 'รอตรวจสลิป';
+    }
+
     match /users/{userId} {
       allow read: if signedIn() && (request.auth.uid == userId || isAdmin());
       allow create: if signedIn() && request.auth.uid == userId;
@@ -73,9 +106,9 @@ service cloud.firestore {
       // Payment records must be created by Admin/Finance or backend workflows only.
       // Students should not create payment documents directly.
       allow create: if isAdmin() || isFinance();
-      // OCR slip updates are handled by Cloud Functions Admin SDK, not by client.
-      // Students must not directly approve or change payment status from client.
-      allow update: if isAdmin() || isFinance();
+      // Apps Script uploads the file to Drive; the student client may update only slip review fields.
+      // Students must not directly approve payment or change protected payment/course/receipt fields.
+      allow update: if isAdmin() || isFinance() || isStudentSlipUploadUpdate(docId);
       allow delete: if isAdmin();
     }
 

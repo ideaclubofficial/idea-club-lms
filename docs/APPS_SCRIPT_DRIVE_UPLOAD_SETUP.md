@@ -18,6 +18,23 @@
    `GOOGLE_APPS_SCRIPT_UPLOAD_URL`
 9. Commit และทดสอบอัปโหลด QR, Logo และสลิป
 
+## หลัง Deploy Apps Script
+
+1. Copy Web App URL จากหน้า deployment
+2. ใส่ใน `index.html`:
+   `const GOOGLE_APPS_SCRIPT_UPLOAD_URL = "...";`
+3. Commit เฉพาะ `index.html`
+4. ทดสอบ upload slip ด้วยบัญชีนักเรียนจริง
+5. ตรวจ `payments/{paymentId}` ว่ามี `driveViewUrl` และสถานะ `รอตรวจสลิป`
+
+## Firestore Rules requirement
+
+- `payments/{paymentId}` ต้องมี `studentAuthUid` ตรงกับ Firebase Auth UID ของนักเรียน
+- นักเรียน update ได้เฉพาะ field สำหรับสลิป เช่น `driveViewUrl`, `slipUploadedByUid`, `slipStatus`, `paymentStatus`
+- นักเรียนเปลี่ยนสถานะได้เฉพาะ `รอตรวจสลิป`
+- นักเรียนไม่สามารถอนุมัติ payment เอง หรือแก้ยอดเงิน/คอร์ส/ใบเสร็จได้
+- Admin/Finance ยังเป็นคน approve/reject และออกใบเสร็จเหมือนเดิม
+
 ## โครงสร้าง Folder
 
 - `site-assets`
