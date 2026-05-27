@@ -1903,6 +1903,93 @@
 
           <section id="admin-monthly-planner" class="admin-tab hidden">
             <div class="form-box">
+              <h3>สร้างตารางอัตโนมัติ</h3>
+              <p style="margin-bottom:18px; color:#6b7280;">บันทึก pattern คอร์ส แล้วสร้าง session ทั้งเดือนจาก Onsite / Online / On-demand</p>
+              <input id="editingMonthlyPlanId" type="hidden" value="" />
+
+              <div class="form-row">
+                <div>
+                  <label>เดือน</label>
+                  <input id="monthlyPlanGeneratorMonthKey" type="month" onchange="renderMonthlyPlanSummary()" />
+                </div>
+                <div>
+                  <label>ศูนย์</label>
+                  <select id="monthlyPlanGeneratorCenter" onchange="renderMonthlyPlanSummary()">
+                    <option>IDEA CLUB ศูนย์ หนองฉาง</option>
+                    <option>IDEA CLUB ศูนย์ นครสวรรค์</option>
+                  </select>
+                </div>
+                <div>
+                  <label>คอร์ส</label>
+                  <select id="monthlyPlanGeneratorCourse" onchange="renderMonthlyPlanSummary()"></select>
+                </div>
+              </div>
+
+              <div class="form-row">
+                <div>
+                  <label>Onsite day 1</label>
+                  <select id="monthlyPlanOnsiteDay1"></select>
+                </div>
+                <div>
+                  <label>เวลาเริ่ม</label>
+                  <input id="monthlyPlanOnsiteStart1" type="time" value="16:00" />
+                </div>
+                <div>
+                  <label>เวลาจบ</label>
+                  <input id="monthlyPlanOnsiteEnd1" type="time" value="18:30" />
+                </div>
+              </div>
+
+              <div class="form-row">
+                <div>
+                  <label>Onsite day 2</label>
+                  <select id="monthlyPlanOnsiteDay2"></select>
+                </div>
+                <div>
+                  <label>เวลาเริ่ม</label>
+                  <input id="monthlyPlanOnsiteStart2" type="time" value="16:00" />
+                </div>
+                <div>
+                  <label>เวลาจบ</label>
+                  <input id="monthlyPlanOnsiteEnd2" type="time" value="18:30" />
+                </div>
+              </div>
+
+              <div class="form-row">
+                <div>
+                  <label>Online day</label>
+                  <select id="monthlyPlanOnlineDay"></select>
+                </div>
+                <div>
+                  <label>เวลาเริ่ม</label>
+                  <input id="monthlyPlanOnlineStart" type="time" value="19:00" />
+                </div>
+                <div>
+                  <label>เวลาจบ</label>
+                  <input id="monthlyPlanOnlineEnd" type="time" value="20:30" />
+                </div>
+              </div>
+
+              <div class="form-row">
+                <div>
+                  <label>On-demand publish day</label>
+                  <select id="monthlyPlanOndemandDay"></select>
+                </div>
+                <div>
+                  <label>เวลาเผยแพร่</label>
+                  <input id="monthlyPlanOndemandPublishTime" type="time" value="09:00" />
+                </div>
+              </div>
+
+              <button class="btn btn-green" type="button" onclick="saveMonthlyPlanPattern()">บันทึก Pattern</button>
+              <button class="btn btn-blue" type="button" onclick="generateMonthlyPlanSessionsFromForm()">สร้างตารางทั้งเดือน</button>
+              <p id="monthlyPlanGeneratorResult" style="margin-top:14px; font-weight:bold;"></p>
+              <div id="monthlyPlanSummaryBox" class="status-display" style="margin-top:14px;">เลือกเดือนและคอร์สเพื่อดูสรุปจำนวน session</div>
+            </div>
+
+            <br />
+
+            <div class="form-box">
               <h3>แผนสอนรายเดือน</h3>
               <p style="margin-bottom:18px; color:#6b7280;">วางแผนคาบเรียนตามเดือน คอร์ส ครู และหัวข้อที่จะสอน</p>
               <input id="editingMonthlyPlanSessionId" type="hidden" value="" />
@@ -2769,6 +2856,7 @@
         seedCollectionIfEmpty('receipts', receipts),
         seedCollectionIfEmpty('monthlyQuestions', monthlyQuestions),
         seedCollectionIfEmpty('monthlyExamLinks', monthlyExamLinks),
+        seedCollectionIfEmpty('monthlyPlans', monthlyPlans),
         seedCollectionIfEmpty('monthlyPlanSessions', monthlyPlanSessions),
         seedCollectionIfEmpty('scoreReports', scoreReports),
         seedCollectionIfEmpty('adminScoreRecords', adminScoreRecords),
@@ -2787,6 +2875,7 @@
         getFirebaseCollection('receipts'),
         getFirebaseCollection('monthlyQuestions'),
         getFirebaseCollection('monthlyExamLinks'),
+        getFirebaseCollection('monthlyPlans'),
         getFirebaseCollection('monthlyPlanSessions'),
         getFirebaseCollection('scoreReports'),
         getFirebaseCollection('adminScoreRecords'),
@@ -2805,12 +2894,13 @@
       replaceArray(receipts, results[7]);
       replaceArray(monthlyQuestions, results[8]);
       replaceArray(monthlyExamLinks, results[9]);
-      replaceArray(monthlyPlanSessions, results[10]);
-      replaceArray(scoreReports, results[11]);
-      replaceArray(adminScoreRecords, results[12]);
-      replaceArray(announcements, results[13]);
-      replaceArray(activityLogs, results[14]);
-      const settingsItems = results[15];
+      replaceArray(monthlyPlans, results[10]);
+      replaceArray(monthlyPlanSessions, results[11]);
+      replaceArray(scoreReports, results[12]);
+      replaceArray(adminScoreRecords, results[13]);
+      replaceArray(announcements, results[14]);
+      replaceArray(activityLogs, results[15]);
+      const settingsItems = results[16];
       const mainSettings = settingsItems.find(function(item) { return item.id === 'main' || item.firebaseDocId === 'main'; });
       if (mainSettings) systemSettings = Object.assign(systemSettings, mainSettings);
       safeRun(repairReceiptMonthsFromPayments, 'repair-receipt-months');
@@ -3213,6 +3303,7 @@
 
     const monthlyQuestions = [];
     const monthlyExamLinks = [];
+    const monthlyPlans = [];
     const monthlyPlanSessions = [];
 
     function padNumber(num, size) {
@@ -4743,6 +4834,7 @@
       }
       if (tabId === 'admin-monthly-planner') {
         safeRun(renderMonthlyPlanOptions, 'monthly-plan-options');
+        safeRun(renderMonthlyPlanGeneratorDefaults, 'monthly-plan-generator-defaults');
         safeRun(renderMonthlyPlanSessions, 'monthly-plan-sessions');
       }
     }
@@ -10063,8 +10155,18 @@ function receiptStatusText(status) {
 
 
     /* ===== Monthly Teaching Planner ===== */
+    const MONTHLY_PLAN_DAYS = [
+      { key: 'monday', text: 'จันทร์', jsDay: 1 },
+      { key: 'tuesday', text: 'อังคาร', jsDay: 2 },
+      { key: 'wednesday', text: 'พุธ', jsDay: 3 },
+      { key: 'thursday', text: 'พฤหัสบดี', jsDay: 4 },
+      { key: 'friday', text: 'ศุกร์', jsDay: 5 },
+      { key: 'saturday', text: 'เสาร์', jsDay: 6 },
+      { key: 'sunday', text: 'อาทิตย์', jsDay: 0 }
+    ];
+
     function getMonthlyPlanStatusText(status) {
-      const map = { planned: 'วางแผนแล้ว', done: 'สอนแล้ว', cancelled: 'ยกเลิก' };
+      const map = { draft: 'ร่าง', planned: 'วางแผนแล้ว', done: 'สอนแล้ว', cancelled: 'ยกเลิก' };
       return map[status] || 'วางแผนแล้ว';
     }
 
@@ -10072,6 +10174,43 @@ function receiptStatusText(status) {
       if (status === 'done') return 'status-paid';
       if (status === 'cancelled') return 'status-absent';
       return 'status-waiting';
+    }
+
+    function getMonthlyPlanDayText(dayKey) {
+      const item = MONTHLY_PLAN_DAYS.find(function(day) { return day.key === dayKey; });
+      return item ? item.text : dayKey;
+    }
+
+    function getMonthlyPlanDayKey(date) {
+      const item = MONTHLY_PLAN_DAYS.find(function(day) { return day.jsDay === date.getDay(); });
+      return item ? item.key : '';
+    }
+
+    function formatMonthTextFromKey(monthKey) {
+      if (!/^\d{4}-\d{2}$/.test(String(monthKey || ''))) return '';
+      const parts = String(monthKey).split('-');
+      const year = Number(parts[0]);
+      const monthIndex = Number(parts[1]) - 1;
+      const monthNames = ['มกราคม','กุมภาพันธ์','มีนาคม','เมษายน','พฤษภาคม','มิถุนายน','กรกฎาคม','สิงหาคม','กันยายน','ตุลาคม','พฤศจิกายน','ธันวาคม'];
+      return monthNames[monthIndex] + ' ' + (year + 543);
+    }
+
+    function getMonthlyPlanMonthLabel(item) {
+      return item.monthText || item.month || item.monthKey || '-';
+    }
+
+    function getMonthlyPlanDateText(item) {
+      const dateText = item.date || item.sessionDate || '-';
+      const start = item.timeStart || item.sessionTime || '';
+      const end = item.timeEnd || '';
+      const publish = item.publishTime || '';
+      if (item.type === 'ondemand') return dateText + (publish ? ' · เผยแพร่ ' + publish : '');
+      return dateText + (start ? ' · ' + start + (end ? '-' + end : '') : '');
+    }
+
+    function getMonthlyPlanTypeText(type) {
+      const map = { onsite: 'Onsite', online: 'Online', ondemand: 'On-demand' };
+      return map[type] || 'Manual';
     }
 
     function getCourseNameById(courseId) {
@@ -10094,6 +10233,7 @@ function receiptStatusText(status) {
 
     function renderMonthlyPlanOptions() {
       const courseSelect = getElement('monthlyPlanCourse');
+      const generatorCourseSelect = getElement('monthlyPlanGeneratorCourse');
       const courseFilter = getElement('monthlyPlanCourseFilter');
       const teacherSelect = getElement('monthlyPlanTeacher');
       const activeCourses = courses.filter(function(course) {
@@ -10110,6 +10250,15 @@ function receiptStatusText(status) {
           return '<option value="' + escapeHtml(id) + '">' + escapeHtml(course.name || course.title || id) + '</option>';
         }).join('');
         courseSelect.value = activeCourses.some(function(course) { return String(course.id || course.firebaseDocId || '') === current; }) ? current : '';
+      }
+
+      if (generatorCourseSelect) {
+        const currentGeneratorCourse = generatorCourseSelect.value;
+        generatorCourseSelect.innerHTML = '<option value="">เลือกคอร์ส</option>' + activeCourses.map(function(course) {
+          const id = String(course.id || course.firebaseDocId || '');
+          return '<option value="' + escapeHtml(id) + '">' + escapeHtml(course.name || course.title || id) + '</option>';
+        }).join('');
+        generatorCourseSelect.value = activeCourses.some(function(course) { return String(course.id || course.firebaseDocId || '') === currentGeneratorCourse; }) ? currentGeneratorCourse : '';
       }
 
       if (courseFilter) {
@@ -10137,11 +10286,327 @@ function receiptStatusText(status) {
       const monthFilter = getElement('monthlyPlanMonthFilter');
       if (monthFilter) {
         const currentMonth = monthFilter.value || 'ทั้งหมด';
-        const months = Array.from(new Set(monthlyPlanSessions.map(function(item) { return item.month || ''; }).filter(Boolean)));
+        const months = Array.from(new Set(monthlyPlanSessions.map(function(item) { return getMonthlyPlanMonthLabel(item); }).filter(Boolean)));
         monthFilter.innerHTML = '<option value="ทั้งหมด">ทั้งหมด</option>' + months.map(function(month) {
           return '<option value="' + escapeHtml(month) + '">' + escapeHtml(month) + '</option>';
         }).join('');
         monthFilter.value = months.includes(currentMonth) ? currentMonth : 'ทั้งหมด';
+      }
+    }
+
+    function renderMonthlyPlanGeneratorDefaults() {
+      renderMonthlyPlanOptions();
+      ['monthlyPlanOnsiteDay1','monthlyPlanOnsiteDay2','monthlyPlanOnlineDay','monthlyPlanOndemandDay'].forEach(function(id) {
+        const select = getElement(id);
+        if (!select || select.options.length) return;
+        select.innerHTML = MONTHLY_PLAN_DAYS.map(function(day) {
+          return '<option value="' + day.key + '">' + day.text + '</option>';
+        }).join('');
+      });
+      if (getElement('monthlyPlanOnsiteDay1')) getElement('monthlyPlanOnsiteDay1').value = 'monday';
+      if (getElement('monthlyPlanOnsiteDay2')) getElement('monthlyPlanOnsiteDay2').value = 'wednesday';
+      if (getElement('monthlyPlanOnlineDay')) getElement('monthlyPlanOnlineDay').value = 'friday';
+      if (getElement('monthlyPlanOndemandDay')) getElement('monthlyPlanOndemandDay').value = 'sunday';
+      renderMonthlyPlanSummary();
+    }
+
+    function buildMonthlyPlanPatternFromForm() {
+      const onsiteSlots = [];
+      const onsiteDay1 = getElement('monthlyPlanOnsiteDay1') ? getElement('monthlyPlanOnsiteDay1').value : '';
+      const onsiteStart1 = getElement('monthlyPlanOnsiteStart1') ? getElement('monthlyPlanOnsiteStart1').value : '';
+      const onsiteEnd1 = getElement('monthlyPlanOnsiteEnd1') ? getElement('monthlyPlanOnsiteEnd1').value : '';
+      const onsiteDay2 = getElement('monthlyPlanOnsiteDay2') ? getElement('monthlyPlanOnsiteDay2').value : '';
+      const onsiteStart2 = getElement('monthlyPlanOnsiteStart2') ? getElement('monthlyPlanOnsiteStart2').value : '';
+      const onsiteEnd2 = getElement('monthlyPlanOnsiteEnd2') ? getElement('monthlyPlanOnsiteEnd2').value : '';
+      if (onsiteDay1 && onsiteStart1 && onsiteEnd1) onsiteSlots.push({ day: onsiteDay1, startTime: onsiteStart1, endTime: onsiteEnd1 });
+      if (onsiteDay2 && onsiteStart2 && onsiteEnd2) onsiteSlots.push({ day: onsiteDay2, startTime: onsiteStart2, endTime: onsiteEnd2 });
+
+      const onlineSlots = [];
+      const onlineDay = getElement('monthlyPlanOnlineDay') ? getElement('monthlyPlanOnlineDay').value : '';
+      const onlineStart = getElement('monthlyPlanOnlineStart') ? getElement('monthlyPlanOnlineStart').value : '';
+      const onlineEnd = getElement('monthlyPlanOnlineEnd') ? getElement('monthlyPlanOnlineEnd').value : '';
+      if (onlineDay && onlineStart && onlineEnd) onlineSlots.push({ day: onlineDay, startTime: onlineStart, endTime: onlineEnd });
+
+      const ondemandSlots = [];
+      const ondemandDay = getElement('monthlyPlanOndemandDay') ? getElement('monthlyPlanOndemandDay').value : '';
+      const publishTime = getElement('monthlyPlanOndemandPublishTime') ? getElement('monthlyPlanOndemandPublishTime').value : '';
+      if (ondemandDay && publishTime) ondemandSlots.push({ day: ondemandDay, publishTime: publishTime });
+
+      return {
+        onsitePerWeek: onsiteSlots.length,
+        onlinePerWeek: onlineSlots.length,
+        ondemandPerWeek: ondemandSlots.length,
+        onsiteSlots: onsiteSlots,
+        onlineSlots: onlineSlots,
+        ondemandSlots: ondemandSlots
+      };
+    }
+
+    function buildMonthlyPlanFromForm(existingPlan) {
+      const monthKey = getElement('monthlyPlanGeneratorMonthKey') ? getElement('monthlyPlanGeneratorMonthKey').value : '';
+      const center = getElement('monthlyPlanGeneratorCenter') ? getElement('monthlyPlanGeneratorCenter').value : '';
+      const courseId = getElement('monthlyPlanGeneratorCourse') ? getElement('monthlyPlanGeneratorCourse').value : '';
+      const selectedCourse = courses.find(function(course) { return String(course.id || course.firebaseDocId || '') === String(courseId); });
+      const courseName = selectedCourse ? (selectedCourse.name || selectedCourse.title || '') : '';
+      const nowText = new Date().toLocaleString('th-TH');
+      const planId = existingPlan ? (existingPlan.id || existingPlan.firebaseDocId) : createFirebaseDocId('monthlyPlans');
+      return {
+        id: planId,
+        firebaseDocId: planId,
+        monthKey: monthKey,
+        monthText: formatMonthTextFromKey(monthKey),
+        center: center,
+        courseId: courseId,
+        courseName: courseName,
+        pattern: buildMonthlyPlanPatternFromForm(),
+        createdAtText: existingPlan ? (existingPlan.createdAtText || nowText) : nowText,
+        updatedAtText: nowText
+      };
+    }
+
+    function validateMonthlyPlan(plan) {
+      if (!plan.monthKey || !/^\d{4}-\d{2}$/.test(plan.monthKey)) return 'กรุณาเลือกเดือนให้ถูกต้อง';
+      if (!plan.center) return 'กรุณาเลือกศูนย์';
+      if (!plan.courseId || !plan.courseName) return 'กรุณาเลือกคอร์ส';
+      if (!plan.pattern || !plan.pattern.onsiteSlots || plan.pattern.onsiteSlots.length < 1) return 'ต้องมี Onsite slot อย่างน้อย 1 รายการ';
+      if (!plan.pattern.onlineSlots || plan.pattern.onlineSlots.length < 1) return 'ต้องมี Online slot อย่างน้อย 1 รายการ';
+      if (!plan.pattern.ondemandSlots || plan.pattern.ondemandSlots.length < 1) return 'ต้องมี On-demand slot อย่างน้อย 1 รายการ';
+      return '';
+    }
+
+    function showMonthlyPlanGeneratorError(result, error) {
+      const isPermissionDenied = error && (error.code === 'permission-denied' || String(error.message || '').includes('permission-denied'));
+      if (result) {
+        result.textContent = isPermissionDenied
+          ? 'Firestore permission-denied: ยังบันทึก monthlyPlans/monthlyPlanSessions ไม่ได้ กรุณาตรวจสิทธิ์ Firestore rules โดยยังไม่ deploy rules จากหน้านี้'
+          : 'สร้างตารางไม่สำเร็จ: ' + (error.message || error.code || error);
+        result.style.color = '#dc2626';
+      }
+    }
+
+    async function saveMonthlyPlanPattern() {
+      const result = getElement('monthlyPlanGeneratorResult');
+      const editingId = getElement('editingMonthlyPlanId') ? getElement('editingMonthlyPlanId').value : '';
+      const formMonthKey = getElement('monthlyPlanGeneratorMonthKey') ? getElement('monthlyPlanGeneratorMonthKey').value : '';
+      const formCenter = getElement('monthlyPlanGeneratorCenter') ? getElement('monthlyPlanGeneratorCenter').value : '';
+      const formCourseId = getElement('monthlyPlanGeneratorCourse') ? getElement('monthlyPlanGeneratorCourse').value : '';
+      const existingPlan = monthlyPlans.find(function(plan) { return String(plan.id || plan.firebaseDocId || '') === String(editingId); }) ||
+        monthlyPlans.find(function(plan) {
+          return plan.monthKey === formMonthKey && plan.center === formCenter && String(plan.courseId || '') === String(formCourseId || '');
+        });
+      const plan = buildMonthlyPlanFromForm(existingPlan);
+      const validationMessage = validateMonthlyPlan(plan);
+      if (validationMessage) {
+        if (result) {
+          result.textContent = validationMessage;
+          result.style.color = '#dc2626';
+        }
+        return null;
+      }
+
+      try {
+        await setFirebaseDocument('monthlyPlans', plan);
+        const index = monthlyPlans.findIndex(function(item) { return String(item.id || item.firebaseDocId || '') === String(plan.id); });
+        if (index >= 0) monthlyPlans[index] = plan;
+        else monthlyPlans.push(plan);
+        if (getElement('editingMonthlyPlanId')) getElement('editingMonthlyPlanId').value = plan.id;
+        if (result) {
+          result.textContent = 'บันทึก Pattern เรียบร้อย';
+          result.style.color = '#16a34a';
+        }
+        addActivityLog('บันทึก Pattern แผนสอนรายเดือน', plan.monthText + ' · ' + plan.center + ' · ' + plan.courseName);
+        renderMonthlyPlanSummary();
+        return plan;
+      } catch (error) {
+        console.error('monthly plan pattern firebase error:', error);
+        showMonthlyPlanGeneratorError(result, error);
+        return null;
+      }
+    }
+
+    function generateMonthlySessionsFromPattern(plan) {
+      const validationMessage = validateMonthlyPlan(plan);
+      if (validationMessage) throw new Error(validationMessage);
+      const parts = plan.monthKey.split('-');
+      const year = Number(parts[0]);
+      const monthIndex = Number(parts[1]) - 1;
+      const daysInMonth = new Date(year, monthIndex + 1, 0).getDate();
+      const nowText = new Date().toLocaleString('th-TH');
+      const sessions = [];
+
+      for (let dayNumber = 1; dayNumber <= daysInMonth; dayNumber += 1) {
+        const date = new Date(year, monthIndex, dayNumber);
+        const dayKey = getMonthlyPlanDayKey(date);
+        const dateText = plan.monthKey + '-' + padNumber(dayNumber, 2);
+        (plan.pattern.onsiteSlots || []).forEach(function(slot) {
+          if (slot.day !== dayKey) return;
+          sessions.push({
+            planId: plan.id || plan.firebaseDocId,
+            monthKey: plan.monthKey,
+            monthText: plan.monthText,
+            month: plan.monthText,
+            date: dateText,
+            sessionDate: dateText,
+            dayName: dayKey,
+            type: 'onsite',
+            center: plan.center,
+            courseId: plan.courseId,
+            courseName: plan.courseName,
+            subject: '',
+            teacherUid: '',
+            teacherId: '',
+            teacherName: '',
+            topic: '',
+            timeStart: slot.startTime || '',
+            timeEnd: slot.endTime || '',
+            publishTime: '',
+            status: 'draft',
+            publishStatus: '',
+            isHoliday: false,
+            createdAtText: nowText,
+            updatedAtText: nowText
+          });
+        });
+        (plan.pattern.onlineSlots || []).forEach(function(slot) {
+          if (slot.day !== dayKey) return;
+          sessions.push({
+            planId: plan.id || plan.firebaseDocId,
+            monthKey: plan.monthKey,
+            monthText: plan.monthText,
+            month: plan.monthText,
+            date: dateText,
+            sessionDate: dateText,
+            dayName: dayKey,
+            type: 'online',
+            center: plan.center,
+            courseId: plan.courseId,
+            courseName: plan.courseName,
+            subject: '',
+            teacherUid: '',
+            teacherId: '',
+            teacherName: '',
+            topic: '',
+            timeStart: slot.startTime || '',
+            timeEnd: slot.endTime || '',
+            publishTime: '',
+            status: 'draft',
+            publishStatus: '',
+            isHoliday: false,
+            createdAtText: nowText,
+            updatedAtText: nowText
+          });
+        });
+        (plan.pattern.ondemandSlots || []).forEach(function(slot) {
+          if (slot.day !== dayKey) return;
+          sessions.push({
+            planId: plan.id || plan.firebaseDocId,
+            monthKey: plan.monthKey,
+            monthText: plan.monthText,
+            month: plan.monthText,
+            date: dateText,
+            sessionDate: dateText,
+            dayName: dayKey,
+            type: 'ondemand',
+            center: plan.center,
+            courseId: plan.courseId,
+            courseName: plan.courseName,
+            subject: '',
+            teacherUid: '',
+            teacherId: '',
+            teacherName: '',
+            topic: '',
+            timeStart: '',
+            timeEnd: '',
+            publishTime: slot.publishTime || '',
+            status: 'draft',
+            publishStatus: 'planned',
+            isHoliday: false,
+            createdAtText: nowText,
+            updatedAtText: nowText
+          });
+        });
+      }
+      return sessions;
+    }
+
+    function isDuplicateMonthlyPlanSession(candidate) {
+      return monthlyPlanSessions.some(function(session) {
+        return String(session.planId || '') === String(candidate.planId || '') &&
+          String(session.date || session.sessionDate || '') === String(candidate.date || '') &&
+          String(session.type || '') === String(candidate.type || '') &&
+          String(session.courseId || '') === String(candidate.courseId || '');
+      });
+    }
+
+    function getMonthlyPlanSummary(monthKey, courseId) {
+      const filtered = monthlyPlanSessions.filter(function(session) {
+        const monthMatched = !monthKey || session.monthKey === monthKey || getMonthlyPlanMonthLabel(session) === monthKey;
+        const courseMatched = !courseId || String(session.courseId || '') === String(courseId);
+        return monthMatched && courseMatched && session.status !== 'cancelled';
+      });
+      return {
+        onsite: filtered.filter(function(session) { return session.type === 'onsite'; }).length,
+        online: filtered.filter(function(session) { return session.type === 'online'; }).length,
+        ondemand: filtered.filter(function(session) { return session.type === 'ondemand'; }).length,
+        total: filtered.length
+      };
+    }
+
+    function renderMonthlyPlanSummary() {
+      const box = getElement('monthlyPlanSummaryBox');
+      if (!box) return;
+      const monthKey = getElement('monthlyPlanGeneratorMonthKey') ? getElement('monthlyPlanGeneratorMonthKey').value : '';
+      const courseId = getElement('monthlyPlanGeneratorCourse') ? getElement('monthlyPlanGeneratorCourse').value : '';
+      const summary = getMonthlyPlanSummary(monthKey, courseId);
+      const monthText = formatMonthTextFromKey(monthKey) || 'ยังไม่เลือกเดือน';
+      const courseName = courseId ? getCourseNameById(courseId) : 'ยังไม่เลือกคอร์ส';
+      box.innerHTML = '<div class="status-display-row"><span><strong>' + escapeHtml(monthText + ' · ' + courseName) + '</strong><br><span style="color:#6b7280;">Onsite ' + summary.onsite + ' · Online ' + summary.online + ' · On-demand ' + summary.ondemand + '</span></span><strong>' + summary.total + ' รายการ</strong></div>';
+    }
+
+    async function generateMonthlyPlanSessionsFromForm() {
+      const result = getElement('monthlyPlanGeneratorResult');
+      const savedPlan = await saveMonthlyPlanPattern();
+      if (!savedPlan) return;
+
+      let candidates = [];
+      try {
+        candidates = generateMonthlySessionsFromPattern(savedPlan);
+      } catch (error) {
+        showMonthlyPlanGeneratorError(result, error);
+        return;
+      }
+
+      const newSessions = [];
+      let skipped = 0;
+      candidates.forEach(function(candidate) {
+        if (isDuplicateMonthlyPlanSession(candidate)) {
+          skipped += 1;
+          return;
+        }
+        const sessionId = createFirebaseDocId('monthlyPlanSessions');
+        candidate.id = sessionId;
+        candidate.firebaseDocId = sessionId;
+        newSessions.push(candidate);
+      });
+
+      try {
+        for (const session of newSessions) {
+          await setFirebaseDocument('monthlyPlanSessions', session);
+          monthlyPlanSessions.push(session);
+        }
+        if (result) {
+          result.textContent = 'สร้างตารางทั้งเดือนเรียบร้อย: สร้างใหม่ ' + newSessions.length + ' รายการ, ข้ามซ้ำ ' + skipped + ' รายการ';
+          result.style.color = '#16a34a';
+        }
+        renderMonthlyPlanOptions();
+        if (getElement('monthlyPlanMonthFilter')) getElement('monthlyPlanMonthFilter').value = savedPlan.monthText;
+        if (getElement('monthlyPlanCourseFilter')) getElement('monthlyPlanCourseFilter').value = savedPlan.courseId;
+        addActivityLog('สร้างตารางสอนรายเดือนอัตโนมัติ', savedPlan.monthText + ' · ' + savedPlan.courseName + ' · สร้างใหม่ ' + newSessions.length + ' · ข้ามซ้ำ ' + skipped);
+        renderMonthlyPlanSessions();
+        renderMonthlyPlanSummary();
+      } catch (error) {
+        console.error('generate monthly sessions firebase error:', error);
+        showMonthlyPlanGeneratorError(result, error);
       }
     }
 
@@ -10154,12 +10619,12 @@ function receiptStatusText(status) {
       const statusFilter = getElement('monthlyPlanStatusFilter') ? getElement('monthlyPlanStatusFilter').value : 'active';
       const filtered = monthlyPlanSessions.filter(function(item) {
         const status = item.status || 'planned';
-        const monthMatched = monthFilter === 'ทั้งหมด' || item.month === monthFilter;
+        const monthMatched = monthFilter === 'ทั้งหมด' || getMonthlyPlanMonthLabel(item) === monthFilter;
         const courseMatched = courseFilter === 'ทั้งหมด' || String(item.courseId || '') === String(courseFilter);
         const statusMatched = statusFilter === 'ทั้งหมด' || (statusFilter === 'active' ? status !== 'cancelled' : status === statusFilter);
         return monthMatched && courseMatched && statusMatched;
       }).sort(function(a, b) {
-        return String(a.sessionDate || '').localeCompare(String(b.sessionDate || '')) || String(a.sessionTime || '').localeCompare(String(b.sessionTime || ''));
+        return String(a.date || a.sessionDate || '').localeCompare(String(b.date || b.sessionDate || '')) || String(a.timeStart || a.sessionTime || '').localeCompare(String(b.timeStart || b.sessionTime || ''));
       });
 
       tbody.innerHTML = filtered.length ? filtered.map(function(item) {
@@ -10169,16 +10634,17 @@ function receiptStatusText(status) {
           ? '<button class="btn btn-blue" type="button" onclick="' + actionCall('editMonthlyPlanSession', id) + '">ดู / แก้ไข</button>'
           : '<button class="btn btn-blue" type="button" onclick="' + actionCall('editMonthlyPlanSession', id) + '">แก้ไข</button><button class="btn btn-red" type="button" onclick="' + actionCall('cancelMonthlyPlanSession', id) + '">ยกเลิก</button>';
         return '<tr>' +
-          '<td>' + escapeHtml(item.month || '-') + '</td>' +
-          '<td>' + escapeHtml((item.sessionDate || '-') + (item.sessionTime ? ' · ' + item.sessionTime : '')) + '</td>' +
+          '<td>' + escapeHtml(getMonthlyPlanMonthLabel(item)) + '</td>' +
+          '<td>' + escapeHtml(getMonthlyPlanDateText(item)) + '<br><span class="mini-muted">' + escapeHtml(getMonthlyPlanDayText(item.dayName || '')) + '</span></td>' +
           '<td>' + escapeHtml(getMonthlyPlanCourseName(item)) + '</td>' +
           '<td>' + escapeHtml(getMonthlyPlanTeacherName(item)) + '</td>' +
-          '<td><strong>' + escapeHtml(item.topic || '-') + '</strong><br><span class="mini-muted">' + escapeHtml(item.objective || '') + '</span></td>' +
+          '<td><span class="tag">' + escapeHtml(getMonthlyPlanTypeText(item.type)) + '</span><br><strong>' + escapeHtml(item.topic || '-') + '</strong><br><span class="mini-muted">' + escapeHtml(item.objective || item.subject || '') + '</span></td>' +
           '<td><span class="' + getMonthlyPlanStatusClass(status) + '">' + getMonthlyPlanStatusText(status) + '</span></td>' +
           '<td>' + escapeHtml(item.updatedAtText || item.createdAtText || '-') + '</td>' +
           '<td>' + actionButtons + '</td>' +
         '</tr>';
       }).join('') : '<tr><td colspan="8">ยังไม่มีแผนสอนรายเดือน</td></tr>';
+      renderMonthlyPlanSummary();
     }
 
     function clearMonthlyPlanForm(clearMessage) {
@@ -11598,6 +12064,7 @@ function receiptStatusText(status) {
         paymentMonths: paymentMonths || [],
         lineGroups: lineGroups || [],
         monthlyExamLinks: monthlyExamLinks || [],
+        monthlyPlans: monthlyPlans || [],
         monthlyPlanSessions: monthlyPlanSessions || [],
         adminScoreRecords: adminScoreRecords || [],
         scoreReports: scoreReports || [],
