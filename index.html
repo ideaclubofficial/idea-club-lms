@@ -7,6 +7,7 @@
   <link id="dynamicFavicon" rel="icon" href="assets/favicon.png" />
   <link id="dynamicAppleTouchIcon" rel="apple-touch-icon" href="assets/favicon.png" />
   <link rel="stylesheet" href="assets/styles.css" />
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
 </head>
 <body>
   <header>
@@ -276,7 +277,7 @@
           <p><strong>สถานะบัญชี:</strong> <span id="studentDashboardAccountStatus" class="status-paid">ลงทะเบียนแล้ว</span></p>
           <div class="test-actions">
             <button class="btn btn-blue" type="button" onclick="openCurrentStudentApplication()">ดูใบสมัคร</button>
-            <button class="btn btn-dark" type="button" onclick="printCurrentStudentApplication()">พิมพ์ / บันทึกเป็น PDF</button>
+            <button class="btn btn-dark" type="button" onclick="downloadCurrentStudentApplicationPdf()">ดาวน์โหลดใบสมัคร PDF</button>
           </div>
         </div>
         <div id="studentCourseSummaryCard" class="hero-card hidden">
@@ -1665,9 +1666,9 @@
               </div>
               <div class="admin-toolbar">
                 <button class="btn btn-blue" type="button" onclick="openBlankApplicationForm()">ดูใบสมัครเปล่า</button>
-                <button class="btn btn-dark" type="button" onclick="printBlankApplicationForm()">พิมพ์ใบสมัครเปล่า</button>
+                <button class="btn btn-dark" type="button" onclick="downloadBlankApplicationPdf()">ดาวน์โหลดใบสมัครเปล่า PDF</button>
                 <button class="btn btn-blue" type="button" onclick="openBlankReceiptForm()">ดูใบเสร็จเปล่า</button>
-                <button class="btn btn-dark" type="button" onclick="downloadBlankReceiptImage()">ดาวน์โหลดใบเสร็จเปล่า</button>
+                <button class="btn btn-dark" type="button" onclick="downloadBlankReceiptPdf()">ดาวน์โหลดใบเสร็จเปล่า PDF</button>
               </div>
             </div>
 
@@ -4820,7 +4821,7 @@
           '<td><button class="btn btn-blue" type="button" onclick="' + actionCall('showStudentProfileDetail', s.id) + '">ดูข้อมูล</button>' +
           (s.courseStatus === 'รออนุมัติคอร์ส' ? '<button class="btn btn-green" type="button" onclick="' + actionCall('approveStudentCourse', s.id) + '">อนุมัติคอร์ส</button><button class="btn btn-red" type="button" onclick="' + actionCall('cancelStudentCourse', s.id) + '">ยกเลิกคอร์ส</button>' : '') +
           '<button class="btn btn-blue" type="button" onclick="' + actionCall('openStudentApplicationAdmin', s.id) + '">ดูใบสมัคร</button>' +
-          '<button class="btn btn-dark" type="button" onclick="' + actionCall('printStudentApplicationAdmin', s.id) + '">พิมพ์ใบสมัคร</button>' +
+          '<button class="btn btn-dark" type="button" onclick="' + actionCall('downloadStudentApplicationPdfAdmin', s.id) + '">ดาวน์โหลดใบสมัคร PDF</button>' +
           '<button class="btn btn-blue" type="button" onclick="' + actionCall('editStudent', s.id) + '">แก้ไข</button>' +
           '<button class="btn btn-dark" type="button" onclick="' + actionCall('openResetStudentPassword', s.id) + '">Reset รหัสผ่าน</button>' +
           '<button class="btn btn-dark" type="button" onclick="' + actionCall('copyStudentLoginInfoById', s.id) + '">คัดลอกข้อมูลเข้าสู่ระบบ</button>' +
@@ -8014,37 +8015,67 @@ function getCourseOnlineDocs(course, includeInactive) {
         : '<div class="receipt-title">IDEA CLUB</div>';
     }
 
-    function printDocumentHtml(title, bodyHtml) {
-      const printWindow = window.open('', '_blank');
-      if (!printWindow) {
-        alert('เปิดหน้าพิมพ์ไม่ได้ กรุณาอนุญาต popup แล้วลองใหม่');
+    function pdfFileName(name) {
+      const base = getSafeFileName(String(name || 'idea-club-document').replace(/\.pdf$/i, ''));
+      return base + '.pdf';
+    }
+
+    function buildPdfDocumentElement(title, bodyHtml) {
+      const wrapper = document.createElement('div');
+      wrapper.className = 'pdf-render-root';
+      wrapper.style.position = 'fixed';
+      wrapper.style.left = '-9999px';
+      wrapper.style.top = '0';
+      wrapper.style.width = '794px';
+      wrapper.style.background = '#ffffff';
+      wrapper.style.color = '#1f2937';
+      wrapper.style.fontFamily = 'Arial, Tahoma, sans-serif';
+      wrapper.style.lineHeight = '1.45';
+      wrapper.innerHTML =
+        '<div class="pdf-document" style="width:794px; min-height:1123px; padding:34px; background:#fff;">' +
+          '<style>' +
+            '.pdf-document *{box-sizing:border-box;letter-spacing:0;}' +
+            '.pdf-document .receipt-box,.pdf-document .application-box{border:2px solid #0f4cbd;border-radius:16px;padding:22px;background:#fff;page-break-inside:avoid;break-inside:avoid;}' +
+            '.pdf-document .receipt-header,.pdf-document .document-header{display:flex;justify-content:space-between;gap:14px;align-items:flex-start;border-bottom:2px solid #e5e7eb;padding-bottom:14px;margin-bottom:14px;}' +
+            '.pdf-document .receipt-title,.pdf-document .document-title{font-size:26px;font-weight:800;color:#0f4cbd;}' +
+            '.pdf-document .document-subtitle{color:#6b7280;margin:4px 0 0;font-size:13px;}' +
+            '.pdf-document .receipt-line,.pdf-document .document-line{display:flex;justify-content:space-between;gap:14px;border-bottom:1px dashed #d1d5db;padding:8px 0;font-size:14px;page-break-inside:avoid;break-inside:avoid;}' +
+            '.pdf-document .receipt-line strong,.pdf-document .document-line strong{min-width:155px;color:#374151;}' +
+            '.pdf-document .receipt-line span,.pdf-document .document-line span{text-align:right;flex:1;color:#111827;overflow-wrap:anywhere;}' +
+            '.pdf-document .receipt-total{font-size:24px;font-weight:800;color:#dc2626;}' +
+            '.pdf-document .document-section-title{margin:16px 0 6px;color:#0f4cbd;font-size:16px;}' +
+            '.pdf-document .blank-warning{border:1px solid #f59e0b;background:#fffbeb;color:#92400e;border-radius:10px;padding:10px;margin:10px 0;font-weight:700;font-size:13px;}' +
+            '.pdf-document .signature-grid{display:grid;grid-template-columns:1fr 1fr;gap:24px;margin-top:34px;}' +
+            '.pdf-document .signature-box{border-top:1px solid #9ca3af;text-align:center;padding-top:8px;color:#4b5563;font-size:13px;}' +
+            '.pdf-document p{margin:6px 0;}' +
+          '</style>' +
+          bodyHtml +
+        '</div>';
+      return wrapper;
+    }
+
+    async function downloadHtmlAsPdf(title, bodyHtml, fileName) {
+      if (typeof html2pdf === 'undefined') {
+        alert('ไม่สามารถสร้าง PDF ได้ เพราะโหลดไลบรารี PDF ไม่สำเร็จ กรุณาตรวจอินเทอร์เน็ตแล้วลองใหม่');
         return;
       }
-
-      printWindow.document.open();
-      printWindow.document.write('<!DOCTYPE html><html lang="th"><head><meta charset="UTF-8" />' +
-        '<title>' + escapeHtml(title) + '</title>' +
-        '<style>' +
-          '@page{size:A4;margin:14mm;}*{box-sizing:border-box;}body{font-family:Arial,Tahoma,sans-serif;color:#1f2937;background:#fff;margin:0;line-height:1.55;}' +
-          '.print-page{width:100%;max-width:780px;margin:0 auto;padding:18px;}' +
-          '.receipt-box,.application-box{border:2px solid #0f4cbd;border-radius:18px;padding:28px;background:#fff;}' +
-          '.receipt-header,.document-header{display:flex;justify-content:space-between;gap:18px;align-items:flex-start;border-bottom:2px solid #e5e7eb;padding-bottom:18px;margin-bottom:18px;}' +
-          '.receipt-title,.document-title{font-size:30px;font-weight:800;color:#0f4cbd;letter-spacing:0;}' +
-          '.document-subtitle{color:#6b7280;margin:4px 0 0;}' +
-          '.receipt-line,.document-line{display:flex;justify-content:space-between;gap:18px;border-bottom:1px dashed #d1d5db;padding:10px 0;font-size:16px;}' +
-          '.receipt-line strong,.document-line strong{min-width:180px;color:#374151;}' +
-          '.receipt-line span,.document-line span{text-align:right;flex:1;color:#111827;}' +
-          '.receipt-total{font-size:28px;font-weight:800;color:#dc2626;}' +
-          '.document-section-title{margin:22px 0 8px;color:#0f4cbd;font-size:18px;}' +
-          '.blank-warning{border:1px solid #f59e0b;background:#fffbeb;color:#92400e;border-radius:12px;padding:12px;margin:14px 0;font-weight:700;}' +
-          '.signature-grid{display:grid;grid-template-columns:1fr 1fr;gap:28px;margin-top:48px;}' +
-          '.signature-box{border-top:1px solid #9ca3af;text-align:center;padding-top:10px;color:#4b5563;}' +
-          '.print-actions{margin:18px auto;max-width:780px;text-align:right;}button{border:0;border-radius:999px;padding:10px 18px;background:#0f4cbd;color:#fff;font-weight:700;cursor:pointer;}' +
-          '@media print{.print-actions{display:none;}body{background:#fff;}.print-page{padding:0;max-width:none;}.receipt-box,.application-box{break-inside:avoid;}}' +
-        '</style></head><body><div class="print-actions"><button id="printNowButton" type="button">พิมพ์ / บันทึกเป็น PDF</button></div><div class="print-page">' +
-        bodyHtml +
-        '</div><script>window.onload=function(){var btn=document.getElementById("printNowButton");if(btn){btn.addEventListener("click",function(){window.print();});}setTimeout(function(){window.print();},250);};<\/script></body></html>');
-      printWindow.document.close();
+      const element = buildPdfDocumentElement(title, bodyHtml);
+      document.body.appendChild(element);
+      try {
+        await html2pdf().set({
+          margin: [8, 8, 8, 8],
+          filename: pdfFileName(fileName || title),
+          image: { type: 'jpeg', quality: 0.98 },
+          html2canvas: { scale: 2, useCORS: true, backgroundColor: '#ffffff' },
+          jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
+          pagebreak: { mode: ['avoid-all', 'css', 'legacy'] }
+        }).from(element.querySelector('.pdf-document')).save();
+      } catch (error) {
+        console.error('download pdf error:', error);
+        alert('ดาวน์โหลด PDF ไม่สำเร็จ: ' + (error.message || error.code || 'ไม่ทราบสาเหตุ'));
+      } finally {
+        document.body.removeChild(element);
+      }
     }
 
     function applicationFormHtml(student, isBlank) {
@@ -8082,10 +8113,10 @@ function getCourseOnlineDocs(course, includeInactive) {
     function openApplicationDocument(student, mode) {
       const isBlank = mode === 'blank';
       const title = isBlank ? 'ใบสมัครเปล่า' : 'ใบสมัครสมาชิก';
-      const printCall = isBlank ? 'printBlankApplicationForm()' : actionCall('printStudentApplicationAdmin', student && student.id);
+      const downloadCall = isBlank ? 'downloadBlankApplicationPdf()' : actionCall('downloadStudentApplicationPdfAdmin', student && student.id);
       openViewBubble(title,
         applicationFormHtml(student || {}, isBlank) +
-        '<div class="test-actions"><button class="btn btn-blue" type="button" onclick="' + printCall + '">พิมพ์ / บันทึกเป็น PDF</button><button class="btn btn-dark" type="button" onclick="closeEditBubble()">ปิด</button></div>'
+        '<div class="test-actions"><button class="btn btn-blue" type="button" onclick="' + downloadCall + '">ดาวน์โหลด PDF</button><button class="btn btn-dark" type="button" onclick="closeEditBubble()">ปิด</button></div>'
       );
     }
 
@@ -8093,8 +8124,8 @@ function getCourseOnlineDocs(course, includeInactive) {
       openApplicationDocument({}, 'blank');
     }
 
-    function printBlankApplicationForm() {
-      printDocumentHtml('ใบสมัครเปล่า IDEA CLUB', applicationFormHtml({}, true));
+    function downloadBlankApplicationPdf() {
+      downloadHtmlAsPdf('ใบสมัครเปล่า IDEA CLUB', applicationFormHtml({}, true), 'idea-club-blank-application.pdf');
     }
 
     function findStudentById(id) {
@@ -8112,13 +8143,13 @@ function getCourseOnlineDocs(course, includeInactive) {
       openApplicationDocument(student, 'filled');
     }
 
-    function printStudentApplicationAdmin(id) {
+    function downloadStudentApplicationPdfAdmin(id) {
       const student = findStudentById(id);
       if (!student) {
         alert('ไม่พบนักเรียน');
         return;
       }
-      printDocumentHtml('ใบสมัคร ' + (student.memberId || student.name || 'IDEA CLUB'), applicationFormHtml(student, false));
+      downloadHtmlAsPdf('ใบสมัคร ' + (student.memberId || student.name || 'IDEA CLUB'), applicationFormHtml(student, false), 'application-' + (student.memberId || student.name || 'student') + '.pdf');
     }
 
     function openCurrentStudentApplication() {
@@ -8128,16 +8159,16 @@ function getCourseOnlineDocs(course, includeInactive) {
       }
       openViewBubble('ใบสมัครสมาชิก',
         applicationFormHtml(currentStudent, false) +
-        '<div class="test-actions"><button class="btn btn-blue" type="button" onclick="printCurrentStudentApplication()">พิมพ์ / บันทึกเป็น PDF</button><button class="btn btn-dark" type="button" onclick="closeEditBubble()">ปิด</button></div>'
+        '<div class="test-actions"><button class="btn btn-blue" type="button" onclick="downloadCurrentStudentApplicationPdf()">ดาวน์โหลด PDF</button><button class="btn btn-dark" type="button" onclick="closeEditBubble()">ปิด</button></div>'
       );
     }
 
-    function printCurrentStudentApplication() {
+    function downloadCurrentStudentApplicationPdf() {
       if (!currentStudent) {
         alert('ไม่พบข้อมูลนักเรียน');
         return;
       }
-      printDocumentHtml('ใบสมัคร ' + (currentStudent.memberId || currentStudent.name || 'IDEA CLUB'), applicationFormHtml(currentStudent, false));
+      downloadHtmlAsPdf('ใบสมัคร ' + (currentStudent.memberId || currentStudent.name || 'IDEA CLUB'), applicationFormHtml(currentStudent, false), 'application-' + (currentStudent.memberId || currentStudent.name || 'student') + '.pdf');
     }
 
     function createReceiptFromPaymentRow(button) {
@@ -8284,17 +8315,13 @@ function receiptStatusText(status) {
     function openBlankReceiptForm() {
       openViewBubble('ใบเสร็จเปล่า',
         receiptDocumentHtml(getBlankReceiptData(), true) +
-        '<div class="test-actions"><button class="btn btn-blue" type="button" onclick="downloadBlankReceiptImage()">ดาวน์โหลดใบเสร็จเป็นรูป</button><button class="btn btn-dark" type="button" onclick="closeEditBubble()">ปิด</button></div>'
+        '<div class="test-actions"><button class="btn btn-blue" type="button" onclick="downloadBlankReceiptPdf()">ดาวน์โหลด PDF</button><button class="btn btn-dark" type="button" onclick="closeEditBubble()">ปิด</button></div>'
       );
     }
 
-    function downloadBlankReceiptImage() {
+    function downloadBlankReceiptPdf() {
       const tempReceipt = getBlankReceiptData();
-      const oldReceipts = receipts.slice();
-      receipts.push(tempReceipt);
-      downloadReceiptImage(tempReceipt.id);
-      receipts.length = 0;
-      oldReceipts.forEach(function(item) { receipts.push(item); });
+      downloadHtmlAsPdf('ใบเสร็จเปล่า IDEA CLUB', receiptDocumentHtml(tempReceipt, true), 'idea-club-blank-receipt.pdf');
     }
 
     function openReceiptAdmin(id) {
@@ -8309,9 +8336,18 @@ function receiptStatusText(status) {
       const receipt = receipts.find(function(r) { return String(r.id) === String(id); });
       if (!receipt) return;
       const adminActions = mode === 'admin'
-        ? '<div class="test-actions"><button class="btn btn-green" type="button" onclick="' + actionCall('publishReceipt', id) + '">แสดงให้ผู้ปกครอง</button><button class="btn btn-dark" type="button" onclick="' + actionCall('hideReceipt', id) + '">ซ่อนจากผู้ปกครอง</button><button class="btn btn-blue" type="button" onclick="' + actionCall('downloadReceiptImage', id) + '">ดาวน์โหลดใบเสร็จเป็นรูป</button><button class="btn btn-red" type="button" onclick="' + actionCall('deleteReceipt', id) + '">ลบใบเสร็จ</button><button class="btn btn-dark" type="button" onclick="closeEditBubble()">ปิด</button></div>'
-        : '<div class="test-actions"><button class="btn btn-blue" type="button" onclick="' + actionCall('downloadReceiptImage', id) + '">ดาวน์โหลดใบเสร็จเป็นรูป</button><button class="btn btn-dark" type="button" onclick="closeEditBubble()">ปิด</button></div>';
+        ? '<div class="test-actions"><button class="btn btn-green" type="button" onclick="' + actionCall('publishReceipt', id) + '">แสดงให้ผู้ปกครอง</button><button class="btn btn-dark" type="button" onclick="' + actionCall('hideReceipt', id) + '">ซ่อนจากผู้ปกครอง</button><button class="btn btn-blue" type="button" onclick="' + actionCall('downloadReceiptPdf', id) + '">ดาวน์โหลด PDF</button><button class="btn btn-red" type="button" onclick="' + actionCall('deleteReceipt', id) + '">ลบใบเสร็จ</button><button class="btn btn-dark" type="button" onclick="closeEditBubble()">ปิด</button></div>'
+        : '<div class="test-actions"><button class="btn btn-blue" type="button" onclick="' + actionCall('downloadReceiptPdf', id) + '">ดาวน์โหลด PDF</button><button class="btn btn-dark" type="button" onclick="closeEditBubble()">ปิด</button></div>';
       openViewBubble('ใบเสร็จ / ใบยืนยันการชำระเงิน', receiptHtml(receipt) + adminActions);
+    }
+
+    function downloadReceiptPdf(id) {
+      const receipt = receipts.find(function(r) { return String(r.id) === String(id); });
+      if (!receipt) {
+        alert('ไม่พบใบเสร็จ');
+        return;
+      }
+      downloadHtmlAsPdf('ใบเสร็จ ' + (receipt.receiptNo || 'IDEA CLUB'), receiptDocumentHtml(receipt, false), 'receipt-' + (receipt.receiptNo || receipt.id || 'idea-club') + '.pdf');
     }
 
     function downloadReceiptImage(id) {
@@ -8536,7 +8572,7 @@ function receiptStatusText(status) {
       });
 
       tbody.innerHTML = filtered.length ? filtered.map(function(r) {
-        return '<tr><td>' + (r.receiptNo || '-') + '</td><td>' + (r.student || '-') + '</td><td>' + (r.course || '-') + '</td><td>' + getReceiptMonth(r) + '</td><td>' + (r.amount || '-') + '</td><td>' + receiptStatusText(r.status) + '</td><td><button class="btn btn-blue" type="button" onclick="' + actionCall('openReceiptAdmin', r.id) + '">ดูตัวอย่าง</button><button class="btn btn-blue" type="button" onclick="' + actionCall('downloadReceiptImage', r.id) + '">ดาวน์โหลด</button><button class="btn btn-green" type="button" onclick="' + actionCall('publishReceipt', r.id) + '">แสดง</button><button class="btn btn-dark" type="button" onclick="' + actionCall('hideReceipt', r.id) + '">ซ่อน</button><button class="btn btn-red" type="button" onclick="' + actionCall('deleteReceipt', r.id) + '">ลบ</button></td></tr>';
+        return '<tr><td>' + (r.receiptNo || '-') + '</td><td>' + (r.student || '-') + '</td><td>' + (r.course || '-') + '</td><td>' + getReceiptMonth(r) + '</td><td>' + (r.amount || '-') + '</td><td>' + receiptStatusText(r.status) + '</td><td><button class="btn btn-blue" type="button" onclick="' + actionCall('openReceiptAdmin', r.id) + '">ดูตัวอย่าง</button><button class="btn btn-blue" type="button" onclick="' + actionCall('downloadReceiptPdf', r.id) + '">ดาวน์โหลด PDF</button><button class="btn btn-green" type="button" onclick="' + actionCall('publishReceipt', r.id) + '">แสดง</button><button class="btn btn-dark" type="button" onclick="' + actionCall('hideReceipt', r.id) + '">ซ่อน</button><button class="btn btn-red" type="button" onclick="' + actionCall('deleteReceipt', r.id) + '">ลบ</button></td></tr>';
       }).join('') : '<tr><td colspan="7">ยังไม่มีใบเสร็จตามเงื่อนไขที่เลือก</td></tr>';
 
       const draftCount = (receipts || []).filter(function(r) { return normalizeReceiptStatus(r.status) === 'draft'; }).length;
@@ -8618,7 +8654,7 @@ function receiptStatusText(status) {
         admin: 'Admin IDEA CLUB',
         status: 'published'
       };
-      openViewBubble('ใบยืนยันการชำระเงิน', receiptHtml(receipt) + '<div class="test-actions"><button class="btn btn-blue" type="button" onclick="' + actionCall('downloadPaymentReceiptImage', payment.id) + '">ดาวน์โหลดใบเสร็จเป็นรูป</button><button class="btn btn-dark" type="button" onclick="closeEditBubble()">ปิด</button></div>');
+      openViewBubble('ใบยืนยันการชำระเงิน', receiptHtml(receipt) + '<div class="test-actions"><button class="btn btn-blue" type="button" onclick="' + actionCall('downloadPaymentReceiptPdf', payment.id) + '">ดาวน์โหลด PDF</button><button class="btn btn-dark" type="button" onclick="closeEditBubble()">ปิด</button></div>');
     }
 
     function getTempReceiptFromPayment(payment) {
@@ -8644,6 +8680,16 @@ function receiptStatusText(status) {
       downloadReceiptImage(tempReceipt.id);
       receipts.length = 0;
       oldReceipts.forEach(function(item) { receipts.push(item); });
+    }
+
+    function downloadPaymentReceiptPdf(paymentId) {
+      const payment = payments.find(function(p) { return String(p.id) === String(paymentId); });
+      if (!payment) {
+        alert('ไม่พบรายการชำระเงิน');
+        return;
+      }
+      const tempReceipt = getTempReceiptFromPayment(payment);
+      downloadHtmlAsPdf('ใบเสร็จ ' + tempReceipt.receiptNo, receiptDocumentHtml(tempReceipt, false), 'receipt-' + tempReceipt.receiptNo + '.pdf');
     }
 
     function renderStudentReceiptPagination(totalItems, totalPages) {
