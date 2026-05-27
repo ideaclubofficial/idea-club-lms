@@ -2034,6 +2034,67 @@
             <br />
 
             <div class="form-box">
+              <h3>วันหยุด / งดเรียน</h3>
+              <p style="margin-bottom:18px; color:#6b7280;">เพิ่มวันหยุด แล้วนำไปใช้กับตารางเรียนที่ตรงเงื่อนไขแบบ soft update</p>
+              <input id="editingHolidayId" type="hidden" value="" />
+              <div class="form-row">
+                <div>
+                  <label>ชื่อวันหยุด</label>
+                  <input id="holidayName" type="text" placeholder="เช่น วันหยุดนักขัตฤกษ์" />
+                </div>
+                <div>
+                  <label>วันที่</label>
+                  <input id="holidayDate" type="date" />
+                </div>
+                <div>
+                  <label>ศูนย์</label>
+                  <select id="holidayCenter">
+                    <option>ทั้งหมด</option>
+                    <option>IDEA CLUB ศูนย์ หนองฉาง</option>
+                    <option>IDEA CLUB ศูนย์ นครสวรรค์</option>
+                  </select>
+                </div>
+              </div>
+              <div class="form-row">
+                <div>
+                  <label>ใช้กับ</label>
+                  <select id="holidayAppliesTo" onchange="renderHolidayCourseSelect()">
+                    <option value="all">ทุกคอร์ส</option>
+                    <option value="selectedCourses">เลือกคอร์ส</option>
+                  </select>
+                </div>
+                <div>
+                  <label>เลือกคอร์ส</label>
+                  <select id="holidayCourseIds" multiple size="5"></select>
+                </div>
+              </div>
+              <label>หมายเหตุ</label>
+              <textarea id="holidayNote" placeholder="หมายเหตุวันหยุด"></textarea>
+              <button class="btn btn-green" type="button" onclick="saveHolidayRecord()">บันทึกวันหยุด</button>
+              <button class="btn btn-blue" type="button" onclick="applySelectedHolidayFromForm()">Apply วันหยุดกับตาราง</button>
+              <button class="btn btn-dark" type="button" onclick="clearHolidayForm()">ล้างฟอร์ม</button>
+              <p id="holidaySaveResult" style="margin-top:14px; font-weight:bold;"></p>
+              <div class="table-wrap" style="margin-top:14px;">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Date</th>
+                      <th>Name</th>
+                      <th>Center</th>
+                      <th>Applies To</th>
+                      <th>Note</th>
+                      <th>Status</th>
+                      <th>Action</th>
+                    </tr>
+                  </thead>
+                  <tbody id="holidayTableBody"></tbody>
+                </table>
+              </div>
+            </div>
+
+            <br />
+
+            <div class="form-box">
               <h3>ตรวจครูชนเวลา</h3>
               <p style="margin-bottom:18px; color:#6b7280;">ตรวจ warning ตารางครูที่ชนกันในเดือนเดียวกัน ข้ามศูนย์ คอร์ส และประเภทการเรียน</p>
               <div class="form-row">
@@ -2938,6 +2999,7 @@
         seedCollectionIfEmpty('monthlyExamLinks', monthlyExamLinks),
         seedCollectionIfEmpty('monthlyPlans', monthlyPlans),
         seedCollectionIfEmpty('monthlyPlanSessions', monthlyPlanSessions),
+        seedCollectionIfEmpty('holidays', holidays),
         seedCollectionIfEmpty('scoreReports', scoreReports),
         seedCollectionIfEmpty('adminScoreRecords', adminScoreRecords),
         seedCollectionIfEmpty('announcements', announcements),
@@ -2957,6 +3019,7 @@
         getFirebaseCollection('monthlyExamLinks'),
         getFirebaseCollection('monthlyPlans'),
         getFirebaseCollection('monthlyPlanSessions'),
+        getFirebaseCollection('holidays'),
         getFirebaseCollection('scoreReports'),
         getFirebaseCollection('adminScoreRecords'),
         getFirebaseCollection('announcements'),
@@ -2976,11 +3039,12 @@
       replaceArray(monthlyExamLinks, results[9]);
       replaceArray(monthlyPlans, results[10]);
       replaceArray(monthlyPlanSessions, results[11]);
-      replaceArray(scoreReports, results[12]);
-      replaceArray(adminScoreRecords, results[13]);
-      replaceArray(announcements, results[14]);
-      replaceArray(activityLogs, results[15]);
-      const settingsItems = results[16];
+      replaceArray(holidays, results[12]);
+      replaceArray(scoreReports, results[13]);
+      replaceArray(adminScoreRecords, results[14]);
+      replaceArray(announcements, results[15]);
+      replaceArray(activityLogs, results[16]);
+      const settingsItems = results[17];
       const mainSettings = settingsItems.find(function(item) { return item.id === 'main' || item.firebaseDocId === 'main'; });
       if (mainSettings) systemSettings = Object.assign(systemSettings, mainSettings);
       safeRun(repairReceiptMonthsFromPayments, 'repair-receipt-months');
@@ -3022,6 +3086,7 @@
       { key: 'admin.finance', title: 'การเงิน', desc: 'รอบชำระเงิน ตรวจสลิป และสถานะค้างชำระ' },
       { key: 'admin.receipts', title: 'ใบเสร็จ', desc: 'สร้าง ตรวจ และเผยแพร่ใบเสร็จ' },
       { key: 'admin.exams', title: 'สอบ / คะแนน', desc: 'ลิงก์สอบ ตารางคะแนน และประกาศผล' },
+      { key: 'admin.monthlyPlanner', title: 'แผนสอนรายเดือน / การจัดตาราง', desc: 'จัดตารางสอน วันหยุด ชดเชย และตรวจครูชนเวลา' },
       { key: 'admin.users', title: 'ครู / สิทธิ์', desc: 'สร้างบัญชีครูและกำหนด Role/Permission' },
       { key: 'admin.announcements', title: 'ประกาศ', desc: 'ประกาศแยกตามศูนย์และระดับชั้น' },
       { key: 'admin.settings', title: 'ตั้งค่าระบบ', desc: 'ตั้งค่า LINE, QR, Logo และข้อมูลกลาง' },
@@ -3043,11 +3108,11 @@
       },
       Manager: {
         label: 'Manager / ผู้จัดการสาขา',
-        permissions: ['admin.dashboard','admin.students','admin.courses','admin.online','admin.ondemand','admin.finance','admin.receipts','admin.exams','admin.announcements','admin.logs','teacher.dashboard','teacher.online','teacher.attendance','teacher.students']
+        permissions: ['admin.dashboard','admin.students','admin.courses','admin.online','admin.ondemand','admin.finance','admin.receipts','admin.exams','admin.monthlyPlanner','admin.announcements','admin.logs','teacher.dashboard','teacher.online','teacher.attendance','teacher.students']
       },
       Academic: {
         label: 'Academic / ฝ่ายวิชาการ',
-        permissions: ['admin.dashboard','admin.students','admin.courses','admin.online','admin.ondemand','admin.exams','admin.announcements','teacher.dashboard','teacher.online','teacher.students']
+        permissions: ['admin.dashboard','admin.students','admin.courses','admin.online','admin.ondemand','admin.exams','admin.monthlyPlanner','admin.announcements','teacher.dashboard','teacher.online','teacher.students']
       },
       Finance: {
         label: 'Finance / ฝ่ายการเงิน',
@@ -3077,7 +3142,7 @@
       'admin-payment': 'admin.finance',
       'admin-receipts': 'admin.receipts',
       'admin-monthly-test': 'admin.exams',
-      'admin-monthly-planner': 'admin.exams',
+      'admin-monthly-planner': 'admin.monthlyPlanner',
       'admin-teachers': 'admin.users',
       'admin-announcements': 'admin.announcements',
       'admin-settings': 'admin.settings',
@@ -3385,6 +3450,7 @@
     const monthlyExamLinks = [];
     const monthlyPlans = [];
     const monthlyPlanSessions = [];
+    const holidays = [];
 
     function padNumber(num, size) {
       return String(num).padStart(size, '0');
@@ -3423,6 +3489,14 @@
 
     function saveEditBubble() {
       if (typeof editBubbleSaveHandler === 'function') editBubbleSaveHandler();
+    }
+
+    function getMonthlySessionStatusLabel(session) {
+      if (!session) return '';
+      if (session.status === 'holiday') return 'งดเรียน';
+      if (session.isMakeup || session.type === 'makeup') return 'เรียนชดเชย';
+      if (session.status === 'cancelled') return 'ยกเลิก';
+      return getMonthlyPlanStatusText(session.status || 'draft');
     }
 
     function bubbleValue(id) {
@@ -4518,6 +4592,7 @@
           '</div>';
         }).join('') : '<div class="card"><h3>ยังไม่มีคอร์สที่เกี่ยวข้อง</h3><p>กรุณาให้ Admin ตั้งคอร์สหรือวิชาที่สอนให้ตรงกับบัญชีครู</p></div>';
       }
+      safeRun(renderTeacherMonthlyPlanSummary, 'teacher-monthly-plan-summary');
     }
 
     const pickupList = [];
@@ -4915,6 +4990,7 @@
       if (tabId === 'admin-monthly-planner') {
         safeRun(renderMonthlyPlanOptions, 'monthly-plan-options');
         safeRun(renderMonthlyPlanGeneratorDefaults, 'monthly-plan-generator-defaults');
+        safeRun(renderHolidayTools, 'holiday-tools');
         safeRun(renderMonthlySubjectBalanceControls, 'monthly-subject-balance-controls');
         safeRun(renderMonthlyTeacherConflictControls, 'monthly-teacher-conflict-controls');
         safeRun(renderMonthlyPlanSessions, 'monthly-plan-sessions');
@@ -7097,6 +7173,7 @@ function getCourseOnlineDocs(course, includeInactive) {
       if (selectedCourse) currentStudentCourseId = selectedCourse.id;
 
       safeRun(function() { updateStudentHomeSummary(selectedCourse, hasRegisteredCourse); }, 'student-home-summary');
+      safeRun(renderStudentMonthlyPlanSummary, 'student-monthly-plan-summary');
       if (currentStudent) {
         updateStudentPickupStatus(currentStudent);
       }
@@ -10298,7 +10375,7 @@ function receiptStatusText(status) {
     }
 
     function getMonthlyPlanTypeText(type) {
-      const map = { onsite: 'Onsite', online: 'Online', ondemand: 'On-demand' };
+      const map = { onsite: 'Onsite', online: 'Online', ondemand: 'On-demand', makeup: 'ชดเชย', manual: 'Manual' };
       return map[type] || 'Manual';
     }
 
@@ -10553,6 +10630,366 @@ function receiptStatusText(status) {
       const draft = buildMonthlyPlanSessionDraftFromForm();
       const conflicts = findTeacherConflicts(draft);
       box.innerHTML = renderMonthlyPlanConflictWarning(conflicts);
+    }
+
+    function renderHolidayCourseSelect() {
+      const select = getElement('holidayCourseIds');
+      if (!select) return;
+      const currentValues = Array.from(select.selectedOptions || []).map(function(option) { return option.value; });
+      select.innerHTML = courses.filter(function(course) { return course && course.deleted !== true; }).map(function(course) {
+        const id = String(course.id || course.firebaseDocId || '');
+        return '<option value="' + escapeHtml(id) + '"' + (currentValues.includes(id) ? ' selected' : '') + '>' + escapeHtml((course.grade || '') + ' · ' + (course.name || id)) + '</option>';
+      }).join('');
+      const appliesTo = getElement('holidayAppliesTo') ? getElement('holidayAppliesTo').value : 'all';
+      select.disabled = appliesTo !== 'selectedCourses';
+    }
+
+    function getSelectedHolidayCourseIds() {
+      const select = getElement('holidayCourseIds');
+      return select ? Array.from(select.selectedOptions || []).map(function(option) { return option.value; }) : [];
+    }
+
+    function clearHolidayForm(clearMessage) {
+      if (getElement('editingHolidayId')) getElement('editingHolidayId').value = '';
+      if (getElement('holidayName')) getElement('holidayName').value = '';
+      if (getElement('holidayDate')) getElement('holidayDate').value = '';
+      if (getElement('holidayCenter')) getElement('holidayCenter').value = 'ทั้งหมด';
+      if (getElement('holidayAppliesTo')) getElement('holidayAppliesTo').value = 'all';
+      if (getElement('holidayNote')) getElement('holidayNote').value = '';
+      renderHolidayCourseSelect();
+      if (clearMessage !== false && getElement('holidaySaveResult')) getElement('holidaySaveResult').textContent = '';
+    }
+
+    function isHolidayForSession(session, holiday) {
+      if (!session || !holiday || holiday.status === 'cancelled') return false;
+      const holidayDate = holiday.date || '';
+      const sessionDate = getMonthlySessionDate(session);
+      const centerMatched = holiday.center === 'ทั้งหมด' || !holiday.center || holiday.center === session.center;
+      const courseIds = Array.isArray(holiday.courseIds) ? holiday.courseIds.map(String) : [];
+      const appliesMatched = holiday.appliesTo === 'all' || !holiday.appliesTo || (holiday.appliesTo === 'selectedCourses' && courseIds.includes(String(session.courseId || '')));
+      return !!holidayDate && holidayDate === sessionDate && centerMatched && appliesMatched;
+    }
+
+    async function applyHolidayToSessions(holiday) {
+      if (!holiday) return 0;
+      const matched = monthlyPlanSessions.filter(function(session) {
+        return isHolidayForSession(session, holiday) && session.status !== 'cancelled';
+      });
+      const nowText = new Date().toLocaleString('th-TH');
+      for (const session of matched) {
+        session.status = 'holiday';
+        session.isHoliday = true;
+        session.holidayName = holiday.name || '';
+        session.holidayId = holiday.id || holiday.firebaseDocId || '';
+        session.updatedAtText = nowText;
+        await setFirebaseDocument('monthlyPlanSessions', session);
+      }
+      renderMonthlyPlanSessions();
+      renderMonthlyTeacherConflictControls();
+      renderMonthlySubjectBalance();
+      renderStudentMonthlyPlanSummary();
+      renderTeacherMonthlyPlanSummary();
+      return matched.length;
+    }
+
+    async function saveHolidayRecord() {
+      const result = getElement('holidaySaveResult');
+      const editingId = getElement('editingHolidayId') ? getElement('editingHolidayId').value : '';
+      const name = getElement('holidayName') ? getElement('holidayName').value.trim() : '';
+      const date = getElement('holidayDate') ? getElement('holidayDate').value : '';
+      const center = getElement('holidayCenter') ? getElement('holidayCenter').value : 'ทั้งหมด';
+      const appliesTo = getElement('holidayAppliesTo') ? getElement('holidayAppliesTo').value : 'all';
+      const note = getElement('holidayNote') ? getElement('holidayNote').value.trim() : '';
+      const courseIds = appliesTo === 'selectedCourses' ? getSelectedHolidayCourseIds() : [];
+      if (!name || !date || (appliesTo === 'selectedCourses' && !courseIds.length)) {
+        if (result) {
+          result.textContent = 'กรุณากรอกชื่อ วันที่ และเลือกคอร์สเมื่อใช้กับบางคอร์ส';
+          result.style.color = '#dc2626';
+        }
+        return null;
+      }
+      const nowText = new Date().toLocaleString('th-TH');
+      let holiday = holidays.find(function(item) { return String(item.id || item.firebaseDocId || '') === String(editingId); });
+      if (!holiday) {
+        const id = createFirebaseDocId('holidays');
+        holiday = { id: id, firebaseDocId: id, createdAtText: nowText };
+        holidays.push(holiday);
+      }
+      Object.assign(holiday, {
+        name: name,
+        date: date,
+        center: center,
+        appliesTo: appliesTo,
+        courseIds: courseIds,
+        note: note,
+        status: holiday.status || 'active',
+        updatedAtText: nowText
+      });
+      try {
+        await setFirebaseDocument('holidays', holiday);
+        renderHolidayTools();
+        if (result) {
+          result.textContent = 'บันทึกวันหยุดเรียบร้อย';
+          result.style.color = '#16a34a';
+        }
+        addActivityLog('บันทึกวันหยุด', name + ' · ' + date);
+        if (confirm('ต้องการนำวันหยุดนี้ไปใช้กับตารางเรียนที่ตรงกันเลยหรือไม่?')) {
+          try {
+            const count = await applyHolidayToSessions(holiday);
+            if (result) result.textContent = 'บันทึกวันหยุดและ Apply แล้ว ' + count + ' session';
+          } catch (applyError) {
+            console.error('apply holiday error:', applyError);
+            if (result) {
+              result.textContent = 'บันทึกวันหยุดแล้ว แต่ Apply ไม่สำเร็จ: ' + (applyError.message || applyError.code || applyError);
+              result.style.color = '#dc2626';
+            }
+          }
+        }
+        return holiday;
+      } catch (error) {
+        console.error('holiday save error:', error);
+        if (result) {
+          result.textContent = 'บันทึกวันหยุดไม่สำเร็จ: ' + (error.message || error.code || error);
+          result.style.color = '#dc2626';
+        }
+        return null;
+      }
+    }
+
+    async function applyHolidayById(id) {
+      const holiday = holidays.find(function(item) { return String(item.id || item.firebaseDocId || '') === String(id); });
+      if (!holiday) return;
+      try {
+        const count = await applyHolidayToSessions(holiday);
+        if (getElement('holidaySaveResult')) {
+          getElement('holidaySaveResult').textContent = 'Apply วันหยุดแล้ว ' + count + ' session';
+          getElement('holidaySaveResult').style.color = '#16a34a';
+        }
+      } catch (error) {
+        console.error('apply holiday error:', error);
+        if (getElement('holidaySaveResult')) {
+          getElement('holidaySaveResult').textContent = 'Apply วันหยุดไม่สำเร็จ: ' + (error.message || error.code || error);
+          getElement('holidaySaveResult').style.color = '#dc2626';
+        }
+      }
+    }
+
+    async function applySelectedHolidayFromForm() {
+      const editingId = getElement('editingHolidayId') ? getElement('editingHolidayId').value : '';
+      const holiday = holidays.find(function(item) { return String(item.id || item.firebaseDocId || '') === String(editingId); }) || await saveHolidayRecord();
+      if (holiday) await applyHolidayById(holiday.id || holiday.firebaseDocId);
+    }
+
+    function editHoliday(id) {
+      const holiday = holidays.find(function(item) { return String(item.id || item.firebaseDocId || '') === String(id); });
+      if (!holiday) return;
+      if (getElement('editingHolidayId')) getElement('editingHolidayId').value = holiday.id || holiday.firebaseDocId || '';
+      if (getElement('holidayName')) getElement('holidayName').value = holiday.name || '';
+      if (getElement('holidayDate')) getElement('holidayDate').value = holiday.date || '';
+      if (getElement('holidayCenter')) getElement('holidayCenter').value = holiday.center || 'ทั้งหมด';
+      if (getElement('holidayAppliesTo')) getElement('holidayAppliesTo').value = holiday.appliesTo || 'all';
+      renderHolidayCourseSelect();
+      const select = getElement('holidayCourseIds');
+      if (select && Array.isArray(holiday.courseIds)) {
+        Array.from(select.options).forEach(function(option) { option.selected = holiday.courseIds.map(String).includes(option.value); });
+      }
+      if (getElement('holidayNote')) getElement('holidayNote').value = holiday.note || '';
+      if (getElement('holidaySaveResult')) {
+        getElement('holidaySaveResult').textContent = 'กำลังแก้ไขวันหยุด';
+        getElement('holidaySaveResult').style.color = '#0f4cbd';
+      }
+    }
+
+    async function cancelHolidayRecord(id) {
+      const holiday = holidays.find(function(item) { return String(item.id || item.firebaseDocId || '') === String(id); });
+      if (!holiday) return;
+      if (!confirm('ต้องการยกเลิกวันหยุดนี้ใช่หรือไม่?')) return;
+      holiday.status = 'cancelled';
+      holiday.updatedAtText = new Date().toLocaleString('th-TH');
+      await setFirebaseDocument('holidays', holiday);
+      renderHolidayTools();
+      addActivityLog('ยกเลิกวันหยุด', holiday.name || '-');
+    }
+
+    function renderHolidayTools() {
+      renderHolidayCourseSelect();
+      const tbody = getElement('holidayTableBody');
+      if (!tbody) return;
+      const rows = holidays.slice().sort(function(a, b) { return String(a.date || '').localeCompare(String(b.date || '')); });
+      tbody.innerHTML = rows.length ? rows.map(function(holiday) {
+        const id = holiday.id || holiday.firebaseDocId || '';
+        const appliesText = holiday.appliesTo === 'selectedCourses'
+          ? (holiday.courseIds || []).map(getCourseNameById).join(', ')
+          : 'ทุกคอร์ส';
+        return '<tr>' +
+          '<td>' + escapeHtml(holiday.date || '-') + '</td>' +
+          '<td>' + escapeHtml(holiday.name || '-') + '</td>' +
+          '<td>' + escapeHtml(holiday.center || 'ทั้งหมด') + '</td>' +
+          '<td>' + escapeHtml(appliesText || '-') + '</td>' +
+          '<td>' + escapeHtml(holiday.note || '-') + '</td>' +
+          '<td><span class="' + (holiday.status === 'cancelled' ? 'status-absent' : 'status-paid') + '">' + escapeHtml(holiday.status || 'active') + '</span></td>' +
+          '<td><button class="btn btn-blue" type="button" onclick="' + actionCall('editHoliday', id) + '">แก้ไข</button><button class="btn btn-green" type="button" onclick="' + actionCall('applyHolidayById', id) + '">Apply</button><button class="btn btn-red" type="button" onclick="' + actionCall('cancelHolidayRecord', id) + '">Cancel</button></td>' +
+        '</tr>';
+      }).join('') : '<tr><td colspan="7">ยังไม่มีวันหยุด</td></tr>';
+    }
+
+    function teacherOptionsForMakeup(selectedTeacherId) {
+      return '<option value="">เลือกครู</option>' + teachers.filter(function(teacher) {
+        return teacher && teacher.deleted !== true && teacher.status !== 'inactive' && teacher.status !== 'archived';
+      }).map(function(teacher) {
+        const id = String(teacher.id || teacher.firebaseDocId || '');
+        return '<option value="' + escapeHtml(id) + '"' + (String(selectedTeacherId || '') === id ? ' selected' : '') + '>' + escapeHtml(teacher.name || teacher.displayName || teacher.email || id) + '</option>';
+      }).join('');
+    }
+
+    function openMakeupSessionForm(id) {
+      const original = monthlyPlanSessions.find(function(session) { return String(session.id || session.firebaseDocId || '') === String(id); });
+      if (!original) return;
+      const originalId = original.id || original.firebaseDocId || '';
+      const bodyHtml =
+        '<div class="notice"><strong>คาบเดิม</strong>' +
+          '<p>' + escapeHtml((getMonthlySessionDate(original) || '-') + ' · ' + getMonthlyPlanTypeText(original.type) + ' · ' + getMonthlyPlanCourseName(original)) + '</p>' +
+          '<p>' + escapeHtml((original.subject || 'ยังไม่กำหนดวิชา') + ' · ' + (getMonthlyPlanTeacherName(original) || '-') + ' · ' + (original.topic || '-')) + '</p>' +
+        '</div>' +
+        '<div class="form-row">' +
+          '<div><label>Makeup date</label><input id="bubbleMakeupDate" type="date" onchange="updateMakeupConflictPreview(\'' + jsArg(originalId) + '\')" /></div>' +
+          '<div><label>timeStart</label><input id="bubbleMakeupTimeStart" type="time" value="' + escapeHtml(original.timeStart || original.sessionTime || '') + '" onchange="updateMakeupConflictPreview(\'' + jsArg(originalId) + '\')" /></div>' +
+          '<div><label>timeEnd</label><input id="bubbleMakeupTimeEnd" type="time" value="' + escapeHtml(original.timeEnd || '') + '" onchange="updateMakeupConflictPreview(\'' + jsArg(originalId) + '\')" /></div>' +
+        '</div>' +
+        '<div class="form-row">' +
+          '<div><label>วิชา</label><select id="bubbleMakeupSubject"><option value="">ยังไม่กำหนด</option>' + ['คณิตศาสตร์','วิทยาศาสตร์','ภาษาอังกฤษ','ภาษาไทย','สังคมศึกษา'].map(function(subject) { return '<option' + (subject === original.subject ? ' selected' : '') + '>' + subject + '</option>'; }).join('') + '</select></div>' +
+          '<div><label>ครู</label><select id="bubbleMakeupTeacher" onchange="updateMakeupConflictPreview(\'' + jsArg(originalId) + '\')">' + teacherOptionsForMakeup(original.teacherId) + '</select></div>' +
+        '</div>' +
+        '<label>หัวข้อ</label><input id="bubbleMakeupTopic" type="text" value="' + escapeHtml(original.topic || '') + '" />' +
+        '<div id="bubbleMakeupConflictWarning" style="margin-top:14px;"></div>';
+      openEditBubble('สร้างคาบชดเชย', bodyHtml, async function() {
+        await saveMakeupSession(originalId);
+      });
+      updateMakeupConflictPreview(originalId);
+    }
+
+    function buildMakeupSessionDraft(original) {
+      const teacherId = document.getElementById('bubbleMakeupTeacher') ? document.getElementById('bubbleMakeupTeacher').value : '';
+      const selectedTeacher = teachers.find(function(teacher) { return String(teacher.id || teacher.firebaseDocId || '') === String(teacherId); });
+      const date = document.getElementById('bubbleMakeupDate') ? document.getElementById('bubbleMakeupDate').value : '';
+      const timeStart = document.getElementById('bubbleMakeupTimeStart') ? document.getElementById('bubbleMakeupTimeStart').value : '';
+      const timeEnd = document.getElementById('bubbleMakeupTimeEnd') ? document.getElementById('bubbleMakeupTimeEnd').value : '';
+      const subject = document.getElementById('bubbleMakeupSubject') ? document.getElementById('bubbleMakeupSubject').value : '';
+      const topic = document.getElementById('bubbleMakeupTopic') ? document.getElementById('bubbleMakeupTopic').value.trim() : '';
+      return {
+        originalSessionId: original.id || original.firebaseDocId || '',
+        originalDate: getMonthlySessionDate(original),
+        isMakeup: true,
+        type: 'makeup',
+        makeupForType: original.type || '',
+        date: date,
+        sessionDate: date,
+        monthKey: date ? date.slice(0, 7) : '',
+        monthText: date ? formatMonthTextFromKey(date.slice(0, 7)) : '',
+        month: date ? formatMonthTextFromKey(date.slice(0, 7)) : '',
+        center: original.center || '',
+        courseId: original.courseId || '',
+        courseName: original.courseName || getMonthlyPlanCourseName(original),
+        subject: subject,
+        teacherUid: selectedTeacher ? (selectedTeacher.teacherUid || selectedTeacher.authUid || '') : '',
+        teacherAuthUid: selectedTeacher ? (selectedTeacher.authUid || selectedTeacher.teacherUid || '') : '',
+        teacherId: teacherId,
+        teacherName: selectedTeacher ? (selectedTeacher.name || selectedTeacher.displayName || selectedTeacher.email || '') : '',
+        topic: topic,
+        timeStart: timeStart,
+        timeEnd: timeEnd,
+        publishTime: '',
+        status: subject && teacherId ? 'confirmed' : 'draft',
+        publishStatus: ''
+      };
+    }
+
+    function updateMakeupConflictPreview(originalId) {
+      const box = document.getElementById('bubbleMakeupConflictWarning');
+      if (!box) return;
+      const original = monthlyPlanSessions.find(function(session) { return String(session.id || session.firebaseDocId || '') === String(originalId); });
+      if (!original) return;
+      box.innerHTML = renderMonthlyPlanConflictWarning(findTeacherConflicts(buildMakeupSessionDraft(original)));
+    }
+
+    async function saveMakeupSession(originalId) {
+      const original = monthlyPlanSessions.find(function(session) { return String(session.id || session.firebaseDocId || '') === String(originalId); });
+      if (!original) return;
+      const draft = buildMakeupSessionDraft(original);
+      const result = getElement('editBubbleResult');
+      if (!draft.date || !draft.timeStart || !draft.timeEnd) {
+        if (result) {
+          result.textContent = 'กรุณากรอกวันที่ เวลาเริ่ม และเวลาจบของคาบชดเชย';
+          result.style.color = '#dc2626';
+        }
+        return;
+      }
+      const conflicts = findTeacherConflicts(draft);
+      if (conflicts.length && !confirm('พบตารางครูชนเวลา ต้องการบันทึกต่อหรือไม่?')) return;
+      const nowText = new Date().toLocaleString('th-TH');
+      const newId = createFirebaseDocId('monthlyPlanSessions');
+      const makeup = Object.assign({}, draft, {
+        id: newId,
+        firebaseDocId: newId,
+        createdAtText: nowText,
+        updatedAtText: nowText
+      });
+      try {
+        await setFirebaseDocument('monthlyPlanSessions', makeup);
+        monthlyPlanSessions.push(makeup);
+        addActivityLog('สร้างคาบชดเชย', (makeup.courseName || '-') + ' · ' + (makeup.date || '-'));
+        closeEditBubble();
+        renderMonthlyPlanSessions();
+        renderMonthlyTeacherConflictControls();
+        renderStudentMonthlyPlanSummary();
+        renderTeacherMonthlyPlanSummary();
+      } catch (error) {
+        console.error('makeup save error:', error);
+        if (result) {
+          result.textContent = 'บันทึกคาบชดเชยไม่สำเร็จ: ' + (error.message || error.code || error);
+          result.style.color = '#dc2626';
+        }
+      }
+    }
+
+    function renderStudentMonthlyPlanSummary() {
+      const dashboard = getElement('studentDashboard');
+      if (!dashboard || !currentStudent || !currentStudent.courseId) return;
+      ensureElement(dashboard, 'studentMonthlyPlanPanel', '<div id="studentMonthlyPlanPanel" class="form-box"><h3>ตารางเรียนรายเดือน</h3><div id="studentMonthlyPlanList" class="status-display"></div></div>');
+      const box = getElement('studentMonthlyPlanList');
+      if (!box) return;
+      const list = monthlyPlanSessions.filter(function(session) {
+        const sameCourse = String(session.courseId || '') === String(currentStudent.courseId || '');
+        const status = session.status || 'draft';
+        if (!sameCourse || status === 'cancelled') return false;
+        if (session.type === 'makeup') return status === 'confirmed';
+        return status === 'holiday';
+      }).sort(function(a, b) {
+        return String(getMonthlySessionDate(a)).localeCompare(String(getMonthlySessionDate(b)));
+      });
+      box.innerHTML = list.length ? list.slice(0, 10).map(function(session) {
+        const labelClass = session.status === 'holiday' ? 'status-absent' : 'status-paid';
+        return '<div class="status-display-row"><span><strong>' + escapeHtml(getMonthlySessionDate(session) || '-') + '</strong><br><span class="mini-muted">' + escapeHtml((session.courseName || getMonthlyPlanCourseName(session)) + ' · ' + (session.subject || '-') + ' · ' + formatMonthlySessionTimeRange(session)) + '</span></span><span class="' + labelClass + '">' + escapeHtml(getMonthlySessionStatusLabel(session)) + '</span></div>';
+      }).join('') : '<div class="notice">ยังไม่มีวันงดเรียนหรือคาบชดเชยที่ประกาศ</div>';
+    }
+
+    function renderTeacherMonthlyPlanSummary() {
+      const dashboard = getElement('teacher-dashboard');
+      if (!dashboard || !currentTeacher) return;
+      ensureElement(dashboard, 'teacherMonthlyPlanPanel', '<div id="teacherMonthlyPlanPanel" class="form-box"><h3>ตารางสอนรายเดือน</h3><div id="teacherMonthlyPlanList" class="status-display"></div></div>');
+      const box = getElement('teacherMonthlyPlanList');
+      if (!box) return;
+      const teacherKey = getTeacherKey(currentTeacher);
+      const list = monthlyPlanSessions.filter(function(session) {
+        const status = session.status || 'draft';
+        return teacherKey && getSessionTeacherKey(session) === teacherKey && status !== 'cancelled' && (status === 'holiday' || session.type === 'makeup');
+      }).sort(function(a, b) {
+        return String(getMonthlySessionDate(a)).localeCompare(String(getMonthlySessionDate(b)));
+      });
+      box.innerHTML = list.length ? list.slice(0, 10).map(function(session) {
+        const labelClass = session.status === 'holiday' ? 'status-absent' : 'status-paid';
+        return '<div class="status-display-row"><span><strong>' + escapeHtml(getMonthlySessionDate(session) || '-') + '</strong><br><span class="mini-muted">' + escapeHtml((session.center || '-') + ' · ' + getMonthlyPlanCourseName(session) + ' · ' + formatMonthlySessionTimeRange(session)) + '</span></span><span class="' + labelClass + '">' + escapeHtml(getMonthlySessionStatusLabel(session)) + '</span></div>';
+      }).join('') : '<div class="notice">ยังไม่มีงดเรียนหรือคาบชดเชยที่ผูกกับครูคนนี้</div>';
     }
 
     function getCourseNameById(courseId) {
@@ -10975,7 +11412,7 @@ function receiptStatusText(status) {
     function isMonthlyBalanceCountableSession(session) {
       const type = session ? session.type : '';
       const status = session ? (session.status || 'draft') : '';
-      return ['onsite','online','ondemand'].includes(type) && status !== 'cancelled' && status !== 'holiday';
+      return ['onsite','online','ondemand','makeup'].includes(type) && status !== 'cancelled' && status !== 'holiday';
     }
 
     function normalizeSubjectWeights(subjectWeights, balanceMode) {
@@ -11080,7 +11517,8 @@ function receiptStatusText(status) {
         overall: calculateSubjectBalanceSummary(list, subjectWeights, balanceMode),
         onsite: calculateSubjectBalanceSummary(list.filter(function(item) { return item.type === 'onsite'; }), subjectWeights, balanceMode),
         online: calculateSubjectBalanceSummary(list.filter(function(item) { return item.type === 'online'; }), subjectWeights, balanceMode),
-        ondemand: calculateSubjectBalanceSummary(list.filter(function(item) { return item.type === 'ondemand'; }), subjectWeights, balanceMode)
+        ondemand: calculateSubjectBalanceSummary(list.filter(function(item) { return item.type === 'ondemand'; }), subjectWeights, balanceMode),
+        makeup: calculateSubjectBalanceSummary(list.filter(function(item) { return item.type === 'makeup'; }), subjectWeights, balanceMode)
       };
     }
 
@@ -11257,7 +11695,8 @@ function receiptStatusText(status) {
         renderMonthlyBalanceTable('Overall', summary.overall) +
         renderMonthlyBalanceTable('Onsite', summary.onsite) +
         renderMonthlyBalanceTable('Online', summary.online) +
-        renderMonthlyBalanceTable('On-demand', summary.ondemand);
+        renderMonthlyBalanceTable('On-demand', summary.ondemand) +
+        renderMonthlyBalanceTable('Makeup', summary.makeup);
     }
 
     function renderMonthlyPlanSessions() {
@@ -11281,8 +11720,8 @@ function receiptStatusText(status) {
         const id = item.id || item.firebaseDocId || '';
         const status = item.status || 'planned';
         const actionButtons = status === 'cancelled'
-          ? '<button class="btn btn-blue" type="button" onclick="' + actionCall('editMonthlyPlanSession', id) + '">ดู / แก้ไข</button>'
-          : '<button class="btn btn-blue" type="button" onclick="' + actionCall('editMonthlyPlanSession', id) + '">แก้ไข</button><button class="btn btn-red" type="button" onclick="' + actionCall('cancelMonthlyPlanSession', id) + '">ยกเลิก</button>';
+          ? '<button class="btn btn-blue" type="button" onclick="' + actionCall('editMonthlyPlanSession', id) + '">ดู / แก้ไข</button><button class="btn btn-green" type="button" onclick="' + actionCall('openMakeupSessionForm', id) + '">สร้างชดเชย</button>'
+          : '<button class="btn btn-blue" type="button" onclick="' + actionCall('editMonthlyPlanSession', id) + '">แก้ไข</button><button class="btn btn-red" type="button" onclick="' + actionCall('cancelMonthlyPlanSession', id) + '">ยกเลิก</button>' + (status === 'holiday' ? '<button class="btn btn-green" type="button" onclick="' + actionCall('openMakeupSessionForm', id) + '">สร้างชดเชย</button>' : '');
         return '<tr>' +
           '<td>' + escapeHtml(getMonthlyPlanMonthLabel(item)) + '</td>' +
           '<td>' + escapeHtml(getMonthlyPlanDateText(item)) + '<br><span class="mini-muted">' + escapeHtml(getMonthlyPlanDayText(item.dayName || '')) + '</span></td>' +
@@ -12750,6 +13189,7 @@ function receiptStatusText(status) {
         monthlyExamLinks: monthlyExamLinks || [],
         monthlyPlans: monthlyPlans || [],
         monthlyPlanSessions: monthlyPlanSessions || [],
+        holidays: holidays || [],
         adminScoreRecords: adminScoreRecords || [],
         scoreReports: scoreReports || [],
         attendanceHistory: typeof pickupHistory !== 'undefined' ? pickupHistory : [],
@@ -12870,11 +13310,12 @@ function receiptStatusText(status) {
     }
 
     const HARD_WIPE_TARGETS = [
-      { key: 'wipeAllSystem', label: 'Wipe ทั้งหมด', collections: ['students', 'payments', 'receipts', 'paymentMonths', 'monthlyQuestions', 'monthlyExamLinks', 'scoreReports', 'adminScoreRecords', 'announcements', 'activityLogs', 'onDemandClips', 'attendanceHistory', 'courses', 'teachers', 'lineGroups', 'settings'], studentUsers: true, dangerous: true },
+      { key: 'wipeAllSystem', label: 'Wipe ทั้งหมด', collections: ['students', 'payments', 'receipts', 'paymentMonths', 'monthlyQuestions', 'monthlyExamLinks', 'monthlyPlans', 'monthlyPlanSessions', 'holidays', 'scoreReports', 'adminScoreRecords', 'announcements', 'activityLogs', 'onDemandClips', 'attendanceHistory', 'courses', 'teachers', 'lineGroups', 'settings'], studentUsers: true, dangerous: true },
       { key: 'students', label: 'นักเรียน', collections: ['students'] },
       { key: 'studentUsers', label: 'บัญชี users ของนักเรียน', studentUsers: true },
       { key: 'finance', label: 'การเงิน / ใบเสร็จ / รอบชำระเงิน', collections: ['payments', 'receipts', 'paymentMonths'] },
       { key: 'scores', label: 'สอบ / คะแนน', collections: ['monthlyQuestions', 'monthlyExamLinks', 'scoreReports', 'adminScoreRecords'] },
+      { key: 'monthlyPlanner', label: 'แผนสอนรายเดือน', collections: ['monthlyPlans', 'monthlyPlanSessions', 'holidays'] },
       { key: 'announcements', label: 'ประกาศ', collections: ['announcements'] },
       { key: 'activityLogs', label: 'ประวัติการแก้ไข', collections: ['activityLogs'] },
       { key: 'onDemandClips', label: 'คลิป On-demand', collections: ['onDemandClips'] },
