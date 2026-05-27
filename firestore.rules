@@ -36,6 +36,24 @@ service cloud.firestore {
         );
     }
 
+    function hasAdminPermission(permissionKey) {
+      return signedIn()
+        && userProfile(request.auth.uid).permissions is list
+        && (
+          permissionKey in userProfile(request.auth.uid).permissions
+          || 'admin.full' in userProfile(request.auth.uid).permissions
+        );
+    }
+
+    function hasMonthlyPlannerAccess() {
+      return signedIn()
+        && (
+          hasAdminPermission('admin.monthlyPlanner')
+          || userProfile(request.auth.uid).role == 'admin'
+          || userProfile(request.auth.uid).appRole in ['SuperAdmin', 'Admin', 'Manager', 'Academic']
+        );
+    }
+
     function ownsExistingDoc() {
       return signedIn() && resource.data.authUid == request.auth.uid;
     }
@@ -145,6 +163,24 @@ service cloud.firestore {
     match /monthlyExamLinks/{docId} {
       allow read: if signedIn();
       allow write: if isAdmin();
+    }
+
+    match /monthlyPlans/{docId} {
+      allow read: if hasMonthlyPlannerAccess();
+      allow create, update: if hasMonthlyPlannerAccess();
+      allow delete: if false;
+    }
+
+    match /monthlyPlanSessions/{docId} {
+      allow read: if hasMonthlyPlannerAccess();
+      allow create, update: if hasMonthlyPlannerAccess();
+      allow delete: if false;
+    }
+
+    match /holidays/{docId} {
+      allow read: if hasMonthlyPlannerAccess();
+      allow create, update: if hasMonthlyPlannerAccess();
+      allow delete: if false;
     }
 
     match /scoreReports/{docId} {
