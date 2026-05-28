@@ -3943,6 +3943,8 @@
       const candidates = [];
       addUniqueLoginCandidate(candidates, normalizedLogin);
       if (matchedTeacher) {
+        // Priority: use authEmail if available (registered in Firebase Auth)
+        addUniqueLoginCandidate(candidates, matchedTeacher.authEmail);
         addUniqueLoginCandidate(candidates, matchedTeacher.email);
         addUniqueLoginCandidate(candidates, matchedTeacher.username && matchedTeacher.username.includes('@') ? matchedTeacher.username : buildLocalEmailFromPhone(matchedTeacher.username || matchedTeacher.phone));
       }
@@ -4001,28 +4003,77 @@
         try {
           result.textContent = 'กำลังเข้าสู่ระบบ...';
           result.style.color = '#0f4cbd';
+          
+          console.log('login-lookup-start', { 
+            loginId: displayLoginId,
+            normalizedLogin: username,
+            rawUsername: rawUsername
+          });
 
           await ensureCoreDataLoaded({ force: true });
           const preMatchedTeacher = findTeacherByLoginId(rawUsername, username, displayLoginId);
           const preMatchedStudent = findStudentByLoginId(rawUsername, username, displayLoginId);
+          
+          console.log('teacher-login-match', {
+            input: displayLoginId,
+            matched: !!preMatchedTeacher,
+            teacherId: preMatchedTeacher?.teacherId,
+            username: preMatchedTeacher?.username,
+            phone: preMatchedTeacher?.phone,
+            authEmail: preMatchedTeacher?.authEmail,
+            authUid: preMatchedTeacher?.authUid,
+            loginKeys: preMatchedTeacher?.loginKeys,
+            email: preMatchedTeacher?.email
+          });
+          
           const loginCandidates = buildAuthLoginCandidates(username, preMatchedTeacher, preMatchedStudent);
           let credential = null;
           let lastSignInError = null;
+          
+          console.log('login-auth-candidates', {
+            candidates: loginCandidates,
+            candidateCount: loginCandidates.length
+          });
+          
           for (const candidate of loginCandidates) {
             try {
+              console.log('login-auth-attempt', { 
+                candidate: candidate,
+                isAuthEmail: preMatchedTeacher && candidate === preMatchedTeacher.authEmail
+              });
               credential = await auth.signInWithEmailAndPassword(candidate, password);
+              console.log('login-auth-success', {
+                candidate: candidate,
+                email: credential.user?.email
+              });
               break;
             } catch (signInError) {
               const code = String(signInError.code || signInError.message || '');
               const isWrongPassword = code.includes('wrong-password') || code.includes('invalid-credential') || code.includes('INVALID_LOGIN_CREDENTIALS');
+              
+              console.warn('login-auth-error', {
+                candidate: candidate,
+                errorCode: signInError.code,
+                errorMessage: signInError.message,
+                isWrongPassword: isWrongPassword
+              });
 
               // รองรับบัญชีที่เคยสร้างจากโค้ดเวอร์ชันเก่า ซึ่งใช้รหัสเริ่มต้น 0000
               // ส่วนเวอร์ชันใหม่ใช้ 000000 เพื่อให้ผ่านเงื่อนไขรหัสผ่านขั้นต่ำของ Firebase
               if (password === '000000' && isWrongPassword) {
                 try {
                   credential = await auth.signInWithEmailAndPassword(candidate, '0000');
+                  console.log('login-auth-success-legacy', {
+                    candidate: candidate,
+                    email: credential.user?.email
+                  });
                   break;
                 } catch (legacySignInError) {
+                  console.warn('login-auth-error-legacy', {
+                    candidate: candidate,
+                    errorCode: legacySignInError.code,
+                    errorMessage: legacySignInError.message
+                  });
                   lastSignInError = legacySignInError;
                 }
               } else {
@@ -4030,7 +4081,17 @@
               }
             }
           }
-          if (!credential) throw lastSignInError || new Error('ไม่สามารถเข้าสู่ระบบได้');
+          
+          if (!credential) {
+            console.error('login-auth-all-failed', {
+              attemptedCandidates: loginCandidates,
+              lastError: lastSignInError?.code,
+              hasTeacherMatch: !!preMatchedTeacher,
+              hasStudentMatch: !!preMatchedStudent,
+              loginId: displayLoginId
+            });
+            throw lastSignInError || new Error('ไม่สามารถเข้าสู่ระบบได้');
+          }
           firebaseUser = credential.user;
           console.info('firebase-auth-success', {
             uid: firebaseUser.uid,
