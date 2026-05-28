@@ -3467,6 +3467,31 @@
       return permissions.includes('admin.full') || permissions.includes(permissionKey);
     }
 
+    function isTeacherRole(role) {
+      const normalized = normalizeAppRole(role);
+      return normalized === 'Teacher' || normalized === 'Assistant' || normalized === 'Manager' || normalized === 'Academic';
+    }
+
+    function canAccessTeacherPanel(profile) {
+      if (!profile) return false;
+      const role = profile.role || profile.appRole;
+      if (profile.status && String(profile.status).toLowerCase() === 'inactive') return false;
+      return isTeacherRole(role) || role === 'admin' || role === 'SuperAdmin' || role === 'Admin';
+    }
+
+    function findTeacherByAuthUid(uid) {
+      return teachers.find(function(t) {
+        return t.authUid === uid;
+      }) || null;
+    }
+
+    function findTeacherByLoginKey(loginId) {
+      if (!loginId) return null;
+      const normalizedLogin = normalizeLoginId(loginId);
+      const displayLoginId = getDisplayLoginId(loginId);
+      return findTeacherByLoginId(loginId, normalizedLogin, displayLoginId);
+    }
+
     function canOpenAdminTab(tabId) {
       const permission = ADMIN_TAB_PERMISSIONS[tabId];
       return !permission || hasPermission(permission);
@@ -4007,6 +4032,11 @@
           }
           if (!credential) throw lastSignInError || new Error('ไม่สามารถเข้าสู่ระบบได้');
           firebaseUser = credential.user;
+          console.info('firebase-auth-success', {
+            uid: firebaseUser.uid,
+            email: firebaseUser.email,
+            loginId: displayLoginId
+          });
 
           // โหลดข้อมูลหลักก่อน เพื่อให้ระบบสามารถเทียบสิทธิ์จาก students / teachers ได้
           // กรณีมี Auth แล้ว แต่ยังไม่ได้สร้าง users/{uid}
@@ -4063,6 +4093,10 @@
           });
 
           if (!profileData && matchedTeacher) {
+            const teacherStatus = String(matchedTeacher.status || 'active').toLowerCase();
+            const normalizedStatus = teacherStatus === 'inactive' || teacherStatus === 'disabled' || teacherStatus === 'blocked' || teacherStatus === 'ปิดใช้งาน'
+              ? 'inactive'
+              : 'active';
             profileData = {
               name: matchedTeacher.name || firebaseEmail || 'Teacher',
               email: matchedTeacher.email || firebaseEmail,
@@ -4071,7 +4105,7 @@
               appRole: normalizeAppRole(matchedTeacher.role || 'Teacher'),
               permissions: getEffectivePermissions(matchedTeacher),
               permissionMode: matchedTeacher.permissionMode || (Array.isArray(matchedTeacher.permissions) ? 'custom' : 'role-default'),
-              status: matchedTeacher.status === 'Inactive' ? 'inactive' : 'active',
+              status: normalizedStatus,
               subject: matchedTeacher.subject || ''
             };
           }
@@ -4129,6 +4163,15 @@
             firebaseUserProfile.permissions = getEffectivePermissions(matchedTeacher);
             firebaseUserProfile.permissionMode = matchedTeacher.permissionMode || (Array.isArray(matchedTeacher.permissions) ? 'custom' : 'role-default');
           }
+          console.info('firebase-profile-resolved', {
+            uid: firebaseUser.uid,
+            role: userRole,
+            appRole: activeAppRole,
+            permissions: firebaseUserProfile.permissions,
+            matchedTeacherId: matchedTeacher && matchedTeacher.id,
+            status: firebaseUserProfile.status,
+            loginId: displayLoginId
+          });
           setSuperAdminMode(userRole === 'admin' && (getEffectivePermissions(firebaseUserProfile).includes('admin.full') || activeAppRole === 'SuperAdmin' || activeAppRole === 'Admin'));
 
           if (userRole === 'admin') {
@@ -4156,6 +4199,15 @@
               status: 'Active',
               role: 'Teacher'
             };
+            // Merge firebaseUserProfile data (including permissions) into teacher object
+            Object.assign(teacher, {
+              permissions: firebaseUserProfile.permissions || teacher.permissions,
+              permissionMode: firebaseUserProfile.permissionMode || teacher.permissionMode,
+              appRole: firebaseUserProfile.appRole || teacher.appRole || normalizeAppRole(teacher.role || 'Teacher'),
+              status: firebaseUserProfile.status || teacher.status,
+              authUid: firebaseUser.uid,
+              email: firebaseUserProfile.email || teacher.email
+            });
             showTeacherPanel(teacher);
             return;
           }
@@ -4668,6 +4720,18 @@
     function showTeacherTab(tabId) {
       if (!canOpenTeacherTab(tabId)) {
         const fallback = findFirstAllowedTeacherTab();
+        const permissions = getEffectivePermissions();
+        const tabPermission = TEACHER_TAB_PERMISSIONS[tabId];
+        console.warn('teacher-tab-permission-denied', {
+          requestedTab: tabId,
+          fallbackTab: fallback,
+          tabRequiredPermission: tabPermission,
+          currentPermissions: permissions,
+          currentTeacherId: currentTeacher && currentTeacher.id,
+          currentTeacherRole: currentTeacher && currentTeacher.role,
+          currentTeacherAppRole: currentTeacher && currentTeacher.appRole,
+          authUid: firebaseUser && firebaseUser.uid
+        });
         if (fallback && fallback !== tabId) {
           alert('บัญชีนี้ไม่มีสิทธิ์เข้าเมนูนี้');
           showTeacherTab(fallback);
