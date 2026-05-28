@@ -10468,13 +10468,82 @@ function receiptStatusText(status) {
       return item ? item.key : '';
     }
 
-    function formatMonthTextFromKey(monthKey) {
+    function normalizeMonthKey(value) {
+      if (!value) return '';
+      const raw = String(value).trim();
+      if (/^\d{4}-\d{2}$/.test(raw)) return raw;
+      if (/^\d{6}$/.test(raw)) return raw.slice(0, 4) + '-' + raw.slice(4);
+
+      const parseThaiYear = function(yearText) {
+        const yearNum = Number(yearText);
+        if (!Number.isFinite(yearNum)) return null;
+        if (yearNum >= 2500 && yearNum <= 2699) return yearNum - 543;
+        if (yearNum >= 1900 && yearNum <= 2099) return yearNum;
+        if (yearNum >= 0 && yearNum <= 99) return yearNum + 2500 - 543;
+        return null;
+      };
+
+      const normalizeText = raw.toLowerCase().replace(/\./g, '').replace(/\s+/g, ' ').trim();
+      const thaiMonths = {
+        'มกราคม': '01', 'ม.ค': '01',
+        'กุมภาพันธ์': '02', 'ก.พ': '02',
+        'มีนาคม': '03', 'มี.ค': '03',
+        'เมษายน': '04', 'เม.ย': '04',
+        'พฤษภาคม': '05', 'พ.ค': '05',
+        'มิถุนายน': '06', 'มิ.ย': '06',
+        'กรกฎาคม': '07', 'ก.ค': '07',
+        'สิงหาคม': '08', 'ส.ค': '08',
+        'กันยายน': '09', 'ก.ย': '09',
+        'ตุลาคม': '10', 'ต.ค': '10',
+        'พฤศจิกายน': '11', 'พ.ย': '11',
+        'ธันวาคม': '12', 'ธ.ค': '12'
+      };
+
+      let month = '';
+      let yearText = '';
+      const parts = normalizeText.split(' ');
+      parts.forEach(function(part) {
+        if (!month && thaiMonths[part]) {
+          month = thaiMonths[part];
+          return;
+        }
+        if (!month && /^(0?[1-9]|1[0-2])$/.test(part)) {
+          month = padNumber(Number(part), 2);
+          return;
+        }
+        if (!yearText && /^(\d{2,4})$/.test(part)) {
+          yearText = part;
+        }
+      });
+
+      if (!month) {
+        const numericMatch = normalizeText.match(/\b(0?[1-9]|1[0-2])\b/);
+        if (numericMatch) month = padNumber(Number(numericMatch[1]), 2);
+      }
+      if (!yearText) {
+        const yearMatch = normalizeText.match(/(\d{2,4})$/);
+        if (yearMatch) yearText = yearMatch[1];
+      }
+
+      const year = parseThaiYear(yearText);
+      if (!month || !year) return '';
+      return String(year) + '-' + month;
+    }
+
+    function getThaiMonthLabel(monthKey, shortForm) {
       if (!/^\d{4}-\d{2}$/.test(String(monthKey || ''))) return '';
       const parts = String(monthKey).split('-');
       const year = Number(parts[0]);
       const monthIndex = Number(parts[1]) - 1;
-      const monthNames = ['มกราคม','กุมภาพันธ์','มีนาคม','เมษายน','พฤษภาคม','มิถุนายน','กรกฎาคม','สิงหาคม','กันยายน','ตุลาคม','พฤศจิกายน','ธันวาคม'];
-      return monthNames[monthIndex] + ' ' + (year + 543);
+      const fullNames = ['มกราคม','กุมภาพันธ์','มีนาคม','เมษายน','พฤษภาคม','มิถุนายน','กรกฎาคม','สิงหาคม','กันยายน','ตุลาคม','พฤศจิกายน','ธันวาคม'];
+      const shortNames = ['ม.ค.','ก.พ.','มี.ค.','เม.ย.','พ.ค.','มิ.ย.','ก.ค.','ส.ค.','ก.ย.','ต.ค.','พ.ย.','ธ.ค.'];
+      if (monthIndex < 0 || monthIndex > 11) return '';
+      const beYear = year + 543;
+      return (shortForm ? shortNames[monthIndex] : fullNames[monthIndex]) + ' ' + (shortForm ? String(beYear).slice(-2) : beYear);
+    }
+
+    function formatMonthTextFromKey(monthKey) {
+      return getThaiMonthLabel(monthKey, false);
     }
 
     function getMonthlyPlanMonthLabel(item) {
@@ -11416,7 +11485,12 @@ function receiptStatusText(status) {
     }
 
     function buildMonthlyPlanFromForm(existingPlan) {
-      const monthKey = getElement('monthlyPlanGeneratorMonthKey') ? getElement('monthlyPlanGeneratorMonthKey').value : '';
+      const monthInput = getElement('monthlyPlanGeneratorMonthKey');
+      const rawMonthKey = monthInput ? monthInput.value : '';
+      const monthKey = normalizeMonthKey(rawMonthKey);
+      if (monthInput && monthKey && monthInput.value !== monthKey) {
+        monthInput.value = monthKey;
+      }
       const center = getElement('monthlyPlanGeneratorCenter') ? getElement('monthlyPlanGeneratorCenter').value : '';
       const courseId = getElement('monthlyPlanGeneratorCourse') ? getElement('monthlyPlanGeneratorCourse').value : '';
       const selectedCourse = courses.find(function(course) { return String(course.id || course.firebaseDocId || '') === String(courseId); });
@@ -11440,7 +11514,8 @@ function receiptStatusText(status) {
     }
 
     function validateMonthlyPlan(plan) {
-      if (!plan.monthKey || !/^\d{4}-\d{2}$/.test(plan.monthKey)) return 'กรุณาเลือกเดือนให้ถูกต้อง';
+      const monthKey = normalizeMonthKey(plan.monthKey || '');
+      if (!monthKey || !/^\d{4}-\d{2}$/.test(monthKey)) return 'กรุณาเลือกเดือนให้ถูกต้อง';
       if (!plan.center) return 'กรุณาเลือกศูนย์';
       if (!plan.courseId || !plan.courseName) return 'กรุณาเลือกคอร์ส';
       if (!plan.pattern || !plan.pattern.onsiteSlots || plan.pattern.onsiteSlots.length < 1) return 'ต้องมี Onsite slot อย่างน้อย 1 รายการ';
@@ -11462,12 +11537,17 @@ function receiptStatusText(status) {
     async function saveMonthlyPlanPattern() {
       const result = getElement('monthlyPlanGeneratorResult');
       const editingId = getElement('editingMonthlyPlanId') ? getElement('editingMonthlyPlanId').value : '';
-      const formMonthKey = getElement('monthlyPlanGeneratorMonthKey') ? getElement('monthlyPlanGeneratorMonthKey').value : '';
+      const rawFormMonthKey = getElement('monthlyPlanGeneratorMonthKey') ? getElement('monthlyPlanGeneratorMonthKey').value : '';
+      const formMonthKey = normalizeMonthKey(rawFormMonthKey);
+      if (getElement('monthlyPlanGeneratorMonthKey') && rawFormMonthKey && formMonthKey && rawFormMonthKey !== formMonthKey) {
+        getElement('monthlyPlanGeneratorMonthKey').value = formMonthKey;
+      }
       const formCenter = getElement('monthlyPlanGeneratorCenter') ? getElement('monthlyPlanGeneratorCenter').value : '';
       const formCourseId = getElement('monthlyPlanGeneratorCourse') ? getElement('monthlyPlanGeneratorCourse').value : '';
       const existingPlan = monthlyPlans.find(function(plan) { return String(plan.id || plan.firebaseDocId || '') === String(editingId); }) ||
         monthlyPlans.find(function(plan) {
-          return plan.monthKey === formMonthKey && plan.center === formCenter && String(plan.courseId || '') === String(formCourseId || '');
+          const planMonthKey = normalizeMonthKey(plan.monthKey || plan.monthText || '');
+          return planMonthKey === formMonthKey && plan.center === formCenter && String(plan.courseId || '') === String(formCourseId || '');
         });
       const plan = buildMonthlyPlanFromForm(existingPlan);
       const validationMessage = validateMonthlyPlan(plan);
@@ -11630,7 +11710,11 @@ function receiptStatusText(status) {
     function renderMonthlyPlanSummary() {
       const box = getElement('monthlyPlanSummaryBox');
       if (!box) return;
-      const monthKey = getElement('monthlyPlanGeneratorMonthKey') ? getElement('monthlyPlanGeneratorMonthKey').value : '';
+      const rawMonthKey = getElement('monthlyPlanGeneratorMonthKey') ? getElement('monthlyPlanGeneratorMonthKey').value : '';
+      const monthKey = normalizeMonthKey(rawMonthKey);
+      if (getElement('monthlyPlanGeneratorMonthKey') && rawMonthKey && monthKey && rawMonthKey !== monthKey) {
+        getElement('monthlyPlanGeneratorMonthKey').value = monthKey;
+      }
       const courseId = getElement('monthlyPlanGeneratorCourse') ? getElement('monthlyPlanGeneratorCourse').value : '';
       const summary = getMonthlyPlanSummary(monthKey, courseId);
       const monthText = formatMonthTextFromKey(monthKey) || 'ยังไม่เลือกเดือน';
