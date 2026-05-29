@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Teacher Login Debug</title>
+    <style>
+        body { font-family: monospace; padding: 20px; background: #1e1e1e; color: #d4d4d4; }
+        .section { margin: 20px 0; padding: 10px; background: #2d2d2d; border-left: 3px solid #007acc; }
+        .label { color: #4ec9b0; font-weight: bold; }
+        .success { color: #4ec9b0; }
+        .error { color: #f48771; }
+        .info { color: #9cdcfe; }
+        code { background: #1e1e1e; padding: 2px 6px; }
+    </style>
+</head>
+<body>
+    <h1>Teacher Login Debug Console</h1>
+    <div id="output"></div>
+
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-auth.js"></script>
+
+    <script>
+        const config = {
+            apiKey: "AIzaSyDPQqJZvvV49g-kMr9YSQB3k3N9xxYqwIc",
+            authDomain: "idea-club-lms.firebaseapp.com",
+            projectId: "idea-club-lms",
+            storageBucket: "idea-club-lms.appspot.com",
+            messagingSenderId: "842623819099",
+            appId: "1:842623819099:web:f2a72a7fac4f8eef8ea72a",
+            measurementId: "G-YCPG3L2WJY"
+        };
+
+        firebase.initializeApp(config);
+        const db = firebase.firestore();
+        const auth = firebase.auth();
+        const output = document.getElementById('output');
+
+        function log(title, content, type = 'info') {
+            const div = document.createElement('div');
+            div.className = 'section';
+            let html = `<div class="${type}">${title}</div>`;
+            if (typeof content === 'object') {
+                html += `<pre>${JSON.stringify(content, null, 2)}</pre>`;
+            } else {
+                html += `<div>${content}</div>`;
+            }
+            div.innerHTML = html;
+            output.appendChild(div);
+            console.log(title, content);
+        }
+
+        async function debugTeacherLogin() {
+            const loginId = '0831234003';
+            
+            try {
+                log('🔍 Starting debug for login ID', loginId);
+
+                // 1. Check teachers collection
+                log('1️⃣ Checking teachers collection...', 'Loading...');
+                const teachersSnapshot = await db.collection('teachers')
+                    .where('phone', '==', loginId)
+                    .limit(1)
+                    .get();
+                
+                if (!teachersSnapshot.empty) {
+                    const teacher = teachersSnapshot.docs[0];
+                    const teacherData = teacher.data();
+                    log('✅ Found teacher by phone', {
+                        docId: teacher.id,
+                        ...teacherData
+                    }, 'success');
+
+                    // 2. Check if auth user exists
+                    if (teacherData.authUid) {
+                        log('2️⃣ Checking Firebase Auth...', `Looking for authUid: ${teacherData.authUid}`, 'info');
+                        
+                        try {
+                            const userRecord = await fetch(
+                                `https://www.googleapis.com/identitytoolkit/v3/relyingparty/getAccountInfo?key=AIzaSyDPQqJZvvV49g-kMr9YSQB3k3N9xxYqwIc`,
+                                {
+                                    method: 'POST',
+                                    body: JSON.stringify({ idToken: await auth.currentUser?.getIdToken() })
+                                }
+                            );
+                            log('⚠️ Auth check', 'Requires authentication, check Firebase Console manually', 'error');
+                        } catch(e) {
+                            log('⚠️ Auth check', 'Requires authentication, check Firebase Console manually', 'error');
+                        }
+                    } else {
+                        log('❌ Auth UID missing', 'Teacher record has no authUid', 'error');
+                    }
+
+                    // 3. Check users/{uid} if authUid exists
+                    if (teacherData.authUid) {
+                        const userDoc = await db.collection('users').doc(teacherData.authUid).get();
+                        if (userDoc.exists) {
+                            log('✅ Found users document', userDoc.data(), 'success');
+                        } else {
+                            log('❌ users/{uid} missing', `No users/${teacherData.authUid}`, 'error');
+                        }
+                    }
+                } else {
+                    log('❌ Teacher not found', `No teacher with phone=${loginId}`, 'error');
+                    
+                    // Try other lookups
+                    const byUsername = await db.collection('teachers')
+                        .where('username', '==', loginId)
+                        .limit(1)
+                        .get();
+                    
+                    if (!byUsername.empty) {
+                        log('📌 Found by username', byUsername.docs[0].data(), 'info');
+                    }
+
+                    const byTeacherId = await db.collection('teachers')
+                        .where('teacherId', '==', loginId)
+                        .limit(1)
+                        .get();
+                    
+                    if (!byTeacherId.empty) {
+                        log('📌 Found by teacherId', byTeacherId.docs[0].data(), 'info');
+                    }
+                }
+
+                log('✅ Debug complete', 'Check console and Firebase Console for more details', 'success');
+
+            } catch (error) {
+                log('❌ Debug error', error.message, 'error');
+            }
+        }
+
+        // Auto-run debug
+        setTimeout(debugTeacherLogin, 1000);
+    </script>
+</body>
+</html>

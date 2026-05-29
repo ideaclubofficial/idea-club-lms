@@ -4308,25 +4308,39 @@
           });
           setSuperAdminMode(userRole === 'admin' && (getEffectivePermissions(firebaseUserProfile).includes('admin.full') || activeAppRole === 'SuperAdmin' || activeAppRole === 'Admin'));
 
-          console.log('teacher-route-start', {
+          // ============================================================
+          // STAFF ROUTING (Teacher/Admin) - MUST BE BEFORE STUDENT CHECK
+          // ============================================================
+          console.log('staff-route-check', {
             userRole: userRole,
             appRole: activeAppRole,
             matchedTeacherId: matchedTeacher && matchedTeacher.id,
+            matchedTeacherStatus: matchedTeacher && matchedTeacher.status,
             loginId: displayLoginId
           });
 
-          const isTeacherRoute = userRole === 'teacher' || activeAppRole === 'Teacher';
-          const isAdminRoute = userRole === 'admin' || ['SuperAdmin', 'Admin', 'Manager', 'Academic', 'Finance'].includes(activeAppRole);
-
-          if (isAdminRoute) {
-            console.log('teacher-route-success', { route: 'admin', userRole, appRole: activeAppRole });
+          // Check if this is an ADMIN login
+          const isAdminProfile = userRole === 'admin' || ['SuperAdmin', 'Admin', 'Manager', 'Academic', 'Finance'].includes(activeAppRole);
+          if (isAdminProfile) {
+            console.log('admin-route-execute', {
+              userRole: userRole,
+              appRole: activeAppRole,
+              matchedTeacherId: matchedTeacher && matchedTeacher.id
+            });
             currentTeacher = matchedTeacher || null;
+            currentStudent = null;
             showAdminPanel(true);
-            return;
+            return; // EXIT HERE - DO NOT CONTINUE TO STUDENT VALIDATION
           }
 
-          if (isTeacherRoute) {
-            console.log('teacher-route-success', { route: 'teacher', userRole, appRole: activeAppRole });
+          // Check if this is a TEACHER login
+          const isTeacherProfile = isTeacherRole(activeAppRole) || userRole === 'teacher' || isTeacherRole(userRole);
+          if (isTeacherProfile) {
+            console.log('teacher-route-execute', {
+              userRole: userRole,
+              appRole: activeAppRole,
+              matchedTeacherId: matchedTeacher && matchedTeacher.id
+            });
             const teacher = matchedTeacher || teachers.find(function(t) {
               const teacherPhone = String(t.phone || t.username || '').replace(/[^0-9]/g, '');
               return t.authUid === firebaseUser.uid ||
@@ -4354,15 +4368,38 @@
               authUid: firebaseUser.uid,
               email: firebaseUserProfile.email || teacher.email
             });
+            currentStudent = null;
+            currentTeacher = teacher;
             showTeacherPanel(teacher);
-            return;
+            console.log('teacher-route-success', {
+              teacherId: teacher.teacherId || teacher.id,
+              role: teacher.role,
+              appRole: teacher.appRole
+            });
+            return; // EXIT HERE - DO NOT CONTINUE TO STUDENT VALIDATION
           }
+
+          // ============================================================
+          // STUDENT ROUTING - ONLY IF NOT STAFF
+          // ============================================================
+          console.log('student-route-check', {
+            userRole: userRole,
+            appRole: activeAppRole,
+            hasMatchedStudent: !!matchedStudent,
+            loginId: displayLoginId
+          });
 
           const student = matchedStudent || findStudentByLoginId(rawUsername, firebaseEmail, displayLoginId) || students.find(function(s) {
             return s.authUid === firebaseUser.uid || s.email === firebaseEmail;
           });
 
           if (!student) {
+            console.warn('student-not-found', {
+              userRole: userRole,
+              appRole: activeAppRole,
+              loginId: displayLoginId,
+              firebaseEmail: firebaseEmail
+            });
             result.textContent = 'ไม่พบบัญชีนักเรียน กรุณาติดต่อเจ้าหน้าที่';
             result.style.color = '#dc2626';
             return;
