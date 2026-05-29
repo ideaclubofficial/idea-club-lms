@@ -335,7 +335,7 @@
         <div class="notice" style="margin-top:18px;">
           <strong>วิธีเข้าสู่ระบบ</strong>
           <p>• ใช้เบอร์โทรศัพท์หรือ Member ID</p>
-          <p>• รหัสผ่านเริ่มต้นคือ <strong>000000</strong></p>
+          <p>• ใช้รหัสผ่านที่ท่านลงทะเบียนไว้</p>
           <p>• สมัครสมาชิกแล้วเข้าสู่ระบบได้ทันที</p>
           <p>• หากเข้าสู่ระบบไม่ได้ กรุณาติดต่อเจ้าหน้าที่ผ่าน LINE</p>
         </div>
@@ -3241,6 +3241,7 @@
 
     async function syncStudentUserProfile(student, authUid) {
       if (!firebaseReady || !db || !student) return;
+      student = sanitizeStudentProfile(student);
       const uid = String(authUid || student.authUid || '').trim();
       if (!uid) return;
       const studentEmail = String(student.email || student.authEmail || buildStudentAuthEmail(student) || '').trim();
@@ -3250,6 +3251,9 @@
         authUid: uid,
         accountType: 'student',
         role: 'student',
+        appRole: 'student',
+        permissions: [],
+        permissionMode: 'student',
         status: String(student.status || 'active').toLowerCase() === 'active' ? 'active' : 'inactive',
         memberId: memberId,
         studentId: String(student.studentId || student.memberId || memberId),
@@ -3263,6 +3267,7 @@
         grade: student.grade || '',
         school: student.school || '',
         preferredLocation: student.preferredLocation || '',
+        loginId: student.loginId || student.phone || student.memberId || student.studentId || studentEmail,
         loginKeys: buildLoginKeys({
           phone: student.phone,
           email: studentEmail,
@@ -3278,6 +3283,9 @@
       if (PRODUCTION_MODE && !firebaseUser) throw new Error('กรุณาเข้าสู่ระบบก่อนบันทึกข้อมูล');
       const docId = String(item.firebaseDocId || item.id || createFirebaseDocId(collectionName));
       const ref = db.collection(collectionName).doc(docId);
+      if (collectionName === 'students' && item) {
+        item = sanitizeStudentProfile(item);
+      }
       const docSnap = await ref.get();
       const cleanItem = buildFirebasePayload(item, docId, !docSnap.exists);
 
@@ -3549,6 +3557,10 @@
       Viewer: {
         label: 'Viewer / ดูข้อมูลเท่านั้น',
         permissions: ['admin.dashboard','teacher.dashboard']
+      },
+      Student: {
+        label: 'Student / นักเรียน',
+        permissions: []
       }
     };
 
@@ -3656,6 +3668,7 @@
 
     function getCurrentAppRole() {
       const record = getActiveAccessRecord() || {};
+      if (isStudentAccount(record)) return 'Student';
       if (record.appRole) return normalizeAppRole(record.appRole);
       if (record.role && ROLE_DEFINITIONS[record.role]) return normalizeAppRole(record.role);
       if (firebaseUserProfile && firebaseUserProfile.appRole) return normalizeAppRole(firebaseUserProfile.appRole);
@@ -3666,6 +3679,9 @@
 
     function getEffectivePermissions(record) {
       const source = record || getActiveAccessRecord() || {};
+      if (isStudentAccount(source) || String(source.accountType || '').trim().toLowerCase() === 'student') {
+        return [];
+      }
       const role = normalizeAppRole(source.appRole || source.role || getCurrentAppRole());
       if (source.permissionMode === 'custom' && Array.isArray(source.permissions)) return source.permissions.slice();
       if (Array.isArray(source.permissions) && source.permissions.length) return source.permissions.slice();
@@ -3680,6 +3696,83 @@
     function isTeacherRole(role) {
       const normalized = normalizeAppRole(role);
       return normalized === 'Teacher' || normalized === 'Assistant' || normalized === 'Manager' || normalized === 'Academic';
+    }
+
+    function isStudentRole(role) {
+      return String(role || '').trim().toLowerCase() === 'student';
+    }
+
+    function isAdminRole(role) {
+      const normalized = normalizeAppRole(role);
+      return ['SuperAdmin', 'Admin', 'Manager', 'Academic', 'Finance'].includes(normalized) || String(role || '').trim().toLowerCase() === 'admin';
+    }
+
+    function isStaffRole(role) {
+      return isTeacherRole(role) || isAdminRole(role);
+    }
+
+    function sanitizeStudentProfile(profile) {
+      if (!profile || typeof profile !== 'object') return {
+        role: 'student',
+        appRole: 'student',
+        accountType: 'student',
+        permissions: [],
+        permissionMode: 'student',
+        status: 'active'
+      };
+      const clean = Object.assign({}, profile);
+      clean.role = 'student';
+      clean.appRole = 'student';
+      clean.accountType = 'student';
+      clean.status = String(clean.status || 'active').toLowerCase() === 'active' ? 'active' : 'inactive';
+      if (!Array.isArray(clean.permissions)) {
+        clean.permissions = [];
+      } else {
+        clean.permissions = clean.permissions.filter(function(permission) {
+          return !String(permission || '').startsWith('admin.') && !String(permission || '').startsWith('teacher.');
+        });
+      }
+      clean.permissions = [];
+      clean.permissionMode = 'student';
+      if (clean.appRole && String(clean.appRole || '').toLowerCase() !== 'student') {
+        clean.appRole = 'student';
+      }
+      delete clean.admin;
+      delete clean.teacher;
+      return clean;
+    }
+
+    function isStudentAccount(profile) {
+      if (!profile || typeof profile !== 'object') return false;
+      const role = String(profile.role || profile.accountType || profile.appRole || '').trim().toLowerCase();
+      return role === 'student';
+    }
+
+    function isStaffAccount(profile) {
+      if (!profile || typeof profile !== 'object') return false;
+      const role = String(profile.role || profile.appRole || '').trim();
+      return isTeacherRole(role) || isAdminRole(role);
+    }
+
+    function sanitizeTeacherProfile(profile) {
+      if (!profile || typeof profile !== 'object') return null;
+      const clean = Object.assign({}, profile);
+      clean.accountType = 'teacher';
+      clean.role = String(clean.role || clean.appRole || 'Teacher');
+      clean.appRole = normalizeAppRole(clean.appRole || clean.role || 'Teacher');
+      if (!Array.isArray(clean.permissions)) {
+        clean.permissions = [];
+      }
+      if (!clean.loginKeys || !clean.loginKeys.length) {
+        clean.loginKeys = buildLoginKeys({
+          phone: clean.phone,
+          username: clean.username,
+          email: clean.email,
+          authEmail: clean.authEmail,
+          teacherId: clean.teacherId
+        });
+      }
+      return clean;
     }
 
     function canAccessTeacherPanel(profile) {
@@ -3884,6 +3977,7 @@
     let currentStudentCourseId = null;
     let currentStudent = null;
     let currentTeacher = null;
+    let currentAdmin = null;
 
     const paymentMonths = [];
     const lineGroups = [];
@@ -4139,6 +4233,7 @@
         phone: teacher.phone || '',
         authEmail: teacher.authEmail || teacherEmail,
         email: teacherEmail,
+        loginId: teacher.loginId || teacher.teacherId || teacher.username || teacher.phone || teacherEmail,
         loginKeys: buildLoginKeys({
           phone: teacher.phone,
           username: teacher.username,
@@ -4548,6 +4643,13 @@
             };
           }
 
+          if (profileData && String(profileData.role || '').toLowerCase() === 'student') {
+            profileData = sanitizeStudentProfile(profileData);
+          }
+          if (matchedStudent && profileData) {
+            profileData = sanitizeStudentProfile(profileData);
+          }
+
           if (!profileData) {
             result.textContent = 'บัญชีนี้ยังไม่มีสิทธิ์ใช้งาน กรุณาติดต่อเจ้าหน้าที่';
             result.style.color = '#dc2626';
@@ -4579,11 +4681,17 @@
           }
 
           const userRole = firebaseUserProfile.role || 'student';
-          const activeAppRole = userRole === 'student'
-            ? ''
+          const isStudentProfile = String(firebaseUserProfile.accountType || firebaseUserProfile.role || firebaseUserProfile.appRole || '').trim().toLowerCase() === 'student';
+          const activeAppRole = isStudentProfile
+            ? 'student'
             : normalizeAppRole(firebaseUserProfile.appRole || (matchedTeacher ? matchedTeacher.role : (userRole === 'admin' ? 'SuperAdmin' : 'Teacher')));
-          if (activeAppRole) firebaseUserProfile.appRole = activeAppRole;
-          if (userRole === 'student' && firebaseUserProfile.appRole) delete firebaseUserProfile.appRole;
+          firebaseUserProfile.appRole = activeAppRole;
+          if (isStudentProfile) {
+            firebaseUserProfile.role = 'student';
+            firebaseUserProfile.accountType = 'student';
+            firebaseUserProfile.permissions = [];
+            firebaseUserProfile.permissionMode = 'student';
+          }
           if (matchedTeacher && (!Array.isArray(firebaseUserProfile.permissions) || !firebaseUserProfile.permissions.length)) {
             firebaseUserProfile.permissions = getEffectivePermissions(matchedTeacher);
             firebaseUserProfile.permissionMode = matchedTeacher.permissionMode || (Array.isArray(matchedTeacher.permissions) ? 'custom' : 'role-default');
@@ -4778,6 +4886,19 @@
       }
       currentStudent = student;
       currentTeacher = null;
+      currentAdmin = null;
+      firebaseUserProfile = sanitizeStudentProfile(Object.assign({}, student));
+      setSuperAdminMode(false);
+      ['superAdminTeacherLink', 'superAdminAdminLink'].forEach(function(id) {
+        const item = getElement(id);
+        if (item) item.classList.add('hidden');
+      });
+      console.log('student-ui-lock-applied', {
+        studentId: student.id || student.studentId || student.memberId || '-',
+        phone: student.phone || '-',
+        role: 'student',
+        accountType: 'student'
+      });
       getElement('studentLoginResult').textContent = 'เข้าสู่ระบบสำเร็จ';
       getElement('studentLoginResult').style.color = '#0f4cbd';
       getElement('mainMenu').classList.add('hidden');
@@ -4866,6 +4987,10 @@
         grade: registerGrade,
         preferredLocation: registerLocation,
         role: 'student',
+        appRole: 'student',
+        accountType: 'student',
+        permissions: [],
+        permissionMode: 'student',
         status: 'active'
       };
 
@@ -4916,6 +5041,10 @@
         status: 'active',
         learningStatus: 'เรียนอยู่',
         role: 'student',
+        appRole: 'student',
+        accountType: 'student',
+        permissions: [],
+        permissionMode: 'student',
         loginId: phone || autoMemberId || studentEmail,
         loginKeys: buildLoginKeys({
           phone: phone,
@@ -4935,6 +5064,9 @@
             authUid: authUid,
             accountType: 'student',
             role: 'student',
+            appRole: 'student',
+            permissions: [],
+            permissionMode: 'student',
             status: 'active',
             memberId: autoMemberId,
             studentId: autoMemberId,
@@ -5159,6 +5291,10 @@
     }
 
     function showStudentPanelForAdmin() {
+      if (currentStudent || isStudentAccount(getActiveAccessRecord())) {
+        alert('บัญชีนักเรียนไม่มีสิทธิ์เข้าหน้านี้');
+        return;
+      }
       currentStudent = null;
       currentTeacher = null;
       hideAllMain();
@@ -5172,12 +5308,22 @@
     }
 
     function showTeacherPanelForAdmin() {
+      if (currentStudent || isStudentAccount(getActiveAccessRecord())) {
+        console.log('student-staff-entry-blocked', { action: 'showTeacherPanelForAdmin', user: getActiveAccessRecord() });
+        alert('บัญชีนักเรียนไม่มีสิทธิ์เข้าหน้านี้');
+        return;
+      }
       showTeacherPanel({ name: getAdminDisplayNameFallback(), username: firebaseUser && firebaseUser.email ? firebaseUser.email : 'admin', status: 'Active', role: 'SuperAdmin', appRole: 'SuperAdmin', permissions: getDefaultPermissionsForRole('SuperAdmin'), permissionMode: 'custom' });
       setSuperAdminMode(true);
       refreshProfileBox();
     }
 
     function showAdminPanelForAdmin() {
+      if (currentStudent || isStudentAccount(getActiveAccessRecord())) {
+        console.log('student-staff-entry-blocked', { action: 'showAdminPanelForAdmin', user: getActiveAccessRecord() });
+        alert('บัญชีนักเรียนไม่มีสิทธิ์เข้าหน้านี้');
+        return;
+      }
       currentStudent = null;
       currentTeacher = null;
       showAdminPanel(true);
@@ -5196,6 +5342,11 @@
     }
 
     function showTeacherPanel(teacher) {
+      if (currentStudent || isStudentAccount(getActiveAccessRecord())) {
+        console.log('student-staff-entry-blocked', { action: 'showTeacherPanel', user: getActiveAccessRecord() });
+        alert('บัญชีนักเรียนไม่มีสิทธิ์เข้าหน้านี้');
+        return;
+      }
       currentStudent = null;
       currentTeacher = teacher || null;
       hideAllMain();
@@ -5662,6 +5813,11 @@
     }
 
     function showAdminPanel(skipCheck) {
+      if (isStudentAccount(getActiveAccessRecord()) || currentStudent) {
+        console.log('student-staff-entry-blocked', { action: 'showAdminPanel', user: getActiveAccessRecord() });
+        alert('บัญชีนักเรียนไม่มีสิทธิ์เข้าหน้านี้');
+        return;
+      }
       if (!skipCheck) {
         if (PRODUCTION_MODE) {
           if (!firebaseUser || !firebaseUserProfile || firebaseUserProfile.role !== 'admin') {
@@ -6042,6 +6198,12 @@
           s.status = learningStatus;
           s.learningStatus = learningStatus;
           s.role = 'student';
+          s.appRole = 'student';
+          s.accountType = 'student';
+          s.permissions = [];
+          s.permissionMode = 'student';
+          delete s.admin;
+          delete s.teacher;
           s.loginId = s.loginId || s.memberId || s.studentId || s.phone || s.email;
           s.loginKeys = buildLoginKeys({
             phone: s.phone,
@@ -6120,6 +6282,10 @@
             status: 'active',
             learningStatus: 'เรียนอยู่',
             role: 'student',
+            appRole: 'student',
+            accountType: 'student',
+            permissions: [],
+            permissionMode: 'student',
             loginId: phone || autoMemberId || studentEmail,
             loginKeys: buildLoginKeys({
               phone: phone,
@@ -6302,6 +6468,8 @@
                 grade: s.grade || '',
                 preferredLocation: s.preferredLocation || '',
                 role: 'student',
+                accountType: 'student',
+                permissions: [],
                 updatedAt: firebase.firestore.FieldValue.serverTimestamp()
               }, { merge: true });
             }
@@ -6435,7 +6603,9 @@
       const editingId = getElement('editingTeacherId').value;
       const name = getElement('teacherName').value.trim();
       const subject = getElement('teacherSubject').value;
-      const username = getElement('teacherUsername').value.trim();
+      const teacherUsername = getElement('teacherUsername').value.trim();
+      const username = teacherUsername;
+      const phone = teacherUsername;
       const branch = getElement('teacherBranch').value;
       const role = getElement('teacherRole') ? getElement('teacherRole').value : 'Teacher';
       const permissions = getCheckedPermissionValues('.teacher-permission:checked');
