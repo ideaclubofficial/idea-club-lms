@@ -6,6 +6,10 @@ service cloud.firestore {
       return request.auth != null;
     }
 
+    function userProfileExists() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).exists;
+    }
+
     function userProfile(uid) {
       return get(/databases/$(database)/documents/users/$(uid)).data;
     }
@@ -29,6 +33,7 @@ service cloud.firestore {
 
     function isTeacher() {
       return signedIn()
+        && userProfileExists()
         && (
           userProfile(request.auth.uid).role == 'teacher'
           || userProfile(request.auth.uid).role == 'admin'
@@ -36,8 +41,13 @@ service cloud.firestore {
         );
     }
 
+    function canReadCollection() {
+      return signedIn() && (isAdmin() || isTeacher());
+    }
+
     function hasAdminPermission(permissionKey) {
       return signedIn()
+        && userProfileExists()
         && userProfile(request.auth.uid).permissions is list
         && (
           permissionKey in userProfile(request.auth.uid).permissions
@@ -47,6 +57,7 @@ service cloud.firestore {
 
     function hasMonthlyPlannerAccess() {
       return signedIn()
+        && userProfileExists()
         && (
           hasAdminPermission('admin.monthlyPlanner')
           || userProfile(request.auth.uid).role == 'admin'
@@ -113,14 +124,14 @@ service cloud.firestore {
     }
 
     match /students/{docId} {
-      allow read: if isAdmin() || isTeacher() || ownsExistingDoc();
+      allow read: if canReadCollection() || ownsExistingDoc();
       allow create: if isAdmin() || ownsIncomingDoc();
       allow update: if isAdmin() || (ownsExistingDoc() && ownsIncomingDoc());
       allow delete: if isAdmin();
     }
 
     match /payments/{docId} {
-      allow read: if isAdmin() || isFinance() || isPaymentOwner();
+      allow read: if isAdmin() || isFinance() || isPaymentOwner() || isTeacher();
       // Payment records must be created by Admin/Finance or backend workflows only.
       // Students should not create payment documents directly.
       allow create: if isAdmin() || isFinance();
@@ -131,7 +142,7 @@ service cloud.firestore {
     }
 
     match /receipts/{docId} {
-      allow read: if isAdmin() || ownsExistingDoc();
+      allow read: if canReadCollection() || ownsExistingDoc();
       allow write: if isAdmin();
     }
 
@@ -141,7 +152,7 @@ service cloud.firestore {
     }
 
     match /teachers/{docId} {
-      allow read: if isAdmin() || isTeacher();
+      allow read: if canReadCollection();
       allow write: if isAdmin();
     }
 
@@ -166,19 +177,19 @@ service cloud.firestore {
     }
 
     match /monthlyPlans/{docId} {
-      allow read: if hasMonthlyPlannerAccess();
+      allow read: if hasMonthlyPlannerAccess() || isTeacher();
       allow create, update: if hasMonthlyPlannerAccess();
       allow delete: if false;
     }
 
     match /monthlyPlanSessions/{docId} {
-      allow read: if hasMonthlyPlannerAccess();
+      allow read: if hasMonthlyPlannerAccess() || isTeacher();
       allow create, update: if hasMonthlyPlannerAccess();
       allow delete: if false;
     }
 
     match /holidays/{docId} {
-      allow read: if hasMonthlyPlannerAccess();
+      allow read: if hasMonthlyPlannerAccess() || isTeacher();
       allow create, update: if hasMonthlyPlannerAccess();
       allow delete: if false;
     }
@@ -189,12 +200,22 @@ service cloud.firestore {
     }
 
     match /adminScoreRecords/{docId} {
-      allow read: if isAdmin() || isTeacher();
+      allow read: if canReadCollection();
       allow write: if isAdmin();
     }
 
     match /announcements/{docId} {
       allow read: if signedIn();
+      allow write: if isAdmin();
+    }
+
+    match /courseTeachingSettings/{docId} {
+      allow read: if canReadCollection();
+      allow write: if isAdmin();
+    }
+
+    match /teacherPreferenceRules/{docId} {
+      allow read: if canReadCollection();
       allow write: if isAdmin();
     }
 

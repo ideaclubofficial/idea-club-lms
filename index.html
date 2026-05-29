@@ -3893,25 +3893,98 @@
       return String(value || '').trim().toLowerCase();
     }
 
+    function normalizeLoginKey(value) {
+      // Normalize login key: trim, lowercase, remove extra spaces
+      return String(value || '').trim().toLowerCase();
+    }
+
     function findTeacherByLoginId(rawLogin, normalizedLogin, displayLoginId) {
       const cleanLogin = cleanLoginDigits(displayLoginId || rawLogin);
       const loginText = normalizeLoginCompare(rawLogin);
       const normalizedText = normalizeLoginCompare(normalizedLogin);
       const displayText = normalizeLoginCompare(displayLoginId);
-      return teachers.find(function(t) {
-        const teacherPhone = cleanLoginDigits(t.phone || t.username || '');
-        return normalizeLoginCompare(t.authUid) === displayText ||
-          normalizeLoginCompare(t.email) === normalizedText ||
-          normalizeLoginCompare(t.email) === loginText ||
-          normalizeLoginCompare(t.username) === normalizedText ||
-          normalizeLoginCompare(t.username) === loginText ||
-          normalizeLoginCompare(t.username) === displayText ||
-          normalizeLoginCompare(t.teacherId) === loginText ||
-          normalizeLoginCompare(t.teacherId) === displayText ||
-          normalizeLoginCompare(t.id) === loginText ||
-          normalizeLoginCompare(t.id) === displayText ||
-          (cleanLogin && teacherPhone === cleanLogin);
-      }) || null;
+      
+      if (!teachers || !teachers.length) {
+        console.warn('findTeacherByLoginId-empty', { 
+          teachers: !teachers,
+          length: teachers ? teachers.length : 0
+        });
+        return null;
+      }
+
+      const matchedTeacher = teachers.find(function(t) {
+        // Prepare all possible teacher fields to match
+        const teacherPhone = cleanLoginDigits(t.phone || t.phoneNumber || '');
+        const teacherUsername = normalizeLoginKey(t.username || '');
+        const teacherTeacherId = normalizeLoginKey(t.teacherId || '');
+        const teacherLoginId = normalizeLoginKey(t.loginId || '');
+        const teacherEmail = normalizeLoginKey(t.email || '');
+        const teacherAuthEmail = normalizeLoginKey(t.authEmail || '');
+        const teacherId = normalizeLoginKey(t.id || '');
+        const teacherAuthUid = normalizeLoginKey(t.authUid || '');
+
+        const isPhoneMatch = cleanLogin && teacherPhone === cleanLogin;
+        const isUsernameMatch = teacherUsername === loginText || 
+                               teacherUsername === normalizedText || 
+                               teacherUsername === displayText;
+        const isTeacherIdMatch = teacherTeacherId === loginText || 
+                                teacherTeacherId === displayText;
+        const isLoginIdMatch = teacherLoginId === loginText || 
+                              teacherLoginId === normalizedText ||
+                              teacherLoginId === displayText;
+        const isEmailMatch = teacherEmail === normalizedText || 
+                            teacherEmail === loginText;
+        const isAuthEmailMatch = teacherAuthEmail === normalizedText || 
+                                teacherAuthEmail === loginText;
+        const isIdMatch = teacherId === loginText || 
+                         teacherId === displayText;
+        const isAuthUidMatch = teacherAuthUid === displayText;
+
+        const matched = isPhoneMatch || isUsernameMatch || isTeacherIdMatch || 
+                       isLoginIdMatch || isEmailMatch || isAuthEmailMatch || 
+                       isIdMatch || isAuthUidMatch;
+
+        if (matched) {
+          console.log('findTeacherByLoginId-match-detail', {
+            input: displayLoginId,
+            teacherId: t.id,
+            teacherTeacherId: t.teacherId,
+            matchReasons: {
+              isPhoneMatch: isPhoneMatch,
+              isUsernameMatch: isUsernameMatch,
+              isTeacherIdMatch: isTeacherIdMatch,
+              isLoginIdMatch: isLoginIdMatch,
+              isEmailMatch: isEmailMatch,
+              isAuthEmailMatch: isAuthEmailMatch,
+              isIdMatch: isIdMatch,
+              isAuthUidMatch: isAuthUidMatch
+            }
+          });
+        }
+
+        return matched;
+      });
+
+      if (!matchedTeacher) {
+        console.warn('findTeacherByLoginId-no-match', {
+          input: displayLoginId,
+          searchTerms: { loginText, normalizedText, displayText, cleanLogin },
+          teachersCount: teachers.length,
+          sampleTeachers: teachers.slice(0, 2).map(function(t) {
+            return {
+              id: t.id,
+              teacherId: t.teacherId,
+              username: t.username,
+              phone: t.phone,
+              email: t.email,
+              authEmail: t.authEmail,
+              loginId: t.loginId
+            };
+          })
+        });
+      }
+
+      return matchedTeacher || null;
     }
 
     function findStudentByLoginId(rawLogin, normalizedLogin, displayLoginId) {
