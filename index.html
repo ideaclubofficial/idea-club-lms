@@ -4395,6 +4395,19 @@
       }
     }
 
+    async function signInExistingAuthForRegistration(email, password) {
+      if (!firebaseReady || !auth || !email || !password) return null;
+      const credential = await auth.signInWithEmailAndPassword(email, password);
+      firebaseUser = credential.user;
+      return credential.user.uid;
+    }
+
+    async function hasUserProfile(uid) {
+      if (!firebaseReady || !db || !uid) return false;
+      const doc = await db.collection('users').doc(String(uid)).get();
+      return doc.exists;
+    }
+
     async function reserveNextMemberId(grade, yearBE) {
       if (!PRODUCTION_MODE || !firebaseReady || !db) return getNextMemberIdByGrade(grade);
       const parts = getMemberIdParts(grade, yearBE);
@@ -4418,25 +4431,55 @@
       });
     }
 
+    let lastTeacherIdFallbackReason = '';
+
+    function isPermissionDeniedError(error) {
+      const text = String((error && (error.code || error.message)) || '');
+      return text.indexOf('permission-denied') !== -1 || text.indexOf('Missing or insufficient permissions') !== -1;
+    }
+
+    function getFriendlyTeacherSaveError(error) {
+      const text = String((error && (error.code || error.message)) || '');
+      if (isPermissionDeniedError(error)) {
+        return 'บัญชีนี้ยังไม่มีสิทธิ์บันทึกข้อมูลครู กรุณาใช้บัญชี Admin หรือให้ผู้ดูแลเปิดสิทธิ์เมนู ครู / สิทธิ์';
+      }
+      if (isEmailAlreadyInUseError(error)) {
+        return 'ID เข้าสู่ระบบนี้มีบัญชีอยู่แล้ว กรุณาตรวจสอบรายชื่อครูก่อนสร้างใหม่';
+      }
+      if (text.indexOf('network') !== -1 || text.indexOf('offline') !== -1 || text.indexOf('unavailable') !== -1) {
+        return 'เชื่อมต่อระบบไม่สำเร็จ กรุณาตรวจสอบอินเทอร์เน็ตแล้วลองใหม่';
+      }
+      return 'บันทึกข้อมูลครูไม่สำเร็จ กรุณาลองใหม่ หรือแจ้งเจ้าหน้าที่ตรวจสอบ';
+    }
+
     async function reserveNextTeacherId(yearBE) {
       if (!PRODUCTION_MODE || !firebaseReady || !db) return getNextTeacherId();
       const parts = getTeacherIdParts(yearBE);
-      return db.runTransaction(async function(transaction) {
-        const ref = db.collection('counters').doc(parts.counterId);
-        const snapshot = await transaction.get(ref);
-        const current = snapshot.exists ? Number(snapshot.data().current || 0) || 0 : 0;
-        const baseline = Math.max(current, getMaxTeacherRunning(parts.yearBE));
-        const next = baseline + 1;
-        transaction.set(ref, {
-          type: 'teacherId',
-          yearBE: parts.yearBE,
-          prefix: parts.prefix,
-          current: next,
-          updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
-          updatedBy: firebaseUser && firebaseUser.uid ? firebaseUser.uid : ''
-        }, { merge: true });
-        return parts.prefix + padNumber(next, 4);
-      });
+      lastTeacherIdFallbackReason = '';
+      try {
+        return await db.runTransaction(async function(transaction) {
+          const ref = db.collection('counters').doc(parts.counterId);
+          const snapshot = await transaction.get(ref);
+          const current = snapshot.exists ? Number(snapshot.data().current || 0) || 0 : 0;
+          const baseline = Math.max(current, getMaxTeacherRunning(parts.yearBE));
+          const next = baseline + 1;
+          transaction.set(ref, {
+            type: 'teacherId',
+            yearBE: parts.yearBE,
+            prefix: parts.prefix,
+            current: next,
+            updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
+            updatedBy: firebaseUser && firebaseUser.uid ? firebaseUser.uid : ''
+          }, { merge: true });
+          return parts.prefix + padNumber(next, 4);
+        });
+      } catch (error) {
+        console.warn('reserve teacher id fallback to local preview:', error);
+        lastTeacherIdFallbackReason = isPermissionDeniedError(error)
+          ? 'ระบบสร้างรหัสครูอัตโนมัติจากข้อมูลล่าสุดแทนแล้ว'
+          : 'ระบบใช้รหัสครูจากข้อมูลล่าสุดแทนแล้ว';
+        return getNextTeacherId();
+      }
     }
 
     function buildLocalEmailFromPhone(phone) {
@@ -5151,9 +5194,30 @@
           authUid = firebaseUser.uid;
         } catch (error) {
           console.error('register firebase auth error:', error);
-          result.textContent = 'สมัครสมาชิกไม่สำเร็จ: ' + (error.message || error.code);
-          result.style.color = '#dc2626';
-          return;
+          if (isEmailAlreadyInUseError(error)) {
+            try {
+              authUid = await signInExistingAuthForRegistration(studentEmail, password);
+              const profileExists = await hasUserProfile(authUid);
+              if (profileExists) {
+                result.textContent = 'เบอร์นี้มีบัญชีอยู่แล้ว กรุณาเข้าสู่ระบบ';
+                result.style.color = '#dc2626';
+                return;
+              }
+              console.warn('register found orphan student auth; rebuilding profile', {
+                uid: authUid,
+                email: studentEmail
+              });
+            } catch (signInError) {
+              console.error('register existing auth sign-in error:', signInError);
+              result.textContent = 'เบอร์นี้มีบัญชี Auth อยู่แล้ว แต่รหัสผ่านไม่ตรงกัน กรุณาเข้าสู่ระบบหรือให้เจ้าหน้าที่ซ่อมบัญชี';
+              result.style.color = '#dc2626';
+              return;
+            }
+          } else {
+            result.textContent = 'สมัครสมาชิกไม่สำเร็จ: ' + (error.message || error.code);
+            result.style.color = '#dc2626';
+            return;
+          }
         }
       }
 
@@ -5163,9 +5227,11 @@
           autoMemberId = await reserveNextMemberId(registerGrade);
         } catch (error) {
           console.error('reserve student member id error:', error);
-          result.textContent = 'จอง Member ID ไม่สำเร็จ กรุณาลองใหม่อีกครั้ง';
-          result.style.color = '#dc2626';
-          return;
+          autoMemberId = getNextMemberIdByGrade(registerGrade);
+          console.warn('reserve student member id fallback to local preview', {
+            memberId: autoMemberId,
+            grade: registerGrade
+          });
         }
       }
 
@@ -5219,7 +5285,7 @@
         }
       } catch (error) {
         console.error('register student firebase error:', error);
-        result.textContent = 'บันทึกบัญชีนักเรียนไม่สำเร็จ กรุณาติดต่อเจ้าหน้าที่เพื่อซ่อมบัญชี: ' + (error.message || error.code);
+        result.textContent = 'สร้าง Auth สำเร็จแล้ว แต่บันทึก profile นักเรียนไม่ครบ กรุณากดสมัครอีกครั้งด้วยเบอร์และรหัสเดิม หรือให้เจ้าหน้าที่ซ่อมบัญชี: ' + (error.message || error.code);
         result.style.color = '#dc2626';
         return;
       }
@@ -6820,6 +6886,7 @@
           result.textContent = 'แก้ไขข้อมูลครูสำเร็จ ใช้เบอร์/Username หรือ Teacher ID เข้าสู่ระบบ รหัสผ่านเริ่มต้น 000000';
         } else {
           const newId = createFirebaseDocId('teachers');
+          lastTeacherIdFallbackReason = '';
           const teacherId = await reserveNextTeacherId();
           if (getElement('teacherIdPreview')) getElement('teacherIdPreview').value = teacherId;
           const teacherEmail = (username && username.includes('@') ? username : buildTeacherAuthEmail({ username: username, phone: phone, teacherId: teacherId })).toLowerCase();
@@ -6869,7 +6936,7 @@
             await setFirebaseDocument('teachers', newTeacher);
           }
           teachers.push(newTeacher);
-          result.textContent = 'สร้างสมาชิกครูสำเร็จ ใช้เบอร์/Username หรือ Teacher ID เข้าสู่ระบบ รหัสผ่านเริ่มต้น 000000';
+          result.textContent = 'สร้างสมาชิกครูสำเร็จ ใช้เบอร์/Username หรือ Teacher ID เข้าสู่ระบบ รหัสผ่านเริ่มต้น 000000' + (lastTeacherIdFallbackReason ? ' (' + lastTeacherIdFallbackReason + ')' : '');
         }
 
         result.style.color = '#16a34a';
@@ -6879,7 +6946,7 @@
         renderAdminDashboard();
       } catch (error) {
         console.error('save teacher error:', error);
-        result.textContent = 'บันทึกสมาชิกครูไม่สำเร็จ: ' + (error.message || error.code || 'ไม่ทราบสาเหตุ');
+        result.textContent = getFriendlyTeacherSaveError(error);
         result.style.color = '#dc2626';
       }
     }

@@ -23,6 +23,16 @@ const projectId = serviceAccount.project_id;
 const args = process.argv.slice(2);
 const write = args.includes('--write');
 const teacherIdArg = (args.find(function(arg) { return arg.indexOf('--teacher-id=') === 0; }) || '').split('=')[1] || '';
+const repairOrphanAdmin = args.includes('--repair-orphan-admin');
+const optionValue = function(name) {
+  const prefix = '--' + name + '=';
+  return (args.find(function(arg) { return arg.indexOf(prefix) === 0; }) || '').slice(prefix.length);
+};
+const adminUidArg = optionValue('uid');
+const adminPhoneArg = optionValue('phone');
+const adminEmailArg = optionValue('email');
+const adminNameArg = optionValue('name') || 'Admin IDEA CLUB';
+const adminAppRoleArg = optionValue('app-role') || 'Admin';
 let accessToken = null;
 
 function base64Url(input) {
@@ -213,6 +223,30 @@ function teacherUserProfile(teacher, uid) {
   };
 }
 
+function adminUserProfile(input) {
+  const uid = String(input.uid || '').trim();
+  const phone = String(input.phone || '').replace(/[^0-9]/g, '');
+  const email = String(input.email || (phone ? phone + '@ideaclub.local' : '')).trim().toLowerCase();
+  const appRole = String(input.appRole || 'Admin').trim() || 'Admin';
+  const permissions = appRole === 'SuperAdmin' || appRole === 'Admin' ? ['admin.full'] : ['admin.dashboard'];
+  return {
+    uid: uid,
+    authUid: uid,
+    accountType: 'staff',
+    role: 'admin',
+    appRole: appRole,
+    permissions: permissions,
+    permissionMode: 'custom',
+    status: 'active',
+    name: input.name || 'Admin IDEA CLUB',
+    phone: phone,
+    authEmail: email,
+    email: email,
+    loginId: phone || email,
+    loginKeys: loginKeys({ phone: phone, email: email, authEmail: email })
+  };
+}
+
 function userNeedsStudentFix(user) {
   return !user
     || user.accountType !== 'student'
@@ -233,6 +267,32 @@ function userNeedsTeacherFix(user, teacher) {
 (async function main() {
   console.log('==== audit-account-links.js ====');
   console.log('mode:', write ? 'WRITE' : 'DRY-RUN');
+
+  if (repairOrphanAdmin) {
+    if (!adminUidArg) throw new Error('ต้องระบุ --uid=<firebase auth uid> สำหรับ --repair-orphan-admin');
+    if (!adminEmailArg && !adminPhoneArg) throw new Error('ต้องระบุ --email หรือ --phone สำหรับ --repair-orphan-admin');
+    const profile = adminUserProfile({
+      uid: adminUidArg,
+      phone: adminPhoneArg,
+      email: adminEmailArg,
+      name: adminNameArg,
+      appRole: adminAppRoleArg
+    });
+    console.log('orphan admin repair target:', {
+      uid: profile.uid,
+      email: profile.email,
+      phone: profile.phone,
+      appRole: profile.appRole,
+      permissions: profile.permissions
+    });
+    if (!write) {
+      console.log('DRY-RUN: ไม่มีการบันทึกใดๆ');
+      return;
+    }
+    await patchDocument('users', profile.uid, profile);
+    console.log('เขียนซ่อม orphan admin users/' + profile.uid + ' เรียบร้อย');
+    return;
+  }
 
   const students = await listCollection('students');
   const teachers = await listCollection('teachers');
