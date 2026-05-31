@@ -3476,6 +3476,8 @@
       const mainSettings = settingsItems.find(function(item) { return item.id === 'main' || item.firebaseDocId === 'main'; });
       if (mainSettings) systemSettings = Object.assign(systemSettings, mainSettings);
       safeRun(repairReceiptMonthsFromPayments, 'repair-receipt-months');
+      safeRun(updateMemberIdPreview, 'member-id-preview-after-load');
+      safeRun(updateTeacherIdPreview, 'teacher-id-preview-after-load');
       safeRun(renderReceiptMonthFilter, 'receipt-month-filter-after-load');
       safeRun(renderActiveAdminTab, 'active-admin-tab-after-load');
       safeRun(renderStudentReceipts, 'student-receipts-after-load');
@@ -5825,8 +5827,12 @@
       if (tabId === 'admin-students') {
         safeRun(renderAdminStudentCourseOptions, 'admin-student-course-options');
         safeRun(renderAdminStudents, 'admin-students');
+        safeRun(updateMemberIdPreview, 'member-id-preview-admin-students');
       }
-      if (tabId === 'admin-teachers') safeRun(renderTeachers, 'admin-teachers');
+      if (tabId === 'admin-teachers') {
+        safeRun(renderTeachers, 'admin-teachers');
+        safeRun(updateTeacherIdPreview, 'teacher-id-preview-admin-teachers');
+      }
       if (tabId === 'admin-courses') {
         safeRun(renderAdminCourses, 'admin-courses');
         safeRun(renderStudentCourses, 'student-courses-after-admin-course');
@@ -6224,7 +6230,7 @@
             phone: phone,
             lineId: lineId,
             school: school,
-            preferredLocation: registerLocation,
+            preferredLocation: preferredLocation,
             course: course || 'ยังไม่ได้สมัครคอร์ส',
             courseId: selectedCourse ? selectedCourse.id : null,
             courseAccess: selectedCourse ? selectedCourse.access : '-',
@@ -6545,9 +6551,18 @@
       }).join('');
     }
 
-    function updateTeacherIdPreview() {
+    function getNextTeacherId() {
       const year = String(new Date().getFullYear() + 543).slice(-2);
-      if (getElement('teacherIdPreview')) getElement('teacherIdPreview').value = 'T' + year + padNumber(teachers.length + 1, 4);
+      const prefix = 'T' + year;
+      const numbers = teachers
+        .filter(function(t) { return String(t.teacherId || '').indexOf(prefix) === 0; })
+        .map(function(t) { return Number(String(t.teacherId || '').replace(prefix, '')) || 0; });
+      const nextNumber = numbers.length ? Math.max.apply(null, numbers) + 1 : 1;
+      return prefix + padNumber(nextNumber, 4);
+    }
+
+    function updateTeacherIdPreview() {
+      if (getElement('teacherIdPreview')) getElement('teacherIdPreview').value = getNextTeacherId();
     }
 
     async function saveTeacher() {
@@ -6614,9 +6629,9 @@
           }
           result.textContent = 'แก้ไขข้อมูลครูสำเร็จ ใช้เบอร์/Username หรือ Teacher ID เข้าสู่ระบบ รหัสผ่านเริ่มต้น 000000';
         } else {
-          const year = String(new Date().getFullYear() + 543).slice(-2);
           const newId = createFirebaseDocId('teachers');
-          const teacherId = 'T' + year + padNumber(teachers.length + 1, 4);
+          const teacherId = getNextTeacherId();
+          if (getElement('teacherIdPreview')) getElement('teacherIdPreview').value = teacherId;
           const teacherEmail = username && username.includes('@') ? username : buildTeacherAuthEmail({ username: username, phone: phone, teacherId: teacherId });
           let authUid = null;
           let authWarning = '';
