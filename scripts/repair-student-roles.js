@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 
-const admin = require('firebase-admin');
+const crypto = require('crypto');
 const fs = require('fs');
+const https = require('https');
 const path = require('path');
 
 const rootDir = path.resolve(__dirname, '..');
@@ -26,14 +27,152 @@ if (!keyPath) {
 }
 
 const serviceAccount = require(keyPath);
-admin.initializeApp({
-  credential: admin.credential.cert(serviceAccount)
-});
-
-const db = admin.firestore();
+const projectId = serviceAccount.project_id;
 const args = process.argv.slice(2);
 const write = args.includes('--write');
 const verbose = args.includes('--verbose');
+let accessToken = null;
+
+function base64Url(input) {
+  return Buffer.from(input).toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
+}
+
+function requestJson(options, body) {
+  return new Promise(function(resolve, reject) {
+    const req = https.request(options, function(res) {
+      let data = '';
+      res.on('data', function(chunk) { data += chunk; });
+      res.on('end', function() {
+        let parsed = null;
+        try {
+          parsed = data ? JSON.parse(data) : {};
+        } catch (error) {
+          reject(new Error('Invalid JSON response: ' + data.slice(0, 200)));
+          return;
+        }
+        if (res.statusCode < 200 || res.statusCode >= 300) {
+          reject(new Error((parsed && (parsed.error_description || parsed.error && parsed.error.message)) || ('HTTP ' + res.statusCode)));
+          return;
+        }
+        resolve(parsed);
+      });
+    });
+    req.on('error', reject);
+    if (body) req.write(body);
+    req.end();
+  });
+}
+
+async function getAccessToken() {
+  if (accessToken) return accessToken;
+  const now = Math.floor(Date.now() / 1000);
+  const header = base64Url(JSON.stringify({ alg: 'RS256', typ: 'JWT' }));
+  const claim = base64Url(JSON.stringify({
+    iss: serviceAccount.client_email,
+    scope: 'https://www.googleapis.com/auth/datastore',
+    aud: 'https://oauth2.googleapis.com/token',
+    exp: now + 3600,
+    iat: now
+  }));
+  const unsigned = header + '.' + claim;
+  const signature = crypto.createSign('RSA-SHA256').update(unsigned).sign(serviceAccount.private_key, 'base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
+  const assertion = unsigned + '.' + signature;
+  const body = new URLSearchParams({
+    grant_type: 'urn:ietf:params:oauth:grant-type:jwt-bearer',
+    assertion: assertion
+  }).toString();
+  const response = await requestJson({
+    method: 'POST',
+    hostname: 'oauth2.googleapis.com',
+    path: '/token',
+    headers: {
+      'Content-Type': 'application/x-www-form-urlencoded',
+      'Content-Length': Buffer.byteLength(body)
+    }
+  }, body);
+  accessToken = response.access_token;
+  return accessToken;
+}
+
+function firestoreValueToJs(value) {
+  if (!value || typeof value !== 'object') return undefined;
+  if (Object.prototype.hasOwnProperty.call(value, 'stringValue')) return value.stringValue;
+  if (Object.prototype.hasOwnProperty.call(value, 'integerValue')) return Number(value.integerValue);
+  if (Object.prototype.hasOwnProperty.call(value, 'doubleValue')) return Number(value.doubleValue);
+  if (Object.prototype.hasOwnProperty.call(value, 'booleanValue')) return value.booleanValue;
+  if (Object.prototype.hasOwnProperty.call(value, 'nullValue')) return null;
+  if (Object.prototype.hasOwnProperty.call(value, 'arrayValue')) {
+    return (value.arrayValue.values || []).map(firestoreValueToJs);
+  }
+  if (Object.prototype.hasOwnProperty.call(value, 'mapValue')) {
+    return firestoreFieldsToJs(value.mapValue.fields || {});
+  }
+  return undefined;
+}
+
+function firestoreFieldsToJs(fields) {
+  const data = {};
+  Object.keys(fields || {}).forEach(function(key) {
+    data[key] = firestoreValueToJs(fields[key]);
+  });
+  return data;
+}
+
+function jsToFirestoreValue(value) {
+  if (Array.isArray(value)) {
+    return { arrayValue: value.length ? { values: value.map(jsToFirestoreValue) } : {} };
+  }
+  if (typeof value === 'boolean') return { booleanValue: value };
+  if (typeof value === 'number') return Number.isInteger(value) ? { integerValue: String(value) } : { doubleValue: value };
+  if (value === null || value === undefined) return { nullValue: null };
+  return { stringValue: String(value) };
+}
+
+async function listCollection(collectionName) {
+  const token = await getAccessToken();
+  const docs = [];
+  let pageToken = '';
+  do {
+    const query = new URLSearchParams({ pageSize: '300' });
+    if (pageToken) query.set('pageToken', pageToken);
+    const response = await requestJson({
+      method: 'GET',
+      hostname: 'firestore.googleapis.com',
+      path: '/v1/projects/' + encodeURIComponent(projectId) + '/databases/(default)/documents/' + collectionName + '?' + query.toString(),
+      headers: { Authorization: 'Bearer ' + token }
+    });
+    (response.documents || []).forEach(function(doc) {
+      docs.push({
+        id: doc.name.split('/').pop(),
+        name: doc.name,
+        data: firestoreFieldsToJs(doc.fields || {})
+      });
+    });
+    pageToken = response.nextPageToken || '';
+  } while (pageToken);
+  return docs;
+}
+
+async function updateDocument(collectionName, id, updates) {
+  const token = await getAccessToken();
+  const fieldNames = Object.keys(updates);
+  if (!fieldNames.length) return;
+  const query = new URLSearchParams();
+  fieldNames.forEach(function(field) { query.append('updateMask.fieldPaths', field); });
+  const fields = {};
+  fieldNames.forEach(function(field) {
+    fields[field] = jsToFirestoreValue(updates[field]);
+  });
+  await requestJson({
+    method: 'PATCH',
+    hostname: 'firestore.googleapis.com',
+    path: '/v1/projects/' + encodeURIComponent(projectId) + '/databases/(default)/documents/' + collectionName + '/' + encodeURIComponent(id) + '?' + query.toString(),
+    headers: {
+      Authorization: 'Bearer ' + token,
+      'Content-Type': 'application/json'
+    }
+  }, JSON.stringify({ fields: fields }));
+}
 
 function normalizeRole(value) {
   return String(value || '').trim().toLowerCase();
@@ -82,10 +221,10 @@ function buildUserFixes(data) {
 }
 
 async function scanStudents() {
-  const snapshot = await db.collection('students').get();
+  const docs = await listCollection('students');
   const reports = [];
-  for (const doc of snapshot.docs) {
-    const data = doc.data();
+  for (const doc of docs) {
+    const data = doc.data;
     const fixes = buildStudentFixes(data);
     if (Object.keys(fixes).length) {
       reports.push({ id: doc.id, path: `students/${doc.id}`, data, fixes });
@@ -95,15 +234,15 @@ async function scanStudents() {
 }
 
 async function scanUsers() {
-  const studentSnapshot = await db.collection('students').get();
-  const studentPhones = new Set(studentSnapshot.docs.map(function(doc) {
-    return String(doc.data().phone || '').replace(/[^0-9]/g, '');
+  const studentDocs = await listCollection('students');
+  const studentPhones = new Set(studentDocs.map(function(doc) {
+    return String(doc.data.phone || '').replace(/[^0-9]/g, '');
   }).filter(function(phone) { return phone; }));
 
-  const snapshot = await db.collection('users').get();
+  const docs = await listCollection('users');
   const reports = [];
-  for (const doc of snapshot.docs) {
-    const data = doc.data();
+  for (const doc of docs) {
+    const data = doc.data;
     const phone = String(data.phone || '').replace(/[^0-9]/g, '');
     const candidate = isStudentCandidate(data) || (phone && studentPhones.has(phone));
     if (!candidate) continue;
@@ -131,18 +270,9 @@ function prettyPrintIssues(items, label) {
 
 async function applyRepairs(items, collectionName) {
   for (const item of items) {
-    const ref = db.collection(collectionName).doc(item.id);
     const updates = Object.assign({}, item.fixes);
-    const hasAppRoleDelete = Object.prototype.hasOwnProperty.call(updates, 'appRole') && updates.appRole === admin.firestore.FieldValue.delete();
-    if (hasAppRoleDelete) {
-      delete updates.appRole;
-    }
-
     if (Object.keys(updates).length) {
-      await ref.update(updates);
-    }
-    if (hasAppRoleDelete) {
-      await ref.update({ appRole: admin.firestore.FieldValue.delete() });
+      await updateDocument(collectionName, item.id, updates);
     }
 
     if (verbose) {
@@ -155,8 +285,8 @@ async function applyRepairs(items, collectionName) {
   console.log('==== repair-student-roles.js ====');
   console.log(`mode: ${write ? 'WRITE' : 'DRY-RUN'}`);
 
-  const studentSnapshot = await db.collection('students').get();
-  const studentCount = studentSnapshot.size;
+  const studentDocs = await listCollection('students');
+  const studentCount = studentDocs.length;
   const studentIssues = await scanStudents();
   const userIssues = await scanUsers();
 

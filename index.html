@@ -3744,14 +3744,51 @@
 
     function isStudentAccount(profile) {
       if (!profile || typeof profile !== 'object') return false;
-      const role = String(profile.role || profile.accountType || profile.appRole || '').trim().toLowerCase();
-      return role === 'student';
+      const accountType = String(profile.accountType || '').trim().toLowerCase();
+      const role = String(profile.role || '').trim().toLowerCase();
+      const appRole = String(profile.appRole || '').trim().toLowerCase();
+      return accountType === 'student' || role === 'student' || appRole === 'student';
     }
 
     function isStaffAccount(profile) {
       if (!profile || typeof profile !== 'object') return false;
+      if (isStudentAccount(profile)) return false;
+      const accountType = String(profile.accountType || '').trim().toLowerCase();
+      if (['staff', 'teacher', 'admin'].includes(accountType)) return true;
       const role = String(profile.role || profile.appRole || '').trim();
       return isTeacherRole(role) || isAdminRole(role);
+    }
+
+    function isKnownAccessRole(role) {
+      const value = String(role || '').trim();
+      if (!value) return false;
+      if (String(value).toLowerCase() === 'student') return true;
+      if (['super_admin', 'SuperAdmin', 'Super Admin', 'admin', 'Admin', 'manager', 'Manager', 'academic', 'Academic', 'finance', 'Finance', 'teacher', 'Teacher', 'assistant', 'Assistant', 'viewer', 'Viewer'].includes(value)) return true;
+      return !!ROLE_DEFINITIONS[value];
+    }
+
+    function isCurrentStudentSession() {
+      return isStudentAccount(firebaseUserProfile) || isStudentAccount(currentStudent);
+    }
+
+    function normalizeUserAccessProfile(profile) {
+      const clean = Object.assign({}, profile || {});
+      const accountType = String(clean.accountType || '').trim().toLowerCase();
+      const roleText = String(clean.role || '').trim();
+      const roleLower = roleText.toLowerCase();
+      const appRoleText = String(clean.appRole || '').trim();
+      const isStudent = accountType === 'student' || roleLower === 'student' || appRoleText.toLowerCase() === 'student';
+
+      if (isStudent) return sanitizeStudentProfile(clean);
+
+      const roleSource = appRoleText || roleText;
+      const normalizedRole = isKnownAccessRole(roleSource) ? normalizeAppRole(roleSource) : '';
+      clean.accountType = accountType || (isAdminRole(normalizedRole || roleSource) ? 'staff' : isTeacherRole(normalizedRole || roleSource) ? 'teacher' : '');
+      clean.role = roleText || (clean.accountType === 'staff' ? 'admin' : clean.accountType === 'teacher' ? 'teacher' : '');
+      clean.appRole = normalizedRole;
+      clean.permissions = Array.isArray(clean.permissions) ? clean.permissions.slice() : [];
+      clean.status = String(clean.status || 'active');
+      return clean;
     }
 
     function sanitizeTeacherProfile(profile) {
@@ -4558,119 +4595,22 @@
             loginId: displayLoginId
           });
 
-          // โหลดข้อมูลหลักก่อน เพื่อให้ระบบสามารถเทียบสิทธิ์จาก students / teachers ได้
-          // กรณีมี Auth แล้ว แต่ยังไม่ได้สร้าง users/{uid}
+          // โหลดข้อมูลประกอบเท่านั้น หลัง Auth สำเร็จ role ต้องมาจาก users/{uid} เท่านั้น
           await ensureCoreDataLoaded({ force: true });
           safeRun(loadPaymentQrFromGithubAsset, 'load-payment-qr-github');
 
           const firebaseEmail = firebaseUser.email || username;
-          const cleanLoginPhone = String(displayLoginId || rawUsername || '').replace(/[^0-9]/g, '');
-
-          let profileData = null;
-          let profileSourceDocId = '';
-
-          // 1) หาแบบมาตรฐาน: users/{uid}
-          let profileDoc = await db.collection('users').doc(firebaseUser.uid).get();
-          if (profileDoc.exists) {
-            profileData = profileDoc.data();
-            profileSourceDocId = profileDoc.id;
-          }
-
-          // 2) ถ้าไม่เจอ ให้หาใน users ด้วย email
-          if (!profileData && firebaseEmail) {
-            const emailQuery = await db.collection('users')
-              .where('email', '==', firebaseEmail)
-              .limit(1)
-              .get();
-            if (!emailQuery.empty) {
-              profileDoc = emailQuery.docs[0];
-              profileData = profileDoc.data();
-              profileSourceDocId = profileDoc.id;
-            }
-          }
-
-          // 3) ถ้ายังไม่เจอ ให้หาใน users ด้วย phone
-          if (!profileData && cleanLoginPhone) {
-            const phoneQuery = await db.collection('users')
-              .where('phone', '==', cleanLoginPhone)
-              .limit(1)
-              .get();
-            if (!phoneQuery.empty) {
-              profileDoc = phoneQuery.docs[0];
-              profileData = profileDoc.data();
-              profileSourceDocId = profileDoc.id;
-            }
-          }
-
-          // 4) ถ้ายังไม่เจอ ให้ผูกสิทธิ์จากข้อมูลครู/นักเรียนที่ Admin เพิ่มไว้ในหลังบ้าน
-          // แล้วสร้าง users/{uid} ให้อัตโนมัติ เพื่อไม่ต้องไปใส่ UID เองทุกครั้ง
-          let matchedTeacher = findTeacherByLoginId(rawUsername, firebaseEmail, displayLoginId) || teachers.find(function(t) {
-            return t.authUid === firebaseUser.uid || t.email === firebaseEmail || t.username === firebaseEmail;
-          });
-
-          let matchedStudent = findStudentByLoginId(rawUsername, firebaseEmail, displayLoginId) || students.find(function(s) {
-            return s.authUid === firebaseUser.uid || s.email === firebaseEmail;
-          });
-
-          if (!profileData && matchedTeacher) {
-            const teacherStatus = String(matchedTeacher.status || 'active').toLowerCase();
-            const normalizedStatus = teacherStatus === 'inactive' || teacherStatus === 'disabled' || teacherStatus === 'blocked' || teacherStatus === 'ปิดใช้งาน'
-              ? 'inactive'
-              : 'active';
-            profileData = {
-              name: matchedTeacher.name || firebaseEmail || 'Teacher',
-              email: matchedTeacher.email || firebaseEmail,
-              phone: matchedTeacher.phone || matchedTeacher.username || cleanLoginPhone,
-              role: toFirebaseRole(matchedTeacher.role || 'Teacher'),
-              appRole: normalizeAppRole(matchedTeacher.role || 'Teacher'),
-              permissions: getEffectivePermissions(matchedTeacher),
-              permissionMode: matchedTeacher.permissionMode || (Array.isArray(matchedTeacher.permissions) ? 'custom' : 'role-default'),
-              status: normalizedStatus,
-              subject: matchedTeacher.subject || ''
-            };
-          }
-
-          if (!profileData && matchedStudent) {
-            profileData = {
-              name: matchedStudent.name || firebaseEmail || 'Student',
-              nickname: matchedStudent.nickname || '',
-              email: matchedStudent.email || firebaseEmail,
-              phone: matchedStudent.phone || cleanLoginPhone,
-              memberId: matchedStudent.memberId || matchedStudent.studentId || '',
-              studentId: matchedStudent.studentId || matchedStudent.memberId || '',
-              role: 'student',
-              status: 'active'
-            };
-          }
-
-          if (profileData && String(profileData.role || '').toLowerCase() === 'student') {
-            profileData = sanitizeStudentProfile(profileData);
-          }
-          if (matchedStudent && profileData) {
-            profileData = sanitizeStudentProfile(profileData);
-          }
-
-          if (!profileData) {
-            result.textContent = 'บัญชีนี้ยังไม่มีสิทธิ์ใช้งาน กรุณาติดต่อเจ้าหน้าที่';
+          const profileDoc = await db.collection('users').doc(firebaseUser.uid).get();
+          if (!profileDoc.exists) {
+            result.textContent = 'ไม่พบข้อมูลบัญชีผู้ใช้ กรุณาติดต่อเจ้าหน้าที่';
             result.style.color = '#dc2626';
+            alert('ไม่พบข้อมูลบัญชีผู้ใช้ กรุณาติดต่อเจ้าหน้าที่');
             await auth.signOut();
             return;
           }
 
-          // ถ้าเจอ users จาก email/phone หรือสร้าง profile จาก students/teachers ให้เขียนกลับเป็น users/{uid}
-          // เพื่อให้ Login ครั้งต่อไปเร็วและตรงมาตรฐาน
-          try {
-            await db.collection('users').doc(firebaseUser.uid).set(Object.assign({}, profileData, {
-              email: profileData.email || firebaseEmail,
-              phone: profileData.phone || cleanLoginPhone,
-              linkedFromDocId: profileSourceDocId || '',
-              updatedAt: firebase.firestore.FieldValue.serverTimestamp()
-            }), { merge: true });
-          } catch (syncProfileError) {
-            console.warn('sync users uid profile warning:', syncProfileError);
-          }
-
-          firebaseUserProfile = profileData;
+          const rawUserProfile = Object.assign({ uid: firebaseUser.uid, authUid: firebaseUser.uid }, profileDoc.data());
+          firebaseUserProfile = normalizeUserAccessProfile(rawUserProfile);
 
           const profileStatus = String(firebaseUserProfile.status || 'active').toLowerCase();
           if (['inactive', 'disabled', 'blocked', 'ปิดใช้งาน'].includes(profileStatus)) {
@@ -4680,94 +4620,126 @@
             return;
           }
 
-          const userRole = firebaseUserProfile.role || 'student';
-          const isStudentProfile = String(firebaseUserProfile.accountType || firebaseUserProfile.role || firebaseUserProfile.appRole || '').trim().toLowerCase() === 'student';
-          const activeAppRole = isStudentProfile
-            ? 'student'
-            : normalizeAppRole(firebaseUserProfile.appRole || (matchedTeacher ? matchedTeacher.role : (userRole === 'admin' ? 'SuperAdmin' : 'Teacher')));
-          firebaseUserProfile.appRole = activeAppRole;
-          if (isStudentProfile) {
-            firebaseUserProfile.role = 'student';
-            firebaseUserProfile.accountType = 'student';
-            firebaseUserProfile.permissions = [];
-            firebaseUserProfile.permissionMode = 'student';
-          }
-          if (matchedTeacher && (!Array.isArray(firebaseUserProfile.permissions) || !firebaseUserProfile.permissions.length)) {
-            firebaseUserProfile.permissions = getEffectivePermissions(matchedTeacher);
-            firebaseUserProfile.permissionMode = matchedTeacher.permissionMode || (Array.isArray(matchedTeacher.permissions) ? 'custom' : 'role-default');
-          }
+          const userRole = firebaseUserProfile.role || '';
+          const accountType = String(firebaseUserProfile.accountType || '').trim().toLowerCase();
+          const activeAppRole = firebaseUserProfile.appRole || '';
+          const roleIsKnown = isKnownAccessRole(userRole) || isKnownAccessRole(activeAppRole) || ['student', 'teacher', 'staff', 'admin'].includes(accountType);
           console.info('firebase-profile-resolved', {
             uid: firebaseUser.uid,
             role: userRole,
             appRole: activeAppRole,
+            accountType: accountType,
             permissions: firebaseUserProfile.permissions,
-            matchedTeacherId: matchedTeacher && matchedTeacher.id,
             status: firebaseUserProfile.status,
             loginId: displayLoginId
           });
-          setSuperAdminMode(userRole === 'admin' && (getEffectivePermissions(firebaseUserProfile).includes('admin.full') || activeAppRole === 'SuperAdmin' || activeAppRole === 'Admin'));
 
           // ============================================================
-          // STAFF ROUTING (Teacher/Admin) - MUST BE BEFORE STUDENT CHECK
+          // STUDENT ROUTING - role source is users/{uid}; students is profile only
+          // ============================================================
+          if (isStudentAccount(firebaseUserProfile)) {
+            console.log('student-route-execute', {
+              userRole: userRole,
+              appRole: activeAppRole,
+              accountType: firebaseUserProfile.accountType,
+              loginId: displayLoginId
+            });
+            const linkedStudentId = String(firebaseUserProfile.linkedStudentId || firebaseUserProfile.studentDocId || '').trim();
+            const profileStudentId = String(firebaseUserProfile.studentId || '').trim();
+            const profileMemberId = String(firebaseUserProfile.memberId || '').trim();
+            const student = students.find(function(s) {
+              return (linkedStudentId && String(s.firebaseDocId || s.id || '') === linkedStudentId) ||
+                (profileStudentId && (String(s.studentId || '') === profileStudentId || String(s.id || '') === profileStudentId)) ||
+                (profileMemberId && String(s.memberId || '') === profileMemberId) ||
+                s.authUid === firebaseUser.uid;
+            });
+            if (!student) {
+              console.warn('student-route-skipped-no-record', { userRole: userRole, loginId: displayLoginId });
+              result.textContent = 'ไม่พบบัญชีนักเรียน กรุณาติดต่อเจ้าหน้าที่';
+              result.style.color = '#dc2626';
+              return;
+            }
+            currentStudent = student;
+            currentTeacher = null;
+            currentAdmin = null;
+            const sanitizedStudentUserProfile = sanitizeStudentProfile(firebaseUserProfile);
+            setSuperAdminMode(false);
+            ['superAdminTeacherLink', 'superAdminAdminLink'].forEach(function(id) {
+              const item = getElement(id);
+              if (item) item.classList.add('hidden');
+            });
+            console.log('student-ui-lock-applied', {
+              studentId: student.id || student.studentId || student.memberId || '-',
+              phone: student.phone || '-',
+              role: 'student',
+              accountType: 'student'
+            });
+            studentLogin(student.phone || student.email || displayLoginId);
+            firebaseUserProfile = sanitizedStudentUserProfile;
+            return;
+          }
+
+          // ============================================================
+          // STAFF ROUTING - role source is users/{uid}; teachers is profile only
           // ============================================================
           console.log('staff-route-check', {
             userRole: userRole,
             appRole: activeAppRole,
-            matchedTeacherId: matchedTeacher && matchedTeacher.id,
-            matchedTeacherStatus: matchedTeacher && matchedTeacher.status,
+            accountType: accountType,
             loginId: displayLoginId
           });
 
-          // Check if this is an ADMIN login
-          const isAdminProfile = userRole === 'admin' || ['SuperAdmin', 'Admin', 'Manager', 'Academic', 'Finance'].includes(activeAppRole);
+          const isAdminProfile = accountType === 'staff' || accountType === 'admin' || userRole === 'admin' || isAdminRole(userRole) || isAdminRole(activeAppRole);
           if (isAdminProfile) {
             console.log('admin-route-execute', {
               userRole: userRole,
-              appRole: activeAppRole,
-              matchedTeacherId: matchedTeacher && matchedTeacher.id
+              appRole: activeAppRole
             });
-            currentTeacher = matchedTeacher || null;
+            const linkedTeacherId = String(firebaseUserProfile.linkedTeacherId || firebaseUserProfile.teacherDocId || firebaseUserProfile.teacherId || '').trim();
+            currentTeacher = teachers.find(function(t) {
+              return (linkedTeacherId && (String(t.firebaseDocId || t.id || '') === linkedTeacherId || String(t.teacherId || '') === linkedTeacherId)) ||
+                t.authUid === firebaseUser.uid;
+            }) || null;
+            currentAdmin = firebaseUserProfile;
             currentStudent = null;
+            setSuperAdminMode(getEffectivePermissions(firebaseUserProfile).includes('admin.full') || activeAppRole === 'SuperAdmin' || activeAppRole === 'Admin');
             showAdminPanel(true);
-            return; // EXIT HERE - DO NOT CONTINUE TO STUDENT VALIDATION
+            return;
           }
 
-          // Check if this is a TEACHER login
-          const isTeacherProfile = isTeacherRole(activeAppRole) || userRole === 'teacher' || isTeacherRole(userRole);
+          const isTeacherProfile = accountType === 'teacher' || userRole === 'teacher' || isTeacherRole(userRole) || isTeacherRole(activeAppRole);
           if (isTeacherProfile) {
             console.log('teacher-route-execute', {
               userRole: userRole,
-              appRole: activeAppRole,
-              matchedTeacherId: matchedTeacher && matchedTeacher.id
+              appRole: activeAppRole
             });
-            const teacher = matchedTeacher || teachers.find(function(t) {
-              const teacherPhone = String(t.phone || t.username || '').replace(/[^0-9]/g, '');
-              return t.authUid === firebaseUser.uid ||
-                t.email === firebaseEmail ||
-                t.username === firebaseEmail ||
-                teacherPhone === cleanLoginPhone ||
-                t.username === displayLoginId ||
-                t.teacherId === displayLoginId;
+            const linkedTeacherId = String(firebaseUserProfile.linkedTeacherId || firebaseUserProfile.teacherDocId || '').trim();
+            const profileTeacherId = String(firebaseUserProfile.teacherId || '').trim();
+            const teacherProfile = teachers.find(function(t) {
+              return (linkedTeacherId && String(t.firebaseDocId || t.id || '') === linkedTeacherId) ||
+                (profileTeacherId && String(t.teacherId || '') === profileTeacherId) ||
+                t.authUid === firebaseUser.uid;
             }) || {
               id: firebaseUser.uid,
               authUid: firebaseUser.uid,
               name: firebaseUserProfile.name || firebaseEmail || 'Teacher',
               subject: firebaseUserProfile.subject || '-',
-              username: firebaseUserProfile.phone || cleanLoginPhone || firebaseEmail,
+              username: firebaseUserProfile.username || firebaseUserProfile.phone || firebaseEmail,
               email: firebaseEmail,
-              status: 'Active',
-              role: 'Teacher'
+              status: firebaseUserProfile.status || 'Active',
+              role: userRole || 'teacher'
             };
-            // Merge firebaseUserProfile data (including permissions) into teacher object
-            Object.assign(teacher, {
-              permissions: firebaseUserProfile.permissions || teacher.permissions,
-              permissionMode: firebaseUserProfile.permissionMode || teacher.permissionMode,
-              appRole: firebaseUserProfile.appRole || teacher.appRole || normalizeAppRole(teacher.role || 'Teacher'),
-              status: firebaseUserProfile.status || teacher.status,
+            const teacher = Object.assign({}, teacherProfile, {
+              permissions: firebaseUserProfile.permissions || teacherProfile.permissions,
+              permissionMode: firebaseUserProfile.permissionMode || teacherProfile.permissionMode,
+              appRole: activeAppRole || teacherProfile.appRole || normalizeAppRole(userRole || teacherProfile.role || 'Teacher'),
+              role: userRole || teacherProfile.role || 'teacher',
+              status: firebaseUserProfile.status || teacherProfile.status,
               authUid: firebaseUser.uid,
-              email: firebaseUserProfile.email || teacher.email
+              email: firebaseUserProfile.email || teacherProfile.email
             });
             currentStudent = null;
+            currentAdmin = null;
             currentTeacher = teacher;
             showTeacherPanel(teacher);
             console.log('teacher-route-success', {
@@ -4775,44 +4747,23 @@
               role: teacher.role,
               appRole: teacher.appRole
             });
-            return; // EXIT HERE - DO NOT CONTINUE TO STUDENT VALIDATION
-          }
-
-          // ============================================================
-          // STUDENT ROUTING - ONLY IF NOT STAFF
-          // ============================================================
-          console.log('student-route-check', {
-            userRole: userRole,
-            appRole: activeAppRole,
-            hasMatchedStudent: !!matchedStudent,
-            loginId: displayLoginId
-          });
-
-          const student = matchedStudent || findStudentByLoginId(rawUsername, firebaseEmail, displayLoginId) || students.find(function(s) {
-            return s.authUid === firebaseUser.uid || s.email === firebaseEmail;
-          });
-
-          if (!student) {
-            console.warn('student-not-found', {
-              userRole: userRole,
-              appRole: activeAppRole,
-              loginId: displayLoginId,
-              firebaseEmail: firebaseEmail
-            });
-            result.textContent = 'ไม่พบบัญชีนักเรียน กรุณาติดต่อเจ้าหน้าที่';
-            result.style.color = '#dc2626';
             return;
           }
 
-          // เติม authUid ให้ข้อมูลนักเรียนเดิมอัตโนมัติ ถ้ายังไม่มี
-          if (!student.authUid) {
-            student.authUid = firebaseUser.uid;
-            student.email = student.email || firebaseEmail;
-            setFirebaseDocument('students', student).catch(function(error) { console.error('sync student authUid error:', error); });
-          }
-
-          currentStudent = student;
-          studentLogin(student.phone || student.email || displayLoginId);
+          // ============================================================
+          // NO VALID ACCOUNT FOUND
+          // ============================================================
+          console.warn('login-no-valid-account', {
+            userRole: userRole,
+            appRole: activeAppRole,
+            accountType: accountType,
+            roleIsKnown: roleIsKnown,
+            loginId: displayLoginId
+          });
+          result.textContent = 'บัญชีนี้ยังไม่ได้กำหนดสิทธิ์ใช้งาน กรุณาติดต่อเจ้าหน้าที่';
+          result.style.color = '#dc2626';
+          alert('บัญชีนี้ยังไม่ได้กำหนดสิทธิ์ใช้งาน กรุณาติดต่อเจ้าหน้าที่');
+          await auth.signOut();
           return;
         } catch (error) {
           console.error('Firebase login error:', error);
@@ -5308,8 +5259,8 @@
     }
 
     function showTeacherPanelForAdmin() {
-      if (currentStudent || isStudentAccount(getActiveAccessRecord())) {
-        console.log('student-staff-entry-blocked', { action: 'showTeacherPanelForAdmin', user: getActiveAccessRecord() });
+      if (isCurrentStudentSession()) {
+        console.warn('student-staff-entry-blocked', { action: 'showTeacherPanelForAdmin', user: getActiveAccessRecord() });
         alert('บัญชีนักเรียนไม่มีสิทธิ์เข้าหน้านี้');
         return;
       }
@@ -5319,8 +5270,8 @@
     }
 
     function showAdminPanelForAdmin() {
-      if (currentStudent || isStudentAccount(getActiveAccessRecord())) {
-        console.log('student-staff-entry-blocked', { action: 'showAdminPanelForAdmin', user: getActiveAccessRecord() });
+      if (isCurrentStudentSession()) {
+        console.warn('student-staff-entry-blocked', { action: 'showAdminPanelForAdmin', user: getActiveAccessRecord() });
         alert('บัญชีนักเรียนไม่มีสิทธิ์เข้าหน้านี้');
         return;
       }
@@ -5342,8 +5293,8 @@
     }
 
     function showTeacherPanel(teacher) {
-      if (currentStudent || isStudentAccount(getActiveAccessRecord())) {
-        console.log('student-staff-entry-blocked', { action: 'showTeacherPanel', user: getActiveAccessRecord() });
+      if (isCurrentStudentSession()) {
+        console.warn('student-staff-entry-blocked', { action: 'showTeacherPanel', user: getActiveAccessRecord() });
         alert('บัญชีนักเรียนไม่มีสิทธิ์เข้าหน้านี้');
         return;
       }
@@ -5813,8 +5764,8 @@
     }
 
     function showAdminPanel(skipCheck) {
-      if (isStudentAccount(getActiveAccessRecord()) || currentStudent) {
-        console.log('student-staff-entry-blocked', { action: 'showAdminPanel', user: getActiveAccessRecord() });
+      if (isCurrentStudentSession()) {
+        console.warn('student-staff-entry-blocked', { action: 'showAdminPanel', user: getActiveAccessRecord() });
         alert('บัญชีนักเรียนไม่มีสิทธิ์เข้าหน้านี้');
         return;
       }

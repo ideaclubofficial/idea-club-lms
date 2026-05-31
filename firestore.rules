@@ -14,8 +14,31 @@ service cloud.firestore {
       return get(/databases/$(database)/documents/users/$(uid)).data;
     }
 
+    function isStudentUser() {
+      return signedIn()
+        && userProfileExists()
+        && (
+          userProfile(request.auth.uid).accountType == 'student'
+          || userProfile(request.auth.uid).role == 'student'
+          || userProfile(request.auth.uid).appRole == 'student'
+        );
+    }
+
+    function hasStaffAccountType() {
+      return signedIn()
+        && userProfileExists()
+        && !isStudentUser()
+        && (
+          userProfile(request.auth.uid).accountType in ['staff', 'teacher', 'admin']
+          || userProfile(request.auth.uid).role in ['admin', 'super_admin', 'teacher', 'staff', 'manager', 'academic', 'finance', 'Admin', 'SuperAdmin', 'Teacher', 'Staff', 'Manager', 'Academic', 'Finance', 'FinanceAdmin']
+          || userProfile(request.auth.uid).appRole in ['SuperAdmin', 'Admin', 'FinanceAdmin', 'TeacherAdmin', 'Staff', 'Manager', 'Academic', 'Finance', 'Teacher', 'AssistantTeacher']
+        );
+    }
+
     function isAdmin() {
       return signedIn()
+        && userProfileExists()
+        && hasStaffAccountType()
         && (
           userProfile(request.auth.uid).role == 'admin'
           || userProfile(request.auth.uid).appRole in ['SuperAdmin', 'Admin', 'FinanceAdmin', 'TeacherAdmin', 'Staff']
@@ -25,6 +48,7 @@ service cloud.firestore {
 
     function isFinance() {
       return signedIn()
+        && hasStaffAccountType()
         && (
           userProfile(request.auth.uid).role in ['finance', 'Finance', 'FinanceAdmin']
           || userProfile(request.auth.uid).appRole in ['finance', 'Finance', 'FinanceAdmin']
@@ -34,6 +58,7 @@ service cloud.firestore {
     function isTeacher() {
       return signedIn()
         && userProfileExists()
+        && hasStaffAccountType()
         && (
           userProfile(request.auth.uid).role == 'teacher'
           || userProfile(request.auth.uid).role == 'admin'
@@ -48,6 +73,7 @@ service cloud.firestore {
     function hasAdminPermission(permissionKey) {
       return signedIn()
         && userProfileExists()
+        && hasStaffAccountType()
         && userProfile(request.auth.uid).permissions is list
         && (
           permissionKey in userProfile(request.auth.uid).permissions
@@ -58,6 +84,7 @@ service cloud.firestore {
     function hasMonthlyPlannerAccess() {
       return signedIn()
         && userProfileExists()
+        && hasStaffAccountType()
         && (
           hasAdminPermission('admin.monthlyPlanner')
           || userProfile(request.auth.uid).role == 'admin'
