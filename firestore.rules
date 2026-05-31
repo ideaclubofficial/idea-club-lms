@@ -7,7 +7,8 @@ service cloud.firestore {
     }
 
     function userProfileExists() {
-      return get(/databases/$(database)/documents/users/$(request.auth.uid)).exists;
+      return request.auth != null
+        && exists(/databases/$(database)/documents/users/$(request.auth.uid));
     }
 
     function userProfile(uid) {
@@ -15,34 +16,35 @@ service cloud.firestore {
     }
 
     function isStudentUser() {
-      return signedIn()
-        && userProfileExists()
+      return request.auth != null
+        && exists(/databases/$(database)/documents/users/$(request.auth.uid))
         && (
-          userProfile(request.auth.uid).accountType == 'student'
-          || userProfile(request.auth.uid).role == 'student'
-          || userProfile(request.auth.uid).appRole == 'student'
+          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.accountType == 'student'
+          || get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'student'
+          || get(/databases/$(database)/documents/users/$(request.auth.uid)).data.appRole == 'student'
         );
     }
 
     function hasStaffAccountType() {
-      return signedIn()
-        && userProfileExists()
+      return request.auth != null
+        && exists(/databases/$(database)/documents/users/$(request.auth.uid))
         && !isStudentUser()
         && (
-          userProfile(request.auth.uid).accountType in ['staff', 'teacher', 'admin']
-          || userProfile(request.auth.uid).role in ['admin', 'super_admin', 'teacher', 'staff', 'manager', 'academic', 'finance', 'Admin', 'SuperAdmin', 'Teacher', 'Staff', 'Manager', 'Academic', 'Finance', 'FinanceAdmin']
-          || userProfile(request.auth.uid).appRole in ['SuperAdmin', 'Admin', 'FinanceAdmin', 'TeacherAdmin', 'Staff', 'Manager', 'Academic', 'Finance', 'Teacher', 'AssistantTeacher']
+          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.accountType in ['staff', 'teacher', 'admin']
+          || get(/databases/$(database)/documents/users/$(request.auth.uid)).data.appRole in ['SuperAdmin', 'Admin', 'Manager', 'Academic', 'Finance', 'Teacher']
+          || get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['admin', 'Admin', 'SuperAdmin', 'Teacher']
         );
     }
 
     function isAdmin() {
-      return signedIn()
-        && userProfileExists()
-        && hasStaffAccountType()
+      return hasStaffAccountType()
         && (
-          userProfile(request.auth.uid).role == 'admin'
-          || userProfile(request.auth.uid).appRole in ['SuperAdmin', 'Admin', 'FinanceAdmin', 'TeacherAdmin', 'Staff']
-          || (userProfile(request.auth.uid).permissions is list && 'admin.full' in userProfile(request.auth.uid).permissions)
+          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.appRole in ['SuperAdmin', 'Admin']
+          || get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['admin', 'Admin', 'SuperAdmin']
+          || (
+            get(/databases/$(database)/documents/users/$(request.auth.uid)).data.permissions is list
+            && 'admin.full' in get(/databases/$(database)/documents/users/$(request.auth.uid)).data.permissions
+          )
         );
     }
 
@@ -66,18 +68,17 @@ service cloud.firestore {
         );
     }
 
-    function canReadCollection() {
-      return signedIn() && (isAdmin() || isTeacher());
-    }
-
     function hasAdminPermission(permissionKey) {
-      return signedIn()
-        && userProfileExists()
-        && hasStaffAccountType()
-        && userProfile(request.auth.uid).permissions is list
+      return hasStaffAccountType()
         && (
-          permissionKey in userProfile(request.auth.uid).permissions
-          || 'admin.full' in userProfile(request.auth.uid).permissions
+          isAdmin()
+          || (
+            get(/databases/$(database)/documents/users/$(request.auth.uid)).data.permissions is list
+            && (
+              permissionKey in get(/databases/$(database)/documents/users/$(request.auth.uid)).data.permissions
+              || 'admin.full' in get(/databases/$(database)/documents/users/$(request.auth.uid)).data.permissions
+            )
+          )
         );
     }
 
@@ -201,14 +202,14 @@ service cloud.firestore {
     }
 
     match /students/{docId} {
-      allow read: if canReadCollection() || ownsExistingDoc();
+      allow read: if isAdmin() || hasAdminPermission('admin.full') || isTeacher() || ownsExistingDoc();
       allow create: if isAdmin() || ownsIncomingDoc();
       allow update: if isAdmin() || (ownsExistingDoc() && ownsIncomingDoc());
       allow delete: if isAdmin();
     }
 
     match /payments/{docId} {
-      allow read: if isAdmin() || isFinance() || isPaymentOwner() || isTeacher();
+      allow read: if isAdmin() || hasAdminPermission('admin.full') || isFinance() || isPaymentOwner() || isTeacher();
       // Payment records must be created by Admin/Finance or backend workflows only.
       // Students should not create payment documents directly.
       allow create: if isAdmin() || isFinance();
@@ -219,7 +220,7 @@ service cloud.firestore {
     }
 
     match /receipts/{docId} {
-      allow read: if canReadCollection() || ownsExistingDoc();
+      allow read: if isAdmin() || hasAdminPermission('admin.full') || isTeacher() || ownsExistingDoc();
       allow write: if isAdmin();
     }
 
@@ -229,7 +230,7 @@ service cloud.firestore {
     }
 
     match /teachers/{docId} {
-      allow read: if canReadCollection();
+      allow read: if isAdmin() || hasAdminPermission('admin.full') || isTeacher();
       allow write: if isAdmin();
     }
 
@@ -254,19 +255,19 @@ service cloud.firestore {
     }
 
     match /monthlyPlans/{docId} {
-      allow read: if hasMonthlyPlannerAccess() || isTeacher();
+      allow read: if isAdmin() || hasAdminPermission('admin.full') || hasMonthlyPlannerAccess() || isTeacher();
       allow create, update: if hasMonthlyPlannerAccess();
       allow delete: if false;
     }
 
     match /monthlyPlanSessions/{docId} {
-      allow read: if hasMonthlyPlannerAccess() || isTeacher();
+      allow read: if isAdmin() || hasAdminPermission('admin.full') || hasMonthlyPlannerAccess() || isTeacher();
       allow create, update: if hasMonthlyPlannerAccess();
       allow delete: if false;
     }
 
     match /holidays/{docId} {
-      allow read: if hasMonthlyPlannerAccess() || isTeacher();
+      allow read: if isAdmin() || hasAdminPermission('admin.full') || hasMonthlyPlannerAccess() || isTeacher();
       allow create, update: if hasMonthlyPlannerAccess();
       allow delete: if false;
     }
@@ -277,7 +278,7 @@ service cloud.firestore {
     }
 
     match /adminScoreRecords/{docId} {
-      allow read: if canReadCollection();
+      allow read: if isAdmin() || hasAdminPermission('admin.full') || isTeacher();
       allow write: if isAdmin();
     }
 
@@ -287,12 +288,12 @@ service cloud.firestore {
     }
 
     match /courseTeachingSettings/{docId} {
-      allow read: if canReadCollection();
+      allow read: if isAdmin() || hasAdminPermission('admin.full') || isTeacher();
       allow write: if isAdmin();
     }
 
     match /teacherPreferenceRules/{docId} {
-      allow read: if canReadCollection();
+      allow read: if isAdmin() || hasAdminPermission('admin.full') || isTeacher();
       allow write: if isAdmin();
     }
 
@@ -312,7 +313,8 @@ service cloud.firestore {
     }
 
     match /activityLogs/{docId} {
-      allow read, write: if isAdmin();
+      allow read: if isAdmin() || hasAdminPermission('admin.full');
+      allow write: if isAdmin();
     }
 
     match /authCleanupQueue/{docId} {
