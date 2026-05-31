@@ -1476,6 +1476,7 @@
                     <option>Online</option>
                     <option>On-demand</option>
                     <option>Online + On-demand</option>
+                    <option>ไม่มีแถม</option>
                   </select>
                 </div>
               </div>
@@ -1962,6 +1963,14 @@
                   </select>
                 </div>
                 <div>
+                  <label>เริ่มเปิดให้ทำข้อสอบ</label>
+                  <input id="examLinkOpenStartAt" type="datetime-local" />
+                </div>
+                <div>
+                  <label>ปิดรับคำตอบ</label>
+                  <input id="examLinkOpenEndAt" type="datetime-local" />
+                </div>
+                <div>
                   <label>หมายเหตุ</label>
                   <input id="examLinkNote" type="text" placeholder="เช่น ปิดรับคำตอบวันที่ ..." />
                 </div>
@@ -2023,6 +2032,7 @@
                     <th>วิชา</th>
                     <th>ชื่อแบบทดสอบ</th>
                     <th>Google Form</th>
+                    <th>เวลาเปิดสอบ</th>
                     <th>สถานะ</th>
                     <th>จัดการ</th>
                   </tr>
@@ -4117,17 +4127,18 @@
 
     function getDefaultCourseFeaturesByAccess(access) {
       const text = String(access || '');
+      const hasNoBonus = text === 'ไม่มีแถม';
       const hasOnline = text.indexOf('Online') !== -1;
       const hasOnDemand = text.indexOf('On-demand') !== -1;
       return {
-        online: hasOnline,
-        onlineDocs: hasOnline,
-        onDemand: hasOnDemand,
+        online: !hasNoBonus && hasOnline,
+        onlineDocs: !hasNoBonus && hasOnline,
+        onDemand: !hasNoBonus && hasOnDemand,
         payment: true,
         lineGroup: true,
         receipts: true,
-        exams: true,
-        scores: true,
+        exams: !hasNoBonus,
+        scores: !hasNoBonus,
         attendance: true,
         announcements: true
       };
@@ -4181,7 +4192,7 @@
       const state = normalizeCourseFeatures(course);
       return COURSE_FEATURES.filter(function(item) { return state[item.key] !== false; }).map(function(item) {
         return '<span class="feature-chip">' + item.title + '</span>';
-      }).join('') || '<span class="feature-chip off">ยังไม่เปิดฟังก์ชัน</span>';
+      }).join('') || '<span class="feature-chip off">ไม่มีสิทธิ์แถม</span>';
     }
 
     function renderStudentCourseAccessSummary(course) {
@@ -4193,19 +4204,40 @@
       if (state.exams !== false || state.scores !== false) items.push('การสอบ');
       return items.map(function(item) {
         return '<span class="feature-chip">' + item + '</span>';
-      }).join('') || '<span class="feature-chip off">ยังไม่เปิดสิทธิ์เข้าเรียน</span>';
+      }).join('') || '<span class="feature-chip off">ไม่มีสิทธิ์แถม</span>';
     }
 
     function renderCourseFeatureBadges(course) {
+      if (String((course && course.access) || '').trim() === 'ไม่มีแถม') {
+        return '<div style="margin:10px 0;"><span class="feature-chip off">ไม่มีสิทธิ์แถม</span></div>';
+      }
       const state = normalizeCourseFeatures(course);
-      return '<div style="margin:10px 0;">' + COURSE_FEATURES.slice(0, 8).map(function(item) {
-        return '<span class="feature-chip' + (state[item.key] !== false ? '' : ' off') + '">' + (state[item.key] !== false ? '✓ ' : 'ปิด ') + item.title + '</span>';
-      }).join('') + '</div>';
+      const badges = COURSE_FEATURES.slice(0, 8).filter(function(item) {
+        return state[item.key] !== false;
+      }).map(function(item) {
+        return '<span class="feature-chip">✓ ' + item.title + '</span>';
+      }).join('');
+      return '<div style="margin:10px 0;">' + (badges || '<span class="feature-chip off">ไม่มีสิทธิ์แถม</span>') + '</div>';
+    }
+
+    function getCourseAccessLabel(course) {
+      const access = String((course && course.access) || '').trim();
+      return access === 'ไม่มีแถม' ? 'ไม่มีสิทธิ์แถม' : (access || '-');
+    }
+
+    function getStudentCourseTag(course) {
+      const label = getCourseAccessLabel(course);
+      return label === 'ไม่มีสิทธิ์แถม' ? label : 'แถม ' + label;
     }
 
     function updateCourseFeatureDefaultsFromAccess() {
       const access = getElement('adminCourseAccess') ? getElement('adminCourseAccess').value : 'Online';
       setSelectedCourseFeatures(getDefaultCourseFeaturesByAccess(access), access);
+    }
+
+    function updateBubbleCourseFeatureDefaultsFromAccess() {
+      const access = getElement('bubbleCourseAccess') ? getElement('bubbleCourseAccess').value : 'Online';
+      renderCourseFeatureCheckboxes('bubbleCourseFeatureList', getDefaultCourseFeaturesByAccess(access), 'bubble-course-feature');
     }
 
 
@@ -6491,6 +6523,32 @@
     let adminStudentCurrentPage = 1;
     const adminStudentPerPage = 20;
 
+    function renderAdminStudentActionGroup(title, buttonsHtml) {
+      if (!buttonsHtml) return '';
+      return '<div class="row-action-group"><span class="row-action-title">' + title + '</span><div class="row-action-buttons">' + buttonsHtml + '</div></div>';
+    }
+
+    function renderAdminStudentActions(s) {
+      const primaryButtons =
+        '<button class="btn btn-blue" type="button" onclick="' + actionCall('showStudentProfileDetail', s.id) + '">ดูข้อมูล</button>' +
+        (s.courseStatus === 'รออนุมัติคอร์ส' ? '<button class="btn btn-green" type="button" onclick="' + actionCall('approveStudentCourse', s.id) + '">อนุมัติคอร์ส</button><button class="btn btn-red" type="button" onclick="' + actionCall('cancelStudentCourse', s.id) + '">ยกเลิกคอร์ส</button>' : '') +
+        '<button class="btn btn-blue" type="button" onclick="' + actionCall('editStudent', s.id) + '">แก้ไข</button>';
+      const documentButtons =
+        '<button class="btn btn-blue" type="button" onclick="' + actionCall('openStudentApplicationAdmin', s.id) + '">ดูใบสมัคร</button>' +
+        '<button class="btn btn-dark" type="button" onclick="' + actionCall('downloadStudentApplicationPdfAdmin', s.id) + '">ดาวน์โหลดใบสมัคร PDF</button>';
+      const accountButtons =
+        '<button class="btn btn-dark" type="button" onclick="' + actionCall('openResetStudentPassword', s.id) + '">Reset รหัสผ่าน</button>' +
+        '<button class="btn btn-dark" type="button" onclick="' + actionCall('copyStudentLoginInfoById', s.id) + '">คัดลอกข้อมูลเข้าสู่ระบบ</button>';
+      const deleteButtons = '<button class="btn btn-red" type="button" onclick="' + actionCall('deleteStudent', s.id) + '">ลบ</button>';
+
+      return '<div class="row-action-stack">' +
+        renderAdminStudentActionGroup('งานหลัก', primaryButtons) +
+        renderAdminStudentActionGroup('เอกสาร', documentButtons) +
+        renderAdminStudentActionGroup('บัญชี', accountButtons) +
+        renderAdminStudentActionGroup('ลบ', deleteButtons) +
+      '</div>';
+    }
+
     function renderAdminStudents() {
       const tbody = getElement('adminStudentTableBody');
       if (!tbody) return;
@@ -6525,15 +6583,7 @@
           '<td><span class="' + courseStatusClass + '">' + courseStatus + '</span></td>' +
           '<td><span class="' + paymentClass + '">' + paymentStatus + '</span></td>' +
           '<td><span class="' + learningClass + '">' + learningStatus + '</span></td>' +
-          '<td><button class="btn btn-blue" type="button" onclick="' + actionCall('showStudentProfileDetail', s.id) + '">ดูข้อมูล</button>' +
-          (s.courseStatus === 'รออนุมัติคอร์ส' ? '<button class="btn btn-green" type="button" onclick="' + actionCall('approveStudentCourse', s.id) + '">อนุมัติคอร์ส</button><button class="btn btn-red" type="button" onclick="' + actionCall('cancelStudentCourse', s.id) + '">ยกเลิกคอร์ส</button>' : '') +
-          '<button class="btn btn-blue" type="button" onclick="' + actionCall('openStudentApplicationAdmin', s.id) + '">ดูใบสมัคร</button>' +
-          '<button class="btn btn-dark" type="button" onclick="' + actionCall('downloadStudentApplicationPdfAdmin', s.id) + '">ดาวน์โหลดใบสมัคร PDF</button>' +
-          '<button class="btn btn-blue" type="button" onclick="' + actionCall('editStudent', s.id) + '">แก้ไข</button>' +
-          '<button class="btn btn-dark" type="button" onclick="' + actionCall('openResetStudentPassword', s.id) + '">Reset รหัสผ่าน</button>' +
-          '<button class="btn btn-dark" type="button" onclick="' + actionCall('copyStudentLoginInfoById', s.id) + '">คัดลอกข้อมูลเข้าสู่ระบบ</button>' +
-          '<button class="btn btn-dark" type="button" onclick="' + actionCall('repairStudentLoginById', s.id) + '">ซ่อม Login นักเรียน</button>' +
-          '<button class="btn btn-red" type="button" onclick="' + actionCall('deleteStudent', s.id) + '">ลบ</button></td>' +
+          '<td class="row-actions-cell">' + renderAdminStudentActions(s) + '</td>' +
         '</tr>';
       }).join('') : '<tr><td colspan="16">ยังไม่มีนักเรียนในเงื่อนไขที่เลือก</td></tr>';
     }
@@ -7165,40 +7215,6 @@
       alert('ซ่อม Login ครูเรียบร้อยแล้ว' + warning);
     }
 
-    async function repairStudentLoginById(id) {
-      const s = students.find(function(item) { return String(item.id) === String(id); });
-      if (!s) return alert('ไม่พบข้อมูลนักเรียนที่ต้องการซ่อม');
-      const studentEmail = s.authEmail || s.email || buildStudentAuthEmail(s);
-      s.authEmail = studentEmail;
-      s.email = s.email || studentEmail;
-      s.studentId = s.studentId || s.memberId || (s.memberId === undefined ? '' : s.memberId);
-      s.loginId = s.loginId || s.studentId || s.memberId || s.phone || s.email;
-      s.loginKeys = buildLoginKeys({
-        phone: s.phone,
-        email: s.email,
-        memberId: s.memberId,
-        studentId: s.studentId
-      });
-
-      let warning = '';
-      if (PRODUCTION_MODE && db && !s.authUid) {
-        try {
-          s.authUid = await createOrResolveAuthUidForAccount(studentEmail, '000000', 'student');
-        } catch (authError) {
-          console.warn('repair student auth error:', authError);
-          alert('ซ่อม Login นักเรียนไม่สำเร็จ: ' + (authError.message || authError.code || 'ไม่ทราบสาเหตุ'));
-          return;
-        }
-      }
-
-      await setFirebaseDocument('students', s);
-      if (PRODUCTION_MODE && s.authUid && db) {
-        await syncStudentUserProfile(s, s.authUid);
-      }
-      renderAdminStudents();
-      alert('ซ่อม Login นักเรียนเรียบร้อยแล้ว' + warning);
-    }
-
     function editTeacher(id) {
       const t = teachers.find(function(item) { return String(item.id) === String(id); });
       if (!t) return;
@@ -7660,7 +7676,7 @@
       }
       const filtered = courses.filter(function(c) { return c.grade === grade && c.status === 'open'; });
       list.innerHTML = filtered.length ? filtered.map(function(c) {
-        return '<div class="card"><span class="tag">' + c.grade + ' · แถม ' + c.access + '</span><h3>' + c.name + '</h3><p>' + c.desc + '</p>' + renderCourseFeatureBadges(c) + '<p><strong>สถานที่เรียน:</strong> ' + c.location + '</p><p><strong>วันเรียน:</strong> ' + ((c.days || []).join(' / ') || '-') + '</p><p class="price">' + formatPrice(getCourseMonthlyPrice(c)) + ' / เดือน</p><button class="btn btn-blue" type="button" onclick="' + actionCall('applyCourse', c.id) + '">สมัครคอร์สนี้</button></div>';
+        return '<div class="card"><span class="tag">' + c.grade + ' · ' + getStudentCourseTag(c) + '</span><h3>' + c.name + '</h3><p>' + c.desc + '</p>' + renderCourseFeatureBadges(c) + '<p><strong>สถานที่เรียน:</strong> ' + c.location + '</p><p><strong>วันเรียน:</strong> ' + ((c.days || []).join(' / ') || '-') + '</p><p class="price">' + formatPrice(getCourseMonthlyPrice(c)) + ' / เดือน</p><button class="btn btn-blue" type="button" onclick="' + actionCall('applyCourse', c.id) + '">สมัครคอร์สนี้</button></div>';
       }).join('') : '<div class="card"><h3>ยังไม่มีคอร์สที่เปิดรับสมัคร</h3><p>ระดับชั้น ' + grade + ' ยังไม่มีคอร์สเปิดรับสมัครในขณะนี้</p></div>';
     }
 
@@ -7682,7 +7698,7 @@
       }
       tbody.innerHTML = courses.map(function(c) {
         const statusText = c.status === 'open' ? '<span class="status-paid">เปิดรับสมัคร</span>' : '<span class="status-absent">ปิดรับสมัคร</span>';
-        return '<tr><td>' + c.grade + '</td><td>' + c.name + '</td><td>' + formatPrice(c.price) + '</td><td>' + c.access + '</td><td>' + c.location + '</td><td>' + ((c.days || []).join(' / ') || '-') + '</td><td>' + renderCourseFeatureSummary(c) + '</td><td>' + statusText + '</td><td><button class="btn btn-blue" type="button" onclick="' + actionCall('editCourse', c.id) + '">แก้ไข</button><button class="btn btn-red" type="button" onclick="' + actionCall('deleteCourse', c.id) + '">ลบ</button></td></tr>';
+        return '<tr><td>' + c.grade + '</td><td>' + c.name + '</td><td>' + formatPrice(c.price) + '</td><td>' + getCourseAccessLabel(c) + '</td><td>' + c.location + '</td><td>' + ((c.days || []).join(' / ') || '-') + '</td><td>' + renderCourseFeatureSummary(c) + '</td><td>' + statusText + '</td><td><button class="btn btn-blue" type="button" onclick="' + actionCall('editCourse', c.id) + '">แก้ไข</button><button class="btn btn-red" type="button" onclick="' + actionCall('deleteCourse', c.id) + '">ลบ</button></td></tr>';
       }).join('');
     }
 
@@ -8300,7 +8316,7 @@ function getCourseOnlineDocs(course, includeInactive) {
         '</div>' +
         '<div class="form-row">' +
           '<div><label>ราคาปกติต่อเดือน</label><input id="bubbleCoursePrice" type="number" value="' + c.price + '"></div>' +
-          '<div><label>สิทธิ์ที่แถมในคอร์ส</label><select id="bubbleCourseAccess"><option' + (c.access === 'Online' ? ' selected' : '') + '>Online</option><option' + (c.access === 'On-demand' ? ' selected' : '') + '>On-demand</option><option' + (c.access === 'Online + On-demand' ? ' selected' : '') + '>Online + On-demand</option></select></div>' +
+          '<div><label>สิทธิ์ที่แถมในคอร์ส</label><select id="bubbleCourseAccess" onchange="updateBubbleCourseFeatureDefaultsFromAccess()"><option' + (c.access === 'Online' ? ' selected' : '') + '>Online</option><option' + (c.access === 'On-demand' ? ' selected' : '') + '>On-demand</option><option' + (c.access === 'Online + On-demand' ? ' selected' : '') + '>Online + On-demand</option><option' + (c.access === 'ไม่มีแถม' ? ' selected' : '') + '>ไม่มีแถม</option></select></div>' +
         '</div>' +
         '<div class="form-row">' +
           '<div><label>สถานที่เรียน</label><select id="bubbleCourseLocation"><option' + (c.location === 'IDEA CLUB ศูนย์ นครสวรรค์' ? ' selected' : '') + '>IDEA CLUB ศูนย์ นครสวรรค์</option><option' + (c.location === 'IDEA CLUB ศูนย์ หนองฉาง' ? ' selected' : '') + '>IDEA CLUB ศูนย์ หนองฉาง</option></select></div>' +
@@ -14263,6 +14279,47 @@ function receiptStatusText(status) {
     }
 
     /* ===== Google Form Monthly Exam System ===== */
+    function parseExamScheduleDate(value) {
+      if (!value) return null;
+      const date = new Date(value);
+      return Number.isNaN(date.getTime()) ? null : date;
+    }
+
+    function formatExamScheduleText(value) {
+      const date = parseExamScheduleDate(value);
+      return date ? date.toLocaleString('th-TH', { dateStyle: 'short', timeStyle: 'short' }) : '';
+    }
+
+    function getExamLinkAvailability(item, now) {
+      if (!item || item.status !== 'open') {
+        return { open: false, text: 'ปิดไว้ก่อน', className: 'status-absent' };
+      }
+      const current = now || new Date();
+      const start = parseExamScheduleDate(item.openStartAtText);
+      const end = parseExamScheduleDate(item.openEndAtText);
+      if (start && current < start) {
+        return { open: false, text: 'ยังไม่ถึงเวลา', className: 'status-waiting' };
+      }
+      if (end && current > end) {
+        return { open: false, text: 'หมดเวลา', className: 'status-absent' };
+      }
+      return { open: true, text: 'เปิดอยู่', className: 'status-paid' };
+    }
+
+    function isExamLinkOpenForStudent(item) {
+      return getExamLinkAvailability(item).open;
+    }
+
+    function renderExamScheduleCell(item) {
+      const availability = getExamLinkAvailability(item);
+      const startText = formatExamScheduleText(item && item.openStartAtText);
+      const endText = formatExamScheduleText(item && item.openEndAtText);
+      const rangeText = startText || endText
+        ? '<span class="mini-muted">' + (startText ? 'เริ่ม ' + startText : 'เริ่มทันที') + (endText ? '<br>ปิด ' + endText : '<br>ไม่กำหนดเวลาปิด') + '</span>'
+        : '<span class="mini-muted">ใช้สถานะเปิด/ปิดเดิม</span>';
+      return '<span class="' + availability.className + '">' + availability.text + '</span><br>' + rangeText;
+    }
+
     function getActiveExamLinksForStudent() {
       const grade = currentStudent && currentStudent.grade ? currentStudent.grade : getProfileGrade();
       return monthlyExamLinks.filter(function(item) {
@@ -14287,6 +14344,8 @@ function receiptStatusText(status) {
       const subject = getElement('examLinkSubject') ? getElement('examLinkSubject').value : 'วิทยาศาสตร์';
       const url = getElement('examLinkUrl') ? getElement('examLinkUrl').value.trim() : '';
       const status = getElement('examLinkStatus') ? getElement('examLinkStatus').value : 'open';
+      const openStartAtText = getElement('examLinkOpenStartAt') ? getElement('examLinkOpenStartAt').value : '';
+      const openEndAtText = getElement('examLinkOpenEndAt') ? getElement('examLinkOpenEndAt').value : '';
       const note = getElement('examLinkNote') ? getElement('examLinkNote').value.trim() : '';
       const result = getElement('monthlyTestSaveResult');
 
@@ -14306,17 +14365,27 @@ function receiptStatusText(status) {
         return;
       }
 
+      const startDate = parseExamScheduleDate(openStartAtText);
+      const endDate = parseExamScheduleDate(openEndAtText);
+      if (startDate && endDate && startDate > endDate) {
+        if (result) {
+          result.textContent = 'เวลาเริ่มเปิดให้ทำข้อสอบต้องมาก่อนเวลาปิดรับคำตอบ';
+          result.style.color = '#dc2626';
+        }
+        return;
+      }
+
       try {
         if (editingId) {
           const item = monthlyExamLinks.find(function(exam) { return String(exam.id) === String(editingId); });
           if (item) {
-            Object.assign(item, { title: title, grade: grade, month: month, subject: subject, url: url, status: status, note: note });
+            Object.assign(item, { title: title, grade: grade, month: month, subject: subject, url: url, status: status, openStartAtText: openStartAtText, openEndAtText: openEndAtText, note: note });
             await setFirebaseDocument('monthlyExamLinks', item);
           }
           if (result) result.textContent = 'แก้ไขลิงก์แบบทดสอบเรียบร้อย';
         } else {
           const newId = createFirebaseDocId('monthlyExamLinks');
-          const newItem = { id: newId, firebaseDocId: newId, title: title, grade: grade, month: month, subject: subject, url: url, status: status, note: note };
+          const newItem = { id: newId, firebaseDocId: newId, title: title, grade: grade, month: month, subject: subject, url: url, status: status, openStartAtText: openStartAtText, openEndAtText: openEndAtText, note: note };
           monthlyExamLinks.push(newItem);
           await setFirebaseDocument('monthlyExamLinks', newItem);
           if (result) result.textContent = 'เพิ่มลิงก์แบบทดสอบเรียบร้อย';
@@ -14343,6 +14412,8 @@ function receiptStatusText(status) {
       if (getElement('examLinkSubject')) getElement('examLinkSubject').value = 'วิทยาศาสตร์';
       if (getElement('examLinkUrl')) getElement('examLinkUrl').value = '';
       if (getElement('examLinkStatus')) getElement('examLinkStatus').value = 'open';
+      if (getElement('examLinkOpenStartAt')) getElement('examLinkOpenStartAt').value = '';
+      if (getElement('examLinkOpenEndAt')) getElement('examLinkOpenEndAt').value = '';
       if (getElement('examLinkNote')) getElement('examLinkNote').value = '';
       if (clearMessage !== false && getElement('monthlyTestSaveResult')) getElement('monthlyTestSaveResult').textContent = '';
     }
@@ -14357,6 +14428,8 @@ function receiptStatusText(status) {
       if (getElement('examLinkSubject')) getElement('examLinkSubject').value = item.subject || 'วิทยาศาสตร์';
       if (getElement('examLinkUrl')) getElement('examLinkUrl').value = item.url || '';
       if (getElement('examLinkStatus')) getElement('examLinkStatus').value = item.status || 'open';
+      if (getElement('examLinkOpenStartAt')) getElement('examLinkOpenStartAt').value = item.openStartAtText || '';
+      if (getElement('examLinkOpenEndAt')) getElement('examLinkOpenEndAt').value = item.openEndAtText || '';
       if (getElement('examLinkNote')) getElement('examLinkNote').value = item.note || '';
       if (getElement('monthlyTestSaveResult')) {
         getElement('monthlyTestSaveResult').textContent = 'กำลังแก้ไขลิงก์แบบทดสอบ';
@@ -14427,10 +14500,11 @@ function receiptStatusText(status) {
           '<td>' + (item.subject || '-') + '</td>' +
           '<td>' + (item.title || '-') + '</td>' +
           '<td>' + linkText + '</td>' +
+          '<td>' + renderExamScheduleCell(item) + '</td>' +
           '<td>' + statusText + '</td>' +
           '<td><button class="btn btn-blue" type="button" onclick="' + actionCall('editMonthlyExamLink', item.id) + '">แก้ไข</button><button class="btn btn-red" type="button" onclick="' + actionCall('deleteMonthlyExamLink', item.id) + '">ลบ</button></td>' +
         '</tr>';
-      }).join('') : '<tr><td colspan="7">ยังไม่มีลิงก์แบบทดสอบ ให้เพิ่มลิงก์ Google Form จากฟอร์มด้านบน</td></tr>';
+      }).join('') : '<tr><td colspan="8">ยังไม่มีลิงก์แบบทดสอบ ให้เพิ่มลิงก์ Google Form จากฟอร์มด้านบน</td></tr>';
     }
 
     function renderStudentExamFilters() {
@@ -14481,8 +14555,9 @@ function receiptStatusText(status) {
       if (getElement('studentExamCardMonth')) getElement('studentExamCardMonth').textContent = selectedMonth || '-';
       if (getElement('studentExamCardSubject')) getElement('studentExamCardSubject').textContent = selectedSubject || '-';
       if (getElement('studentExamCardCount')) {
-        getElement('studentExamCardCount').textContent = examLink ? 'พร้อมเปิด Google Form' : 'ยังไม่มีลิงก์ที่เปิดใช้งาน';
-        getElement('studentExamCardCount').className = examLink ? 'status-paid' : 'status-waiting';
+        const availability = examLink ? getExamLinkAvailability(examLink) : null;
+        getElement('studentExamCardCount').textContent = availability ? availability.text : 'ยังไม่มีลิงก์ที่เปิดในเวลานี้';
+        getElement('studentExamCardCount').className = availability ? availability.className : 'status-waiting';
       }
       if (getElement('studentExamCardTitle')) getElement('studentExamCardTitle').textContent = examLink ? examLink.title : 'Monthly Test ' + (selectedMonth || '-') + (selectedSubject ? ' · ' + selectedSubject : '');
       if (getElement('scorePublishStatus')) {
@@ -14499,6 +14574,11 @@ function receiptStatusText(status) {
       const examLink = getSelectedMonthlyExamLink();
       if (!examLink || !examLink.url) {
         alert('ยังไม่มีลิงก์ Google Form สำหรับเดือนและวิชาที่เลือก');
+        return;
+      }
+      const availability = getExamLinkAvailability(examLink);
+      if (!availability.open) {
+        alert('ยังไม่สามารถทำข้อสอบได้: ' + availability.text);
         return;
       }
       window.open(examLink.url, '_blank');
@@ -15253,6 +15333,10 @@ function receiptStatusText(status) {
       const box = getElement('adminNewMemberList');
       if (!box) return;
       const recent = getRecentNewMembers();
+      if (!recent.recent7Days.length) {
+        box.innerHTML = '<div class="notice">ไม่พบรายการที่ต้องตรวจสอบ</div>';
+        return;
+      }
       const rows = recent.latest.map(function(item) {
         const s = item.student || {};
         const timeText = item.createdDate ? item.createdDate.toLocaleString('th-TH') : (s.registeredAtText || s.createdAtText || 'ไม่พบเวลาสมัคร');
@@ -15260,9 +15344,7 @@ function receiptStatusText(status) {
           escapeHtml((s.grade || '-') + ' · ' + (s.phone || '-') + ' · ' + (s.courseStatus || s.course || 'ยังไม่ได้สมัครคอร์ส')) +
           '</p><p class="mini-muted">สมัครเมื่อ: ' + escapeHtml(timeText) + '</p></div>';
       }).join('');
-      const hasRecent = recent.recent7Days.length > 0;
-      box.innerHTML = '<div class="' + (hasRecent ? 'feature-warning' : 'feature-ok') + '"><strong>สมาชิกใหม่ใน 7 วันล่าสุด' + (hasRecent ? ' ' + recent.recent7Days.length + ' คน' : '') + '</strong><p>' + (hasRecent ? 'ตรวจสอบข้อมูลและคอร์สที่ต้องอนุมัติจากหน้านักเรียน' : 'ไม่มีสมาชิกใหม่ในช่วง 7 วันล่าสุด') + '</p><button class="btn btn-blue" type="button" onclick="showAdminTab(\'admin-students\')">ไปดูรายชื่อนักเรียน</button></div>' +
-        (rows || '<div class="notice">ไม่มีสมาชิกใหม่ในช่วง 7 วันล่าสุด</div>');
+      box.innerHTML = '<div class="feature-warning"><strong>สมาชิกใหม่ใน 7 วันล่าสุด ' + recent.recent7Days.length + ' คน</strong><p>ตรวจสอบข้อมูลและคอร์สที่ต้องอนุมัติจากหน้านักเรียน</p><button class="btn btn-blue" type="button" onclick="showAdminTab(\'admin-students\')">ไปดูรายชื่อนักเรียน</button></div>' + rows;
     }
 
     function injectAdminDataQualityBox() {
@@ -15284,10 +15366,13 @@ function receiptStatusText(status) {
         { label: 'ยังไม่มี QR Code รับชำระเงิน', count: q.qrMissing ? 1 : 0, action: "showAdminTab('admin-payment')" },
         { label: 'ยังไม่มีเดือนชำระเงิน', count: q.monthMissing ? 1 : 0, action: "showAdminTab('admin-payment')" }
       ];
-      box.innerHTML = rows.map(function(row) {
-        const cls = row.count ? 'feature-warning' : 'feature-ok';
-        const status = row.count ? row.count + ' รายการต้องตรวจสอบ' : 'เรียบร้อย';
-        return '<div class="' + cls + '"><strong>' + row.label + '</strong><p>' + status + '</p>' + (row.count ? '<button class="btn btn-blue" type="button" onclick="' + row.action + '">ไปจัดการ</button>' : '') + '</div>';
+      const issueRows = rows.filter(function(row) { return row.count; });
+      if (!issueRows.length) {
+        box.innerHTML = '<div class="notice">ไม่พบรายการที่ต้องตรวจสอบ</div>';
+        return;
+      }
+      box.innerHTML = issueRows.map(function(row) {
+        return '<div class="feature-warning"><strong>' + row.label + '</strong><p>' + row.count + ' รายการต้องตรวจสอบ</p><button class="btn btn-blue" type="button" onclick="' + row.action + '">ไปจัดการ</button></div>';
       }).join('');
     }
 
@@ -15314,10 +15399,20 @@ function receiptStatusText(status) {
         box.innerHTML = '<div class="feature-warning">ยังไม่มีคอร์สในระบบ</div>';
         return;
       }
-      box.innerHTML = courses.map(function(c) {
+      const notReadyCourses = courses.map(function(c) {
         const r = getCourseReadiness(c);
-        const cls = r.ready ? 'feature-ok' : 'feature-warning';
-        return '<div class="' + cls + '"><strong>' + (c.grade || '-') + ' · ' + (c.name || '-') + '</strong><p>' + (r.ready ? 'พร้อมเปิดใช้งาน' : 'ยังไม่พร้อม: ' + r.issues.join(' / ')) + '</p><button class="btn btn-dark" type="button" onclick="checkSingleCourseReadiness(\'' + jsArg(c.id) + '\')">ดูรายละเอียด</button></div>';
+        return { course: c, readiness: r };
+      }).filter(function(row) {
+        return !row.readiness.ready;
+      });
+      if (!notReadyCourses.length) {
+        box.innerHTML = '<div class="notice">ไม่พบรายการที่ต้องตรวจสอบ</div>';
+        return;
+      }
+      box.innerHTML = notReadyCourses.map(function(row) {
+        const c = row.course;
+        const r = row.readiness;
+        return '<div class="feature-warning"><strong>' + (c.grade || '-') + ' · ' + (c.name || '-') + '</strong><p>ยังไม่พร้อม: ' + r.issues.join(' / ') + '</p><button class="btn btn-dark" type="button" onclick="checkSingleCourseReadiness(\'' + jsArg(c.id) + '\')">ดูรายละเอียด</button></div>';
       }).join('');
     }
 
@@ -15380,6 +15475,14 @@ function receiptStatusText(status) {
       const missingStudentAuthUid = readiness.filter(function(item) { return !item.hasStudentAuthUid; });
       const missingAmount = readiness.filter(function(item) { return !item.hasAmount; });
       const readyForOcr = readiness.filter(function(item) { return item.hasMemberOrStudentId && item.hasAmount; });
+      const issueSummaries = [
+        { label: 'ขาด memberId/studentId', count: missingMemberOrStudentId.length, cls: 'status-absent' },
+        { label: 'ขาด studentAuthUid', count: missingStudentAuthUid.length, cls: 'status-waiting' },
+        { label: 'ขาด amount/expectedAmount', count: missingAmount.length, cls: 'status-absent' }
+      ].filter(function(item) { return item.count; });
+      const summaryRows = issueSummaries.length ? issueSummaries.map(function(item) {
+        return '<div class="status-display-row"><span class="status-label">' + item.label + '</span><strong class="' + item.cls + '">' + item.count + '</strong></div>';
+      }).join('') : '<div class="notice">ไม่พบรายการที่ต้องตรวจสอบ</div>';
       const samples = readiness.filter(function(item) {
         return !item.hasMemberOrStudentId || !item.hasStudentAuthUid || !item.hasAmount;
       }).slice(0, 30);
@@ -15392,11 +15495,7 @@ function receiptStatusText(status) {
         '<div class="receipt-box">' +
           '<div class="receipt-header"><div><div class="receipt-title">ตรวจข้อมูล Payment สำหรับ OCR</div><p>ระบบ OCR ยังไม่เปิดใช้งาน รายงานนี้ใช้เตรียมความพร้อม OCR ในอนาคตเท่านั้น ยังไม่แก้ข้อมูลจริง</p></div><span class="status-badge parent">' + readyForOcr.length + ' / ' + list.length + '</span></div>' +
           '<div class="status-display">' +
-            '<div class="status-display-row"><span class="status-label">payments ทั้งหมด</span><strong>' + list.length + '</strong></div>' +
-            '<div class="status-display-row"><span class="status-label">พร้อมใช้งาน OCR</span><strong class="status-paid">' + readyForOcr.length + '</strong></div>' +
-            '<div class="status-display-row"><span class="status-label">ขาด memberId/studentId</span><strong class="status-absent">' + missingMemberOrStudentId.length + '</strong></div>' +
-            '<div class="status-display-row"><span class="status-label">ขาด studentAuthUid</span><strong class="status-waiting">' + missingStudentAuthUid.length + '</strong></div>' +
-            '<div class="status-display-row"><span class="status-label">ขาด amount/expectedAmount</span><strong class="status-absent">' + missingAmount.length + '</strong></div>' +
+            summaryRows +
           '</div>' +
           '<div class="notice" style="margin-top:14px;">Dry run ที่ซ่อมได้: ' + repairPaymentOwnerFieldsDryRun().length + ' รายการ ยังไม่มีการเขียน Firestore จริง</div>' +
           '<div class="table-wrap" style="margin-top:14px;"><table><thead><tr><th>Payment ID</th><th>นักเรียน</th><th>Member ID</th><th>Student ID</th><th>Auth UID</th><th>Amount</th></tr></thead><tbody>' + sampleRows + '</tbody></table></div>' +
