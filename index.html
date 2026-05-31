@@ -4477,6 +4477,31 @@
       return null;
     }
 
+    async function findTeacherProfileByAuthEmail(email) {
+      if (!firebaseReady || !db || !email) return null;
+      const normalizedEmail = String(email || '').trim().toLowerCase();
+      const normalizedLogin = normalizeLoginKey(normalizedEmail);
+      const queries = [
+        db.collection('teachers').where('authEmail', '==', normalizedEmail).limit(1).get(),
+        db.collection('teachers').where('email', '==', normalizedEmail).limit(1).get(),
+        db.collection('teachers').where('username', '==', normalizedEmail).limit(1).get(),
+        db.collection('teachers').where('loginKeys', 'array-contains', normalizedLogin || normalizedEmail).limit(1).get()
+      ];
+      const snapshots = await Promise.all(queries.map(function(queryPromise) {
+        return queryPromise.catch(function(error) {
+          console.warn('find teacher profile by email warning:', error);
+          return null;
+        });
+      }));
+      for (const snapshot of snapshots) {
+        if (snapshot && !snapshot.empty) {
+          const doc = snapshot.docs[0];
+          return Object.assign({ id: doc.id, firebaseDocId: doc.id }, doc.data());
+        }
+      }
+      return null;
+    }
+
     function assertExistingProfileMatchesAccount(profile, expectedAccountType, email) {
       if (!profile || !profile.uid) {
         throw new Error('บัญชี Auth นี้มีอยู่แล้ว แต่ไม่พบ users/{uid} ที่ผูกไว้ กรุณาให้ผู้ดูแลซ่อมบัญชีก่อนเพิ่มข้อมูล');
@@ -4498,7 +4523,32 @@
       } catch (authError) {
         if (!isEmailAlreadyInUseError(authError)) throw authError;
         const profile = await findUserProfileByAuthEmail(email);
-        return assertExistingProfileMatchesAccount(profile, expectedAccountType, email);
+        if (profile) return assertExistingProfileMatchesAccount(profile, expectedAccountType, email);
+
+        const expected = String(expectedAccountType || '').toLowerCase();
+        if (expected === 'staff' || expected === 'teacher') {
+          const teacherProfile = await findTeacherProfileByAuthEmail(email);
+          const authUid = String(teacherProfile && teacherProfile.authUid || '').trim();
+          if (authUid) {
+            const normalizedRole = normalizeAppRole(teacherProfile.appRole || teacherProfile.role || 'Teacher');
+            const teacherAccountType = isAdminLikeRole(normalizedRole) ? 'staff' : 'teacher';
+            if (expected !== teacherAccountType) {
+              throw new Error('บัญชี Auth นี้ถูกใช้กับ role อื่นแล้ว (' + (email || '-') + ') กรุณาตรวจสอบข้อมูลครู/ผู้ดูแลก่อน');
+            }
+            await syncTeacherUserProfile(teacherProfile, authUid);
+            if (String(teacherProfile.firebaseDocId || teacherProfile.id || '') !== authUid) {
+              await db.collection('teachers').doc(authUid).set(Object.assign({}, teacherProfile, {
+                id: authUid,
+                firebaseDocId: authUid,
+                authUid: authUid,
+                updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+              }), { merge: true });
+            }
+            return authUid;
+          }
+        }
+
+        throw new Error('บัญชี Auth นี้มีอยู่แล้ว กรุณาใช้เมนูซ่อมบัญชี หรือใช้ scripts/bootstrap-admin.js เพื่อผูก users/{uid}');
       }
     }
 
@@ -4551,7 +4601,10 @@
         return 'บัญชีนี้ยังไม่มีสิทธิ์บันทึกข้อมูลครู กรุณาใช้บัญชี Admin หรือให้ผู้ดูแลเปิดสิทธิ์เมนู ครู / สิทธิ์';
       }
       if (isEmailAlreadyInUseError(error)) {
-        return 'ID เข้าสู่ระบบนี้มีบัญชีอยู่แล้ว กรุณาตรวจสอบรายชื่อครูก่อนสร้างใหม่';
+        return 'บัญชี Auth นี้มีอยู่แล้ว กรุณาใช้เมนูซ่อมบัญชี หรือใช้ scripts/bootstrap-admin.js เพื่อผูก users/{uid}';
+      }
+      if (text.indexOf('บัญชี Auth นี้มีอยู่แล้ว') !== -1 || text.indexOf('บัญชี Auth นี้ถูกใช้กับ role อื่น') !== -1) {
+        return text;
       }
       if (text.indexOf('network') !== -1 || text.indexOf('offline') !== -1 || text.indexOf('unavailable') !== -1) {
         return 'เชื่อมต่อระบบไม่สำเร็จ กรุณาตรวจสอบอินเทอร์เน็ตแล้วลองใหม่';

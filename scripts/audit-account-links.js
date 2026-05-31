@@ -266,38 +266,46 @@ function userNeedsTeacherFix(user, teacher) {
 
 (async function main() {
   console.log('==== audit-account-links.js ====');
-  console.log('mode:', write ? 'WRITE' : 'DRY-RUN');
+  console.log('mode: AUDIT ONLY');
 
-  if (repairOrphanAdmin) {
-    if (!adminUidArg) throw new Error('ต้องระบุ --uid=<firebase auth uid> สำหรับ --repair-orphan-admin');
-    if (!adminEmailArg && !adminPhoneArg) throw new Error('ต้องระบุ --email หรือ --phone สำหรับ --repair-orphan-admin');
-    const profile = adminUserProfile({
-      uid: adminUidArg,
-      phone: adminPhoneArg,
-      email: adminEmailArg,
-      name: adminNameArg,
-      appRole: adminAppRoleArg
-    });
-    console.log('orphan admin repair target:', {
-      uid: profile.uid,
-      email: profile.email,
-      phone: profile.phone,
-      appRole: profile.appRole,
-      permissions: profile.permissions
-    });
-    if (!write) {
-      console.log('DRY-RUN: ไม่มีการบันทึกใดๆ');
-      return;
-    }
-    await patchDocument('users', profile.uid, profile);
-    console.log('เขียนซ่อม orphan admin users/' + profile.uid + ' เรียบร้อย');
-    return;
+  if (write || repairOrphanAdmin) {
+    throw new Error('audit-account-links.js เป็นโหมดตรวจอย่างเดียวแล้ว กรุณาใช้ scripts/bootstrap-admin.js สำหรับซ่อม admin/staff');
   }
 
   const students = await listCollection('students');
   const teachers = await listCollection('teachers');
   const users = await listCollection('users');
   const usersById = new Map(users.map(function(doc) { return [doc.id, doc.data]; }));
+
+  function normalized(value) {
+    return String(value || '').trim().toLowerCase();
+  }
+
+  function isAdminLike(role) {
+    return ['superadmin', 'admin', 'manager', 'academic', 'finance', 'financeadmin', 'teacheradmin', 'staff'].includes(normalized(role));
+  }
+
+  function isActiveStatus(value) {
+    const status = normalized(value || 'active');
+    return status === 'active' || status === 'ใช้งาน';
+  }
+
+  function isStudentUser(user) {
+    return user
+      && (normalized(user.accountType) === 'student'
+        || normalized(user.role) === 'student'
+        || normalized(user.appRole) === 'student');
+  }
+
+  function isStaffOrTeacherUser(user) {
+    return user
+      && !isStudentUser(user)
+      && (
+        ['staff', 'teacher', 'admin'].includes(normalized(user.accountType))
+        || ['admin', 'teacher', 'staff', 'manager', 'academic', 'finance', 'superadmin'].includes(normalized(user.role))
+        || ['superadmin', 'admin', 'manager', 'academic', 'finance', 'teacher', 'assistantteacher'].includes(normalized(user.appRole))
+      );
+  }
 
   const studentsMissingAuth = students.filter(function(doc) { return !doc.data.authUid; });
   const teachersMissingAuth = teachers.filter(function(doc) { return !doc.data.authUid; });
@@ -313,34 +321,60 @@ function userNeedsTeacherFix(user, teacher) {
   console.log('student users/{uid} ต้องซ่อม:', studentUserIssues.length);
   console.log('teacher users/{uid} ต้องซ่อม:', teacherUserIssues.length);
 
+  const studentPermissionLeaks = users.filter(function(doc) {
+    return isStudentUser(doc.data) && hasStaffPermissions(doc.data);
+  });
+  const adminMissingFull = users.filter(function(doc) {
+    return ['superadmin', 'admin'].includes(normalized(doc.data.appRole || doc.data.role))
+      && isActiveStatus(doc.data.status)
+      && !isStudentUser(doc.data)
+      && (!Array.isArray(doc.data.permissions) || !doc.data.permissions.includes('admin.full'));
+  });
+  const usersRoleIssues = users.filter(function(doc) {
+    const user = doc.data;
+    if (!user.authUid || String(user.authUid) !== doc.id) return true;
+    if (isStudentUser(user)) return normalized(user.accountType) !== 'student' || normalized(user.role) !== 'student';
+    if (isAdminLike(user.appRole || user.role)) return !isStaffOrTeacherUser(user) || normalized(user.role) !== 'admin';
+    if (normalized(user.appRole) === 'teacher' || normalized(user.role) === 'teacher') return !isStaffOrTeacherUser(user);
+    return false;
+  });
+  const teacherRoleIssues = teachers.filter(function(doc) {
+    const user = doc.data.authUid ? usersById.get(String(doc.data.authUid)) : null;
+    if (!doc.data.authUid || !user) return false;
+    const role = doc.data.appRole || doc.data.role || 'Teacher';
+    return isAdminLike(role)
+      ? !(normalized(user.accountType) === 'staff' && normalized(user.role) === 'admin')
+      : !(normalized(user.accountType) === 'teacher' || normalized(user.role) === 'teacher');
+  });
+
+  console.log('student users มี staff/admin permission ค้าง:', studentPermissionLeaks.length);
+  console.log('admin/SuperAdmin ไม่มี admin.full:', adminMissingFull.length);
+  console.log('users role/accountType/status น่าสงสัย:', usersRoleIssues.length);
+  console.log('teachers role ไม่ตรง users/{authUid}:', teacherRoleIssues.length);
+
   studentUserIssues.slice(0, 10).forEach(function(doc) {
     console.log('- student fix:', doc.id, doc.data.name || '-', doc.data.authUid);
   });
   teacherUserIssues.slice(0, 10).forEach(function(doc) {
     console.log('- teacher fix:', doc.id, doc.data.name || '-', doc.data.authUid);
   });
+  studentPermissionLeaks.slice(0, 10).forEach(function(doc) {
+    console.log('- student permission leak:', doc.id, doc.data.name || '-', doc.data.permissions || []);
+  });
+  adminMissingFull.slice(0, 10).forEach(function(doc) {
+    console.log('- admin missing admin.full:', doc.id, doc.data.name || '-', doc.data.appRole || doc.data.role || '-');
+  });
+  usersRoleIssues.slice(0, 10).forEach(function(doc) {
+    console.log('- user role issue:', doc.id, doc.data.name || '-', {
+      accountType: doc.data.accountType,
+      role: doc.data.role,
+      appRole: doc.data.appRole,
+      status: doc.data.status
+    });
+  });
+  teacherRoleIssues.slice(0, 10).forEach(function(doc) {
+    console.log('- teacher role mismatch:', doc.id, doc.data.name || '-', doc.data.authUid);
+  });
 
-  if (!write) {
-    console.log('DRY-RUN: ไม่มีการบันทึกใดๆ');
-    return;
-  }
-
-  for (const doc of studentUserIssues) {
-    await patchDocument('users', String(doc.data.authUid), studentUserProfile(Object.assign({ id: doc.id, firebaseDocId: doc.id }, doc.data), String(doc.data.authUid)));
-  }
-
-  const allowedTeacherIssues = teacherIdArg === 'all'
-    ? teacherUserIssues
-    : teacherUserIssues.filter(function(doc) { return doc.id === teacherIdArg || doc.data.teacherId === teacherIdArg; });
-
-  if (teacherUserIssues.length && !teacherIdArg) {
-    console.log('SKIP teacher repair: ระบุ --teacher-id=<docId|teacherId|all> ถ้าต้องการซ่อมครูแบบเจาะจง');
-  }
-
-  for (const doc of allowedTeacherIssues) {
-    await patchDocument('users', String(doc.data.authUid), teacherUserProfile(Object.assign({ id: doc.id, firebaseDocId: doc.id }, doc.data), String(doc.data.authUid)));
-  }
-
-  console.log('เขียนซ่อม student users:', studentUserIssues.length);
-  console.log('เขียนซ่อม teacher users:', allowedTeacherIssues.length);
+  console.log('AUDIT ONLY: ไม่มีการบันทึกใดๆ');
 })();

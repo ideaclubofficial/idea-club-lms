@@ -26,6 +26,46 @@ const ADMIN_PERMISSIONS = [
   'teacher.students'
 ];
 
+const ROLE_PERMISSIONS = {
+  SuperAdmin: ADMIN_PERMISSIONS,
+  Admin: ADMIN_PERMISSIONS,
+  Manager: [
+    'admin.dashboard',
+    'admin.students',
+    'admin.courses',
+    'admin.online',
+    'admin.ondemand',
+    'admin.finance',
+    'admin.receipts',
+    'admin.exams',
+    'admin.monthlyPlanner',
+    'admin.announcements',
+    'admin.logs',
+    'teacher.dashboard',
+    'teacher.online',
+    'teacher.attendance',
+    'teacher.students'
+  ],
+  Academic: [
+    'admin.dashboard',
+    'admin.students',
+    'admin.courses',
+    'admin.online',
+    'admin.ondemand',
+    'admin.exams',
+    'admin.monthlyPlanner',
+    'admin.announcements',
+    'teacher.dashboard',
+    'teacher.online',
+    'teacher.students'
+  ],
+  Finance: [
+    'admin.dashboard',
+    'admin.finance',
+    'admin.receipts'
+  ]
+};
+
 const rootDir = path.resolve(__dirname, '..');
 const keyCandidates = [
   process.env.GOOGLE_APPLICATION_CREDENTIALS,
@@ -197,11 +237,25 @@ async function createAuthUser(email, name, password) {
 function normalizeRole(role) {
   const value = String(role || 'SuperAdmin').trim();
   if (value === 'Super Admin' || value === 'super_admin') return 'SuperAdmin';
+  if (value.toLowerCase() === 'superadmin') return 'SuperAdmin';
+  if (value.toLowerCase() === 'admin') return 'Admin';
+  if (value.toLowerCase() === 'manager') return 'Manager';
+  if (value.toLowerCase() === 'academic') return 'Academic';
+  if (value.toLowerCase() === 'finance') return 'Finance';
   return value || 'SuperAdmin';
+}
+
+function permissionsForRole(role) {
+  const appRole = normalizeRole(role);
+  if (!ROLE_PERMISSIONS[appRole]) {
+    throw new Error('role ไม่รองรับ: ' + appRole + ' (รองรับ SuperAdmin, Admin, Manager, Academic, Finance)');
+  }
+  return ROLE_PERMISSIONS[appRole].slice();
 }
 
 function buildPayloads(uid, email, name, phone, role) {
   const appRole = normalizeRole(role);
+  const permissions = permissionsForRole(appRole);
   const loginKeys = [email];
   const base = {
     uid: uid,
@@ -214,7 +268,7 @@ function buildPayloads(uid, email, name, phone, role) {
     name: name,
     status: 'Active',
     permissionMode: 'custom',
-    permissions: ADMIN_PERMISSIONS.slice(),
+    permissions: permissions,
     loginKeys: loginKeys
   };
 
@@ -243,7 +297,7 @@ function buildPayloads(uid, email, name, phone, role) {
       subject: 'ผู้ดูแลระบบ',
       branch: 'IDEA CLUB',
       permissionMode: 'custom',
-      permissions: ADMIN_PERMISSIONS.slice()
+      permissions: permissions
     }
   };
 }
