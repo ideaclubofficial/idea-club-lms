@@ -3239,14 +3239,13 @@
       return cleanItem;
     }
 
-    async function syncStudentUserProfile(student, authUid) {
-      if (!firebaseReady || !db || !student) return;
-      student = sanitizeStudentProfile(student);
-      const uid = String(authUid || student.authUid || '').trim();
-      if (!uid) return;
-      const studentEmail = String(student.email || student.authEmail || buildStudentAuthEmail(student) || '').trim();
-      const memberId = String(student.memberId || student.studentId || student.id || '');
-      await db.collection('users').doc(uid).set({
+    function buildStudentUserProfile(student, authUid) {
+      const cleanStudent = sanitizeStudentProfile(student || {});
+      const uid = String(authUid || cleanStudent.authUid || '').trim();
+      if (!uid) throw new Error('ไม่พบ UID สำหรับสร้าง users/{uid} ของนักเรียน');
+      const studentEmail = String(cleanStudent.email || cleanStudent.authEmail || buildStudentAuthEmail(cleanStudent) || '').trim().toLowerCase();
+      const memberId = String(cleanStudent.memberId || cleanStudent.studentId || cleanStudent.id || '');
+      return {
         uid: uid,
         authUid: uid,
         accountType: 'student',
@@ -3254,28 +3253,110 @@
         appRole: 'student',
         permissions: [],
         permissionMode: 'student',
-        status: String(student.status || 'active').toLowerCase() === 'active' ? 'active' : 'inactive',
+        status: normalizeStudentAccountStatus(cleanStudent),
         memberId: memberId,
-        studentId: String(student.studentId || student.memberId || memberId),
-        name: student.name || '',
-        nickname: student.nickname || '',
-        parentName: student.parentName || '',
-        phone: student.phone || '',
-        lineId: student.lineId || '',
-        contactEmail: student.contactEmail || '',
+        studentId: String(cleanStudent.studentId || cleanStudent.memberId || memberId),
+        name: cleanStudent.name || '',
+        nickname: cleanStudent.nickname || '',
+        parentName: cleanStudent.parentName || '',
+        phone: cleanStudent.phone || '',
+        lineId: cleanStudent.lineId || '',
+        contactEmail: cleanStudent.contactEmail || '',
+        authEmail: cleanStudent.authEmail || studentEmail,
         email: studentEmail,
-        grade: student.grade || '',
-        school: student.school || '',
-        preferredLocation: student.preferredLocation || '',
-        loginId: student.loginId || student.phone || student.memberId || student.studentId || studentEmail,
+        grade: cleanStudent.grade || '',
+        school: cleanStudent.school || '',
+        preferredLocation: cleanStudent.preferredLocation || '',
+        linkedStudentId: cleanStudent.firebaseDocId || cleanStudent.id || uid,
+        loginId: cleanStudent.loginId || cleanStudent.phone || cleanStudent.memberId || cleanStudent.studentId || studentEmail,
         loginKeys: buildLoginKeys({
-          phone: student.phone,
+          phone: cleanStudent.phone,
           email: studentEmail,
-          memberId: student.memberId,
-          studentId: student.studentId
+          authEmail: cleanStudent.authEmail || studentEmail,
+          memberId: cleanStudent.memberId,
+          studentId: cleanStudent.studentId
+        })
+      };
+    }
+
+    function buildTeacherUserProfile(teacher, authUid) {
+      const cleanTeacher = sanitizeTeacherProfile(teacher || {});
+      const uid = String(authUid || cleanTeacher.authUid || '').trim();
+      if (!uid) throw new Error('ไม่พบ UID สำหรับสร้าง users/{uid} ของครู');
+      const normalizedRole = normalizeAppRole(cleanTeacher.appRole || cleanTeacher.role || 'Teacher');
+      const teacherEmail = String(cleanTeacher.email || cleanTeacher.authEmail || buildTeacherAuthEmail(cleanTeacher) || '').trim().toLowerCase();
+      return {
+        uid: uid,
+        authUid: uid,
+        accountType: isAdminLikeRole(normalizedRole) ? 'staff' : 'teacher',
+        role: isAdminLikeRole(normalizedRole) ? 'admin' : 'teacher',
+        appRole: normalizedRole,
+        permissionMode: cleanTeacher.permissionMode || 'custom',
+        status: String(cleanTeacher.status || 'Active') === 'Active' ? 'active' : 'inactive',
+        teacherId: cleanTeacher.teacherId || '',
+        linkedTeacherId: cleanTeacher.firebaseDocId || cleanTeacher.id || uid,
+        username: cleanTeacher.username || '',
+        phone: cleanTeacher.phone || '',
+        authEmail: cleanTeacher.authEmail || teacherEmail,
+        email: teacherEmail,
+        loginId: cleanTeacher.loginId || cleanTeacher.teacherId || cleanTeacher.username || cleanTeacher.phone || teacherEmail,
+        loginKeys: buildLoginKeys({
+          phone: cleanTeacher.phone,
+          username: cleanTeacher.username,
+          email: teacherEmail,
+          authEmail: cleanTeacher.authEmail || teacherEmail,
+          teacherId: cleanTeacher.teacherId
         }),
+        name: cleanTeacher.name || '',
+        subject: cleanTeacher.subject || '',
+        branch: cleanTeacher.branch || '',
+        permissions: getEffectivePermissions(cleanTeacher)
+      };
+    }
+
+    async function commitNewStudentAccount(student, authUid) {
+      if (!firebaseReady || !db || !student || !authUid) throw new Error('ข้อมูลบัญชีนักเรียนไม่ครบ');
+      const docId = String(student.firebaseDocId || student.id || authUid);
+      student.id = docId;
+      student.firebaseDocId = docId;
+      student.authUid = authUid;
+      student = sanitizeStudentProfile(student);
+      const userProfile = buildStudentUserProfile(student, authUid);
+      const batch = db.batch();
+      batch.set(db.collection('users').doc(authUid), Object.assign({}, userProfile, {
+        createdAt: firebase.firestore.FieldValue.serverTimestamp(),
         updatedAt: firebase.firestore.FieldValue.serverTimestamp()
-      }, { merge: true });
+      }), { merge: true });
+      batch.set(db.collection('students').doc(docId), buildFirebasePayload(student, docId, true), { merge: true });
+      await batch.commit();
+      return student;
+    }
+
+    async function commitNewTeacherAccount(teacher, authUid) {
+      if (!firebaseReady || !db || !teacher || !authUid) throw new Error('ข้อมูลบัญชีครูไม่ครบ');
+      const docId = String(teacher.firebaseDocId || teacher.id || authUid);
+      teacher.id = docId;
+      teacher.firebaseDocId = docId;
+      teacher.authUid = authUid;
+      const userProfile = buildTeacherUserProfile(teacher, authUid);
+      const batch = db.batch();
+      batch.set(db.collection('users').doc(authUid), Object.assign({}, userProfile, {
+        createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+        updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+      }), { merge: true });
+      batch.set(db.collection('teachers').doc(docId), buildFirebasePayload(teacher, docId, true), { merge: true });
+      await batch.commit();
+      return teacher;
+    }
+
+    async function syncStudentUserProfile(student, authUid) {
+      if (!firebaseReady || !db || !student) return;
+      const uid = String(authUid || student.authUid || '').trim();
+      if (!uid) return;
+      const profile = buildStudentUserProfile(student, uid);
+      await db.collection('users').doc(uid).set(Object.assign({}, profile, {
+        updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+      }), { merge: true });
     }
 
     async function setFirebaseDocument(collectionName, item) {
@@ -3292,7 +3373,7 @@
       await ref.set(cleanItem, { merge: true });
       item.firebaseDocId = docId;
       item.deleted = cleanItem.deleted;
-      if (collectionName === 'students' && item.authUid) {
+      if (collectionName === 'students' && item.authUid && !isCurrentStudentSession()) {
         try {
           await syncStudentUserProfile(item);
         } catch (error) {
@@ -3713,6 +3794,14 @@
       return isTeacherRole(role) || isAdminRole(role);
     }
 
+    function normalizeStudentAccountStatus(profile) {
+      const status = String(profile && profile.status || '').trim().toLowerCase();
+      const learningStatus = String(profile && profile.learningStatus || '').trim();
+      const inactiveValues = ['inactive', 'disabled', 'blocked', 'suspended', 'ลาออก', 'ระงับ', 'ปิดบัญชี'];
+      if (inactiveValues.includes(status) || inactiveValues.includes(learningStatus)) return 'inactive';
+      return 'active';
+    }
+
     function sanitizeStudentProfile(profile) {
       if (!profile || typeof profile !== 'object') return {
         role: 'student',
@@ -3726,7 +3815,7 @@
       clean.role = 'student';
       clean.appRole = 'student';
       clean.accountType = 'student';
-      clean.status = String(clean.status || 'active').toLowerCase() === 'active' ? 'active' : 'inactive';
+      clean.status = normalizeStudentAccountStatus(clean);
       if (!Array.isArray(clean.permissions)) {
         clean.permissions = [];
       } else {
@@ -4043,6 +4132,52 @@
       return map[grade] || 'ST';
     }
 
+    function getCurrentBuddhistYear() {
+      return new Date().getFullYear() + 543;
+    }
+
+    function getCounterYearBE() {
+      return String((getElement('memberYearBE') && getElement('memberYearBE').value) || getCurrentBuddhistYear());
+    }
+
+    function getMemberIdParts(grade, yearBE) {
+      const finalYear = String(yearBE || getCounterYearBE());
+      const prefix = gradeCode(grade) + finalYear.slice(-2);
+      return {
+        yearBE: finalYear,
+        grade: grade || '',
+        gradeCode: gradeCode(grade),
+        prefix: prefix,
+        counterId: 'memberIds_' + finalYear + '_' + gradeCode(grade)
+      };
+    }
+
+    function getTeacherIdParts(yearBE) {
+      const finalYear = String(yearBE || getCurrentBuddhistYear());
+      const prefix = 'T' + finalYear.slice(-2);
+      return {
+        yearBE: finalYear,
+        prefix: prefix,
+        counterId: 'teacherIds_' + finalYear
+      };
+    }
+
+    function getMaxMemberRunningByGrade(grade, yearBE) {
+      const parts = getMemberIdParts(grade, yearBE);
+      const numbers = students
+        .filter(function(s) { return String(s.memberId || '').indexOf(parts.prefix) === 0; })
+        .map(function(s) { return Number(String(s.memberId || '').replace(parts.prefix, '')) || 0; });
+      return numbers.length ? Math.max.apply(null, numbers) : 0;
+    }
+
+    function getMaxTeacherRunning(yearBE) {
+      const parts = getTeacherIdParts(yearBE);
+      const numbers = teachers
+        .filter(function(t) { return String(t.teacherId || '').indexOf(parts.prefix) === 0; })
+        .map(function(t) { return Number(String(t.teacherId || '').replace(parts.prefix, '')) || 0; });
+      return numbers.length ? Math.max.apply(null, numbers) : 0;
+    }
+
     let editBubbleSaveHandler = null;
 
     function openEditBubble(title, bodyHtml, saveHandler) {
@@ -4207,6 +4342,103 @@
       }
     }
 
+    function isEmailAlreadyInUseError(error) {
+      const text = String((error && (error.code || error.message)) || '');
+      return text.indexOf('email-already-in-use') !== -1 || text.indexOf('auth/email-already-in-use') !== -1;
+    }
+
+    async function findUserProfileByAuthEmail(email) {
+      if (!firebaseReady || !db || !email) return null;
+      const normalizedEmail = String(email || '').trim().toLowerCase();
+      const queries = [
+        db.collection('users').where('authEmail', '==', normalizedEmail).limit(1).get(),
+        db.collection('users').where('email', '==', normalizedEmail).limit(1).get(),
+        db.collection('users').where('loginKeys', 'array-contains', normalizedEmail).limit(1).get()
+      ];
+      const snapshots = await Promise.all(queries.map(function(queryPromise) {
+        return queryPromise.catch(function(error) {
+          console.warn('find user profile by email warning:', error);
+          return null;
+        });
+      }));
+      for (const snapshot of snapshots) {
+        if (snapshot && !snapshot.empty) {
+          const doc = snapshot.docs[0];
+          return Object.assign({ uid: doc.id, firebaseDocId: doc.id }, doc.data());
+        }
+      }
+      return null;
+    }
+
+    function assertExistingProfileMatchesAccount(profile, expectedAccountType, email) {
+      if (!profile || !profile.uid) {
+        throw new Error('บัญชี Auth นี้มีอยู่แล้ว แต่ไม่พบ users/{uid} ที่ผูกไว้ กรุณาให้ผู้ดูแลซ่อมบัญชีก่อนเพิ่มข้อมูล');
+      }
+      const expected = String(expectedAccountType || '').toLowerCase();
+      const accountType = String(profile.accountType || '').toLowerCase();
+      const role = String(profile.role || '').toLowerCase();
+      const appRole = String(profile.appRole || '').toLowerCase();
+      const matched = accountType === expected || role === expected || appRole === expected;
+      if (!matched) {
+        throw new Error('บัญชี Auth นี้ถูกใช้กับ role อื่นแล้ว (' + (email || '-') + ') กรุณาตรวจสอบ users/{uid} ก่อน');
+      }
+      return profile.uid;
+    }
+
+    async function createOrResolveAuthUidForAccount(email, password, expectedAccountType) {
+      try {
+        return await createAuthUserFromAdmin(email, password);
+      } catch (authError) {
+        if (!isEmailAlreadyInUseError(authError)) throw authError;
+        const profile = await findUserProfileByAuthEmail(email);
+        return assertExistingProfileMatchesAccount(profile, expectedAccountType, email);
+      }
+    }
+
+    async function reserveNextMemberId(grade, yearBE) {
+      if (!PRODUCTION_MODE || !firebaseReady || !db) return getNextMemberIdByGrade(grade);
+      const parts = getMemberIdParts(grade, yearBE);
+      return db.runTransaction(async function(transaction) {
+        const ref = db.collection('counters').doc(parts.counterId);
+        const snapshot = await transaction.get(ref);
+        const current = snapshot.exists ? Number(snapshot.data().current || 0) || 0 : 0;
+        const baseline = Math.max(current, getMaxMemberRunningByGrade(grade, parts.yearBE));
+        const next = baseline + 1;
+        transaction.set(ref, {
+          type: 'memberId',
+          yearBE: parts.yearBE,
+          grade: parts.grade,
+          gradeCode: parts.gradeCode,
+          prefix: parts.prefix,
+          current: next,
+          updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
+          updatedBy: firebaseUser && firebaseUser.uid ? firebaseUser.uid : ''
+        }, { merge: true });
+        return parts.prefix + padNumber(next, 4);
+      });
+    }
+
+    async function reserveNextTeacherId(yearBE) {
+      if (!PRODUCTION_MODE || !firebaseReady || !db) return getNextTeacherId();
+      const parts = getTeacherIdParts(yearBE);
+      return db.runTransaction(async function(transaction) {
+        const ref = db.collection('counters').doc(parts.counterId);
+        const snapshot = await transaction.get(ref);
+        const current = snapshot.exists ? Number(snapshot.data().current || 0) || 0 : 0;
+        const baseline = Math.max(current, getMaxTeacherRunning(parts.yearBE));
+        const next = baseline + 1;
+        transaction.set(ref, {
+          type: 'teacherId',
+          yearBE: parts.yearBE,
+          prefix: parts.prefix,
+          current: next,
+          updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
+          updatedBy: firebaseUser && firebaseUser.uid ? firebaseUser.uid : ''
+        }, { merge: true });
+        return parts.prefix + padNumber(next, 4);
+      });
+    }
+
     function buildLocalEmailFromPhone(phone) {
       const cleanPhone = String(phone || '').replace(/[^0-9]/g, '');
       return cleanPhone ? cleanPhone + '@ideaclub.local' : '';
@@ -4260,32 +4492,10 @@
       if (!firebaseReady || !db || !teacher) return;
       const uid = String(authUid || teacher.authUid || '').trim();
       if (!uid) return;
-      const teacherEmail = String(teacher.email || teacher.authEmail || buildTeacherAuthEmail(teacher) || '').trim();
-      await db.collection('users').doc(uid).set({
-        uid: uid,
-        authUid: uid,
-        accountType: 'teacher',
-        role: String(teacher.role || teacher.appRole || 'Teacher'),
-        status: String(teacher.status || 'Active'),
-        teacherId: teacher.teacherId || '',
-        username: teacher.username || '',
-        phone: teacher.phone || '',
-        authEmail: teacher.authEmail || teacherEmail,
-        email: teacherEmail,
-        loginId: teacher.loginId || teacher.teacherId || teacher.username || teacher.phone || teacherEmail,
-        loginKeys: buildLoginKeys({
-          phone: teacher.phone,
-          username: teacher.username,
-          email: teacher.email,
-          authEmail: teacher.authEmail,
-          teacherId: teacher.teacherId
-        }),
-        name: teacher.name || '',
-        subject: teacher.subject || '',
-        branch: teacher.branch || '',
-        permissions: Array.isArray(teacher.permissions) ? teacher.permissions : [],
+      const profile = buildTeacherUserProfile(teacher, uid);
+      await db.collection('users').doc(uid).set(Object.assign({}, profile, {
         updatedAt: firebase.firestore.FieldValue.serverTimestamp()
-      }, { merge: true });
+      }), { merge: true });
     }
 
     function normalizeLoginId(input) {
@@ -4927,26 +5137,7 @@
       }
 
       let authUid = null;
-      const studentEmail = cleanPhone + '@ideaclub.local';
-      const userProfileData = {
-        name: studentName,
-        nickname: nickname,
-        parentName: parentName,
-        phone: phone,
-        lineId: lineId,
-        contactEmail: contactEmail,
-        email: studentEmail,
-        school: school,
-        grade: registerGrade,
-        preferredLocation: registerLocation,
-        role: 'student',
-        appRole: 'student',
-        accountType: 'student',
-        permissions: [],
-        permissionMode: 'student',
-        status: 'active'
-      };
-
+      const studentEmail = (cleanPhone + '@ideaclub.local').toLowerCase();
       if (PRODUCTION_MODE) {
         if (!firebaseReady || !auth || !db) {
           result.textContent = 'Firebase ยังไม่พร้อมใช้งาน';
@@ -4966,7 +5157,18 @@
         }
       }
 
-      const autoMemberId = getNextMemberIdByGrade(registerGrade);
+      let autoMemberId = getNextMemberIdByGrade(registerGrade);
+      if (PRODUCTION_MODE && firebaseReady && db && authUid) {
+        try {
+          autoMemberId = await reserveNextMemberId(registerGrade);
+        } catch (error) {
+          console.error('reserve student member id error:', error);
+          result.textContent = 'จอง Member ID ไม่สำเร็จ กรุณาลองใหม่อีกครั้ง';
+          result.style.color = '#dc2626';
+          return;
+        }
+      }
+
       const newId = authUid || Date.now();
       const newStudent = {
         id: newId,
@@ -5007,46 +5209,25 @@
         })
       };
 
-      students.push(newStudent);
-      currentStudent = newStudent;
-
       try {
         if (PRODUCTION_MODE && firebaseReady && db && authUid) {
-          const studentUserProfileData = Object.assign({}, userProfileData, {
-            uid: authUid,
-            authUid: authUid,
-            accountType: 'student',
-            role: 'student',
-            appRole: 'student',
-            permissions: [],
-            permissionMode: 'student',
-            status: 'active',
-            memberId: autoMemberId,
-            studentId: autoMemberId,
-            loginKeys: buildLoginKeys({
-              phone: phone,
-              memberId: autoMemberId,
-              studentId: autoMemberId,
-              email: studentEmail
-            })
-          });
-          const batch = db.batch();
-          batch.set(db.collection('users').doc(authUid), Object.assign({}, studentUserProfileData, {
-            createdAt: firebase.firestore.FieldValue.serverTimestamp(),
-            updatedAt: firebase.firestore.FieldValue.serverTimestamp()
-          }), { merge: true });
-          batch.set(db.collection('students').doc(String(newStudent.firebaseDocId)), buildFirebasePayload(newStudent, String(newStudent.firebaseDocId), true), { merge: true });
-          await batch.commit();
+          await commitNewStudentAccount(newStudent, authUid);
           await ensureCoreDataLoaded({ force: true });
         } else {
+          students.push(newStudent);
           await setFirebaseDocument('students', newStudent);
         }
       } catch (error) {
         console.error('register student firebase error:', error);
-        result.textContent = 'สร้างบัญชีได้แล้ว แต่บันทึกข้อมูลนักเรียนไม่สำเร็จ: ' + (error.message || error.code);
+        result.textContent = 'บันทึกบัญชีนักเรียนไม่สำเร็จ กรุณาติดต่อเจ้าหน้าที่เพื่อซ่อมบัญชี: ' + (error.message || error.code);
         result.style.color = '#dc2626';
         return;
       }
+
+      if (!students.some(function(item) { return String(item.id) === String(newStudent.id); })) {
+        students.push(newStudent);
+      }
+      currentStudent = newStudent;
 
       result.textContent = 'สมัครสมาชิกเรียบร้อย ระบบเข้าสู่หน้าสมาชิกให้อัตโนมัติ';
       result.style.color = '#16a34a';
@@ -5181,6 +5362,19 @@
       try {
         if (info.type === 'student') {
           await setFirebaseDocument('students', record);
+          if (firebaseReady && db && firebaseUser) {
+            await db.collection('users').doc(firebaseUser.uid).set({
+              name: record.name || '',
+              nickname: record.nickname || '',
+              parentName: record.parentName || '',
+              phone: record.phone || '',
+              lineId: record.lineId || '',
+              contactEmail: record.contactEmail || '',
+              school: record.school || '',
+              preferredLocation: record.preferredLocation || '',
+              updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+            }, { merge: true });
+          }
           currentStudent = record;
           updateStudentCourseDisplay();
         } else if (info.type === 'teacher') {
@@ -6145,7 +6339,7 @@
           s.preferredLocation = preferredLocation;
           s.email = studentEmail;
           s.authEmail = s.authEmail || studentEmail;
-          s.memberId = s.memberId && s.memberId !== '-' ? s.memberId : getNextMemberIdByGrade(finalGrade);
+          s.memberId = s.memberId && s.memberId !== '-' ? s.memberId : await reserveNextMemberId(finalGrade);
           s.studentId = s.studentId || s.memberId;
           s.course = course || 'ยังไม่ได้สมัครคอร์ส';
           s.courseId = selectedCourse ? selectedCourse.id : null;
@@ -6171,9 +6365,10 @@
 
           if (PRODUCTION_MODE && db && !s.authUid) {
             try {
-              s.authUid = await createAuthUserFromAdmin(studentEmail, '000000');
+              s.authUid = await createOrResolveAuthUidForAccount(studentEmail, '000000', 'student');
             } catch (authError) {
-              console.warn('edit student auth create warning:', authError);
+              console.error('edit student auth create error:', authError);
+              throw authError;
             }
           }
 
@@ -6192,27 +6387,22 @@
           });
           if (existedStudent) throw new Error('เบอร์นี้มีข้อมูลนักเรียนในระบบแล้ว ถ้าต้องการเปลี่ยนข้อมูลให้กด “แก้ไข” จากตารางรายชื่อ');
 
+          const studentEmail = buildStudentAuthEmail({ phone: phone }).toLowerCase();
+          const finalGrade = selectedCourse ? selectedCourse.grade : grade;
+          const autoMemberId = await reserveNextMemberId(finalGrade);
           const newId = createFirebaseDocId('students');
-          const studentEmail = buildStudentAuthEmail({ phone: phone });
           let authUid = null;
-          let authNote = '';
 
           if (PRODUCTION_MODE && studentEmail && db) {
             try {
-              authUid = await createAuthUserFromAdmin(studentEmail, '000000');
+              authUid = await createOrResolveAuthUidForAccount(studentEmail, '000000', 'student');
             } catch (authError) {
               console.error('create student auth error:', authError);
-              if (authError && (authError.code === 'auth/email-already-in-use' || String(authError.message || '').includes('email-already-in-use'))) {
-                authNote = ' (บัญชีเข้าสู่ระบบ นี้มีอยู่ใน Firebase Auth แล้ว ระบบจึงเพิ่มเฉพาะข้อมูลนักเรียน)';
-              } else {
-                throw authError;
-              }
+              throw authError;
             }
           }
 
           const docId = authUid || newId;
-          const finalGrade = selectedCourse ? selectedCourse.grade : grade;
-          const autoMemberId = getNextMemberIdByGrade(finalGrade);
           const newStudent = {
             id: docId,
             firebaseDocId: String(docId),
@@ -6251,9 +6441,14 @@
               email: studentEmail
             })
           };
+          if (PRODUCTION_MODE && db) {
+            if (!authUid) throw new Error('สร้างบัญชี Auth ไม่สำเร็จ ระบบจึงยังไม่บันทึกข้อมูลนักเรียน');
+            await commitNewStudentAccount(newStudent, authUid);
+          } else {
+            await setFirebaseDocument('students', newStudent);
+          }
           students.push(newStudent);
-          await setFirebaseDocument('students', newStudent);
-          result.textContent = 'เพิ่มนักเรียนใหม่เรียบร้อย รหัสเริ่มต้น 000000 และบันทึกลง Firebase แล้ว' + authNote;
+          result.textContent = 'เพิ่มนักเรียนใหม่เรียบร้อย รหัสเริ่มต้น 000000 และบันทึกลง Firebase แล้ว';
         }
 
         result.style.color = '#16a34a';
@@ -6552,13 +6747,8 @@
     }
 
     function getNextTeacherId() {
-      const year = String(new Date().getFullYear() + 543).slice(-2);
-      const prefix = 'T' + year;
-      const numbers = teachers
-        .filter(function(t) { return String(t.teacherId || '').indexOf(prefix) === 0; })
-        .map(function(t) { return Number(String(t.teacherId || '').replace(prefix, '')) || 0; });
-      const nextNumber = numbers.length ? Math.max.apply(null, numbers) + 1 : 1;
-      return prefix + padNumber(nextNumber, 4);
+      const parts = getTeacherIdParts();
+      return parts.prefix + padNumber(getMaxTeacherRunning(parts.yearBE) + 1, 4);
     }
 
     function updateTeacherIdPreview() {
@@ -6615,10 +6805,10 @@
 
             if (PRODUCTION_MODE && !t.authUid && db) {
               try {
-                t.authUid = await createAuthUserFromAdmin(t.authEmail, '000000');
+                t.authUid = await createOrResolveAuthUidForAccount(t.authEmail, '000000', isAdminLikeRole(role) ? 'staff' : 'teacher');
               } catch (authError) {
-                console.warn('edit teacher auth create warning:', authError);
-                // If email already exists, do not fail entire save. We may still sync teacher document.
+                console.error('edit teacher auth create error:', authError);
+                throw authError;
               }
             }
 
@@ -6630,22 +6820,17 @@
           result.textContent = 'แก้ไขข้อมูลครูสำเร็จ ใช้เบอร์/Username หรือ Teacher ID เข้าสู่ระบบ รหัสผ่านเริ่มต้น 000000';
         } else {
           const newId = createFirebaseDocId('teachers');
-          const teacherId = getNextTeacherId();
+          const teacherId = await reserveNextTeacherId();
           if (getElement('teacherIdPreview')) getElement('teacherIdPreview').value = teacherId;
-          const teacherEmail = username && username.includes('@') ? username : buildTeacherAuthEmail({ username: username, phone: phone, teacherId: teacherId });
+          const teacherEmail = (username && username.includes('@') ? username : buildTeacherAuthEmail({ username: username, phone: phone, teacherId: teacherId })).toLowerCase();
           let authUid = null;
-          let authWarning = '';
 
           if (PRODUCTION_MODE && db) {
             try {
-              authUid = await createAuthUserFromAdmin(teacherEmail, '000000');
+              authUid = await createOrResolveAuthUidForAccount(teacherEmail, '000000', isAdminLikeRole(role) ? 'staff' : 'teacher');
             } catch (authError) {
-              console.warn('create teacher auth error:', authError);
-              if (authError && (authError.code === 'auth/email-already-in-use' || String(authError.message || '').includes('email-already-in-use'))) {
-                authWarning = ' (บัญชี Auth มีอยู่แล้ว ระบบยังบันทึกรายชื่อครูและจะ Sync users แต่ไม่สร้างบัญชีใหม่)';
-              } else {
-                authWarning = ' (เพิ่มรายชื่อครูแล้ว แต่สร้างบัญชี Auth ไม่สำเร็จ: ' + (authError.message || authError.code || 'ไม่ทราบสาเหตุ') + ')';
-              }
+              console.error('create teacher auth error:', authError);
+              throw authError;
             }
           }
 
@@ -6677,12 +6862,14 @@
             permissionMode: 'custom',
             status: status || 'Active'
           };
-          teachers.push(newTeacher);
-          await setFirebaseDocument('teachers', newTeacher);
-          if (PRODUCTION_MODE && newTeacher.authUid && db) {
-            await syncTeacherUserProfile(newTeacher, newTeacher.authUid);
+          if (PRODUCTION_MODE && db) {
+            if (!authUid) throw new Error('สร้างบัญชี Auth ไม่สำเร็จ ระบบจึงยังไม่บันทึกข้อมูลครู');
+            await commitNewTeacherAccount(newTeacher, authUid);
+          } else {
+            await setFirebaseDocument('teachers', newTeacher);
           }
-          result.textContent = 'สร้างสมาชิกครูสำเร็จ ใช้เบอร์/Username หรือ Teacher ID เข้าสู่ระบบ รหัสผ่านเริ่มต้น 000000' + authWarning;
+          teachers.push(newTeacher);
+          result.textContent = 'สร้างสมาชิกครูสำเร็จ ใช้เบอร์/Username หรือ Teacher ID เข้าสู่ระบบ รหัสผ่านเริ่มต้น 000000';
         }
 
         result.style.color = '#16a34a';
@@ -6717,10 +6904,11 @@
       let warning = '';
       if (PRODUCTION_MODE && db && !t.authUid) {
         try {
-          t.authUid = await createAuthUserFromAdmin(teacherEmail, '000000');
+          t.authUid = await createOrResolveAuthUidForAccount(teacherEmail, '000000', isAdminLikeRole(t.role || t.appRole || 'Teacher') ? 'staff' : 'teacher');
         } catch (authError) {
           console.warn('repair teacher auth error:', authError);
-          warning = ' (ไม่สามารถสร้าง Auth ใหม่ได้ หาก Auth มีอยู่แล้ว กรุณาใช้งานคู่กับผู้ดูแล Firebase)';
+          alert('ซ่อม Login ครูไม่สำเร็จ: ' + (authError.message || authError.code || 'ไม่ทราบสาเหตุ'));
+          return;
         }
       }
 
@@ -6750,10 +6938,11 @@
       let warning = '';
       if (PRODUCTION_MODE && db && !s.authUid) {
         try {
-          s.authUid = await createAuthUserFromAdmin(studentEmail, '000000');
+          s.authUid = await createOrResolveAuthUidForAccount(studentEmail, '000000', 'student');
         } catch (authError) {
           console.warn('repair student auth error:', authError);
-          warning = ' (ไม่สามารถสร้าง Auth ใหม่ได้ หาก Auth มีอยู่แล้ว กรุณาใช้งานคู่กับผู้ดูแล Firebase)';
+          alert('ซ่อม Login นักเรียนไม่สำเร็จ: ' + (authError.message || authError.code || 'ไม่ทราบสาเหตุ'));
+          return;
         }
       }
 
@@ -6874,13 +7063,8 @@
     }
 
     function getNextMemberIdByGrade(grade) {
-      const year = String((getElement('memberYearBE') && getElement('memberYearBE').value) || new Date().getFullYear() + 543).slice(-2);
-      const prefix = gradeCode(grade) + year;
-      const numbers = students
-        .filter(function(s) { return String(s.memberId || '').indexOf(prefix) === 0; })
-        .map(function(s) { return Number(String(s.memberId || '').replace(prefix, '')) || 0; });
-      const nextNumber = numbers.length ? Math.max.apply(null, numbers) + 1 : 1;
-      return prefix + padNumber(nextNumber, 4);
+      const parts = getMemberIdParts(grade);
+      return parts.prefix + padNumber(getMaxMemberRunningByGrade(grade, parts.yearBE) + 1, 4);
     }
 
     function updateMemberIdPreview() {

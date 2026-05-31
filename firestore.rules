@@ -92,6 +92,50 @@ service cloud.firestore {
         );
     }
 
+    function protectedUserFields() {
+      return [
+        'uid',
+        'authUid',
+        'accountType',
+        'role',
+        'appRole',
+        'permissions',
+        'permissionMode',
+        'status',
+        'linkedStudentId',
+        'linkedTeacherId',
+        'studentId',
+        'memberId',
+        'teacherId'
+      ];
+    }
+
+    function isOwnStudentProfileCreate(userId) {
+      return signedIn()
+        && request.auth.uid == userId
+        && request.resource.data.accountType == 'student'
+        && request.resource.data.role == 'student'
+        && request.resource.data.appRole == 'student'
+        && (!('permissions' in request.resource.data) || request.resource.data.permissions == [])
+        && (!('permissionMode' in request.resource.data) || request.resource.data.permissionMode == 'student')
+        && request.resource.data.authUid == request.auth.uid
+        && request.resource.data.uid == request.auth.uid;
+    }
+
+    function isOwnSafeProfileUpdate(userId) {
+      return signedIn()
+        && request.auth.uid == userId
+        && !request.resource.data.diff(resource.data).affectedKeys().hasAny(protectedUserFields());
+    }
+
+    function canWriteCounter() {
+      return signedIn()
+        && (
+          isAdmin()
+          || (!userProfileExists() && request.resource.data.type == 'memberId')
+        );
+    }
+
     function ownsExistingDoc() {
       return signedIn() && resource.data.authUid == request.auth.uid;
     }
@@ -145,8 +189,14 @@ service cloud.firestore {
 
     match /users/{userId} {
       allow read: if signedIn() && (request.auth.uid == userId || isAdmin());
-      allow create: if signedIn() && request.auth.uid == userId;
-      allow update: if signedIn() && (request.auth.uid == userId || isAdmin());
+      allow create: if isAdmin() || isOwnStudentProfileCreate(userId);
+      allow update: if isAdmin() || isOwnSafeProfileUpdate(userId);
+      allow delete: if isAdmin();
+    }
+
+    match /counters/{docId} {
+      allow read: if signedIn();
+      allow create, update: if canWriteCounter();
       allow delete: if isAdmin();
     }
 
