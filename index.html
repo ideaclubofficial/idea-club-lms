@@ -3010,6 +3010,8 @@
     let firebaseUserProfile = null;
     let coreDataLoaded = false;
     let coreDataLoadingPromise = null;
+    let studentDataLoadedForUid = '';
+    let studentDataLoadingPromise = null;
 
     try {
       firebase.initializeApp(firebaseConfig);
@@ -3066,6 +3068,111 @@
       }).filter(function(item) {
         return includeDeleted || item.deleted !== true;
       });
+    }
+
+    async function getFirebaseCollectionQuiet(collectionName, includeDeleted) {
+      if (!firebaseReady || !db) return [];
+      try {
+        return await getFirebaseCollection(collectionName, includeDeleted);
+      } catch (error) {
+        console.warn('student optional collection skipped:', collectionName, error);
+        return [];
+      }
+    }
+
+    async function getOwnedStudentRecord(userProfile) {
+      if (!firebaseReady || !db || !firebaseUser) return null;
+      const uid = firebaseUser.uid;
+      const linkedStudentId = String(userProfile && (userProfile.linkedStudentId || userProfile.studentDocId) || '').trim();
+      const memberId = String(userProfile && (userProfile.memberId || userProfile.studentId) || '').trim();
+      const candidates = [linkedStudentId, uid].filter(function(value, index, list) {
+        return value && list.indexOf(value) === index;
+      });
+
+      for (const docId of candidates) {
+        try {
+          const doc = await db.collection('students').doc(docId).get();
+          if (doc.exists) {
+            const data = Object.assign({ firebaseDocId: doc.id }, doc.data());
+            if (data.authUid === uid || String(data.memberId || data.studentId || '') === memberId) return data;
+          }
+        } catch (error) {
+          console.warn('student owned doc lookup skipped:', docId, error);
+        }
+      }
+
+      try {
+        const snapshot = await db.collection('students').where('authUid', '==', uid).limit(1).get();
+        if (!snapshot.empty) {
+          const doc = snapshot.docs[0];
+          return Object.assign({ firebaseDocId: doc.id }, doc.data());
+        }
+      } catch (error) {
+        console.warn('student authUid query skipped:', error);
+      }
+
+      return null;
+    }
+
+    async function loadStudentDataOnly(userProfile) {
+      if (!firebaseReady || !db || !firebaseUser) return null;
+      console.log('student-data-load-start', {
+        uid: firebaseUser.uid,
+        accountType: userProfile && userProfile.accountType,
+        role: userProfile && userProfile.role
+      });
+
+      const studentRecord = await getOwnedStudentRecord(userProfile);
+      if (studentRecord) {
+        const normalizedStudent = sanitizeStudentProfile(Object.assign({}, studentRecord, {
+          id: studentRecord.id || studentRecord.firebaseDocId || studentRecord.authUid || firebaseUser.uid,
+          authUid: studentRecord.authUid || firebaseUser.uid
+        }));
+        replaceArray(students, [normalizedStudent]);
+        currentStudent = normalizedStudent;
+      }
+
+      const results = await Promise.all([
+        getFirebaseCollectionQuiet('courses'),
+        getFirebaseCollectionQuiet('onDemandClips'),
+        getFirebaseCollectionQuiet('announcements'),
+        getFirebaseCollectionQuiet('scoreReports'),
+        getFirebaseCollectionQuiet('paymentMonths'),
+        getFirebaseCollectionQuiet('lineGroups')
+      ]);
+
+      replaceArray(courses, results[0]);
+      replaceArray(onDemandClips, results[1]);
+      replaceArray(announcements, results[2]);
+      replaceArray(scoreReports, results[3]);
+      replaceArray(paymentMonths, results[4]);
+      replaceArray(lineGroups, results[5]);
+
+      console.log('student-data-load-success', {
+        uid: firebaseUser.uid,
+        hasStudent: !!studentRecord,
+        collections: ['students:own', 'courses', 'onDemandClips', 'announcements', 'scoreReports', 'paymentMonths', 'lineGroups']
+      });
+      return studentRecord;
+    }
+
+    async function ensureStudentDataLoaded(userProfile, options) {
+      options = options || {};
+      const uid = firebaseUser && firebaseUser.uid ? firebaseUser.uid : '';
+      if (!uid) return null;
+      if (options.force || studentDataLoadedForUid !== uid) {
+        studentDataLoadedForUid = '';
+        studentDataLoadingPromise = null;
+      }
+      if (!studentDataLoadingPromise) {
+        studentDataLoadingPromise = loadStudentDataOnly(userProfile).then(function(studentRecord) {
+          studentDataLoadedForUid = uid;
+          return studentRecord;
+        }).finally(function() {
+          studentDataLoadingPromise = null;
+        });
+      }
+      return await studentDataLoadingPromise;
     }
 
     async function ensureCoreDataLoaded(options) {
@@ -4761,7 +4868,6 @@
             rawUsername: rawUsername
           });
 
-          await ensureCoreDataLoaded({ force: true });
           const preMatchedTeacher = findTeacherByLoginId(rawUsername, username, displayLoginId);
           const preMatchedStudent = findStudentByLoginId(rawUsername, username, displayLoginId);
           
@@ -4850,8 +4956,6 @@
             loginId: displayLoginId
           });
 
-          // โหลดข้อมูลประกอบเท่านั้น หลัง Auth สำเร็จ role ต้องมาจาก users/{uid} เท่านั้น
-          await ensureCoreDataLoaded({ force: true });
           safeRun(loadPaymentQrFromGithubAsset, 'load-payment-qr-github');
 
           const firebaseEmail = firebaseUser.email || username;
@@ -4899,6 +5003,7 @@
               accountType: firebaseUserProfile.accountType,
               loginId: displayLoginId
             });
+            await ensureStudentDataLoaded(firebaseUserProfile, { force: true });
             const linkedStudentId = String(firebaseUserProfile.linkedStudentId || firebaseUserProfile.studentDocId || '').trim();
             const profileStudentId = String(firebaseUserProfile.studentId || '').trim();
             const profileMemberId = String(firebaseUserProfile.memberId || '').trim();
@@ -4933,6 +5038,8 @@
             firebaseUserProfile = sanitizedStudentUserProfile;
             return;
           }
+
+          await ensureCoreDataLoaded({ force: true });
 
           // ============================================================
           // STAFF ROUTING - role source is users/{uid}; teachers is profile only
@@ -5278,7 +5385,6 @@
       try {
         if (PRODUCTION_MODE && firebaseReady && db && authUid) {
           await commitNewStudentAccount(newStudent, authUid);
-          await ensureCoreDataLoaded({ force: true });
         } else {
           students.push(newStudent);
           await setFirebaseDocument('students', newStudent);
@@ -5294,17 +5400,24 @@
         students.push(newStudent);
       }
       currentStudent = newStudent;
+      currentTeacher = null;
+      currentAdmin = null;
+      firebaseUserProfile = sanitizeStudentProfile(Object.assign({}, newStudent, {
+        uid: authUid || newStudent.id,
+        authUid: authUid || newStudent.authUid
+      }));
+      console.log('student-register-success', {
+        uid: authUid || '',
+        memberId: autoMemberId,
+        phone: phone
+      });
+      if (PRODUCTION_MODE && firebaseReady && db && authUid) {
+        await ensureStudentDataLoaded(firebaseUserProfile, { force: true });
+        currentStudent = students[0] || newStudent;
+      }
 
       result.textContent = 'สมัครสมาชิกเรียบร้อย ระบบเข้าสู่หน้าสมาชิกให้อัตโนมัติ';
       result.style.color = '#16a34a';
-      try {
-        await addActivityLog('สมัครสมาชิกใหม่', studentName + ' · ' + registerGrade + ' · ' + phone);
-      } catch (logError) {
-        console.warn('new member activity log warning:', logError);
-      }
-      safeRun(renderAdminStudents, 'render-admin-students-after-register');
-      safeRun(renderMemberTable, 'render-member-table-after-register');
-      safeRun(updateMemberIdPreview, 'update-member-preview-after-register');
       refreshProfileBox();
       studentLogin(phone);
     }
@@ -8198,11 +8311,24 @@ function getCourseOnlineDocs(course, includeInactive) {
       if (clearMessage !== false) getElement('courseSaveResult').textContent = '';
     }
 
-    function applyCourse(id) {
+    async function ensureCurrentStudentSession() {
+      if (currentStudent && isStudentAccount(currentStudent)) return currentStudent;
+      if (!firebaseUser || !firebaseUserProfile || !isStudentAccount(firebaseUserProfile)) return null;
+      const studentRecord = await ensureStudentDataLoaded(firebaseUserProfile, { force: true });
+      if (studentRecord) {
+        currentStudent = students.find(function(item) {
+          return item.authUid === firebaseUser.uid || String(item.firebaseDocId || item.id || '') === String(studentRecord.firebaseDocId || studentRecord.id || '');
+        }) || sanitizeStudentProfile(Object.assign({}, studentRecord));
+      }
+      return currentStudent || null;
+    }
+
+    async function applyCourse(id) {
       const c = courses.find(function(item) { return String(item.id) === String(id); });
       if (!c) return;
 
-      if (!currentStudent) {
+      const activeStudent = await ensureCurrentStudentSession();
+      if (!activeStudent) {
         alert('กรุณาเข้าสู่ระบบด้วยบัญชีนักเรียนก่อนสมัครคอร์ส');
         return;
       }
@@ -8220,10 +8346,9 @@ function getCourseOnlineDocs(course, includeInactive) {
 
       if (getElement('profileGrade')) getElement('profileGrade').value = c.grade;
       setFirebaseDocument('students', currentStudent).catch(function(error) { console.error('apply course firebase error:', error); });
-      addActivityLog('นักเรียนสมัครคอร์ส', (currentStudent.name || '-') + ' · ' + c.name + ' · ' + (currentStudent.registeredCourseMonth || '-'));
       updateStudentCourseDisplay();
-      renderAdminStudents();
-        alert('สมัครคอร์ส ' + c.name + ' เรียบร้อยแล้ว กรุณาชำระเงินและอัปโหลดสลิป');
+      if (!isCurrentStudentSession()) renderAdminStudents();
+      alert('สมัครคอร์ส ' + c.name + ' เรียบร้อยแล้ว กรุณาชำระเงินและอัปโหลดสลิป');
     }
 
     function getCurrentStudentCourse() {
