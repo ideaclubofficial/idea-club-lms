@@ -2123,6 +2123,35 @@
 
           <section id="admin-monthly-planner" class="admin-tab hidden">
             <div class="form-box">
+              <h3>สรุปตารางรายเดือน</h3>
+              <p style="margin-bottom:18px; color:#6b7280;">ดูภาพรวมคอร์ส คาบเรียน และปัญหาที่ต้องจัดการในเดือนที่เลือก</p>
+              <div class="form-row">
+                <div>
+                  <label>เดือน</label>
+                  <select id="monthlyPlannerSummaryMonthFilter" onchange="renderMonthlyPlannerDashboardSummary()">
+                    <option value="ทั้งหมด">ทั้งหมด</option>
+                  </select>
+                </div>
+                <div>
+                  <label>ศูนย์</label>
+                  <select id="monthlyPlannerSummaryCenterFilter" onchange="renderMonthlyPlannerDashboardSummary()">
+                    <option value="ทั้งหมด">ทั้งหมด</option>
+                  </select>
+                </div>
+                <div>
+                  <label>คอร์ส</label>
+                  <select id="monthlyPlannerSummaryCourseFilter" onchange="renderMonthlyPlannerDashboardSummary()">
+                    <option value="ทั้งหมด">ทั้งหมด</option>
+                  </select>
+                </div>
+              </div>
+              <div id="monthlyPlannerDashboardSummaryCards" class="dashboard-grid"></div>
+              <div id="monthlyPlannerDashboardSummaryNote" class="notice" style="margin-top:14px;"></div>
+            </div>
+
+            <br />
+
+            <div class="form-box">
               <div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:16px;">
                 <button type="button" class="btn btn-blue active" data-planner-tab-button="plannerTab1" onclick="switchMonthlyPlannerTab('plannerTab1')">1. ตัวช่วยจัดตาราง</button>
                 <button type="button" class="btn btn-blue" data-planner-tab-button="plannerTab2" onclick="switchMonthlyPlannerTab('plannerTab2')">2. ตารางรายเดือน</button>
@@ -6350,6 +6379,7 @@
         safeRun(renderMonthlySubjectBalanceControls, 'monthly-subject-balance-controls');
         safeRun(renderMonthlyTeacherConflictControls, 'monthly-teacher-conflict-controls');
         safeRun(renderMonthlyPlanSessions, 'monthly-plan-sessions');
+        safeRun(renderMonthlyPlannerDashboardSummary, 'monthly-planner-dashboard-summary');
       }
     }
 
@@ -12416,6 +12446,7 @@ function receiptStatusText(status) {
       try {
         await setFirebaseDocument('holidays', holiday);
         renderHolidayTools();
+        renderMonthlyPlannerDashboardSummary();
         if (result) {
           result.textContent = 'บันทึกวันหยุดเรียบร้อย';
           result.style.color = '#16a34a';
@@ -12496,6 +12527,7 @@ function receiptStatusText(status) {
       holiday.updatedAtText = new Date().toLocaleString('th-TH');
       await setFirebaseDocument('holidays', holiday);
       renderHolidayTools();
+      renderMonthlyPlannerDashboardSummary();
       addActivityLog('ยกเลิกวันหยุด', holiday.name || '-');
     }
 
@@ -13878,6 +13910,175 @@ function receiptStatusText(status) {
       };
     }
 
+    function getMonthlyPlannerSummaryMonthKey(session) {
+      return getMonthlySessionMonthKey(session) || normalizeMonthKey(getMonthlyPlanMonthLabel(session));
+    }
+
+    function getMonthlyPlannerSummaryFilterValue(id, fallback) {
+      const element = getElement(id);
+      return element ? (element.value || fallback || 'ทั้งหมด') : (fallback || 'ทั้งหมด');
+    }
+
+    function setMonthlyPlannerSummarySelectOptions(select, options, currentValue, defaultValue) {
+      if (!select) return 'ทั้งหมด';
+      const values = options.map(function(option) { return option.value; });
+      select.innerHTML = options.map(function(option) {
+        return '<option value="' + escapeHtml(option.value) + '">' + escapeHtml(option.label) + '</option>';
+      }).join('');
+      const nextValue = values.includes(currentValue) ? currentValue : (values.includes(defaultValue) ? defaultValue : (values[0] || 'ทั้งหมด'));
+      select.value = nextValue;
+      return nextValue;
+    }
+
+    function getMonthlyPlannerFilteredSessions() {
+      const monthFilter = getMonthlyPlannerSummaryFilterValue('monthlyPlannerSummaryMonthFilter');
+      const centerFilter = getMonthlyPlannerSummaryFilterValue('monthlyPlannerSummaryCenterFilter');
+      const courseFilter = getMonthlyPlannerSummaryFilterValue('monthlyPlannerSummaryCourseFilter');
+      return monthlyPlanSessions.filter(function(session) {
+        const monthMatched = monthFilter === 'ทั้งหมด' || getMonthlyPlannerSummaryMonthKey(session) === monthFilter;
+        const centerMatched = centerFilter === 'ทั้งหมด' || String(session.center || '') === centerFilter;
+        const courseMatched = courseFilter === 'ทั้งหมด' || String(session.courseId || '') === String(courseFilter);
+        return monthMatched && centerMatched && courseMatched;
+      });
+    }
+
+    function getMonthlyPlannerCountableSessions(sessions) {
+      return (sessions || []).filter(function(session) {
+        const status = session.status || 'planned';
+        return status !== 'cancelled' && status !== 'holiday';
+      });
+    }
+
+    function getUnassignedMonthlySessions(sessions) {
+      return getMonthlyPlannerCountableSessions(sessions).filter(function(session) {
+        return !getSessionTeacherKey(session) && !getMonthlyPlanTeacherName(session);
+      });
+    }
+
+    function getMonthlyTeacherConflictSessions(sessions) {
+      const seen = {};
+      return getMonthlyPlannerCountableSessions(sessions).filter(function(session) {
+        const id = String(session.id || session.firebaseDocId || '');
+        if (!id || seen[id]) return false;
+        const hasConflict = findTeacherConflicts(session).length > 0;
+        if (hasConflict) seen[id] = true;
+        return hasConflict;
+      });
+    }
+
+    function getUnmadeHolidaySessions(sessions) {
+      return (sessions || []).filter(function(session) {
+        const id = String(session.id || session.firebaseDocId || '');
+        if ((session.status || '') !== 'holiday' || !id) return false;
+        return !monthlyPlanSessions.some(function(item) {
+          const status = item.status || 'draft';
+          return status !== 'cancelled' &&
+            (item.isMakeup || item.type === 'makeup') &&
+            String(item.originalSessionId || '') === id;
+        });
+      });
+    }
+
+    function getMonthlySubjectBalanceWarnings(sessions) {
+      const monthFilter = getMonthlyPlannerSummaryFilterValue('monthlyPlannerSummaryMonthFilter');
+      const courseFilter = getMonthlyPlannerSummaryFilterValue('monthlyPlannerSummaryCourseFilter');
+      const courseIds = Array.from(new Set((sessions || []).map(function(session) {
+        return String(session.courseId || '');
+      }).filter(Boolean)));
+      const targetCourseIds = courseFilter === 'ทั้งหมด' ? courseIds : [courseFilter].filter(Boolean);
+      const warnings = [];
+
+      targetCourseIds.forEach(function(courseId) {
+        const courseSessions = (sessions || []).filter(function(session) {
+          return String(session.courseId || '') === String(courseId);
+        });
+        const countableSessions = courseSessions.filter(isMonthlyBalanceCountableSession);
+        if (!countableSessions.length) return;
+        const plan = monthlyPlans.find(function(item) {
+          return String(item.courseId || '') === String(courseId) &&
+            (monthFilter === 'ทั้งหมด' || item.monthKey === monthFilter || normalizeMonthKey(item.monthText || item.month || '') === monthFilter);
+        }) || null;
+        const weights = plan && Array.isArray(plan.subjectWeights) && plan.subjectWeights.length ? plan.subjectWeights : DEFAULT_MONTHLY_SUBJECT_WEIGHTS;
+        const mode = plan && plan.balanceMode ? plan.balanceMode : 'equal';
+        calculateSubjectBalanceSummary(courseSessions, weights, mode).forEach(function(row) {
+          if (row.diff !== 0) {
+            warnings.push({
+              courseId: courseId,
+              courseName: getCourseNameById(courseId),
+              subject: row.subject,
+              diff: row.diff
+            });
+          }
+        });
+      });
+      return warnings;
+    }
+
+    function renderMonthlyPlannerDashboardSummary() {
+      const cardsBox = getElement('monthlyPlannerDashboardSummaryCards');
+      const noteBox = getElement('monthlyPlannerDashboardSummaryNote');
+      const monthSelect = getElement('monthlyPlannerSummaryMonthFilter');
+      const centerSelect = getElement('monthlyPlannerSummaryCenterFilter');
+      const courseSelect = getElement('monthlyPlannerSummaryCourseFilter');
+      if (!cardsBox) return;
+
+      const monthOptions = Array.from(new Set(monthlyPlanSessions.map(getMonthlyPlannerSummaryMonthKey).filter(Boolean))).sort();
+      const defaultMonth = monthOptions.length ? monthOptions[monthOptions.length - 1] : 'ทั้งหมด';
+      const currentMonth = monthSelect ? (monthSelect.dataset.summaryInitialized ? monthSelect.value : defaultMonth) : 'ทั้งหมด';
+      const selectedMonth = setMonthlyPlannerSummarySelectOptions(monthSelect, [{ value: 'ทั้งหมด', label: 'ทั้งหมด' }].concat(monthOptions.map(function(monthKey) {
+        return { value: monthKey, label: formatMonthTextFromKey(monthKey) || monthKey };
+      })), currentMonth, defaultMonth);
+      if (monthSelect) monthSelect.dataset.summaryInitialized = 'true';
+
+      const baseForCenter = monthlyPlanSessions.filter(function(session) {
+        return selectedMonth === 'ทั้งหมด' || getMonthlyPlannerSummaryMonthKey(session) === selectedMonth;
+      });
+      const centerOptions = Array.from(new Set(baseForCenter.map(function(session) {
+        return String(session.center || '').trim();
+      }).filter(Boolean))).sort();
+      const selectedCenter = setMonthlyPlannerSummarySelectOptions(centerSelect, [{ value: 'ทั้งหมด', label: 'ทั้งหมด' }].concat(centerOptions.map(function(center) {
+        return { value: center, label: center };
+      })), centerSelect ? centerSelect.value : 'ทั้งหมด', 'ทั้งหมด');
+
+      const baseForCourse = baseForCenter.filter(function(session) {
+        return selectedCenter === 'ทั้งหมด' || String(session.center || '') === selectedCenter;
+      });
+      const courseIds = Array.from(new Set(baseForCourse.map(function(session) {
+        return String(session.courseId || '');
+      }).filter(Boolean))).sort(function(a, b) {
+        return String(getCourseNameById(a)).localeCompare(String(getCourseNameById(b)));
+      });
+      setMonthlyPlannerSummarySelectOptions(courseSelect, [{ value: 'ทั้งหมด', label: 'ทั้งหมด' }].concat(courseIds.map(function(courseId) {
+        return { value: courseId, label: getCourseNameById(courseId) || courseId };
+      })), courseSelect ? courseSelect.value : 'ทั้งหมด', 'ทั้งหมด');
+
+      const filtered = getMonthlyPlannerFilteredSessions();
+      const nonCancelled = filtered.filter(function(session) { return (session.status || 'planned') !== 'cancelled'; });
+      const countable = getMonthlyPlannerCountableSessions(filtered);
+      const uniqueCourses = Array.from(new Set(nonCancelled.map(function(session) { return String(session.courseId || ''); }).filter(Boolean)));
+      const unassigned = getUnassignedMonthlySessions(filtered);
+      const conflicts = getMonthlyTeacherConflictSessions(filtered);
+      const unmadeHolidays = getUnmadeHolidaySessions(filtered);
+      const balanceWarnings = getMonthlySubjectBalanceWarnings(filtered);
+      const cardData = [
+        { title: 'คอร์สทั้งหมดในเดือนนี้', value: uniqueCourses.length, hint: 'คอร์สที่มี session ในเงื่อนไขนี้' },
+        { title: 'คาบทั้งหมด', value: countable.length, hint: 'ไม่รวม cancelled และ holiday' },
+        { title: 'คาบที่ยังไม่มีครู', value: unassigned.length, hint: 'session ที่ยังไม่มีครูผู้สอน' },
+        { title: 'คาบที่ครูชนเวลา', value: conflicts.length, hint: 'นับ session ที่พบ conflict' },
+        { title: 'คาบวันหยุดที่ยังไม่มีชดเชย', value: unmadeHolidays.length, hint: 'holiday ที่ยังไม่มี makeup ผูกกลับ' },
+        { title: 'วิชาที่ขาด/เกินสมดุล', value: balanceWarnings.length, hint: 'diff ไม่เท่ากับ 0 จาก Overall' }
+      ];
+
+      cardsBox.innerHTML = cardData.map(function(card) {
+        return '<div class="stat"><h4>' + escapeHtml(card.title) + '</h4><p>' + card.value + '</p><span class="mini-muted">' + escapeHtml(card.hint) + '</span></div>';
+      }).join('');
+      if (noteBox) {
+        noteBox.innerHTML = filtered.length
+          ? 'ใช้ข้อมูลจาก monthlyPlanSessions ตามตัวกรองด้านบน'
+          : 'ยังไม่มีข้อมูลตารางในเงื่อนไขที่เลือก';
+      }
+    }
+
     function renderMonthlySubjectBalanceControls() {
       const monthSelect = getElement('monthlySubjectBalanceMonth');
       const courseSelect = getElement('monthlySubjectBalanceCourse');
@@ -14005,6 +14206,7 @@ function receiptStatusText(status) {
         monthlySubjectWeightDraft = normalizeSubjectWeights(plan.subjectWeights, plan.balanceMode).map(function(item) { return Object.assign({}, item); });
         renderMonthlySubjectWeightsRows();
         renderMonthlySubjectBalance();
+        renderMonthlyPlannerDashboardSummary();
         if (result) {
           result.textContent = 'บันทึกน้ำหนักวิชาเรียบร้อย' + warningText;
           result.style.color = '#16a34a';
@@ -14099,6 +14301,7 @@ function receiptStatusText(status) {
       renderMonthlyPlanGrid(filtered);
       renderMonthlyPlanSummary();
       renderMonthlySubjectBalance();
+      renderMonthlyPlannerDashboardSummary();
     }
 
     function clearMonthlyPlanForm(clearMessage) {
