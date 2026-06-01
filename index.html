@@ -185,7 +185,41 @@
       background: #f8fafc;
     }
 
+    .planner-summary-card {
+      cursor: pointer;
+      border: 1px solid transparent;
+      transition: border-color 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease;
+    }
+
+    .planner-summary-card:hover {
+      border-color: #93c5fd;
+      box-shadow: 0 8px 18px rgba(15, 76, 189, 0.12);
+      transform: translateY(-1px);
+    }
+
+    .planner-summary-card.active-summary-card {
+      border-color: #0f4cbd;
+      box-shadow: 0 0 0 3px rgba(15, 76, 189, 0.12);
+    }
+
+    .planner-issue-banner {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 14px;
+    }
+
+    .monthly-balance-warning-row {
+      background: #fff7ed;
+    }
+
     @media (max-width: 768px) {
+      .planner-issue-banner {
+        align-items: stretch;
+        flex-direction: column;
+      }
+
       .menu a,
       .admin-sidebar a,
       .student-action-btn,
@@ -2613,6 +2647,7 @@
 
             <div class="form-box">
               <h3>รายการแผนสอน</h3>
+              <div id="monthlyPlannerIssueFilterBanner"></div>
               <div class="form-row">
                 <div>
                   <label>กรองตามเดือน</label>
@@ -4289,6 +4324,7 @@
     const teacherPreferenceRules = [];
     const courseTeachingSettings = [];
     const monthlyPlanSessionPreview = [];
+    let monthlyPlannerIssueFilter = 'all';
 
     const onDemandClips = [];
 
@@ -14023,6 +14059,117 @@ function receiptStatusText(status) {
       return warnings;
     }
 
+    function getMonthlyPlannerIssueFilterLabel(filterKey) {
+      const map = {
+        all: 'คาบทั้งหมด',
+        unassigned: 'คาบที่ยังไม่มีครู',
+        teacherConflict: 'คาบที่ครูชนเวลา',
+        holidayNeedsMakeup: 'คาบวันหยุดที่ยังไม่มีชดเชย',
+        subjectBalanceIssue: 'วิชาที่ขาด/เกินสมดุล'
+      };
+      return map[filterKey || monthlyPlannerIssueFilter] || 'คาบทั้งหมด';
+    }
+
+    function setSelectValueIfExists(selectId, value) {
+      const select = getElement(selectId);
+      if (!select) return;
+      const hasValue = Array.from(select.options).some(function(option) { return option.value === value; });
+      if (hasValue) select.value = value;
+    }
+
+    function setMonthlyPlanMonthFilterFromSummary(monthKey) {
+      const select = getElement('monthlyPlanMonthFilter');
+      if (!select || !monthKey || monthKey === 'ทั้งหมด') {
+        if (select) select.value = 'ทั้งหมด';
+        return;
+      }
+      const option = Array.from(select.options).find(function(item) {
+        return normalizeMonthKey(item.value) === monthKey || item.value === formatMonthTextFromKey(monthKey);
+      });
+      select.value = option ? option.value : 'ทั้งหมด';
+    }
+
+    function syncMonthlyPlannerSummaryFiltersToSessionList() {
+      renderMonthlyPlanOptions();
+      const monthValue = getMonthlyPlannerSummaryFilterValue('monthlyPlannerSummaryMonthFilter');
+      const centerValue = getMonthlyPlannerSummaryFilterValue('monthlyPlannerSummaryCenterFilter');
+      const courseValue = getMonthlyPlannerSummaryFilterValue('monthlyPlannerSummaryCourseFilter');
+      setMonthlyPlanMonthFilterFromSummary(monthValue);
+      setSelectValueIfExists('monthlyPlanCenterFilter', centerValue);
+      setSelectValueIfExists('monthlyPlanCourseFilter', courseValue);
+      setSelectValueIfExists('monthlyPlanTeacherFilter', 'ทั้งหมด');
+      setSelectValueIfExists('monthlyPlanTypeFilter', 'ทั้งหมด');
+      setSelectValueIfExists('monthlyPlanStatusFilter', 'active');
+    }
+
+    function getMonthlyPlannerIssueFilteredSessions(sessions) {
+      if (monthlyPlannerIssueFilter === 'unassigned') return getUnassignedMonthlySessions(sessions);
+      if (monthlyPlannerIssueFilter === 'teacherConflict') return getMonthlyTeacherConflictSessions(sessions);
+      if (monthlyPlannerIssueFilter === 'holidayNeedsMakeup') return getUnmadeHolidaySessions(sessions);
+      return sessions || [];
+    }
+
+    function renderMonthlyPlannerIssueFilterBanner() {
+      const box = getElement('monthlyPlannerIssueFilterBanner');
+      if (!box) return;
+      if (!monthlyPlannerIssueFilter || monthlyPlannerIssueFilter === 'all') {
+        box.innerHTML = '';
+        return;
+      }
+      box.innerHTML = '<div class="notice planner-issue-banner">' +
+        '<strong>กำลังแสดง: ' + escapeHtml(getMonthlyPlannerIssueFilterLabel()) + '</strong>' +
+        '<button class="btn btn-dark" type="button" onclick="clearMonthlyPlannerIssueFilter()">ล้างตัวกรอง</button>' +
+      '</div>';
+    }
+
+    function setMonthlyPlannerIssueFilter(filterKey) {
+      monthlyPlannerIssueFilter = filterKey || 'all';
+      syncMonthlyPlannerSummaryFiltersToSessionList();
+      switchMonthlyPlannerTab('plannerTab2');
+      renderMonthlyPlanSessions();
+      const target = getElement('monthlyPlannerIssueFilterBanner') || getElement('monthlyPlanTableBody');
+      if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+
+    function clearMonthlyPlannerIssueFilter() {
+      monthlyPlannerIssueFilter = 'all';
+      renderMonthlyPlanSessions();
+    }
+
+    function scrollToMonthlyPlannerGrid() {
+      const grid = getElement('monthlyPlanGridBody');
+      if (grid) grid.closest('.form-box').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+
+    function openMonthlySubjectBalanceFromSummary() {
+      monthlyPlannerIssueFilter = 'subjectBalanceIssue';
+      switchMonthlyPlannerTab('plannerTab3');
+      const monthValue = getMonthlyPlannerSummaryFilterValue('monthlyPlannerSummaryMonthFilter');
+      const courseValue = getMonthlyPlannerSummaryFilterValue('monthlyPlannerSummaryCourseFilter');
+      if (monthValue !== 'ทั้งหมด') setSelectValueIfExists('monthlySubjectBalanceMonth', monthValue);
+      if (courseValue !== 'ทั้งหมด') setSelectValueIfExists('monthlySubjectBalanceCourse', courseValue);
+      loadMonthlySubjectBalanceForm();
+      renderMonthlyPlannerDashboardSummary();
+      const box = getElement('monthlySubjectBalanceSummary') || getElement('monthlySubjectBalanceMonth');
+      if (box) box.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+
+    function handleMonthlyPlannerSummaryCardClick(actionKey) {
+      syncMonthlyPlannerSummaryFiltersToSessionList();
+      if (actionKey === 'grid') {
+        monthlyPlannerIssueFilter = 'all';
+        switchMonthlyPlannerTab('plannerTab2');
+        renderMonthlyPlanSessions();
+        scrollToMonthlyPlannerGrid();
+        return;
+      }
+      if (actionKey === 'subjectBalanceIssue') {
+        openMonthlySubjectBalanceFromSummary();
+        return;
+      }
+      setMonthlyPlannerIssueFilter(actionKey || 'all');
+    }
+
     function renderMonthlyPlannerDashboardSummary() {
       const cardsBox = getElement('monthlyPlannerDashboardSummaryCards');
       const noteBox = getElement('monthlyPlannerDashboardSummaryNote');
@@ -14070,16 +14217,17 @@ function receiptStatusText(status) {
       const unmadeHolidays = getUnmadeHolidaySessions(filtered);
       const balanceWarnings = getMonthlySubjectBalanceWarnings(filtered);
       const cardData = [
-        { title: 'คอร์สทั้งหมดในเดือนนี้', value: uniqueCourses.length, hint: 'คอร์สที่มี session ในเงื่อนไขนี้' },
-        { title: 'คาบทั้งหมด', value: countable.length, hint: 'ไม่รวม cancelled และ holiday' },
-        { title: 'คาบที่ยังไม่มีครู', value: unassigned.length, hint: 'session ที่ยังไม่มีครูผู้สอน' },
-        { title: 'คาบที่ครูชนเวลา', value: conflicts.length, hint: 'นับ session ที่พบ conflict' },
-        { title: 'คาบวันหยุดที่ยังไม่มีชดเชย', value: unmadeHolidays.length, hint: 'holiday ที่ยังไม่มี makeup ผูกกลับ' },
-        { title: 'วิชาที่ขาด/เกินสมดุล', value: balanceWarnings.length, hint: 'diff ไม่เท่ากับ 0 จาก Overall' }
+        { title: 'คอร์สทั้งหมดในเดือนนี้', value: uniqueCourses.length, hint: 'คอร์สที่มี session ในเงื่อนไขนี้', action: 'grid' },
+        { title: 'คาบทั้งหมด', value: countable.length, hint: 'ไม่รวม cancelled และ holiday', action: 'all' },
+        { title: 'คาบที่ยังไม่มีครู', value: unassigned.length, hint: 'session ที่ยังไม่มีครูผู้สอน', action: 'unassigned' },
+        { title: 'คาบที่ครูชนเวลา', value: conflicts.length, hint: 'นับ session ที่พบ conflict', action: 'teacherConflict' },
+        { title: 'คาบวันหยุดที่ยังไม่มีชดเชย', value: unmadeHolidays.length, hint: 'holiday ที่ยังไม่มี makeup ผูกกลับ', action: 'holidayNeedsMakeup' },
+        { title: 'วิชาที่ขาด/เกินสมดุล', value: balanceWarnings.length, hint: 'diff ไม่เท่ากับ 0 จาก Overall', action: 'subjectBalanceIssue' }
       ];
 
       cardsBox.innerHTML = cardData.map(function(card) {
-        return '<div class="stat"><h4>' + escapeHtml(card.title) + '</h4><p>' + card.value + '</p><span class="mini-muted">' + escapeHtml(card.hint) + '</span></div>';
+        const activeClass = monthlyPlannerIssueFilter === card.action ? ' active-summary-card' : '';
+        return '<div class="stat planner-summary-card' + activeClass + '" onclick="' + actionCall('handleMonthlyPlannerSummaryCardClick', card.action) + '"><h4>' + escapeHtml(card.title) + '</h4><p>' + card.value + '</p><span class="mini-muted">' + escapeHtml(card.hint) + '</span></div>';
       }).join('');
       if (noteBox) {
         noteBox.innerHTML = filtered.length
@@ -14240,7 +14388,7 @@ function receiptStatusText(status) {
       return '<div class="form-box" style="margin-top:14px;"><h3>' + title + '</h3>' +
         '<div class="table-wrap"><table><thead><tr><th>Subject</th><th>Weight</th><th>Expected</th><th>Actual</th><th>Diff</th><th>Status</th></tr></thead><tbody>' +
         rows.map(function(row) {
-          return '<tr><td>' + escapeHtml(row.subject) + '</td><td>' + escapeHtml(row.weight) + '</td><td>' + row.expected + '</td><td>' + row.actual + '</td><td>' + row.diff + '</td><td>' + getMonthlyBalanceStatusHtml(row.diff) + '</td></tr>';
+          return '<tr class="' + (row.diff !== 0 ? 'monthly-balance-warning-row' : '') + '"><td>' + escapeHtml(row.subject) + '</td><td>' + escapeHtml(row.weight) + '</td><td>' + row.expected + '</td><td>' + row.actual + '</td><td>' + row.diff + '</td><td>' + getMonthlyBalanceStatusHtml(row.diff) + '</td></tr>';
         }).join('') +
         '</tbody></table></div>' + advice + '</div>';
     }
@@ -14276,7 +14424,7 @@ function receiptStatusText(status) {
       const centerFilter = getElement('monthlyPlanCenterFilter') ? getElement('monthlyPlanCenterFilter').value : 'ทั้งหมด';
       const teacherFilter = getElement('monthlyPlanTeacherFilter') ? getElement('monthlyPlanTeacherFilter').value : 'ทั้งหมด';
       const typeFilter = getElement('monthlyPlanTypeFilter') ? getElement('monthlyPlanTypeFilter').value : 'ทั้งหมด';
-      const filtered = monthlyPlanSessions.filter(function(item) {
+      const baseFiltered = monthlyPlanSessions.filter(function(item) {
         const status = item.status || 'planned';
         const monthMatched = monthFilter === 'ทั้งหมด' || getMonthlyPlanMonthLabel(item) === monthFilter;
         const courseMatched = courseFilter === 'ทั้งหมด' || String(item.courseId || '') === String(courseFilter);
@@ -14286,9 +14434,11 @@ function receiptStatusText(status) {
         const typeKey = getMonthlyPlanSessionTypeKey(item);
         const typeMatched = typeFilter === 'ทั้งหมด' || typeKey === typeFilter;
         return monthMatched && courseMatched && statusMatched && centerMatched && teacherMatched && typeMatched;
-      }).sort(function(a, b) {
+      });
+      const filtered = getMonthlyPlannerIssueFilteredSessions(baseFiltered).sort(function(a, b) {
         return String(a.date || a.sessionDate || '').localeCompare(String(b.date || b.sessionDate || '')) || String(a.timeStart || a.sessionTime || '').localeCompare(String(b.timeStart || b.sessionTime || ''));
       });
+      renderMonthlyPlannerIssueFilterBanner();
 
       tbody.innerHTML = filtered.length ? filtered.map(function(item) {
         const id = item.id || item.firebaseDocId || '';
@@ -14306,7 +14456,7 @@ function receiptStatusText(status) {
           '<td>' + escapeHtml(item.updatedAtText || item.createdAtText || '-') + '</td>' +
           '<td>' + actionButtons + '</td>' +
         '</tr>';
-      }).join('') : '<tr><td colspan="8">ยังไม่มีแผนสอนรายเดือน</td></tr>';
+      }).join('') : '<tr><td colspan="8">' + (monthlyPlannerIssueFilter === 'all' ? 'ยังไม่มีแผนสอนรายเดือน' : 'ไม่พบรายการตามตัวกรองนี้') + '</td></tr>';
       renderMonthlyPlanGrid(filtered);
       renderMonthlyPlanSummary();
       renderMonthlySubjectBalance();
