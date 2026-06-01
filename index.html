@@ -877,6 +877,7 @@
           <h3>เมนูครู</h3>
           <a onclick="showTeacherTab('teacher-dashboard')"><span class="menu-icon">🏠</span>ภาพรวมครู</a>
           <a onclick="showTeacherTab('teacher-online')"><span class="menu-icon">💻</span>ห้องเรียน Online</a>
+          <a onclick="showTeacherTab('teacher-private-lessons')"><span class="menu-icon">🕒</span>ชั่วโมงเรียนเดี่ยว</a>
           <a onclick="showTeacherTab('teacher-attendance')"><span class="menu-icon">✅</span>เช็คชื่อนักเรียน</a>
           <a onclick="showTeacherTab('teacher-students')"><span class="menu-icon">👨‍🎓</span>รายชื่อนักเรียน</a>
           <a onclick="showPublic()"><span class="menu-icon">🏠</span>ออก</a>
@@ -943,6 +944,32 @@
             </div>
             <br />
             <div id="teacherOnlineClassList" class="grid"></div>
+          </section>
+
+          <section id="teacher-private-lessons" class="teacher-tab hidden">
+            <div class="form-box">
+              <h3>ชั่วโมงเรียนเดี่ยว</h3>
+              <p style="margin-bottom:18px; color:#6b7280;">บันทึกเวลาเริ่มและเวลาจบจากคาบสอนเดี่ยว 1:1 ที่ผูกกับครูคนนี้</p>
+              <div id="teacherPrivateLessonSummary" class="dashboard-grid"></div>
+            </div>
+            <br />
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>วันที่</th>
+                    <th>นักเรียน</th>
+                    <th>วิชา</th>
+                    <th>เวลาเริ่ม</th>
+                    <th>เวลาจบ</th>
+                    <th>สถานะ</th>
+                    <th>จัดการ</th>
+                  </tr>
+                </thead>
+                <tbody id="teacherPrivateLessonTableBody"></tbody>
+              </table>
+            </div>
+            <p id="teacherPrivateLessonResult" style="margin-top:14px; font-weight:bold;"></p>
           </section>
 
           <section id="teacher-students" class="teacher-tab hidden">
@@ -3811,6 +3838,7 @@
       { key: 'admin.logs', title: 'ประวัติการแก้ไข', desc: 'ดูและส่งออก Activity Log' },
       { key: 'teacher.dashboard', title: 'ภาพรวมครู', desc: 'ดูสรุปคอร์สและตารางสอน' },
       { key: 'teacher.online', title: 'ห้องเรียนครู', desc: 'เข้าห้อง Online และดูข้อมูลห้องเรียน' },
+      { key: 'teacher.privateLessons', title: 'ชั่วโมงเรียนเดี่ยว', desc: 'บันทึกเวลาเริ่มและจบคาบสอนเดี่ยว 1:1' },
       { key: 'teacher.attendance', title: 'เช็คชื่อ', desc: 'บันทึกสถานะมาเรียน/ไม่มา' },
       { key: 'teacher.students', title: 'รายชื่อนักเรียน', desc: 'ดูรายชื่อในคอร์สที่สอน' }
     ];
@@ -3838,7 +3866,7 @@
       },
       Teacher: {
         label: 'Teacher / ครูผู้สอน',
-        permissions: ['teacher.dashboard','teacher.online','teacher.attendance','teacher.students']
+        permissions: ['teacher.dashboard','teacher.online','teacher.privateLessons','teacher.attendance','teacher.students']
       },
       Assistant: {
         label: 'Assistant / ผู้ช่วยครู',
@@ -3874,6 +3902,7 @@
     const TEACHER_TAB_PERMISSIONS = {
       'teacher-dashboard': 'teacher.dashboard',
       'teacher-online': 'teacher.online',
+      'teacher-private-lessons': 'teacher.dashboard',
       'teacher-attendance': 'teacher.attendance',
       'teacher-students': 'teacher.students'
     };
@@ -4146,7 +4175,7 @@
     }
 
     function findFirstAllowedTeacherTab() {
-      const order = ['teacher-dashboard','teacher-online','teacher-attendance','teacher-students'];
+      const order = ['teacher-dashboard','teacher-online','teacher-private-lessons','teacher-attendance','teacher-students'];
       return order.find(function(tabId) { return canOpenTeacherTab(tabId); }) || 'teacher-dashboard';
     }
 
@@ -5893,6 +5922,7 @@
       if (tabId === 'teacher-students') renderTeacherStudents();
       if (tabId === 'teacher-dashboard') { renderTodayTeachingList(); renderTeacherDashboardSummary(); }
       if (tabId === 'teacher-online') renderTeacherOnlineClasses();
+      if (tabId === 'teacher-private-lessons') renderTeacherPrivateLessons();
       if (tabId === 'teacher-attendance') renderPickupList();
     }
 
@@ -5985,6 +6015,129 @@
         '</div>';
       }).join('');
       renderTeacherDashboardSummary();
+    }
+
+    function getTeacherIdentityValues(teacher) {
+      if (!teacher) return [];
+      return [teacher.id, teacher.firebaseDocId, teacher.teacherId, teacher.authUid, teacher.teacherUid, teacher.email, teacher.username]
+        .map(function(value) { return String(value || '').trim(); })
+        .filter(Boolean);
+    }
+
+    function isPrivateLessonForCurrentTeacher(session) {
+      if (!session || session.type !== 'oneOnOne' || !currentTeacher) return false;
+      const teacherValues = getTeacherIdentityValues(currentTeacher);
+      const sessionValues = [session.teacherId, session.teacherUid, session.teacherAuthUid, session.authUid, session.teacherName]
+        .map(function(value) { return String(value || '').trim(); })
+        .filter(Boolean);
+      return sessionValues.some(function(value) { return teacherValues.includes(value); });
+    }
+
+    function getTeacherPrivateLessonSessions() {
+      return monthlyPlanSessions.filter(function(session) {
+        return isPrivateLessonForCurrentTeacher(session);
+      }).sort(function(a, b) {
+        return String(getMonthlySessionDate(a) || '').localeCompare(String(getMonthlySessionDate(b) || '')) ||
+          String(formatMonthlySessionTimeRange(a) || '').localeCompare(String(formatMonthlySessionTimeRange(b) || ''));
+      });
+    }
+
+    function formatPrivateLessonActualTime(value) {
+      if (!value) return '-';
+      const date = new Date(value);
+      if (Number.isNaN(date.getTime())) return String(value);
+      return date.toLocaleString('th-TH', { dateStyle: 'short', timeStyle: 'short' });
+    }
+
+    function getPrivateLessonStatusText(session) {
+      if (session.lessonCompleted) return 'จบการสอนแล้ว';
+      if (session.actualStartTime) return 'กำลังสอน';
+      return session.status || 'รอเริ่มสอน';
+    }
+
+    function renderTeacherPrivateLessons() {
+      const tbody = getElement('teacherPrivateLessonTableBody');
+      const summary = getElement('teacherPrivateLessonSummary');
+      if (!tbody) return;
+      const lessons = getTeacherPrivateLessonSessions();
+      const completed = lessons.filter(function(item) { return !!item.lessonCompleted; });
+      const totalHours = completed.reduce(function(sum, item) { return sum + (Number(item.actualHours) || 0); }, 0);
+      if (summary) {
+        summary.innerHTML =
+          '<div class="stat"><h4>คาบ 1:1 ทั้งหมด</h4><p>' + lessons.length + ' คาบ</p></div>' +
+          '<div class="stat"><h4>จบการสอนแล้ว</h4><p>' + completed.length + ' คาบ</p></div>' +
+          '<div class="stat"><h4>ชั่วโมงรวม</h4><p>' + totalHours.toFixed(2) + ' ชม.</p></div>';
+      }
+      tbody.innerHTML = lessons.length ? lessons.map(function(session) {
+        const id = session.id || session.firebaseDocId || '';
+        const canStart = !session.actualStartTime && !session.lessonCompleted;
+        const canEnd = !!session.actualStartTime && !session.lessonCompleted;
+        const actionButtons =
+          '<button class="btn btn-blue" type="button"' + (canStart ? ' onclick="' + actionCall('startPrivateLessonSession', id) + '"' : ' disabled') + '>เริ่มสอน</button>' +
+          '<button class="btn btn-green" type="button"' + (canEnd ? ' onclick="' + actionCall('completePrivateLessonSession', id) + '"' : ' disabled') + '>จบการสอน</button>';
+        return '<tr>' +
+          '<td>' + escapeHtml(getMonthlySessionDate(session) || '-') + '</td>' +
+          '<td>' + escapeHtml(session.studentName || session.studentMemberId || '-') + '</td>' +
+          '<td>' + escapeHtml(session.subject || '-') + '</td>' +
+          '<td>' + escapeHtml(session.timeStart || session.sessionTime || '-') + '<br><span class="mini-muted">จริง: ' + escapeHtml(formatPrivateLessonActualTime(session.actualStartTime)) + '</span></td>' +
+          '<td>' + escapeHtml(session.timeEnd || '-') + '<br><span class="mini-muted">จริง: ' + escapeHtml(formatPrivateLessonActualTime(session.actualEndTime)) + '</span></td>' +
+          '<td><span class="' + (session.lessonCompleted ? 'status-paid' : (session.actualStartTime ? 'status-waiting' : 'status-parent')) + '">' + escapeHtml(getPrivateLessonStatusText(session)) + '</span>' + (session.actualHours ? '<br><span class="mini-muted">' + Number(session.actualHours).toFixed(2) + ' ชม.</span>' : '') + '</td>' +
+          '<td>' + actionButtons + '</td>' +
+        '</tr>';
+      }).join('') : '<tr><td colspan="7">ยังไม่มีคาบสอนเดี่ยว 1:1 ที่ผูกกับครูคนนี้</td></tr>';
+    }
+
+    function setTeacherPrivateLessonResult(message, isError) {
+      const result = getElement('teacherPrivateLessonResult');
+      if (!result) return;
+      result.textContent = message || '';
+      result.style.color = isError ? '#dc2626' : '#16a34a';
+    }
+
+    async function startPrivateLessonSession(sessionId) {
+      const session = monthlyPlanSessions.find(function(item) { return String(item.id || item.firebaseDocId || '') === String(sessionId || ''); });
+      if (!session || !isPrivateLessonForCurrentTeacher(session)) {
+        setTeacherPrivateLessonResult('ไม่พบคาบสอนเดี่ยวของครูคนนี้', true);
+        return;
+      }
+      const now = new Date();
+      session.actualStartTime = session.actualStartTime || now.toISOString();
+      session.lessonCompleted = false;
+      session.updatedAt = now.toISOString();
+      session.updatedAtText = now.toLocaleString('th-TH');
+      try {
+        await setFirebaseDocument('monthlyPlanSessions', session);
+        setTeacherPrivateLessonResult('เริ่มบันทึกเวลาเรียนเดี่ยวแล้ว', false);
+        renderTeacherPrivateLessons();
+        renderTeacherMonthlyPlanSummary();
+      } catch (error) {
+        setTeacherPrivateLessonResult('เริ่มสอนไม่สำเร็จ: ' + (error.message || error.code || error), true);
+      }
+    }
+
+    async function completePrivateLessonSession(sessionId) {
+      const session = monthlyPlanSessions.find(function(item) { return String(item.id || item.firebaseDocId || '') === String(sessionId || ''); });
+      if (!session || !isPrivateLessonForCurrentTeacher(session)) {
+        setTeacherPrivateLessonResult('ไม่พบคาบสอนเดี่ยวของครูคนนี้', true);
+        return;
+      }
+      const now = new Date();
+      const start = session.actualStartTime ? new Date(session.actualStartTime) : now;
+      const actualHours = Math.max(0, (now.getTime() - start.getTime()) / (1000 * 60 * 60));
+      session.actualStartTime = session.actualStartTime || now.toISOString();
+      session.actualEndTime = now.toISOString();
+      session.actualHours = Number(actualHours.toFixed(2));
+      session.lessonCompleted = true;
+      session.updatedAt = now.toISOString();
+      session.updatedAtText = now.toLocaleString('th-TH');
+      try {
+        await setFirebaseDocument('monthlyPlanSessions', session);
+        setTeacherPrivateLessonResult('จบการสอนแล้ว บันทึก ' + session.actualHours.toFixed(2) + ' ชั่วโมง', false);
+        renderTeacherPrivateLessons();
+        renderTeacherMonthlyPlanSummary();
+      } catch (error) {
+        setTeacherPrivateLessonResult('จบการสอนไม่สำเร็จ: ' + (error.message || error.code || error), true);
+      }
     }
 
     function renderTeacherDashboardSummary() {
