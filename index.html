@@ -1980,6 +1980,10 @@
                 </div>
               </div>
               <div id="privateBillingSummaryCards" class="dashboard-grid"></div>
+              <div class="test-actions" style="margin-top:14px;">
+                <button class="btn btn-green" type="button" onclick="createPrivateLessonPaymentRecords()">นำยอดเรียนเดี่ยวเข้า Payment</button>
+              </div>
+              <p id="privateBillingPaymentResult" style="margin-top:14px; font-weight:bold;"></p>
               <p class="mini-muted" style="margin-top:12px;">ถ้า session มี billingType, hourlyRate หรือ fixedPrice ระบบจะใช้ค่าของ session นั้นก่อน ค่าในฟอร์มนี้เป็นค่า default สำหรับ preview เท่านั้น</p>
             </div>
             <br />
@@ -7970,9 +7974,8 @@
       };
     }
 
-    function renderPrivateLessonBillingPreview() {
+    function getPrivateLessonBillingFilteredRows() {
       const allLessons = getCompletedPrivateLessonSessionsForBilling();
-      renderPrivateLessonBillingFilters(allLessons);
       const monthFilter = getElement('privateBillingMonthFilter') ? getElement('privateBillingMonthFilter').value : 'ทั้งหมด';
       const teacherFilter = getElement('privateBillingTeacherFilter') ? getElement('privateBillingTeacherFilter').value : 'ทั้งหมด';
       const studentFilter = getElement('privateBillingStudentFilter') ? getElement('privateBillingStudentFilter').value : 'ทั้งหมด';
@@ -7989,6 +7992,15 @@
         const billing = getPrivateLessonBillingConfig(session);
         return Object.assign({ session: session }, billing);
       });
+      return { allLessons: allLessons, filtered: filtered, rows: rows };
+    }
+
+    function renderPrivateLessonBillingPreview() {
+      const allLessons = getCompletedPrivateLessonSessionsForBilling();
+      renderPrivateLessonBillingFilters(allLessons);
+      const data = getPrivateLessonBillingFilteredRows();
+      const filtered = data.filtered;
+      const rows = data.rows;
       const studentCount = new Set(filtered.map(getPrivateLessonBillingStudentKey).filter(Boolean)).size;
       const totalHours = rows.reduce(function(sum, row) { return sum + row.hours; }, 0);
       const totalAmount = rows.reduce(function(sum, row) { return sum + row.amount; }, 0);
@@ -8018,6 +8030,163 @@
           '<td>' + formatPrice(row.amount) + '</td>' +
         '</tr>';
       }).join('') : '<tr><td colspan="8">ยังไม่มีคาบเรียนเดี่ยวที่จบการสอนแล้วตามตัวกรองนี้</td></tr>';
+    }
+
+    function findStudentForPrivateLessonSession(session) {
+      const keys = [session.studentId, session.studentMemberId, session.studentName].map(function(value) {
+        return String(value || '').trim();
+      }).filter(Boolean);
+      return students.find(function(student) {
+        return keys.includes(String(student.id || '').trim()) ||
+          keys.includes(String(student.firebaseDocId || '').trim()) ||
+          keys.includes(String(student.authUid || '').trim()) ||
+          keys.includes(String(student.memberId || '').trim()) ||
+          keys.includes(String(student.studentId || '').trim()) ||
+          keys.includes(String(student.name || '').trim());
+      }) || null;
+    }
+
+    function buildPrivateLessonLineItem(row) {
+      const session = row.session;
+      const monthKey = getPrivateLessonBillingMonthKey(session);
+      return {
+        type: 'privateLesson',
+        sessionId: session.id || session.firebaseDocId || '',
+        privateLessonMonthKey: monthKey,
+        date: getMonthlySessionDate(session) || '',
+        teacherId: session.teacherId || '',
+        teacherName: session.teacherName || getTeacherNameById(session.teacherId) || '',
+        studentId: session.studentId || '',
+        studentName: session.studentName || session.studentMemberId || '',
+        subject: session.subject || '',
+        billingType: row.billingType,
+        actualHours: row.hours,
+        hourlyRate: row.hourlyRate,
+        fixedPrice: row.fixedPrice,
+        amount: Number(row.amount.toFixed(2))
+      };
+    }
+
+    function getPaymentPrivateLessonLineItemTotal(payment, monthKey) {
+      return (Array.isArray(payment && payment.lineItems) ? payment.lineItems : []).filter(function(item) {
+        return item && item.type === 'privateLesson' && (!monthKey || item.privateLessonMonthKey === monthKey);
+      }).reduce(function(sum, item) {
+        return sum + (Number(item.amount || 0) || 0);
+      }, 0);
+    }
+
+    function findPaymentForPrivateLesson(student, session, monthText) {
+      return payments.find(function(payment) {
+        if (payment.month !== monthText) return false;
+        const studentMatched =
+          (student && String(payment.studentId || '') === String(student.id || '')) ||
+          (student && payment.authUid && String(payment.authUid || '') === String(student.authUid || '')) ||
+          (student && payment.memberId && String(payment.memberId || '') === String(student.memberId || '')) ||
+          (!student && session.studentId && String(payment.studentId || '') === String(session.studentId || '')) ||
+          (!student && session.studentMemberId && String(payment.memberId || '') === String(session.studentMemberId || ''));
+        return !!studentMatched;
+      }) || null;
+    }
+
+    function setPrivateBillingPaymentResult(message, isError) {
+      const result = getElement('privateBillingPaymentResult');
+      if (!result) return;
+      result.textContent = message || '';
+      result.style.color = isError ? '#dc2626' : '#16a34a';
+    }
+
+    async function createPrivateLessonPaymentRecords() {
+      const data = getPrivateLessonBillingFilteredRows();
+      const rows = data.rows.filter(function(row) {
+        return row.session && row.session.lessonCompleted === true && row.session.type === 'oneOnOne';
+      });
+      if (!rows.length) {
+        setPrivateBillingPaymentResult('ไม่มีคาบเรียนเดี่ยวที่จบการสอนแล้วตามตัวกรองนี้', true);
+        return;
+      }
+      if (!confirm('นำยอดเรียนเดี่ยวตามตัวกรองนี้เข้า Payment ใช่หรือไม่?\n\nระบบจะเพิ่ม/อัปเดต lineItems type privateLesson และยังไม่สร้างใบเสร็จ')) return;
+      const grouped = {};
+      rows.forEach(function(row) {
+        const session = row.session;
+        const monthKey = getPrivateLessonBillingMonthKey(session);
+        const monthText = formatMonthTextFromKey(monthKey) || monthKey || '';
+        const student = findStudentForPrivateLessonSession(session);
+        const studentKey = student ? String(student.id || student.firebaseDocId || student.authUid || student.memberId || '') : getPrivateLessonBillingStudentKey(session);
+        const key = studentKey + '|' + monthText;
+        if (!grouped[key]) grouped[key] = { student: student, monthKey: monthKey, monthText: monthText, rows: [] };
+        grouped[key].rows.push(row);
+      });
+
+      let created = 0;
+      let updated = 0;
+      const nowText = new Date().toLocaleString('th-TH');
+      try {
+        for (const key of Object.keys(grouped)) {
+          const group = grouped[key];
+          if (!group.monthText) continue;
+          const firstSession = group.rows[0].session;
+          const student = group.student;
+          const lineItems = group.rows.map(buildPrivateLessonLineItem);
+          const privateTotal = lineItems.reduce(function(sum, item) { return sum + (Number(item.amount || 0) || 0); }, 0);
+          let payment = findPaymentForPrivateLesson(student, firstSession, group.monthText);
+          if (payment) {
+            const previousPrivateTotal = getPaymentPrivateLessonLineItemTotal(payment, group.monthKey);
+            const existingLineItems = Array.isArray(payment.lineItems) ? payment.lineItems.filter(function(item) {
+              return !(item && item.type === 'privateLesson' && item.privateLessonMonthKey === group.monthKey);
+            }) : [];
+            payment.lineItems = existingLineItems.concat(lineItems);
+            payment.baseAmount = Math.max(0, Number(payment.baseAmount || payment.amount || 0) - previousPrivateTotal + privateTotal);
+            payment.expectedAmount = Math.max(0, Number(payment.expectedAmount || payment.amount || 0) - previousPrivateTotal + privateTotal);
+            payment.finalAmount = Math.max(0, Number(payment.finalAmount || payment.amount || 0) - previousPrivateTotal + privateTotal);
+            payment.amount = payment.finalAmount;
+            payment.hasPrivateLessons = true;
+            payment.updatedAtText = nowText;
+            payment.adminNote = payment.adminNote || 'รวมค่าเรียนเดี่ยว';
+            await setFirebaseDocument('payments', payment);
+            updated += 1;
+          } else {
+            const paymentId = createFirebaseDocId('payments');
+            payment = {
+              id: paymentId,
+              firebaseDocId: paymentId,
+              studentId: student ? (student.id || student.firebaseDocId || '') : (firstSession.studentId || ''),
+              memberId: student ? (student.memberId || student.studentId || '') : (firstSession.studentMemberId || ''),
+              studentName: student ? (student.name || '') : (firstSession.studentName || ''),
+              studentAuthUid: student ? (student.authUid || '') : '',
+              authUid: student ? (student.authUid || '') : '',
+              student: student ? (student.name || '') : (firstSession.studentName || firstSession.studentMemberId || ''),
+              courseId: 'privateLesson',
+              courseName: 'เรียนเดี่ยว',
+              course: 'เรียนเดี่ยว',
+              month: group.monthText,
+              studentSelectedMonth: group.monthText,
+              baseAmount: privateTotal,
+              expectedAmount: privateTotal,
+              discount: 0,
+              finalAmount: privateTotal,
+              amount: privateTotal,
+              lineItems: lineItems,
+              hasPrivateLessons: true,
+              slipUrl: '',
+              slipNote: 'ระบบสร้างจากชั่วโมงเรียนเดี่ยว',
+              adminNote: 'ค่าเรียนเดี่ยว',
+              paymentStatus: 'รอชำระเงิน',
+              status: 'รอชำระเงิน',
+              createdAtText: nowText
+            };
+            payments.push(payment);
+            await setFirebaseDocument('payments', payment);
+            created += 1;
+          }
+        }
+        addActivityLog('นำยอดเรียนเดี่ยวเข้า Payment', 'สร้างใหม่ ' + created + ' รายการ · อัปเดต ' + updated + ' รายการ');
+        setPrivateBillingPaymentResult('นำยอดเรียนเดี่ยวเข้า Payment แล้ว: สร้างใหม่ ' + created + ' รายการ, อัปเดต ' + updated + ' รายการ', false);
+        renderPrivateLessonBillingPreview();
+        renderPaymentTable();
+        updatePaymentSummary();
+      } catch (error) {
+        setPrivateBillingPaymentResult('นำยอดเข้า Payment ไม่สำเร็จ: ' + (error.message || error.code || error), true);
+      }
     }
 
     function getCourseMonthlyPrice(course) {
@@ -8076,10 +8245,21 @@
       const base = getPaymentBaseAmount(payment);
       const discount = getPaymentDiscountAmount(payment);
       const finalAmount = getPaymentFinalAmount(payment);
+      const privateLessonTotal = getPaymentPrivateLessonLineItemTotal(payment);
+      const lineItemText = privateLessonTotal > 0 ? '<br><span class="mini-muted">เรียนเดี่ยว: ' + formatPrice(privateLessonTotal) + '</span>' : '';
       if (discount > 0 || base !== finalAmount) {
-        return '<strong>' + formatPrice(finalAmount) + '</strong><br><span class="mini-muted">ราคาคอร์ส: ' + formatPrice(base) + '</span><br><span class="mini-muted">ส่วนลด: ' + formatPrice(discount) + '</span>';
+        return '<strong>' + formatPrice(finalAmount) + '</strong><br><span class="mini-muted">ราคาคอร์ส: ' + formatPrice(base) + '</span><br><span class="mini-muted">ส่วนลด: ' + formatPrice(discount) + '</span>' + lineItemText;
       }
-      return formatPrice(finalAmount);
+      return formatPrice(finalAmount) + lineItemText;
+    }
+
+    function renderPaymentCourseText(payment) {
+      const privateCount = (Array.isArray(payment && payment.lineItems) ? payment.lineItems : []).filter(function(item) {
+        return item && item.type === 'privateLesson';
+      }).length;
+      const courseText = payment.course || payment.courseName || '-';
+      if (!privateCount) return courseText;
+      return escapeHtml(courseText) + '<br><span class="tag">เรียนเดี่ยว ' + privateCount + ' ครั้ง</span>';
     }
 
     function updateManualPaymentSuggestedAmount() {
@@ -10201,7 +10381,7 @@ function getCourseOnlineDocs(course, includeInactive) {
         const ocrButton = paymentHasOcrData(p) ? '<button class="btn btn-blue" type="button" onclick="' + actionCall('viewPaymentOcrDetail', p.firebaseDocId || p.id) + '">ดู OCR</button>' : '';
         const statusClass = p.status === 'ชำระแล้ว' ? 'status-paid' : p.status === 'ค้างชำระ' || p.status === 'สลิปไม่ผ่าน' ? 'status-absent' : 'status-waiting';
         const noteText = p.adminNote ? '<br><span class="mini-muted">หมายเหตุ Admin: ' + p.adminNote + '</span>' : '';
-        return '<tr data-payment-id="' + p.id + '"><td>' + (p.student || '-') + '</td><td>' + (p.course || '-') + '</td><td>' + (p.month || '-') + '</td><td>' + renderPaymentAmountText(p) + '</td><td>' + slipCell + '<br><span class="mini-muted">เดือนที่นักเรียนแจ้ง: ' + (p.studentSelectedMonth || p.month || '-') + '</span><br><span class="mini-muted">แจ้งเมื่อ: ' + (p.createdAtText || '-') + '</span>' + noteText + '</td><td><span class="' + statusClass + '">' + (p.status || 'รอชำระเงิน') + '</span></td><td>' + paymentActionButtons(p.status || 'รอชำระเงิน') + ocrButton + '<button class="btn btn-blue" type="button" onclick="editPaymentAmountDiscount(this)">แก้ยอด/ส่วนลด</button><button class="btn btn-dark" type="button" onclick="editPaymentAdminNote(this)">หมายเหตุ</button></td></tr>';
+        return '<tr data-payment-id="' + p.id + '"><td>' + (p.student || '-') + '</td><td>' + renderPaymentCourseText(p) + '</td><td>' + (p.month || '-') + '</td><td>' + renderPaymentAmountText(p) + '</td><td>' + slipCell + '<br><span class="mini-muted">เดือนที่นักเรียนแจ้ง: ' + (p.studentSelectedMonth || p.month || '-') + '</span><br><span class="mini-muted">แจ้งเมื่อ: ' + (p.createdAtText || '-') + '</span>' + noteText + '</td><td><span class="' + statusClass + '">' + (p.status || 'รอชำระเงิน') + '</span></td><td>' + paymentActionButtons(p.status || 'รอชำระเงิน') + ocrButton + '<button class="btn btn-blue" type="button" onclick="editPaymentAmountDiscount(this)">แก้ยอด/ส่วนลด</button><button class="btn btn-dark" type="button" onclick="editPaymentAdminNote(this)">หมายเหตุ</button></td></tr>';
       }).join('') : '<tr><td colspan="7">ยังไม่มีรายการชำระเงิน</td></tr>';
       filterPaymentStatusByMonth();
     }
