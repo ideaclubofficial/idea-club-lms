@@ -10419,6 +10419,7 @@ function getCourseOnlineDocs(course, includeInactive) {
         course: payment ? (payment.course || '-') : (row && row.children[1] ? row.children[1].innerText.trim() : '-'),
         month: payment ? (payment.month || '-') : (row && row.children[2] ? row.children[2].innerText.trim() : '-'),
         amount: payment ? String(getPaymentFinalAmount(payment)) : (row && row.children[3] ? row.children[3].innerText.trim().replace(' บาท', '') : '0'),
+        lineItems: payment && Array.isArray(payment.lineItems) ? payment.lineItems : [],
         slip: payment ? (payment.slipUrl ? 'มีสลิป' : (payment.slipSource || '-')) : (row && row.children[4] ? row.children[4].innerText.trim() : '-'),
         slipNote: payment ? (payment.slipNote || ('นักเรียนแจ้งส่งสลิปของเดือน ' + (payment.month || '-'))) : '',
         sentAt: payment ? (payment.createdAtText || '-') : '-',
@@ -10720,6 +10721,7 @@ function getCourseOnlineDocs(course, includeInactive) {
         course: data.course,
         month: receiptMonth,
         amount: String(data.amount).replace(' บาท', ''),
+        lineItems: Array.isArray(data.lineItems) ? data.lineItems : [],
         approvedDate: new Date().toLocaleDateString('th-TH'),
         admin: getElement('profileName') ? getElement('profileName').textContent : 'Admin IDEA CLUB',
         status: options.publish ? 'published' : 'draft',
@@ -10778,13 +10780,131 @@ function receiptStatusText(status) {
       return '<span class="status-waiting">รอตรวจ</span>';
     }
 
+    function parseReceiptAmount(value) {
+      return Number(String(value || 0).replace(/[^\d.-]/g, '')) || 0;
+    }
+
+    function findPaymentForReceipt(receipt) {
+      if (!receipt) return null;
+      if (receipt.paymentId) {
+        const byId = payments.find(function(payment) {
+          return String(payment.id || payment.firebaseDocId || '') === String(receipt.paymentId || '');
+        });
+        if (byId) return byId;
+      }
+      return payments.find(function(payment) {
+        const sameStudent = receipt.studentId && String(payment.studentId || '') === String(receipt.studentId || '');
+        const sameAuth = receipt.authUid && String(payment.authUid || payment.studentAuthUid || '') === String(receipt.authUid || '');
+        const sameCourse = !receipt.courseId || String(payment.courseId || '') === String(receipt.courseId || '');
+        const sameMonth = getReceiptMonth(receipt) === (payment.month || payment.studentSelectedMonth || '-');
+        return (sameStudent || sameAuth) && sameCourse && sameMonth && payment.status === 'ชำระแล้ว';
+      }) || null;
+    }
+
+    function getReceiptPrivateLessonItems(receipt, payment) {
+      const receiptItems = Array.isArray(receipt && receipt.lineItems) ? receipt.lineItems : [];
+      const paymentItems = Array.isArray(payment && payment.lineItems) ? payment.lineItems : [];
+      const sourceItems = receiptItems.length ? receiptItems : paymentItems;
+      return sourceItems.filter(function(item) {
+        return item && item.type === 'privateLesson';
+      });
+    }
+
+    function getReceiptDisplayTotal(receipt) {
+      const payment = findPaymentForReceipt(receipt);
+      if (payment) return getPaymentFinalAmount(payment);
+      return parseReceiptAmount(receipt && receipt.amount);
+    }
+
+    function getReceiptLineItems(receipt) {
+      if (receipt && receipt.status === 'blank') {
+        return [{
+          type: 'course',
+          title: '........................................',
+          detail: '........................................',
+          hoursText: '........',
+          rateText: '................',
+          amountText: '................'
+        }];
+      }
+      const payment = findPaymentForReceipt(receipt);
+      const total = getReceiptDisplayTotal(receipt);
+      const privateItems = getReceiptPrivateLessonItems(receipt, payment);
+      const privateTotal = privateItems.reduce(function(sum, item) {
+        return sum + (Number(item.amount || 0) || 0);
+      }, 0);
+      const rows = [];
+      const courseLabel = (receipt && receipt.course) || (payment && (payment.course || payment.courseName)) || 'คอร์สปกติ';
+      const normalCourseAmount = Math.max(0, total - privateTotal);
+      const hasPrivateOnlyPayment = payment && String(payment.courseId || '') === 'privateLesson' && normalCourseAmount <= 0;
+      if (!hasPrivateOnlyPayment && normalCourseAmount > 0) {
+        rows.push({
+          type: 'course',
+          title: 'คอร์สปกติ',
+          detail: courseLabel + ' · ' + getReceiptMonth(receipt),
+          hoursText: '-',
+          rateText: '-',
+          amount: normalCourseAmount
+        });
+      }
+      privateItems.forEach(function(item) {
+        const isFixed = item.billingType === 'fixed';
+        const hours = Number(item.actualHours || 0) || 0;
+        const rate = isFixed ? Number(item.fixedPrice || item.amount || 0) || 0 : Number(item.hourlyRate || 0) || 0;
+        const detailParts = [item.subject, item.date, item.teacherName].filter(Boolean);
+        rows.push({
+          type: 'privateLesson',
+          title: isFixed ? 'คอร์สเหมา' : 'เรียนเดี่ยวรายชั่วโมง',
+          detail: detailParts.join(' · ') || 'เรียนเดี่ยว',
+          hoursText: hours ? hours.toFixed(2) + ' ชม.' : '-',
+          rateText: isFixed ? formatPrice(rate) + ' เหมา' : formatPrice(rate) + ' / ชม.',
+          amount: Number(item.amount || 0) || 0
+        });
+      });
+      if (!rows.length) {
+        rows.push({
+          type: 'course',
+          title: 'คอร์สปกติ',
+          detail: courseLabel + ' · ' + getReceiptMonth(receipt),
+          hoursText: '-',
+          rateText: '-',
+          amount: total
+        });
+      }
+      return rows;
+    }
+
+    function receiptLineItemsHtml(receipt) {
+      const rows = getReceiptLineItems(receipt);
+      return '<div class="receipt-items">' +
+        '<div class="receipt-items-head"><span>รายการ</span><span>ชั่วโมง</span><span>อัตรา</span><span>ยอดเงิน</span></div>' +
+        rows.map(function(item) {
+          return '<div class="receipt-item-row">' +
+            '<div><strong>' + escapeHtml(item.title) + '</strong><br><span>' + escapeHtml(item.detail || '-') + '</span></div>' +
+            '<div>' + escapeHtml(item.hoursText || '-') + '</div>' +
+            '<div>' + escapeHtml(item.rateText || '-') + '</div>' +
+            '<div><strong>' + escapeHtml(item.amountText || formatPrice(item.amount)) + '</strong></div>' +
+          '</div>';
+        }).join('') +
+      '</div>';
+    }
+
     function receiptHtml(receipt) {
+      const receiptTotal = getReceiptDisplayTotal(receipt);
+      const receiptTotalText = receipt && receipt.status === 'blank' ? escapeHtml(receipt.amount || '................') + ' บาท' : formatPrice(receiptTotal);
       return '<style>' +
         '.receipt-box *{box-sizing:border-box;max-width:100%;min-width:0;overflow-wrap:anywhere;}' +
         '.receipt-box .receipt-line{display:grid;grid-template-columns:145px minmax(0,1fr);gap:12px;border-bottom:1px dashed #d1d5db;padding:7px 0;font-size:13px;}' +
         '.receipt-box .receipt-line strong{color:#374151;}' +
         '.receipt-box .receipt-line span{text-align:right;color:#111827;overflow-wrap:anywhere;}' +
+        '.receipt-box .receipt-items{margin-top:14px;border:1px solid #dbeafe;border-radius:12px;overflow:hidden;}' +
+        '.receipt-box .receipt-items-head,.receipt-box .receipt-item-row{display:grid;grid-template-columns:minmax(0,1.8fr) 92px 118px 118px;gap:10px;align-items:center;padding:10px 12px;font-size:13px;}' +
+        '.receipt-box .receipt-items-head{background:#0f4cbd;color:#fff;font-weight:800;}' +
+        '.receipt-box .receipt-item-row{border-top:1px solid #e5e7eb;background:#fff;}' +
+        '.receipt-box .receipt-item-row span{color:#6b7280;font-size:12px;}' +
+        '.receipt-box .receipt-item-row div:not(:first-child){text-align:right;}' +
         '.receipt-box .receipt-total{font-size:20px;font-weight:800;color:#dc2626;text-align:right;overflow-wrap:anywhere;}' +
+        '@media(max-width:720px){.receipt-box .receipt-items-head{display:none;}.receipt-box .receipt-item-row{grid-template-columns:1fr;gap:4px;}.receipt-box .receipt-item-row div:not(:first-child){text-align:left;}}' +
       '</style>' +
       '<div id="printReceiptArea" class="receipt-box" style="width:100%; max-width:100%; overflow:hidden; border:2px solid #0f4cbd; border-radius:14px; padding:18px; background:#fff;">' +
         '<div class="receipt-header" style="display:grid; grid-template-columns:minmax(0,1fr) minmax(120px,160px); gap:14px; align-items:start; border-bottom:2px solid #e5e7eb; padding-bottom:12px; margin-bottom:12px;">' +
@@ -10796,7 +10916,8 @@ function receiptStatusText(status) {
         '<div class="receipt-line"><strong>เดือนที่ชำระ</strong><span>' + getReceiptMonth(receipt) + '</span></div>' +
         '<div class="receipt-line"><strong>สถานะ</strong><span>ชำระแล้ว</span></div>' +
         '<div class="receipt-line"><strong>ผู้ตรวจสอบ</strong><span>' + receipt.admin + '</span></div>' +
-        '<div class="receipt-total-row" style="display:grid; grid-template-columns:minmax(0,1fr) minmax(0,220px); gap:12px; align-items:center; margin-top:16px; padding-top:12px; border-top:2px solid #e5e7eb;"><strong>ยอดชำระสุทธิ</strong><span class="receipt-total">' + receipt.amount + ' บาท</span></div>' +
+        receiptLineItemsHtml(receipt) +
+        '<div class="receipt-total-row" style="display:grid; grid-template-columns:minmax(0,1fr) minmax(0,220px); gap:12px; align-items:center; margin-top:16px; padding-top:12px; border-top:2px solid #e5e7eb;"><strong>ยอดชำระสุทธิ</strong><span class="receipt-total">' + receiptTotalText + '</span></div>' +
         '<p style="margin-top:18px; color:#6b7280; font-size:14px;">หมายเหตุ: ' + (systemSettings.receiptFooter || 'เอกสารนี้เป็นใบยืนยันการชำระเงินจากสถาบัน IDEA CLUB ไม่ใช่สลิปโอนเงินธนาคาร') + '</p>' +
       '</div>';
     }
@@ -11079,7 +11200,7 @@ function receiptStatusText(status) {
       });
 
       tbody.innerHTML = filtered.length ? filtered.map(function(r) {
-        return '<tr><td>' + (r.receiptNo || '-') + '</td><td>' + (r.student || '-') + '</td><td>' + (r.course || '-') + '</td><td>' + getReceiptMonth(r) + '</td><td>' + (r.amount || '-') + '</td><td>' + receiptStatusText(r.status) + '</td><td><button class="btn btn-blue" type="button" onclick="' + actionCall('openReceiptAdmin', r.id) + '">ดูตัวอย่าง</button><button class="btn btn-blue" type="button" onclick="' + actionCall('downloadReceiptPdf', r.id) + '">ดาวน์โหลด PDF</button><button class="btn btn-green" type="button" onclick="' + actionCall('publishReceipt', r.id) + '">แสดง</button><button class="btn btn-dark" type="button" onclick="' + actionCall('hideReceipt', r.id) + '">ซ่อน</button><button class="btn btn-red" type="button" onclick="' + actionCall('deleteReceipt', r.id) + '">ลบ</button></td></tr>';
+        return '<tr><td>' + (r.receiptNo || '-') + '</td><td>' + (r.student || '-') + '</td><td>' + (r.course || '-') + '</td><td>' + getReceiptMonth(r) + '</td><td>' + formatPrice(getReceiptDisplayTotal(r)) + '</td><td>' + receiptStatusText(r.status) + '</td><td><button class="btn btn-blue" type="button" onclick="' + actionCall('openReceiptAdmin', r.id) + '">ดูตัวอย่าง</button><button class="btn btn-blue" type="button" onclick="' + actionCall('downloadReceiptPdf', r.id) + '">ดาวน์โหลด PDF</button><button class="btn btn-green" type="button" onclick="' + actionCall('publishReceipt', r.id) + '">แสดง</button><button class="btn btn-dark" type="button" onclick="' + actionCall('hideReceipt', r.id) + '">ซ่อน</button><button class="btn btn-red" type="button" onclick="' + actionCall('deleteReceipt', r.id) + '">ลบ</button></td></tr>';
       }).join('') : '<tr><td colspan="7">ยังไม่มีใบเสร็จตามเงื่อนไขที่เลือก</td></tr>';
 
       const draftCount = (receipts || []).filter(function(r) { return normalizeReceiptStatus(r.status) === 'draft'; }).length;
@@ -11125,7 +11246,7 @@ function receiptStatusText(status) {
       });
 
       const rows = visibleReceipts.map(function(r) {
-        return { type: 'receipt', id: r.id, sortId: Number(r.id || 0), receiptNo: r.receiptNo, month: getReceiptMonth(r), course: r.course, amount: r.amount, status: 'ชำระแล้ว' };
+        return { type: 'receipt', id: r.id, sortId: Number(r.id || 0), receiptNo: r.receiptNo, month: getReceiptMonth(r), course: r.course, amount: formatPrice(getReceiptDisplayTotal(r)).replace(' บาท', ''), status: 'ชำระแล้ว' };
       }).concat(paidPaymentsWithoutReceipt.map(function(p) {
         return { type: 'payment', id: p.id, sortId: Number(p.id || 0), receiptNo: 'AUTO-' + String(p.id || '').slice(-6), month: p.month || '-', course: p.course || '-', amount: formatPrice(getPaymentFinalAmount(p)).replace(' บาท', ''), status: 'ชำระแล้ว' };
       })).sort(function(a, b) {
@@ -11156,7 +11277,9 @@ function receiptStatusText(status) {
         student: payment.student || (currentStudent ? currentStudent.name : '-'),
         course: payment.course || '-',
         month: payment.month || '-',
-        amount: formatPrice(payment.amount || 0).replace(' บาท', ''),
+        amount: formatPrice(getPaymentFinalAmount(payment)).replace(' บาท', ''),
+        lineItems: Array.isArray(payment.lineItems) ? payment.lineItems : [],
+        paymentId: payment.id || '',
         approvedDate: payment.approvedDate || new Date().toLocaleDateString('th-TH'),
         admin: 'Admin IDEA CLUB',
         status: 'published'
@@ -11171,7 +11294,9 @@ function receiptStatusText(status) {
         student: payment.student || (currentStudent ? currentStudent.name : '-'),
         course: payment.course || '-',
         month: payment.month || '-',
-        amount: formatPrice(payment.amount || 0).replace(' บาท', ''),
+        amount: formatPrice(getPaymentFinalAmount(payment)).replace(' บาท', ''),
+        lineItems: Array.isArray(payment.lineItems) ? payment.lineItems : [],
+        paymentId: payment.id || '',
         approvedDate: payment.approvedDate || new Date().toLocaleDateString('th-TH'),
         admin: 'Admin IDEA CLUB',
         status: 'published'
