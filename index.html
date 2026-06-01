@@ -1139,6 +1139,7 @@
           <div class="sidebar-group-title"><span class="menu-icon">💳</span>การเงิน</div>
           <a data-menu-label="รอบชำระเงิน" onclick="showAdminTab('admin-payment-round')"><span class="menu-icon">💳</span>รอบชำระเงิน</a>
           <a data-menu-label="ตรวจสลิป / รายการชำระเงิน" onclick="showAdminTab('admin-payment')"><span class="menu-icon">💳</span>ตรวจสลิป / รายการชำระเงิน</a>
+          <a data-menu-label="สรุปเรียนเดี่ยว" onclick="showAdminTab('admin-private-lesson-billing')"><span class="menu-icon">🕒</span>สรุปเรียนเดี่ยว</a>
           <a data-menu-label="ใบเสร็จ" onclick="showAdminTab('admin-receipts')"><span class="menu-icon">🧾</span>ใบเสร็จ</a>
           <div class="sidebar-group-title"><span class="menu-icon">📊</span>แบบทดสอบ</div>
           <a data-menu-label="สอบ / คะแนน" onclick="showAdminTab('admin-monthly-test')"><span class="menu-icon">📊</span>สอบ / คะแนน</a>
@@ -1935,6 +1936,70 @@
             </div>
 
             <br />
+          </section>
+
+          <section id="admin-private-lesson-billing" class="admin-tab hidden">
+            <div class="form-box">
+              <h3>สรุปเรียนเดี่ยว</h3>
+              <p style="margin-bottom:18px; color:#6b7280;">Preview ค่าเรียนเดี่ยวจากคาบ 1:1 ที่ครูกดจบการสอนแล้ว ยังไม่สร้างรายการชำระเงินหรือใบเสร็จ</p>
+              <div class="form-row">
+                <div>
+                  <label>เดือน</label>
+                  <select id="privateBillingMonthFilter" onchange="renderPrivateLessonBillingPreview()">
+                    <option value="ทั้งหมด">ทั้งหมด</option>
+                  </select>
+                </div>
+                <div>
+                  <label>ครู</label>
+                  <select id="privateBillingTeacherFilter" onchange="renderPrivateLessonBillingPreview()">
+                    <option value="ทั้งหมด">ทั้งหมด</option>
+                  </select>
+                </div>
+                <div>
+                  <label>นักเรียน</label>
+                  <select id="privateBillingStudentFilter" onchange="renderPrivateLessonBillingPreview()">
+                    <option value="ทั้งหมด">ทั้งหมด</option>
+                  </select>
+                </div>
+              </div>
+              <div class="form-row">
+                <div>
+                  <label>รูปแบบคิดเงินเริ่มต้น</label>
+                  <select id="privateBillingType" onchange="renderPrivateLessonBillingPreview()">
+                    <option value="hourly">รายชั่วโมง</option>
+                    <option value="fixed">เหมาราคา</option>
+                  </select>
+                </div>
+                <div>
+                  <label>เรทรายชั่วโมง</label>
+                  <input id="privateBillingHourlyRate" type="number" min="0" value="0" oninput="renderPrivateLessonBillingPreview()" />
+                </div>
+                <div>
+                  <label>ราคาเหมา</label>
+                  <input id="privateBillingFixedPrice" type="number" min="0" value="0" oninput="renderPrivateLessonBillingPreview()" />
+                </div>
+              </div>
+              <div id="privateBillingSummaryCards" class="dashboard-grid"></div>
+              <p class="mini-muted" style="margin-top:12px;">ถ้า session มี billingType, hourlyRate หรือ fixedPrice ระบบจะใช้ค่าของ session นั้นก่อน ค่าในฟอร์มนี้เป็นค่า default สำหรับ preview เท่านั้น</p>
+            </div>
+            <br />
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>เดือน</th>
+                    <th>วันที่</th>
+                    <th>ครู</th>
+                    <th>นักเรียน</th>
+                    <th>วิชา</th>
+                    <th>ชั่วโมง</th>
+                    <th>รูปแบบ</th>
+                    <th>ยอด Preview</th>
+                  </tr>
+                </thead>
+                <tbody id="privateBillingTableBody"></tbody>
+              </table>
+            </div>
           </section>
 
           <section id="admin-receipts" class="admin-tab hidden">
@@ -3890,6 +3955,7 @@
       'admin-video': 'admin.ondemand',
       'admin-payment-round': 'admin.finance',
       'admin-payment': 'admin.finance',
+      'admin-private-lesson-billing': 'admin.finance',
       'admin-receipts': 'admin.receipts',
       'admin-monthly-test': 'admin.exams',
       'admin-monthly-planner': 'admin.monthlyPlanner',
@@ -4170,7 +4236,7 @@
     }
 
     function findFirstAllowedAdminTab() {
-      const order = ['admin-dashboard','admin-students','admin-courses','admin-online-class','admin-video','admin-payment-round','admin-payment','admin-receipts','admin-monthly-test','admin-monthly-planner','admin-teachers','admin-announcements','admin-settings','admin-activity-log'];
+      const order = ['admin-dashboard','admin-students','admin-courses','admin-online-class','admin-video','admin-payment-round','admin-payment','admin-private-lesson-billing','admin-receipts','admin-monthly-test','admin-monthly-planner','admin-teachers','admin-announcements','admin-settings','admin-activity-log'];
       return order.find(function(tabId) { return canOpenAdminTab(tabId); }) || 'admin-dashboard';
     }
 
@@ -6559,6 +6625,9 @@
         safeRun(renderPaymentTable, 'payment-table');
         safeRun(updatePaymentSummary, 'payment-summary');
       }
+      if (tabId === 'admin-private-lesson-billing') {
+        safeRun(renderPrivateLessonBillingPreview, 'private-lesson-billing-preview');
+      }
       if (tabId === 'admin-receipts') {
         safeRun(renderReceiptMonthFilter, 'receipt-month-filter');
         safeRun(renderAdminReceipts, 'admin-receipts');
@@ -7830,6 +7899,125 @@
 
     function formatPrice(price) {
       return Number(price || 0).toLocaleString('th-TH') + ' บาท';
+    }
+
+    function getCompletedPrivateLessonSessionsForBilling() {
+      return monthlyPlanSessions.filter(function(session) {
+        return session && session.type === 'oneOnOne' && session.lessonCompleted === true;
+      });
+    }
+
+    function getPrivateLessonBillingMonthKey(session) {
+      return getMonthlySessionMonthKey(session) || (session.actualEndTime ? String(session.actualEndTime).slice(0, 7) : '');
+    }
+
+    function getPrivateLessonBillingTeacherKey(session) {
+      return String(session.teacherId || session.teacherUid || session.teacherAuthUid || session.teacherName || '').trim();
+    }
+
+    function getPrivateLessonBillingStudentKey(session) {
+      return String(session.studentId || session.studentMemberId || session.studentName || '').trim();
+    }
+
+    function setPrivateBillingSelectOptions(selectId, options, defaultValue) {
+      const select = getElement(selectId);
+      if (!select) return;
+      const current = select.value || defaultValue || 'ทั้งหมด';
+      select.innerHTML = options.map(function(option) {
+        return '<option value="' + escapeHtml(option.value) + '">' + escapeHtml(option.label) + '</option>';
+      }).join('');
+      const values = options.map(function(option) { return option.value; });
+      select.value = values.includes(current) ? current : (defaultValue || 'ทั้งหมด');
+    }
+
+    function renderPrivateLessonBillingFilters(allLessons) {
+      const lessons = allLessons || getCompletedPrivateLessonSessionsForBilling();
+      const months = Array.from(new Set(lessons.map(getPrivateLessonBillingMonthKey).filter(Boolean))).sort();
+      const teacherMap = {};
+      const studentMap = {};
+      lessons.forEach(function(session) {
+        const teacherKey = getPrivateLessonBillingTeacherKey(session);
+        const studentKey = getPrivateLessonBillingStudentKey(session);
+        if (teacherKey && !teacherMap[teacherKey]) teacherMap[teacherKey] = session.teacherName || getTeacherNameById(session.teacherId) || teacherKey;
+        if (studentKey && !studentMap[studentKey]) studentMap[studentKey] = session.studentName || session.studentMemberId || studentKey;
+      });
+      setPrivateBillingSelectOptions('privateBillingMonthFilter', [{ value: 'ทั้งหมด', label: 'ทั้งหมด' }].concat(months.map(function(monthKey) {
+        return { value: monthKey, label: formatMonthTextFromKey(monthKey) || monthKey };
+      })), 'ทั้งหมด');
+      setPrivateBillingSelectOptions('privateBillingTeacherFilter', [{ value: 'ทั้งหมด', label: 'ทั้งหมด' }].concat(Object.keys(teacherMap).sort(function(a, b) {
+        return String(teacherMap[a] || '').localeCompare(String(teacherMap[b] || ''));
+      }).map(function(key) { return { value: key, label: teacherMap[key] }; })), 'ทั้งหมด');
+      setPrivateBillingSelectOptions('privateBillingStudentFilter', [{ value: 'ทั้งหมด', label: 'ทั้งหมด' }].concat(Object.keys(studentMap).sort(function(a, b) {
+        return String(studentMap[a] || '').localeCompare(String(studentMap[b] || ''));
+      }).map(function(key) { return { value: key, label: studentMap[key] }; })), 'ทั้งหมด');
+    }
+
+    function getPrivateLessonBillingConfig(session) {
+      const defaultType = getElement('privateBillingType') ? getElement('privateBillingType').value : 'hourly';
+      const defaultHourlyRate = getElement('privateBillingHourlyRate') ? Number(getElement('privateBillingHourlyRate').value || 0) : 0;
+      const defaultFixedPrice = getElement('privateBillingFixedPrice') ? Number(getElement('privateBillingFixedPrice').value || 0) : 0;
+      const billingType = session.billingType === 'fixed' || session.billingType === 'hourly' ? session.billingType : defaultType;
+      const hourlyRate = Number(session.hourlyRate !== undefined ? session.hourlyRate : defaultHourlyRate) || 0;
+      const fixedPrice = Number(session.fixedPrice !== undefined ? session.fixedPrice : defaultFixedPrice) || 0;
+      const hours = Number(session.actualHours || 0) || 0;
+      const amount = billingType === 'fixed' ? fixedPrice : hours * hourlyRate;
+      return {
+        billingType: billingType,
+        hourlyRate: hourlyRate,
+        fixedPrice: fixedPrice,
+        hours: hours,
+        amount: amount
+      };
+    }
+
+    function renderPrivateLessonBillingPreview() {
+      const allLessons = getCompletedPrivateLessonSessionsForBilling();
+      renderPrivateLessonBillingFilters(allLessons);
+      const monthFilter = getElement('privateBillingMonthFilter') ? getElement('privateBillingMonthFilter').value : 'ทั้งหมด';
+      const teacherFilter = getElement('privateBillingTeacherFilter') ? getElement('privateBillingTeacherFilter').value : 'ทั้งหมด';
+      const studentFilter = getElement('privateBillingStudentFilter') ? getElement('privateBillingStudentFilter').value : 'ทั้งหมด';
+      const filtered = allLessons.filter(function(session) {
+        const monthMatched = monthFilter === 'ทั้งหมด' || getPrivateLessonBillingMonthKey(session) === monthFilter;
+        const teacherMatched = teacherFilter === 'ทั้งหมด' || getPrivateLessonBillingTeacherKey(session) === teacherFilter;
+        const studentMatched = studentFilter === 'ทั้งหมด' || getPrivateLessonBillingStudentKey(session) === studentFilter;
+        return monthMatched && teacherMatched && studentMatched;
+      }).sort(function(a, b) {
+        return String(getMonthlySessionDate(a) || '').localeCompare(String(getMonthlySessionDate(b) || '')) ||
+          String(a.teacherName || '').localeCompare(String(b.teacherName || ''));
+      });
+      const rows = filtered.map(function(session) {
+        const billing = getPrivateLessonBillingConfig(session);
+        return Object.assign({ session: session }, billing);
+      });
+      const studentCount = new Set(filtered.map(getPrivateLessonBillingStudentKey).filter(Boolean)).size;
+      const totalHours = rows.reduce(function(sum, row) { return sum + row.hours; }, 0);
+      const totalAmount = rows.reduce(function(sum, row) { return sum + row.amount; }, 0);
+      const cards = getElement('privateBillingSummaryCards');
+      if (cards) {
+        cards.innerHTML =
+          '<div class="stat"><h4>นักเรียนทั้งหมด</h4><p>' + studentCount + ' คน</p></div>' +
+          '<div class="stat"><h4>ชั่วโมงรวม</h4><p>' + totalHours.toFixed(2) + ' ชม.</p></div>' +
+          '<div class="stat"><h4>จำนวนครั้ง</h4><p>' + filtered.length + ' ครั้ง</p></div>' +
+          '<div class="stat"><h4>ยอดรวม</h4><p>' + formatPrice(totalAmount) + '</p></div>';
+      }
+      const tbody = getElement('privateBillingTableBody');
+      if (!tbody) return;
+      tbody.innerHTML = rows.length ? rows.map(function(row) {
+        const session = row.session;
+        const rateText = row.billingType === 'fixed'
+          ? 'เหมา ' + formatPrice(row.fixedPrice)
+          : formatPrice(row.hourlyRate) + ' / ชม.';
+        return '<tr>' +
+          '<td>' + escapeHtml(formatMonthTextFromKey(getPrivateLessonBillingMonthKey(session)) || getPrivateLessonBillingMonthKey(session) || '-') + '</td>' +
+          '<td>' + escapeHtml(getMonthlySessionDate(session) || '-') + '</td>' +
+          '<td>' + escapeHtml(session.teacherName || getTeacherNameById(session.teacherId) || '-') + '</td>' +
+          '<td>' + escapeHtml(session.studentName || session.studentMemberId || '-') + '</td>' +
+          '<td>' + escapeHtml(session.subject || '-') + '</td>' +
+          '<td>' + row.hours.toFixed(2) + '</td>' +
+          '<td>' + escapeHtml(row.billingType === 'fixed' ? 'fixed' : 'hourly') + '<br><span class="mini-muted">' + escapeHtml(rateText) + '</span></td>' +
+          '<td>' + formatPrice(row.amount) + '</td>' +
+        '</tr>';
+      }).join('') : '<tr><td colspan="8">ยังไม่มีคาบเรียนเดี่ยวที่จบการสอนแล้วตามตัวกรองนี้</td></tr>';
     }
 
     function getCourseMonthlyPrice(course) {
