@@ -210,6 +210,19 @@
       margin-bottom: 14px;
     }
 
+    .planner-quick-fix-toolbar {
+      display: flex;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-top: 14px;
+    }
+
+    .planner-quick-fix-result {
+      margin-top: 12px;
+      font-weight: 700;
+    }
+
     .monthly-balance-warning-row {
       background: #fff7ed;
     }
@@ -218,6 +231,10 @@
       .planner-issue-banner {
         align-items: stretch;
         flex-direction: column;
+      }
+
+      .planner-quick-fix-toolbar .btn {
+        width: 100%;
       }
 
       .menu a,
@@ -2181,6 +2198,8 @@
               </div>
               <div id="monthlyPlannerDashboardSummaryCards" class="dashboard-grid"></div>
               <div id="monthlyPlannerDashboardSummaryNote" class="notice" style="margin-top:14px;"></div>
+              <div id="monthlyPlannerQuickFixToolbar" class="planner-quick-fix-toolbar"></div>
+              <div id="monthlyPlannerQuickFixResult" class="planner-quick-fix-result"></div>
             </div>
 
             <br />
@@ -14122,6 +14141,359 @@ function receiptStatusText(status) {
       '</div>';
     }
 
+    function setMonthlyPlannerQuickFixResult(message, isError) {
+      const box = getElement('monthlyPlannerQuickFixResult');
+      if (!box) return;
+      box.textContent = message || '';
+      box.style.color = isError ? '#dc2626' : '#16a34a';
+    }
+
+    function renderMonthlyPlannerQuickFixToolbar() {
+      const box = getElement('monthlyPlannerQuickFixToolbar');
+      if (!box) return;
+      const actions = {
+        unassigned: [
+          { key: 'autoAssignTeachers', label: 'แนะนำครูให้อัตโนมัติ', className: 'btn-green' }
+        ],
+        teacherConflict: [
+          { key: 'suggestBackupTeachers', label: 'แนะนำครูสำรอง', className: 'btn-blue' },
+          { key: 'viewAllConflicts', label: 'ดูคาบที่ชนทั้งหมด', className: 'btn-dark' }
+        ],
+        holidayNeedsMakeup: [
+          { key: 'createMakeupForHolidays', label: 'สร้างชดเชยทั้งหมด', className: 'btn-green' }
+        ],
+        subjectBalanceIssue: [
+          { key: 'suggestSubjectBalance', label: 'แนะนำการปรับวิชา', className: 'btn-blue' }
+        ]
+      };
+      const list = actions[monthlyPlannerIssueFilter] || [];
+      if (!list.length) {
+        box.innerHTML = '';
+        return;
+      }
+      box.innerHTML = '<span class="mini-muted">Quick Fix:</span>' + list.map(function(action) {
+        return '<button class="btn ' + action.className + '" type="button" onclick="' + actionCall('runMonthlyPlannerQuickFix', action.key) + '">' + escapeHtml(action.label) + '</button>';
+      }).join('');
+    }
+
+    function runMonthlyPlannerQuickFix(actionKey) {
+      if (actionKey === 'autoAssignTeachers') return autoAssignTeachersForUnassigned();
+      if (actionKey === 'suggestBackupTeachers') return suggestBackupTeachersForConflicts();
+      if (actionKey === 'viewAllConflicts') return openMonthlyPlannerConflictOverview();
+      if (actionKey === 'createMakeupForHolidays') return createMakeupForAllUnmadeHolidays();
+      if (actionKey === 'suggestSubjectBalance') return suggestSubjectBalanceAdjustments();
+    }
+
+    function refreshMonthlyPlannerAfterQuickFix() {
+      renderMonthlyPlannerDashboardSummary();
+      renderMonthlyPlanSessions();
+      renderMonthlyTeacherConflictControls();
+      renderMonthlySubjectBalance();
+      renderStudentMonthlyPlanSummary();
+      renderTeacherMonthlyPlanSummary();
+    }
+
+    function getActivePlannerTeacherList() {
+      return teachers.filter(function(teacher) {
+        return teacher && teacher.deleted !== true && teacher.status !== 'inactive' && teacher.status !== 'archived';
+      });
+    }
+
+    function getTeacherPlannerId(teacher) {
+      return String(teacher && (teacher.id || teacher.firebaseDocId || teacher.teacherId || teacher.authUid || teacher.teacherUid || '') || '');
+    }
+
+    function findTeacherByPlannerId(teacherId) {
+      const key = String(teacherId || '');
+      return getActivePlannerTeacherList().find(function(teacher) {
+        return [teacher.id, teacher.firebaseDocId, teacher.teacherId, teacher.authUid, teacher.teacherUid, teacher.email].map(function(value) {
+          return String(value || '');
+        }).includes(key);
+      }) || null;
+    }
+
+    function teacherCanTeachSubject(teacher, subject) {
+      const target = normalizeTextValue(subject || '').toLowerCase();
+      if (!teacher || !target) return false;
+      const subjectValues = [];
+      if (Array.isArray(teacher.subjects)) subjectValues.push.apply(subjectValues, teacher.subjects);
+      if (teacher.subject) subjectValues.push(teacher.subject);
+      if (teacher.mainSubject) subjectValues.push(teacher.mainSubject);
+      if (teacher.teachingSubject) subjectValues.push(teacher.teachingSubject);
+      return subjectValues.some(function(value) {
+        const normalized = normalizeTextValue(value || '').toLowerCase();
+        return !!normalized && (normalized.indexOf(target) >= 0 || target.indexOf(normalized) >= 0);
+      });
+    }
+
+    function getMonthlyTeacherCandidateIds(session, subject, includeFallback) {
+      const normalizedSubject = normalizeTextValue(subject || session.subject || '').toLowerCase();
+      const ids = [];
+      const setting = courseTeachingSettings.find(function(item) {
+        return String(item.courseId || '') === String(session.courseId || '');
+      });
+      if (setting && Array.isArray(setting.subjects)) {
+        const subjectSetting = setting.subjects.find(function(item) {
+          return normalizeTextValue(item.subject || '').toLowerCase() === normalizedSubject;
+        });
+        if (subjectSetting) {
+          if (subjectSetting.primaryTeacherId) ids.push(subjectSetting.primaryTeacherId);
+          if (Array.isArray(subjectSetting.backupTeacherIds)) {
+            subjectSetting.backupTeacherIds.forEach(function(id) {
+              if (id && !ids.includes(id)) ids.push(id);
+            });
+          }
+        }
+      }
+      if (includeFallback) {
+        getActivePlannerTeacherList().forEach(function(teacher) {
+          const id = getTeacherPlannerId(teacher);
+          if (id && !ids.includes(id) && teacherCanTeachSubject(teacher, subject || session.subject)) ids.push(id);
+        });
+      }
+      return ids;
+    }
+
+    function buildMonthlySessionTeacherDraft(session, teacher) {
+      const teacherId = getTeacherPlannerId(teacher);
+      return Object.assign({}, session, {
+        teacherId: teacherId,
+        teacherUid: teacher.teacherUid || teacher.authUid || '',
+        teacherAuthUid: teacher.authUid || teacher.teacherUid || '',
+        teacherName: teacher.name || teacher.displayName || teacher.email || teacherId
+      });
+    }
+
+    function findAvailableTeacherForMonthlySession(session, subject, excludeTeacherIds) {
+      const excluded = (excludeTeacherIds || []).map(String);
+      const candidateIds = getMonthlyTeacherCandidateIds(session, subject || session.subject, true);
+      for (let i = 0; i < candidateIds.length; i += 1) {
+        const id = String(candidateIds[i] || '');
+        if (!id || excluded.includes(id)) continue;
+        const teacher = findTeacherByPlannerId(id);
+        if (!teacher) continue;
+        const draft = buildMonthlySessionTeacherDraft(Object.assign({}, session, { subject: subject || session.subject }), teacher);
+        if (!findTeacherConflicts(draft).length) return teacher;
+      }
+      return null;
+    }
+
+    async function updateMonthlyPlannerSessionFields(session, fields, action, note) {
+      Object.assign(session, fields || {});
+      session.updatedAtText = new Date().toLocaleString('th-TH');
+      appendMonthlyPlanChangeLog(session, action, note);
+      await setFirebaseDocument('monthlyPlanSessions', session);
+    }
+
+    async function autoAssignTeachersForUnassigned() {
+      const sessions = getUnassignedMonthlySessions(getMonthlyPlannerFilteredSessions()).filter(function(session) {
+        return !!String(session.subject || '').trim();
+      });
+      if (!sessions.length) {
+        setMonthlyPlannerQuickFixResult('ไม่พบคาบที่มีวิชาและยังไม่มีครู', true);
+        return;
+      }
+      if (!confirm('ระบบจะแนะนำและบันทึกครูให้คาบที่ยังไม่มีครู ต้องการดำเนินการต่อหรือไม่?')) return;
+      setMonthlyPlannerQuickFixResult('กำลังแนะนำครูและบันทึกข้อมูล...', false);
+      let assigned = 0;
+      const skipped = [];
+      try {
+        for (const session of sessions) {
+          const teacher = findAvailableTeacherForMonthlySession(session, session.subject, []);
+          if (!teacher) {
+            const hasSetting = courseTeachingSettings.some(function(item) { return String(item.courseId || '') === String(session.courseId || ''); });
+            skipped.push((getMonthlySessionDate(session) || '-') + ' ' + getMonthlyPlanCourseName(session) + ': ' + (hasSetting ? 'ไม่มีครูที่ว่าง' : 'ไม่มี courseTeachingSettings'));
+            continue;
+          }
+          await updateMonthlyPlannerSessionFields(session, buildMonthlySessionTeacherDraft(session, teacher), 'autoAssignTeacher', 'Quick Fix แนะนำครูให้อัตโนมัติ');
+          assigned += 1;
+        }
+        setMonthlyPlannerQuickFixResult('แนะนำครูสำเร็จ ' + assigned + ' คาบ, ข้าม ' + skipped.length + ' คาบ' + (skipped.length ? ' · ' + skipped.slice(0, 3).join(' / ') : ''), skipped.length > 0 && assigned === 0);
+        refreshMonthlyPlannerAfterQuickFix();
+      } catch (error) {
+        setMonthlyPlannerQuickFixResult('แนะนำครูไม่สำเร็จ: ' + (error.message || error.code || error), true);
+      }
+    }
+
+    function suggestBackupTeachersForConflicts() {
+      const sessions = getMonthlyTeacherConflictSessions(getMonthlyPlannerFilteredSessions());
+      const suggestions = sessions.map(function(session) {
+        const currentTeacherId = getSessionTeacherKey(session);
+        const teacher = findAvailableTeacherForMonthlySession(session, session.subject, [currentTeacherId, session.teacherId, session.teacherUid, session.teacherAuthUid, session.teacherName]);
+        return { session: session, teacher: teacher };
+      });
+      if (!suggestions.length) {
+        openViewBubble('แนะนำครูสำรอง', '<div class="notice">ไม่พบคาบที่ครูชนเวลาตามตัวกรองนี้</div>');
+        return;
+      }
+      const bodyHtml = suggestions.map(function(item) {
+        const session = item.session;
+        const teacher = item.teacher;
+        const sessionId = session.id || session.firebaseDocId || '';
+        const teacherId = teacher ? getTeacherPlannerId(teacher) : '';
+        return '<div class="notice" style="margin-bottom:12px;">' +
+          '<strong>' + escapeHtml((getMonthlySessionDate(session) || '-') + ' · ' + formatMonthlySessionTimeRange(session) + ' · ' + getMonthlyPlanCourseName(session)) + '</strong>' +
+          '<p class="mini-muted">' + escapeHtml((session.subject || '-') + ' · ครูปัจจุบัน: ' + (getMonthlyPlanTeacherName(session) || '-')) + '</p>' +
+          (teacher
+            ? '<p>แนะนำ: <strong>' + escapeHtml(teacher.name || teacher.displayName || teacher.email || teacherId) + '</strong></p><button class="btn btn-green" type="button" onclick="applyMonthlyPlannerTeacherSuggestion(\'' + jsArg(sessionId) + '\', \'' + jsArg(teacherId) + '\')">ใช้ครูนี้</button>'
+            : '<p class="status-absent">ยังไม่พบครูสำรองที่ไม่ชนเวลา</p>') +
+        '</div>';
+      }).join('');
+      openViewBubble('แนะนำครูสำรอง', bodyHtml);
+    }
+
+    async function applyMonthlyPlannerTeacherSuggestion(sessionId, teacherId) {
+      const session = monthlyPlanSessions.find(function(item) { return String(item.id || item.firebaseDocId || '') === String(sessionId || ''); });
+      const teacher = findTeacherByPlannerId(teacherId);
+      if (!session || !teacher) return;
+      if (!confirm('ต้องการเปลี่ยนครูของคาบนี้เป็น ' + (teacher.name || teacher.displayName || teacher.email || teacherId) + ' ใช่หรือไม่?')) return;
+      const result = getElement('editBubbleResult');
+      try {
+        await updateMonthlyPlannerSessionFields(session, buildMonthlySessionTeacherDraft(session, teacher), 'applyBackupTeacher', 'Quick Fix ใช้ครูสำรอง');
+        if (result) { result.textContent = 'เปลี่ยนครูเรียบร้อย'; result.style.color = '#16a34a'; }
+        refreshMonthlyPlannerAfterQuickFix();
+      } catch (error) {
+        if (result) { result.textContent = 'เปลี่ยนครูไม่สำเร็จ: ' + (error.message || error.code || error); result.style.color = '#dc2626'; }
+      }
+    }
+
+    function openMonthlyPlannerConflictOverview() {
+      renderMonthlyTeacherConflictControls();
+      renderMonthlyTeacherConflicts();
+      const box = getElement('monthlyTeacherConflictList');
+      if (box) box.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+
+    function addDaysToDateText(dateText, days) {
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(String(dateText || ''))) return '';
+      const date = new Date(dateText + 'T00:00:00');
+      date.setDate(date.getDate() + Number(days || 0));
+      return date.toISOString().slice(0, 10);
+    }
+
+    async function createMakeupForAllUnmadeHolidays() {
+      const holidaysToFix = getUnmadeHolidaySessions(getMonthlyPlannerFilteredSessions());
+      if (!holidaysToFix.length) {
+        setMonthlyPlannerQuickFixResult('ไม่พบวันหยุดที่ต้องสร้างชดเชย', true);
+        return;
+      }
+      if (!confirm('ระบบจะสร้างคาบชดเชยแบบร่างให้วันหยุดที่ยังไม่มีชดเชยทั้งหมด ต้องการดำเนินการต่อหรือไม่?')) return;
+      setMonthlyPlannerQuickFixResult('กำลังสร้างคาบชดเชย...', false);
+      let created = 0;
+      const nowText = new Date().toLocaleString('th-TH');
+      try {
+        for (const original of holidaysToFix) {
+          const date = addDaysToDateText(getMonthlySessionDate(original), 7);
+          const newId = createFirebaseDocId('monthlyPlanSessions');
+          const makeup = Object.assign({}, original, {
+            id: newId,
+            firebaseDocId: newId,
+            originalSessionId: original.id || original.firebaseDocId || '',
+            originalDate: getMonthlySessionDate(original),
+            isMakeup: true,
+            type: 'makeup',
+            makeupForType: original.type || '',
+            date: date,
+            sessionDate: date,
+            monthKey: date ? date.slice(0, 7) : '',
+            monthText: date ? formatMonthTextFromKey(date.slice(0, 7)) : '',
+            month: date ? formatMonthTextFromKey(date.slice(0, 7)) : '',
+            status: 'draft',
+            holidayId: '',
+            holidayName: '',
+            isHoliday: false,
+            createdAtText: nowText,
+            updatedAtText: nowText
+          });
+          appendMonthlyPlanChangeLog(makeup, 'bulk_makeup_created', 'Quick Fix สร้างชดเชยจากวันหยุด');
+          await setFirebaseDocument('monthlyPlanSessions', makeup);
+          monthlyPlanSessions.push(makeup);
+          created += 1;
+        }
+        setMonthlyPlannerQuickFixResult('สร้างคาบชดเชยแบบร่างแล้ว ' + created + ' รายการ');
+        refreshMonthlyPlannerAfterQuickFix();
+      } catch (error) {
+        setMonthlyPlannerQuickFixResult('สร้างคาบชดเชยไม่สำเร็จ: ' + (error.message || error.code || error), true);
+      }
+    }
+
+    function buildSubjectBalanceSuggestions() {
+      const sessions = getMonthlyPlannerFilteredSessions();
+      const warnings = getMonthlySubjectBalanceWarnings(sessions);
+      const byCourse = {};
+      warnings.forEach(function(row) {
+        if (!byCourse[row.courseId]) byCourse[row.courseId] = { over: [], under: [] };
+        if (row.diff > 0) byCourse[row.courseId].over.push(row);
+        if (row.diff < 0) byCourse[row.courseId].under.push(row);
+      });
+      const suggestions = [];
+      Object.keys(byCourse).forEach(function(courseId) {
+        const group = byCourse[courseId];
+        group.under.forEach(function(under) {
+          const over = group.over[0];
+          if (!over) return;
+          const candidates = sessions.filter(function(session) {
+            const status = session.status || 'draft';
+            return String(session.courseId || '') === String(courseId) &&
+              status !== 'cancelled' &&
+              status !== 'holiday' &&
+              session.type !== 'makeup' &&
+              String(session.subject || '') === String(over.subject || '');
+          });
+          if (candidates.length) {
+            suggestions.push({ session: candidates[0], fromSubject: over.subject, toSubject: under.subject });
+          }
+        });
+      });
+      return suggestions;
+    }
+
+    function suggestSubjectBalanceAdjustments() {
+      const suggestions = buildSubjectBalanceSuggestions();
+      if (!suggestions.length) {
+        openViewBubble('แนะนำการปรับวิชา', '<div class="notice">ยังไม่มีคำแนะนำที่เหมาะสมจากข้อมูลปัจจุบัน</div>');
+        return;
+      }
+      const bodyHtml = suggestions.slice(0, 20).map(function(item) {
+        const session = item.session;
+        const sessionId = session.id || session.firebaseDocId || '';
+        return '<div class="notice" style="margin-bottom:12px;">' +
+          '<strong>' + escapeHtml((getMonthlySessionDate(session) || '-') + ' · ' + getMonthlyPlanCourseName(session)) + '</strong>' +
+          '<p>' + escapeHtml(item.fromSubject + ' → ' + item.toSubject) + '</p>' +
+          '<button class="btn btn-green" type="button" onclick="applyMonthlyPlannerSubjectSuggestion(\'' + jsArg(sessionId) + '\', \'' + jsArg(item.toSubject) + '\')">ใช้คำแนะนำนี้</button>' +
+        '</div>';
+      }).join('');
+      openViewBubble('แนะนำการปรับวิชา', bodyHtml);
+    }
+
+    async function applyMonthlyPlannerSubjectSuggestion(sessionId, newSubject) {
+      const session = monthlyPlanSessions.find(function(item) { return String(item.id || item.firebaseDocId || '') === String(sessionId || ''); });
+      if (!session || !newSubject) return;
+      if (!confirm('ต้องการเปลี่ยนวิชาของคาบนี้เป็น ' + newSubject + ' ใช่หรือไม่?')) return;
+      const currentTeacher = findTeacherByPlannerId(session.teacherId || session.teacherUid || session.teacherAuthUid || '');
+      const fields = { subject: newSubject };
+      if (!currentTeacher || !teacherCanTeachSubject(currentTeacher, newSubject)) {
+        const suggestedTeacher = findAvailableTeacherForMonthlySession(session, newSubject, []);
+        if (suggestedTeacher) {
+          Object.assign(fields, buildMonthlySessionTeacherDraft(Object.assign({}, session, { subject: newSubject }), suggestedTeacher));
+          fields.subject = newSubject;
+        } else {
+          fields.teacherId = '';
+          fields.teacherUid = '';
+          fields.teacherAuthUid = '';
+          fields.teacherName = '';
+        }
+      }
+      const result = getElement('editBubbleResult');
+      try {
+        await updateMonthlyPlannerSessionFields(session, fields, 'applySubjectBalanceSuggestion', 'Quick Fix ปรับสมดุลวิชา');
+        if (result) { result.textContent = 'ปรับวิชาเรียบร้อย'; result.style.color = '#16a34a'; }
+        refreshMonthlyPlannerAfterQuickFix();
+      } catch (error) {
+        if (result) { result.textContent = 'ปรับวิชาไม่สำเร็จ: ' + (error.message || error.code || error); result.style.color = '#dc2626'; }
+      }
+    }
+
     function setMonthlyPlannerIssueFilter(filterKey) {
       monthlyPlannerIssueFilter = filterKey || 'all';
       syncMonthlyPlannerSummaryFiltersToSessionList();
@@ -14234,6 +14606,7 @@ function receiptStatusText(status) {
           ? 'ใช้ข้อมูลจาก monthlyPlanSessions ตามตัวกรองด้านบน'
           : 'ยังไม่มีข้อมูลตารางในเงื่อนไขที่เลือก';
       }
+      renderMonthlyPlannerQuickFixToolbar();
     }
 
     function renderMonthlySubjectBalanceControls() {
