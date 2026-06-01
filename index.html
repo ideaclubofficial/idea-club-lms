@@ -1736,6 +1736,7 @@
                       <th>คอร์ส</th>
                       <th>ราคาปกติ</th>
                       <th>ราคาที่เก็บเดือนนี้</th>
+                      <th>จัดการ</th>
                     </tr>
                   </thead>
                   <tbody id="paymentCoursePriceTableBody"></tbody>
@@ -7665,19 +7666,34 @@
       if (!amountInput.value && suggested) amountInput.value = suggested;
     }
 
+    function getCurrentStudentPreferredLocation() {
+      return String((currentStudent && currentStudent.preferredLocation) || '').trim();
+    }
+
+    function isCourseInCurrentStudentCenter(course) {
+      const studentLocation = getCurrentStudentPreferredLocation();
+      const courseLocation = String((course && course.location) || '').trim();
+      return !!studentLocation && !!courseLocation && normalizeTextValue(courseLocation) === normalizeTextValue(studentLocation);
+    }
+
     function renderStudentCourses() {
       const gradeFilter = getElement('courseGradeFilter');
       const list = getElement('studentCourseList');
       if (!gradeFilter || !list) return;
       const grade = gradeFilter.value;
-      if (!grade) {
-        list.innerHTML = '<div class="card"><h3>เลือกระดับชั้น</h3><p>คอร์สที่เปิดรับสมัครจะแสดงที่นี่</p></div>';
+      const studentLocation = getCurrentStudentPreferredLocation();
+      if (!studentLocation) {
+        list.innerHTML = '<div class="card"><h3>ยังไม่พบข้อมูลศูนย์ของนักเรียน</h3><p>กรุณาติดต่อเจ้าหน้าที่ให้ตรวจสอบศูนย์ที่ลงทะเบียนไว้ ก่อนสมัครคอร์ส</p></div>';
         return;
       }
-      const filtered = courses.filter(function(c) { return c.grade === grade && c.status === 'open'; });
+      if (!grade) {
+        list.innerHTML = '<div class="card"><h3>เลือกระดับชั้น</h3><p>ระบบจะแสดงเฉพาะคอร์สของ ' + studentLocation + '</p></div>';
+        return;
+      }
+      const filtered = courses.filter(function(c) { return c.grade === grade && c.status === 'open' && isCourseInCurrentStudentCenter(c); });
       list.innerHTML = filtered.length ? filtered.map(function(c) {
         return '<div class="card"><span class="tag">' + c.grade + ' · ' + getStudentCourseTag(c) + '</span><h3>' + c.name + '</h3><p>' + c.desc + '</p>' + renderCourseFeatureBadges(c) + '<p><strong>สถานที่เรียน:</strong> ' + c.location + '</p><p><strong>วันเรียน:</strong> ' + ((c.days || []).join(' / ') || '-') + '</p><p class="price">' + formatPrice(getCourseMonthlyPrice(c)) + ' / เดือน</p><button class="btn btn-blue" type="button" onclick="' + actionCall('applyCourse', c.id) + '">สมัครคอร์สนี้</button></div>';
-      }).join('') : '<div class="card"><h3>ยังไม่มีคอร์สที่เปิดรับสมัคร</h3><p>ระดับชั้น ' + grade + ' ยังไม่มีคอร์สเปิดรับสมัครในขณะนี้</p></div>';
+      }).join('') : '<div class="card"><h3>ยังไม่มีคอร์สเปิดรับสมัครสำหรับศูนย์นี้</h3><p>ระดับชั้น ' + grade + ' ที่ ' + studentLocation + ' ยังไม่มีคอร์สเปิดรับสมัครในขณะนี้</p></div>';
     }
 
     function getSelectedCourseDays() {
@@ -8411,6 +8427,14 @@ function getCourseOnlineDocs(course, includeInactive) {
       const activeStudent = await ensureCurrentStudentSession();
       if (!activeStudent) {
         alert('กรุณาเข้าสู่ระบบด้วยบัญชีนักเรียนก่อนสมัครคอร์ส');
+        return;
+      }
+      if (!activeStudent.preferredLocation) {
+        alert('ยังไม่พบข้อมูลศูนย์ที่ลงทะเบียนไว้ กรุณาติดต่อเจ้าหน้าที่');
+        return;
+      }
+      if (!isCourseInCurrentStudentCenter(c)) {
+        alert('คอร์สนี้ไม่ตรงกับศูนย์ที่ลงทะเบียนไว้');
         return;
       }
 
@@ -9375,7 +9399,7 @@ function getCourseOnlineDocs(course, includeInactive) {
       const selectedMonth = monthSelect ? monthSelect.value : (paymentMonths[0] ? paymentMonths[0].month : '');
       const item = getPaymentMonthItem(selectedMonth);
       if (!selectedMonth || !item) {
-        tbody.innerHTML = '<tr><td colspan="3">ยังไม่มีเดือนชำระเงิน</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="4">ยังไม่มีเดือนชำระเงิน</td></tr>';
         return;
       }
 
@@ -9383,10 +9407,30 @@ function getCourseOnlineDocs(course, includeInactive) {
         const savedPrice = getMonthCoursePrice(selectedMonth, c.id);
         const normalPrice = getCourseMonthlyPrice(c);
         const inputValue = savedPrice || normalPrice || '';
-        return '<tr><td><strong>' + (c.grade || '-') + ' · ' + (c.name || '-') + '</strong><br><span class="mini-muted">' + (c.location || '-') + '</span></td><td>' + formatPrice(normalPrice) + '</td><td><input id="' + getPaymentCoursePriceInputId(c.id) + '" type="number" value="' + inputValue + '" placeholder="เช่น 1500"></td></tr>';
+        return '<tr><td><strong>' + (c.grade || '-') + ' · ' + (c.name || '-') + '</strong><br><span class="mini-muted">' + (c.location || '-') + '</span></td><td>' + formatPrice(normalPrice) + '</td><td><input id="' + getPaymentCoursePriceInputId(c.id) + '" type="number" value="' + inputValue + '" placeholder="เช่น 1500"></td><td><button class="btn btn-dark" type="button" onclick="' + actionCall('setHalfPriceForCourse', c.id) + '">ครึ่งราคา</button></td></tr>';
       });
 
-      tbody.innerHTML = rows.length ? rows.join('') : '<tr><td colspan="3">ยังไม่มีคอร์สให้ตั้งราคา</td></tr>';
+      tbody.innerHTML = rows.length ? rows.join('') : '<tr><td colspan="4">ยังไม่มีคอร์สให้ตั้งราคา</td></tr>';
+    }
+
+    function setHalfPriceForCourse(courseId) {
+      const course = courses.find(function(c) { return String(c.id) === String(courseId); });
+      const result = getElement('paymentCoursePriceResult');
+      if (!course) return;
+      const normalPrice = getCourseMonthlyPrice(course);
+      if (!normalPrice) {
+        if (result) {
+          result.textContent = 'คอร์สนี้ยังไม่มีราคาปกติ';
+          result.style.color = '#dc2626';
+        }
+        return;
+      }
+      const input = getElement(getPaymentCoursePriceInputId(course.id));
+      if (input) input.value = Math.round(normalPrice / 2);
+      if (result) {
+        result.textContent = 'ตั้งครึ่งราคาของคอร์สนี้แล้ว กรุณากด “บันทึกราคาทั้งหมด”';
+        result.style.color = '#0f4cbd';
+      }
     }
 
     function useDefaultCoursePricesForSelectedMonth() {
