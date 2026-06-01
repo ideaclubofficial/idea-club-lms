@@ -1420,6 +1420,14 @@
                     <option>IDEA CLUB ศูนย์ หนองฉาง</option>
                   </select>
                 </div>
+                <div>
+                  <label>รูปแบบที่สอนได้</label>
+                  <select id="teacherTeachingMode">
+                    <option value="both">สอนได้ทั้ง Onsite และ Online</option>
+                    <option value="onsite">สอนได้เฉพาะ Onsite</option>
+                    <option value="online">สอนได้เฉพาะ Online</option>
+                  </select>
+                </div>
               </div>
 
               <div class="form-row">
@@ -2244,6 +2252,10 @@
                 </div>
               </div>
 
+              <div class="notice" style="margin-bottom:14px;">
+                <strong>ตาราง Onsite สำหรับคำนวณสมดุล</strong><br />
+                <span class="mini-muted">Online / On-demand ใช้ลงคาบแยกและแสดงในภาพรวมตาราง แต่ไม่ถูกนำไปคำนวณสมดุลวิชา</span>
+              </div>
               <div class="table-wrap" style="margin-bottom:14px;">
                 <table>
                   <thead>
@@ -2280,6 +2292,7 @@
                     <tr>
                       <th>วิชา</th>
                       <th>น้ำหนัก</th>
+                      <th>รูปแบบ</th>
                       <th>ครูหลัก</th>
                       <th>ครูสำรอง</th>
                       <th>จัดการ</th>
@@ -2391,6 +2404,10 @@
                 <div>
                   <label>เลือกเดือน</label>
                   <select id="monthlySubjectBalanceMonth" onchange="loadMonthlySubjectBalanceForm()"></select>
+                </div>
+                <div>
+                  <label>เลือกศูนย์</label>
+                  <select id="monthlySubjectBalanceCenter" onchange="renderMonthlySubjectBalanceControls()"></select>
                 </div>
                 <div>
                   <label>เลือกคอร์ส</label>
@@ -2526,6 +2543,7 @@
                     <option value="online">online</option>
                     <option value="ondemand">ondemand</option>
                     <option value="makeup">makeup</option>
+                    <option value="oneOnOne">สอนเดี่ยว 1:1</option>
                   </select>
                 </div>
               </div>
@@ -2549,6 +2567,10 @@
                 <div>
                   <label>คอร์ส</label>
                   <select id="monthlyPlanCourse" onchange="updateMonthlyPlanTeacherOptions(); updateMonthlyPlanConflictPreview()"></select>
+                </div>
+                <div id="monthlyPlanStudentRow" class="hidden">
+                  <label>นักเรียน 1:1</label>
+                  <select id="monthlyPlanStudent"></select>
                 </div>
                 <div>
                   <label>ครูผู้สอน</label>
@@ -2616,6 +2638,7 @@
               </div>
 
               <button class="btn btn-blue" type="button" onclick="openManualMonthlyPlanSessionForm()">เพิ่มคาบเอง</button>
+              <button class="btn btn-blue" type="button" onclick="openOneOnOneMonthlyPlanSessionForm()">เพิ่มคาบสอนเดี่ยว 1:1</button>
               <button class="btn btn-green" type="button" onclick="saveMonthlyPlanSession()">บันทึกแผนสอน</button>
               <button class="btn btn-dark" type="button" onclick="clearMonthlyPlanForm()">ล้างฟอร์ม</button>
               <div id="monthlyPlanConflictWarning" style="margin-top:14px;"></div>
@@ -2662,6 +2685,7 @@
                     <option value="online">online</option>
                     <option value="ondemand">ondemand</option>
                     <option value="makeup">makeup</option>
+                    <option value="oneOnOne">สอนเดี่ยว 1:1</option>
                     <option value="holiday">งดเรียน</option>
                     <option value="cancelled">ยกเลิก</option>
                   </select>
@@ -3492,6 +3516,7 @@
         name: cleanTeacher.name || '',
         subject: cleanTeacher.subject || '',
         branch: cleanTeacher.branch || '',
+        teachingModes: getTeacherTeachingModes(cleanTeacher),
         permissions: getEffectivePermissions(cleanTeacher)
       };
     }
@@ -7091,7 +7116,7 @@
         const normalizedRole = normalizeAppRole(t.appRole || t.role || 'Teacher');
         const permissionCount = getEffectivePermissions(t).length;
         const role = '<span class="' + (isAdminLikeRole(normalizedRole) ? 'status-parent' : 'status-paid') + '">' + getRoleLabel(normalizedRole) + '</span><br><span class="mini-muted">' + permissionCount + ' สิทธิ์</span>';
-        return '<tr><td>' + (i + 1) + '</td><td>' + t.teacherId + '</td><td>' + t.name + '</td><td>' + t.subject + '</td><td>' + t.username + '</td><td>' + t.branch + '</td><td>' + role + '</td><td>' + status + '</td><td><button class="btn btn-blue" type="button" onclick="' + actionCall('editTeacher', t.id) + '">แก้ไข</button><button class="btn btn-dark" type="button" onclick="' + actionCall('resetTeacherPassword', t.id) + '">Reset 000000</button><button class="btn btn-red" type="button" onclick="' + actionCall('deleteTeacher', t.id) + '">ลบ</button></td></tr>';
+        return '<tr><td>' + (i + 1) + '</td><td>' + t.teacherId + '</td><td>' + t.name + '</td><td>' + t.subject + '<br><span class="mini-muted">' + escapeHtml(getTeachingModeLabel(t.teachingModes)) + '</span></td><td>' + t.username + '</td><td>' + t.branch + '</td><td>' + role + '</td><td>' + status + '</td><td><button class="btn btn-blue" type="button" onclick="' + actionCall('editTeacher', t.id) + '">แก้ไข</button><button class="btn btn-dark" type="button" onclick="' + actionCall('resetTeacherPassword', t.id) + '">Reset 000000</button><button class="btn btn-red" type="button" onclick="' + actionCall('deleteTeacher', t.id) + '">ลบ</button></td></tr>';
       }).join('');
     }
 
@@ -7112,6 +7137,7 @@
       const username = teacherUsername;
       const phone = teacherUsername;
       const branch = getElement('teacherBranch').value;
+      const teachingModes = normalizeTeachingModesFromValue(getElement('teacherTeachingMode') ? getElement('teacherTeachingMode').value : 'both');
       const role = getElement('teacherRole') ? getElement('teacherRole').value : 'Teacher';
       const permissions = getCheckedPermissionValues('.teacher-permission:checked');
       const status = getElement('teacherStatus').value;
@@ -7138,6 +7164,7 @@
             t.authEmail = t.authEmail || teacherEmail;
             t.phone = phone || t.phone || (username && username.match(/^[0-9]+$/) ? username : '');
             t.branch = branch;
+            t.teachingModes = teachingModes;
             t.role = normalizeAppRole(role);
             t.appRole = normalizeAppRole(role);
             t.permissions = permissions;
@@ -7204,6 +7231,7 @@
             }),
             name: name,
             subject: subject,
+            teachingModes: teachingModes,
             defaultPassword: '000000',
             branch: branch,
             role: normalizeAppRole(role),
@@ -7282,6 +7310,7 @@
         '<div class="form-row">' +
           '<div><label>ID เข้าสู่ระบบ / เบอร์โทรศัพท์</label><input id="bubbleTeacherUsername" type="text" value="' + t.username + '"></div>' +
           '<div><label>สาขา</label><select id="bubbleTeacherBranch"><option' + (t.branch === 'IDEA CLUB ศูนย์ นครสวรรค์' ? ' selected' : '') + '>IDEA CLUB ศูนย์ นครสวรรค์</option><option' + (t.branch === 'IDEA CLUB ศูนย์ หนองฉาง' ? ' selected' : '') + '>IDEA CLUB ศูนย์ หนองฉาง</option></select></div>' +
+          '<div><label>รูปแบบที่สอนได้</label><select id="bubbleTeacherTeachingMode"><option value="both"' + (getTeachingModeValueFromModes(t.teachingModes) === 'both' ? ' selected' : '') + '>สอนได้ทั้ง Onsite และ Online</option><option value="onsite"' + (getTeachingModeValueFromModes(t.teachingModes) === 'onsite' ? ' selected' : '') + '>สอนได้เฉพาะ Onsite</option><option value="online"' + (getTeachingModeValueFromModes(t.teachingModes) === 'online' ? ' selected' : '') + '>สอนได้เฉพาะ Online</option></select></div>' +
         '</div>' +
         '<div class="form-row">' +
           '<div><label>สิทธิ์การใช้งาน</label><select id="bubbleTeacherRole" onchange="renderPermissionCheckboxes(\'bubbleTeacherPermissionList\', getDefaultPermissionsForRole(this.value), \'bubble-teacher-permission\')">' + roleOptionsHtml(t.appRole || t.role || 'Teacher') + '</select></div>' +
@@ -7308,6 +7337,7 @@
               username: username,
               email: teacherEmail || t.email || '',
               branch: bubbleSelectValue('bubbleTeacherBranch'),
+              teachingModes: normalizeTeachingModesFromValue(bubbleSelectValue('bubbleTeacherTeachingMode')),
               role: normalizeAppRole(bubbleSelectValue('bubbleTeacherRole') || 'Teacher'),
               appRole: normalizeAppRole(bubbleSelectValue('bubbleTeacherRole') || 'Teacher'),
               permissions: getCheckedPermissionValues('.bubble-teacher-permission:checked'),
@@ -7327,6 +7357,7 @@
                 permissionMode: t.permissionMode || 'custom',
                 status: t.status === 'Active' ? 'active' : 'inactive',
                 subject: t.subject,
+                teachingModes: t.teachingModes,
                 updatedAt: firebase.firestore.FieldValue.serverTimestamp()
               }, { merge: true });
             }
@@ -7371,6 +7402,7 @@
       getElement('teacherSubject').value = 'คณิตศาสตร์';
       getElement('teacherUsername').value = '';
       getElement('teacherBranch').value = 'IDEA CLUB ศูนย์ นครสวรรค์';
+      if (getElement('teacherTeachingMode')) getElement('teacherTeachingMode').value = 'both';
       if (getElement('teacherRole')) getElement('teacherRole').value = 'Teacher';
       renderPermissionCheckboxes('teacherPermissionList', getDefaultPermissionsForRole('Teacher'), 'teacher-permission');
       getElement('teacherStatus').value = 'Active';
@@ -11907,6 +11939,27 @@ function receiptStatusText(status) {
       const type = getElement('monthlyPlanType') ? getElement('monthlyPlanType').value : 'onsite';
       const publishRow = getElement('monthlyPlanPublishTimeRow');
       if (publishRow) publishRow.classList.toggle('hidden', type !== 'ondemand');
+      const studentRow = getElement('monthlyPlanStudentRow');
+      if (studentRow) studentRow.classList.toggle('hidden', type !== 'oneOnOne');
+      renderMonthlyPlanStudentOptions();
+      updateMonthlyPlanTeacherOptions();
+    }
+
+    function renderMonthlyPlanStudentOptions() {
+      const select = getElement('monthlyPlanStudent');
+      if (!select) return;
+      const current = select.value;
+      const activeStudents = students.filter(function(student) {
+        return student && student.deleted !== true && student.status !== 'inactive' && student.status !== 'archived';
+      });
+      select.innerHTML = '<option value="">เลือกนักเรียน</option>' + activeStudents.map(function(student) {
+        const id = String(student.id || student.firebaseDocId || student.authUid || student.memberId || '');
+        const label = (student.name || student.nickname || id) + (student.grade ? ' · ' + student.grade : '') + (student.preferredLocation ? ' · ' + student.preferredLocation : '');
+        return '<option value="' + escapeHtml(id) + '">' + escapeHtml(label) + '</option>';
+      }).join('');
+      select.value = activeStudents.some(function(student) {
+        return String(student.id || student.firebaseDocId || student.authUid || student.memberId || '') === current;
+      }) ? current : '';
     }
 
     function getMonthlyPlanDayText(dayKey) {
@@ -12011,10 +12064,63 @@ function receiptStatusText(status) {
     }
 
     function getMonthlyPlanTypeText(type) {
-      const map = { onsite: 'Onsite', online: 'Online', ondemand: 'On-demand', makeup: 'ชดเชย', manual: 'Manual' };
+      const map = { onsite: 'Onsite', online: 'Online', ondemand: 'On-demand', makeup: 'ชดเชย', oneOnOne: 'สอนเดี่ยว 1:1', manual: 'Manual' };
       if (type === 'holiday') return 'วันหยุด';
       if (type === 'cancelled') return 'ยกเลิก';
       return map[type] || 'Manual';
+    }
+
+    function normalizeTeachingModesFromValue(value) {
+      if (Array.isArray(value)) {
+        const modes = value.map(function(item) { return String(item || '').trim(); }).filter(function(item) {
+          return item === 'onsite' || item === 'online';
+        });
+        return modes.length ? Array.from(new Set(modes)) : ['onsite', 'online'];
+      }
+      const text = String(value || 'both').trim();
+      if (text === 'onsite') return ['onsite'];
+      if (text === 'online') return ['online'];
+      return ['onsite', 'online'];
+    }
+
+    function getTeachingModeValueFromModes(modes) {
+      const normalized = normalizeTeachingModesFromValue(modes);
+      if (normalized.includes('onsite') && normalized.includes('online')) return 'both';
+      if (normalized.includes('online')) return 'online';
+      return 'onsite';
+    }
+
+    function getTeachingModeLabel(modes) {
+      const value = getTeachingModeValueFromModes(modes);
+      if (value === 'onsite') return 'Onsite เท่านั้น';
+      if (value === 'online') return 'Online เท่านั้น';
+      return 'Onsite + Online';
+    }
+
+    function teachingModeOptionsHtml(value) {
+      const current = getTeachingModeValueFromModes(value);
+      return '<option value="inherit"' + (String(value || '') === 'inherit' ? ' selected' : '') + '>ใช้ตามโปรไฟล์ครู</option>' +
+        '<option value="both"' + (current === 'both' && String(value || '') !== 'inherit' ? ' selected' : '') + '>ทั้งสองระบบ</option>' +
+        '<option value="onsite"' + (current === 'onsite' ? ' selected' : '') + '>Onsite เท่านั้น</option>' +
+        '<option value="online"' + (current === 'online' ? ' selected' : '') + '>Online เท่านั้น</option>';
+    }
+
+    function getTeacherTeachingModes(teacher) {
+      return normalizeTeachingModesFromValue(teacher && teacher.teachingModes);
+    }
+
+    function getSubjectTeachingModes(subjectSetting) {
+      if (!subjectSetting || subjectSetting.teachingModes === 'inherit' || subjectSetting.teachingModes === undefined) return null;
+      return normalizeTeachingModesFromValue(subjectSetting.teachingModes);
+    }
+
+    function canTeacherTeachMode(teacher, mode, subjectSetting) {
+      const normalizedMode = mode === 'oneOnOne' ? 'onsite' : mode;
+      if (normalizedMode !== 'onsite' && normalizedMode !== 'online') return true;
+      const allowedByTeacher = getTeacherTeachingModes(teacher).includes(normalizedMode);
+      const subjectModes = getSubjectTeachingModes(subjectSetting);
+      const allowedBySubject = subjectModes ? subjectModes.includes(normalizedMode) : true;
+      return allowedByTeacher && allowedBySubject;
     }
 
     function getMonthlyPlanSessionTypeKey(session) {
@@ -12193,6 +12299,7 @@ function receiptStatusText(status) {
               '<div class="grid-card-row"><span class="grid-card-label">' + escapeHtml(getMonthlyPlanTypeText(sessionType)) + '</span><span class="grid-card-time">' + escapeHtml(formatMonthlySessionTimeRange(session)) + '</span></div>' +
               '<div class="grid-card-teacher">' + escapeHtml(getMonthlyPlanTeacherName(session) || '-') + '</div>' +
               '<div><strong>' + escapeHtml(session.subject || '-') + '</strong></div>' +
+              (session.type === 'oneOnOne' ? '<div class="grid-card-topic">นักเรียน: ' + escapeHtml(session.studentName || session.studentMemberId || '-') + '</div>' : '') +
               '<div class="grid-card-topic">' + escapeHtml(session.topic || '-') + '</div>' +
               '<div class="grid-card-badges">' + getMonthlyPlanExtraBadges(session) + '</div>' +
             '</div>';
@@ -12421,6 +12528,10 @@ function receiptStatusText(status) {
       const teacherId = getElement('monthlyPlanTeacher') ? getElement('monthlyPlanTeacher').value : '';
       const selectedTeacher = teachers.find(function(teacher) { return String(teacher.id || teacher.firebaseDocId || '') === String(teacherId); });
       const selectedCourse = courses.find(function(course) { return String(course.id || course.firebaseDocId || '') === String(getElement('monthlyPlanCourse') ? getElement('monthlyPlanCourse').value : ''); });
+      const studentId = getElement('monthlyPlanStudent') ? getElement('monthlyPlanStudent').value : (existing ? existing.studentId || '' : '');
+      const selectedStudent = students.find(function(student) {
+        return String(student.id || student.firebaseDocId || student.authUid || student.memberId || '') === String(studentId || '');
+      });
       const type = getElement('monthlyPlanType') ? getElement('monthlyPlanType').value : (existing ? existing.type || 'onsite' : 'onsite');
       const timeStart = getElement('monthlyPlanTimeStart') ? getElement('monthlyPlanTimeStart').value : '';
       const timeEnd = getElement('monthlyPlanTimeEnd') ? getElement('monthlyPlanTimeEnd').value : '';
@@ -12443,6 +12554,9 @@ function receiptStatusText(status) {
       draft.teacherUid = selectedTeacher ? (selectedTeacher.teacherUid || selectedTeacher.authUid || '') : '';
       draft.teacherAuthUid = selectedTeacher ? (selectedTeacher.authUid || selectedTeacher.teacherUid || '') : '';
       draft.teacherName = selectedTeacher ? (selectedTeacher.name || selectedTeacher.displayName || selectedTeacher.email || '') : '';
+      draft.studentId = type === 'oneOnOne' ? studentId : (existing ? existing.studentId || '' : '');
+      draft.studentName = type === 'oneOnOne' && selectedStudent ? (selectedStudent.name || selectedStudent.nickname || '') : (existing ? existing.studentName || '' : '');
+      draft.studentMemberId = type === 'oneOnOne' && selectedStudent ? (selectedStudent.memberId || selectedStudent.studentId || '') : (existing ? existing.studentMemberId || '' : '');
       draft.center = getElement('monthlyPlanCenter') ? getElement('monthlyPlanCenter').value.trim() : (existing ? existing.center || '' : '');
       draft.status = getElement('monthlyPlanStatus') ? getElement('monthlyPlanStatus').value : (existing ? existing.status : 'draft');
       draft.subject = getElement('monthlyPlanSubject') ? getElement('monthlyPlanSubject').value : (existing ? existing.subject : '');
@@ -12994,15 +13108,15 @@ function receiptStatusText(status) {
       const teacherKey = getTeacherKey(currentTeacher);
       const list = monthlyPlanSessions.filter(function(session) {
         const status = session.status || 'draft';
-        return teacherKey && getSessionTeacherKey(session) === teacherKey && status !== 'cancelled' && (status === 'holiday' || session.type === 'makeup');
+        return teacherKey && getSessionTeacherKey(session) === teacherKey && status !== 'cancelled' && (status === 'holiday' || session.type === 'makeup' || session.type === 'oneOnOne');
       }).sort(function(a, b) {
         return String(getMonthlySessionDate(a)).localeCompare(String(getMonthlySessionDate(b)));
       });
       box.innerHTML = list.length ? list.slice(0, 10).map(function(session) {
         const labelClass = session.status === 'holiday' ? 'status-absent' : 'status-paid';
         const rescheduleText = session.isRescheduled ? ' · ย้ายวันเรียน' : '';
-        return '<div class="status-display-row"><span><strong>' + escapeHtml(getMonthlySessionDate(session) || '-') + '</strong><br><span class="mini-muted">' + escapeHtml((session.center || '-') + ' · ' + getMonthlyPlanCourseName(session) + ' · ' + formatMonthlySessionTimeRange(session) + rescheduleText) + '</span></span><span class="' + labelClass + '">' + escapeHtml(getMonthlySessionStatusLabel(session)) + '</span></div>';
-      }).join('') : '<div class="notice">ยังไม่มีงดเรียนหรือคาบชดเชยที่ผูกกับครูคนนี้</div>';
+        return '<div class="status-display-row"><span><strong>' + escapeHtml(getMonthlySessionDate(session) || '-') + '</strong><br><span class="mini-muted">' + escapeHtml((session.center || '-') + ' · ' + getMonthlyPlanTypeText(session.type) + ' · ' + (session.type === 'oneOnOne' ? (session.studentName || session.studentMemberId || '-') + ' · ' : '') + getMonthlyPlanCourseName(session) + ' · ' + formatMonthlySessionTimeRange(session) + rescheduleText) + '</span></span><span class="' + labelClass + '">' + escapeHtml(getMonthlySessionStatusLabel(session)) + '</span></div>';
+      }).join('') : '<div class="notice">ยังไม่มีงดเรียน คาบชดเชย หรือคาบสอนเดี่ยวที่ผูกกับครูคนนี้</div>';
     }
 
     function getCourseNameById(courseId) {
@@ -13046,11 +13160,15 @@ function receiptStatusText(status) {
 
       if (generatorCourseSelect) {
         const currentGeneratorCourse = generatorCourseSelect.value;
-        generatorCourseSelect.innerHTML = '<option value="">เลือกคอร์ส</option>' + activeCourses.map(function(course) {
+        const selectedGeneratorCenter = getElement('monthlyPlanGeneratorCenter') ? String(getElement('monthlyPlanGeneratorCenter').value || '').trim() : '';
+        const generatorCourses = selectedGeneratorCenter
+          ? activeCourses.filter(function(course) { return String(course.location || '').trim() === selectedGeneratorCenter; })
+          : activeCourses;
+        generatorCourseSelect.innerHTML = '<option value="">เลือกคอร์ส</option>' + generatorCourses.map(function(course) {
           const id = String(course.id || course.firebaseDocId || '');
           return '<option value="' + escapeHtml(id) + '">' + escapeHtml(course.name || course.title || id) + '</option>';
         }).join('');
-        generatorCourseSelect.value = activeCourses.some(function(course) { return String(course.id || course.firebaseDocId || '') === currentGeneratorCourse; }) ? currentGeneratorCourse : '';
+        generatorCourseSelect.value = generatorCourses.some(function(course) { return String(course.id || course.firebaseDocId || '') === currentGeneratorCourse; }) ? currentGeneratorCourse : '';
       }
 
       if (courseSelect) {
@@ -13103,17 +13221,20 @@ function receiptStatusText(status) {
       const typeFilter = getElement('monthlyPlanTypeFilter');
       if (typeFilter) {
         const currentType = typeFilter.value || 'ทั้งหมด';
-        typeFilter.value = ['ทั้งหมด','onsite','online','ondemand','makeup','holiday','cancelled'].includes(currentType) ? currentType : 'ทั้งหมด';
+        typeFilter.value = ['ทั้งหมด','onsite','online','ondemand','makeup','oneOnOne','holiday','cancelled'].includes(currentType) ? currentType : 'ทั้งหมด';
       }
 
       if (teacherSelect) {
         const currentTeacher = teacherSelect.value;
         const courseId = getElement('monthlyPlanCourse') ? getElement('monthlyPlanCourse').value : '';
         const subject = getElement('monthlyPlanSubject') ? getElement('monthlyPlanSubject').value : '';
+        const sessionType = getElement('monthlyPlanType') ? getElement('monthlyPlanType').value : 'onsite';
         const course = courses.find(function(course) { return String(course.id || course.firebaseDocId || '') === String(courseId || ''); });
         const grade = course ? (course.grade || '') : '';
+        const subjectSetting = getMonthlySubjectSetting({ courseId: courseId, subject: subject, type: sessionType }, subject);
         const preferredTeacherIds = getPreferredTeachers(course ? (course.name || course.title || '') : '', subject, grade);
-        const sortedTeachers = activeTeachers.slice().sort(function(a, b) {
+        const modeTeachers = activeTeachers.filter(function(teacher) { return canTeacherTeachMode(teacher, sessionType, subjectSetting); });
+        const sortedTeachers = modeTeachers.slice().sort(function(a, b) {
           const idA = String(a.id || a.firebaseDocId || '');
           const idB = String(b.id || b.firebaseDocId || '');
           const indexA = preferredTeacherIds.indexOf(idA);
@@ -13132,7 +13253,7 @@ function receiptStatusText(status) {
           const label = (teacher.name || teacher.displayName || teacher.email || id) + (isPreferred ? ' ⭐ ครูแนะนำ' : '');
           return '<option value="' + escapeHtml(id) + '">' + escapeHtml(label) + '</option>';
         }).join('');
-        teacherSelect.value = activeTeachers.some(function(teacher) { return String(teacher.id || teacher.firebaseDocId || '') === currentTeacher; }) ? currentTeacher : '';
+        teacherSelect.value = modeTeachers.some(function(teacher) { return String(teacher.id || teacher.firebaseDocId || '') === currentTeacher; }) ? currentTeacher : '';
       }
 
       const monthFilter = getElement('monthlyPlanMonthFilter');
@@ -13165,9 +13286,13 @@ function receiptStatusText(status) {
     }
 
     function handleMonthlyPlanGeneratorSelectionChange() {
+      renderMonthlyPlanOptions();
       const courseId = getElement('monthlyPlanGeneratorCourse') ? getElement('monthlyPlanGeneratorCourse').value : '';
       const monthKey = normalizeMonthKey(getElement('monthlyPlanGeneratorMonthKey') ? getElement('monthlyPlanGeneratorMonthKey').value : '');
       const center = getElement('monthlyPlanGeneratorCenter') ? getElement('monthlyPlanGeneratorCenter').value : '';
+      if (getElement('monthlySubjectBalanceMonth') && monthKey) setSelectValueIfExists('monthlySubjectBalanceMonth', monthKey);
+      if (getElement('monthlySubjectBalanceCenter') && center) setSelectValueIfExists('monthlySubjectBalanceCenter', center);
+      if (getElement('monthlySubjectBalanceCourse') && courseId) setSelectValueIfExists('monthlySubjectBalanceCourse', courseId);
       const existingPlan = monthlyPlans.find(function(plan) {
         return String(plan.courseId || '') === String(courseId || '') &&
           (!monthKey || plan.monthKey === monthKey || normalizeMonthKey(plan.monthText || plan.month || '') === monthKey) &&
@@ -13264,6 +13389,62 @@ function receiptStatusText(status) {
       return true;
     }
 
+    function assignAvailableTeacherToPreviewSession(session, previewList) {
+      if (!session || !session.subject || session.type === 'ondemand') return;
+      const candidateIds = getMonthlyTeacherCandidateIds(session, session.subject, true);
+      for (let i = 0; i < candidateIds.length; i += 1) {
+        const teacher = findTeacherByPlannerId(candidateIds[i]);
+        if (!teacher) continue;
+        if (isTeacherAvailableForSession(getTeacherPlannerId(teacher), getMonthlySessionDate(session), getMonthlySessionTimeRange(session).start, getMonthlySessionTimeRange(session).end, previewList)) {
+          session.teacherId = getTeacherPlannerId(teacher);
+          session.teacherName = teacher.name || teacher.displayName || teacher.email || session.teacherId;
+          session.teacherUid = teacher.teacherUid || teacher.authUid || '';
+          session.teacherAuthUid = teacher.authUid || teacher.teacherUid || '';
+          return;
+        }
+      }
+      session.problem = session.type === 'online' ? 'ไม่มีครู Online' : 'ต้องเลือกครู';
+    }
+
+    function getSubjectCountsFromSessions(sessions) {
+      const counts = {};
+      (sessions || []).forEach(function(session) {
+        const subject = String(session.subject || '').trim();
+        if (!subject) return;
+        counts[subject] = (counts[subject] || 0) + 1;
+      });
+      return counts;
+    }
+
+    function getSubjectTargetCounts(totalCount, subjectWeights) {
+      const counts = {};
+      generateSubjectDistribution(totalCount, subjectWeights || []).forEach(function(subject) {
+        if (!subject) return;
+        counts[subject] = (counts[subject] || 0) + 1;
+      });
+      return counts;
+    }
+
+    function fillOnlineSessionsForOnsiteDeficit(previewList, subjectWeights) {
+      const onsiteSessions = (previewList || []).filter(function(item) { return item.type === 'onsite'; });
+      const onlineSessions = (previewList || []).filter(function(item) { return item.type === 'online' && !String(item.subject || '').trim(); });
+      const targetCounts = getSubjectTargetCounts(onsiteSessions.length, subjectWeights);
+      const onsiteCounts = getSubjectCountsFromSessions(onsiteSessions);
+      const deficits = [];
+      Object.keys(targetCounts).forEach(function(subject) {
+        const missing = Math.max(0, Number(targetCounts[subject] || 0) - Number(onsiteCounts[subject] || 0));
+        for (let i = 0; i < missing; i += 1) deficits.push(subject);
+      });
+      deficits.forEach(function(subject, index) {
+        const session = onlineSessions[index];
+        if (!session) return;
+        session.subject = subject;
+        session.problem = '';
+        assignAvailableTeacherToPreviewSession(session, previewList);
+      });
+      return Math.max(0, deficits.length - onlineSessions.length);
+    }
+
     function previewMonthlyPlanSessions() {
       const resultBox = getElement('monthlyPlanPreviewResult');
       try {
@@ -13275,44 +13456,27 @@ function receiptStatusText(status) {
         }
         const candidates = generateMonthlySessionsFromPattern(plan);
         monthlyPlanSessionPreview.length = 0;
-        const distribution = generateSubjectDistribution(candidates.length, plan.subjectTargets || plan.subjectWeights || []);
-        const courseSetting = courseTeachingSettings.find(function(c) { return String(c.courseId || '') === String(plan.courseId || ''); });
+        const onsiteDistribution = generateSubjectDistribution(candidates.filter(function(item) { return item.type === 'onsite'; }).length, plan.subjectTargets || plan.subjectWeights || []);
         let distIndex = 0;
         candidates.forEach(function(cand) {
           const copy = Object.assign({}, cand);
-          copy.subject = distribution[distIndex++] || '';
+          const isOnsite = copy.type === 'onsite';
+          copy.subject = isOnsite ? (onsiteDistribution[distIndex++] || '') : '';
           copy.problem = '';
-          if (courseSetting && Array.isArray(courseSetting.subjects)) {
-            const subj = courseSetting.subjects.find(function(s) { return String(s.subject || '').trim().toLowerCase() === String(copy.subject || '').trim().toLowerCase(); });
-            if (subj && subj.primaryTeacherId) {
-              if (isTeacherAvailableForSession(subj.primaryTeacherId, getMonthlySessionDate(copy), getMonthlySessionTimeRange(copy).start, getMonthlySessionTimeRange(copy).end, monthlyPlanSessionPreview)) {
-                copy.teacherId = subj.primaryTeacherId;
-                copy.teacherName = getTeacherNameById(subj.primaryTeacherId);
-              } else if (Array.isArray(subj.backupTeacherIds)) {
-                let assigned = false;
-                subj.backupTeacherIds.forEach(function(bid) {
-                  if (assigned) return;
-                  if (isTeacherAvailableForSession(bid, getMonthlySessionDate(copy), getMonthlySessionTimeRange(copy).start, getMonthlySessionTimeRange(copy).end, monthlyPlanSessionPreview)) {
-                    copy.teacherId = bid; copy.teacherName = getTeacherNameById(bid); assigned = true;
-                  }
-                });
-                if (!assigned && !copy.teacherId) copy.problem = 'ต้องเลือกครู';
-              } else {
-                copy.problem = 'ต้องเลือกครู';
-              }
-            } else {
-              copy.problem = copy.subject ? 'ไม่มีครู' : 'ไม่มีวิชา';
-            }
-          } else {
-            copy.problem = copy.subject ? '' : 'ไม่มีวิชา';
-          }
+          if (copy.subject) assignAvailableTeacherToPreviewSession(copy, monthlyPlanSessionPreview);
+          if (isOnsite && !copy.subject) copy.problem = 'ไม่มีวิชา';
+          if (!isOnsite && !copy.subject) copy.problem = '';
           if (copy.teacherId && !isTeacherAvailableForSession(copy.teacherId, getMonthlySessionDate(copy), getMonthlySessionTimeRange(copy).start, getMonthlySessionTimeRange(copy).end, monthlyPlanSessionPreview)) {
             copy.problem = 'ครูชนเวลา';
           }
           monthlyPlanSessionPreview.push(copy);
         });
+        const unfilledOnlineDeficit = fillOnlineSessionsForOnsiteDeficit(monthlyPlanSessionPreview, plan.subjectTargets || plan.subjectWeights || []);
         renderMonthlyPlanPreviewTable(monthlyPlanSessionPreview);
-        if (resultBox) { resultBox.textContent = 'สร้าง Preview สำเร็จ: ' + monthlyPlanSessionPreview.length + ' รายการ'; resultBox.style.color = '#16a34a'; }
+        if (resultBox) {
+          resultBox.textContent = 'สร้าง Preview สำเร็จ: ' + monthlyPlanSessionPreview.length + ' รายการ' + (unfilledOnlineDeficit ? ' · Online ไม่พอเติมสมดุล ' + unfilledOnlineDeficit + ' คาบ' : '');
+          resultBox.style.color = unfilledOnlineDeficit ? '#dc2626' : '#16a34a';
+        }
       } catch (err) {
         if (resultBox) { resultBox.textContent = 'สร้าง Preview ไม่สำเร็จ: ' + (err.message || err); resultBox.style.color = '#dc2626'; }
       }
@@ -13382,11 +13546,12 @@ function receiptStatusText(status) {
       const setting = courseTeachingSettings.find(function(c) { return String(c.courseId || '') === String(courseId || ''); });
       summary.textContent = courseId ? ('ตั้งค่า ' + (getCourseNameById(courseId) || '')) : 'เลือกรายการคอร์สเพื่อเริ่มตั้งค่า';
       const rows = (setting && Array.isArray(setting.subjects) && setting.subjects.length) ? setting.subjects : [ { subject: 'คณิตศาสตร์', weight:1, primaryTeacherId:'', backupTeacherIds:[] }, { subject: 'วิทยาศาสตร์', weight:1, primaryTeacherId:'', backupTeacherIds:[] }, { subject: 'ภาษาอังกฤษ', weight:1, primaryTeacherId:'', backupTeacherIds:[] } ];
-      const teacherOptions = '<option value="">เลือกครู</option>' + teachers.filter(function(t){ return t && t.deleted !== true && t.status !== 'inactive' && t.status !== 'archived'; }).map(function(t){ const id = String(t.id || t.firebaseDocId || ''); return '<option value="'+escapeHtml(id)+'">'+escapeHtml(t.name||t.displayName||t.email||id)+'</option>'; }).join('');
+      const teacherOptions = '<option value="">เลือกครู</option>' + teachers.filter(function(t){ return t && t.deleted !== true && t.status !== 'inactive' && t.status !== 'archived'; }).map(function(t){ const id = String(t.id || t.firebaseDocId || ''); return '<option value="'+escapeHtml(id)+'">'+escapeHtml((t.name||t.displayName||t.email||id) + ' · ' + getTeachingModeLabel(t.teachingModes))+'</option>'; }).join('');
       body.innerHTML = rows.map(function(r, idx) {
         return '<tr>' +
           '<td><input type="text" class="course-teach-subject" value="'+escapeHtml(r.subject||'')+'" /></td>' +
           '<td><input type="number" min="0" style="width:80px;" class="course-teach-weight" value="'+escapeHtml(String(r.weight||1))+'" /></td>' +
+          '<td><select class="course-teach-mode">' + teachingModeOptionsHtml(r.teachingModes || 'inherit') + '</select></td>' +
           '<td><select class="course-teach-primary">'+teacherOptions+'</select></td>' +
           '<td><input class="course-teach-backup" placeholder="teacherIds comma separated" value="'+escapeHtml((Array.isArray(r.backupTeacherIds)?r.backupTeacherIds.join(','):'') )+'" /></td>' +
           '<td><button class="btn btn-red" type="button" onclick="deleteCourseTeachingRow(this)">ลบ</button></td>' +
@@ -13397,9 +13562,9 @@ function receiptStatusText(status) {
 
     function addCourseTeachingSettingRow() {
       const body = getElement('courseTeachingSettingsTableBody'); if (!body) return;
-      const teacherOptions = '<option value="">เลือกครู</option>' + teachers.filter(function(t){ return t && t.deleted !== true && t.status !== 'inactive' && t.status !== 'archived'; }).map(function(t){ const id = String(t.id || t.firebaseDocId || ''); return '<option value="'+escapeHtml(id)+'">'+escapeHtml(t.name||t.displayName||t.email||id)+'</option>'; }).join('');
+      const teacherOptions = '<option value="">เลือกครู</option>' + teachers.filter(function(t){ return t && t.deleted !== true && t.status !== 'inactive' && t.status !== 'archived'; }).map(function(t){ const id = String(t.id || t.firebaseDocId || ''); return '<option value="'+escapeHtml(id)+'">'+escapeHtml((t.name||t.displayName||t.email||id) + ' · ' + getTeachingModeLabel(t.teachingModes))+'</option>'; }).join('');
       const row = document.createElement('tr');
-      row.innerHTML = '<td><input type="text" class="course-teach-subject" value="" /></td><td><input type="number" min="0" style="width:80px;" class="course-teach-weight" value="1" /></td><td><select class="course-teach-primary">'+teacherOptions+'</select></td><td><input class="course-teach-backup" placeholder="teacherIds comma separated" value="" /></td><td><button class="btn btn-red" type="button" onclick="deleteCourseTeachingRow(this)">ลบ</button></td>';
+      row.innerHTML = '<td><input type="text" class="course-teach-subject" value="" /></td><td><input type="number" min="0" style="width:80px;" class="course-teach-weight" value="1" /></td><td><select class="course-teach-mode">' + teachingModeOptionsHtml('inherit') + '</select></td><td><select class="course-teach-primary">'+teacherOptions+'</select></td><td><input class="course-teach-backup" placeholder="teacherIds comma separated" value="" /></td><td><button class="btn btn-red" type="button" onclick="deleteCourseTeachingRow(this)">ลบ</button></td>';
       body.appendChild(row);
     }
 
@@ -13411,9 +13576,10 @@ function receiptStatusText(status) {
       const subjects = rows.map(function(row) {
         const subject = row.querySelector('.course-teach-subject') ? row.querySelector('.course-teach-subject').value.trim() : '';
         const weight = Number(row.querySelector('.course-teach-weight') ? row.querySelector('.course-teach-weight').value : 1) || 1;
+        const modeValue = row.querySelector('.course-teach-mode') ? row.querySelector('.course-teach-mode').value : 'inherit';
         const primary = row.querySelector('.course-teach-primary') ? row.querySelector('.course-teach-primary').value : '';
         const backup = row.querySelector('.course-teach-backup') ? row.querySelector('.course-teach-backup').value.split(',').map(function(s){return s.trim();}).filter(Boolean) : [];
-        return { subject: subject, weight: weight, primaryTeacherId: primary, backupTeacherIds: backup };
+        return { subject: subject, weight: weight, teachingModes: modeValue === 'inherit' ? 'inherit' : normalizeTeachingModesFromValue(modeValue), primaryTeacherId: primary, backupTeacherIds: backup };
       }).filter(function(s){ return s.subject; });
       const existing = courseTeachingSettings.find(function(c) { return String(c.courseId||'') === String(courseId); });
       const nowText = new Date().toLocaleString('th-TH');
@@ -13451,9 +13617,11 @@ function receiptStatusText(status) {
       const courseId = getElement('monthlyPlanCourse') ? getElement('monthlyPlanCourse').value : '';
       const course = courses.find(function(item) { return String(item.id || item.firebaseDocId || '') === String(courseId || ''); });
       const subject = getElement('monthlyPlanSubject') ? getElement('monthlyPlanSubject').value : '';
+      const sessionType = getElement('monthlyPlanType') ? getElement('monthlyPlanType').value : 'onsite';
+      const subjectSetting = getMonthlySubjectSetting({ courseId: courseId, subject: subject, type: sessionType }, subject);
       const preferredTeacherIds = getPreferredTeachers(course ? (course.name || course.title || '') : '', subject, course ? (course.grade || '') : '');
       const activeTeachers = teachers.filter(function(teacher) {
-        return teacher && teacher.deleted !== true && teacher.status !== 'inactive' && teacher.status !== 'archived';
+        return teacher && teacher.deleted !== true && teacher.status !== 'inactive' && teacher.status !== 'archived' && canTeacherTeachMode(teacher, sessionType, subjectSetting);
       });
       const currentTeacher = teacherSelect.value;
       const options = activeTeachers.slice().sort(function(a, b) {
@@ -13941,17 +14109,23 @@ function receiptStatusText(status) {
 
     function getSelectedMonthlyBalancePlan() {
       const monthKey = getElement('monthlySubjectBalanceMonth') ? getElement('monthlySubjectBalanceMonth').value : '';
+      const center = getElement('monthlySubjectBalanceCenter') ? getElement('monthlySubjectBalanceCenter').value : '';
       const courseId = getElement('monthlySubjectBalanceCourse') ? getElement('monthlySubjectBalanceCourse').value : '';
       return monthlyPlans.find(function(plan) {
-        return plan.monthKey === monthKey && String(plan.courseId || '') === String(courseId || '');
+        return plan.monthKey === monthKey &&
+          String(plan.courseId || '') === String(courseId || '') &&
+          (!center || !plan.center || String(plan.center || '') === String(center));
       }) || null;
     }
 
     function getMonthlySubjectBalanceSessions() {
       const monthKey = getElement('monthlySubjectBalanceMonth') ? getElement('monthlySubjectBalanceMonth').value : '';
+      const center = getElement('monthlySubjectBalanceCenter') ? getElement('monthlySubjectBalanceCenter').value : '';
       const courseId = getElement('monthlySubjectBalanceCourse') ? getElement('monthlySubjectBalanceCourse').value : '';
       return monthlyPlanSessions.filter(function(session) {
-        return session.monthKey === monthKey && String(session.courseId || '') === String(courseId || '');
+        return session.monthKey === monthKey &&
+          String(session.courseId || '') === String(courseId || '') &&
+          (!center || String(session.center || '') === String(center));
       });
     }
 
@@ -13967,6 +14141,19 @@ function receiptStatusText(status) {
       return ['onsite','online','ondemand','makeup'].includes(type) && status !== 'cancelled' && status !== 'holiday';
     }
 
+    function isOnsiteBalancePotentialSession(session) {
+      const status = session ? (session.status || 'draft') : '';
+      return session && session.type === 'onsite' && status !== 'cancelled' && status !== 'holiday';
+    }
+
+    function isOnsiteBalanceCountableSession(session) {
+      return isOnsiteBalancePotentialSession(session) && !!String(session.subject || '').trim();
+    }
+
+    function getMonthlySubjectBalanceOnsiteSessions() {
+      return getMonthlySubjectBalanceSessions().filter(isOnsiteBalancePotentialSession);
+    }
+
     function normalizeSubjectTargets(subjectTargets) {
       return (Array.isArray(subjectTargets) ? subjectTargets : []).map(function(item) {
         const subject = String(item && item.subject ? item.subject : '').trim();
@@ -13980,12 +14167,12 @@ function receiptStatusText(status) {
     }
 
     function getMonthlySubjectBalanceTotalSessions() {
-      const sessionCount = getMonthlySubjectBalanceSessions().filter(isMonthlyBalancePotentialSession).length;
+      const sessionCount = getMonthlySubjectBalanceOnsiteSessions().length;
       if (sessionCount) return sessionCount;
       const plan = getSelectedMonthlyBalancePlan();
       if (!plan) return 0;
       try {
-        return generateMonthlySessionsFromPattern(plan).filter(isMonthlyBalancePotentialSession).length;
+        return generateMonthlySessionsFromPattern(plan).filter(isOnsiteBalancePotentialSession).length;
       } catch (error) {
         return 0;
       }
@@ -14006,7 +14193,7 @@ function receiptStatusText(status) {
 
     function getPlanSubjectTargets(plan, sessions) {
       if (plan && Array.isArray(plan.subjectTargets) && plan.subjectTargets.length) return normalizeSubjectTargets(plan.subjectTargets);
-      const totalCount = (sessions || []).filter(isMonthlyBalancePotentialSession).length;
+      const totalCount = (sessions || []).filter(isOnsiteBalancePotentialSession).length;
       if (plan && Array.isArray(plan.subjectWeights) && plan.subjectWeights.length) return convertSubjectWeightsToTargets(plan.subjectWeights, totalCount, plan.balanceMode || 'weighted');
       return convertSubjectWeightsToTargets(DEFAULT_MONTHLY_SUBJECT_WEIGHTS, totalCount, 'weighted');
     }
@@ -14017,8 +14204,58 @@ function receiptStatusText(status) {
       const total = getMonthlySubjectBalanceTotalSessions();
       const used = readMonthlySubjectWeightRows().items.reduce(function(sum, item) { return sum + Number(item.targetCount || item.weight || 0); }, 0);
       const remaining = total - used;
-      box.innerHTML = '<strong>' + total + ' คาบ</strong><br><span class="mini-muted">ใส่แล้ว ' + used + ' · ' + (remaining >= 0 ? 'เหลือ ' + remaining : 'เกิน ' + Math.abs(remaining)) + '</span>';
+      box.innerHTML = '<strong>Onsite ' + total + ' คาบ</strong><br><span class="mini-muted">ใส่แล้ว ' + used + ' · ' + (remaining >= 0 ? 'เหลือ ' + remaining : 'เกิน ' + Math.abs(remaining)) + '</span>';
       box.style.borderColor = remaining < 0 ? '#fca5a5' : '#e5e7eb';
+    }
+
+    function getMonthlyActualSubjectRows(sessions) {
+      const counts = {};
+      (sessions || []).filter(isMonthlyBalanceCountableSession).forEach(function(session) {
+        const subject = String(session.subject || '').trim() || 'ยังไม่กำหนดวิชา';
+        counts[subject] = (counts[subject] || 0) + 1;
+      });
+      return Object.keys(counts).sort().map(function(subject) {
+        return { subject: subject, actual: counts[subject] };
+      });
+    }
+
+    function renderMonthlyActualSubjectTable(title, sessions) {
+      const rows = getMonthlyActualSubjectRows(sessions);
+      const total = (sessions || []).filter(isMonthlyBalancePotentialSession).length;
+      return '<div class="form-box" style="margin-top:14px;"><h3>' + escapeHtml(title) + '</h3>' +
+        '<p class="mini-muted">แสดงจำนวนคาบจริงที่ Admin ลงไว้ ไม่ใช้ target สมดุล</p>' +
+        '<div class="table-wrap"><table><thead><tr><th>วิชา</th><th>จำนวนคาบจริง</th></tr></thead><tbody>' +
+        (rows.length ? rows.map(function(row) {
+          return '<tr><td>' + escapeHtml(row.subject) + '</td><td>' + row.actual + '</td></tr>';
+        }).join('') : '<tr><td colspan="2">ยังไม่มีวิชาที่กำหนดไว้</td></tr>') +
+        '</tbody></table></div><p class="mini-muted">รวม ' + total + ' คาบ</p></div>';
+    }
+
+    function renderOnlineFillForOnsiteBalance(sessions, weights) {
+      const onsiteSessions = (sessions || []).filter(isOnsiteBalancePotentialSession);
+      const onlineSessions = (sessions || []).filter(function(item) {
+        return item.type === 'online' && (item.status || 'draft') !== 'cancelled' && (item.status || '') !== 'holiday';
+      });
+      const targetCounts = getSubjectTargetCounts(onsiteSessions.length, weights);
+      const onsiteCounts = getSubjectCountsFromSessions(onsiteSessions);
+      const deficits = [];
+      Object.keys(targetCounts).forEach(function(subject) {
+        const missing = Math.max(0, Number(targetCounts[subject] || 0) - Number(onsiteCounts[subject] || 0));
+        if (missing) deficits.push({ subject: subject, missing: missing });
+      });
+      if (!deficits.length) {
+        return '<div class="notice" style="margin-top:14px;">Onsite สมดุลแล้ว ไม่ต้องเติม Online</div>';
+      }
+      const availableOnline = onlineSessions.filter(function(item) { return !String(item.subject || '').trim(); }).length;
+      const totalMissing = deficits.reduce(function(sum, item) { return sum + item.missing; }, 0);
+      return '<div class="form-box" style="margin-top:14px;"><h3>Online เติมสมดุล</h3>' +
+        '<p class="mini-muted">เติมได้จากคาบ Online ที่มีอยู่และยังไม่ได้กำหนดวิชาเท่านั้น</p>' +
+        '<div class="table-wrap"><table><thead><tr><th>วิชา</th><th>ขาดจาก Onsite</th><th>สถานะ</th></tr></thead><tbody>' +
+        deficits.map(function(item, index) {
+          const canFill = index < availableOnline;
+          return '<tr><td>' + escapeHtml(item.subject) + '</td><td>' + item.missing + '</td><td>' + (canFill ? '<span class="status-paid">เติม Online ได้</span>' : '<span class="status-absent">Online ไม่พอ</span>') + '</td></tr>';
+        }).join('') +
+        '</tbody></table></div><p class="mini-muted">คาบ Online ว่าง ' + availableOnline + ' จากที่ต้องเติม ' + totalMissing + ' คาบ</p></div>';
     }
 
     function normalizeSubjectWeights(subjectWeights, balanceMode) {
@@ -14150,16 +14387,13 @@ function receiptStatusText(status) {
     function calculateSubjectBalanceByType(sessions, subjectWeights, balanceMode) {
       const list = sessions || [];
       if (balanceMode === 'target' || normalizeSubjectTargets(subjectWeights).length) {
-        const typeTargets = function(type) {
-          const typeSessions = list.filter(function(item) { return item.type === type; });
-          return scaleSubjectTargetsForSessionCount(subjectWeights, typeSessions.filter(isMonthlyBalancePotentialSession).length);
-        };
+        const onsiteSessions = list.filter(isOnsiteBalancePotentialSession);
         return {
-          overall: calculateSubjectBalanceSummary(list, subjectWeights, 'target'),
-          onsite: calculateSubjectBalanceSummary(list.filter(function(item) { return item.type === 'onsite'; }), typeTargets('onsite'), 'target'),
-          online: calculateSubjectBalanceSummary(list.filter(function(item) { return item.type === 'online'; }), typeTargets('online'), 'target'),
-          ondemand: calculateSubjectBalanceSummary(list.filter(function(item) { return item.type === 'ondemand'; }), typeTargets('ondemand'), 'target'),
-          makeup: calculateSubjectBalanceSummary(list.filter(function(item) { return item.type === 'makeup'; }), typeTargets('makeup'), 'target')
+          overall: calculateSubjectBalanceSummary(onsiteSessions, subjectWeights, 'target'),
+          onsite: calculateSubjectBalanceSummary(onsiteSessions, subjectWeights, 'target'),
+          online: [],
+          ondemand: [],
+          makeup: []
         };
       }
       return {
@@ -14253,7 +14487,7 @@ function receiptStatusText(status) {
         const courseSessions = (sessions || []).filter(function(session) {
           return String(session.courseId || '') === String(courseId);
         });
-        const countableSessions = courseSessions.filter(isMonthlyBalanceCountableSession);
+        const countableSessions = courseSessions.filter(isOnsiteBalanceCountableSession);
         if (!countableSessions.length) return;
         const plan = monthlyPlans.find(function(item) {
           return String(item.courseId || '') === String(courseId) &&
@@ -14263,7 +14497,7 @@ function receiptStatusText(status) {
           ? plan.subjectTargets
           : (plan && Array.isArray(plan.subjectWeights) && plan.subjectWeights.length ? plan.subjectWeights : DEFAULT_MONTHLY_SUBJECT_WEIGHTS);
         const mode = plan && Array.isArray(plan.subjectTargets) && plan.subjectTargets.length ? 'target' : (plan && plan.balanceMode ? plan.balanceMode : 'equal');
-        calculateSubjectBalanceSummary(courseSessions, weights, mode).forEach(function(row) {
+        calculateSubjectBalanceSummary(courseSessions.filter(isOnsiteBalancePotentialSession), weights, mode).forEach(function(row) {
           if (row.diff !== 0) {
             warnings.push({
               courseId: courseId,
@@ -14425,29 +14659,39 @@ function receiptStatusText(status) {
       });
     }
 
-    function getMonthlyTeacherCandidateIds(session, subject, includeFallback) {
+    function getMonthlySubjectSetting(session, subject) {
       const normalizedSubject = normalizeTextValue(subject || session.subject || '').toLowerCase();
-      const ids = [];
       const setting = courseTeachingSettings.find(function(item) {
         return String(item.courseId || '') === String(session.courseId || '');
       });
       if (setting && Array.isArray(setting.subjects)) {
-        const subjectSetting = setting.subjects.find(function(item) {
+        return setting.subjects.find(function(item) {
           return normalizeTextValue(item.subject || '').toLowerCase() === normalizedSubject;
-        });
-        if (subjectSetting) {
+        }) || null;
+      }
+      return null;
+    }
+
+    function getMonthlyTeacherCandidateIds(session, subject, includeFallback) {
+      const ids = [];
+      const subjectSetting = getMonthlySubjectSetting(session, subject);
+      if (subjectSetting) {
+        const sessionMode = getMonthlyPlanSessionTypeKey(session);
+        const primaryTeacher = findTeacherByPlannerId(subjectSetting.primaryTeacherId);
+        if (primaryTeacher && canTeacherTeachMode(primaryTeacher, sessionMode, subjectSetting)) {
           if (subjectSetting.primaryTeacherId) ids.push(subjectSetting.primaryTeacherId);
-          if (Array.isArray(subjectSetting.backupTeacherIds)) {
-            subjectSetting.backupTeacherIds.forEach(function(id) {
-              if (id && !ids.includes(id)) ids.push(id);
-            });
-          }
+        }
+        if (Array.isArray(subjectSetting.backupTeacherIds)) {
+          subjectSetting.backupTeacherIds.forEach(function(id) {
+            const backupTeacher = findTeacherByPlannerId(id);
+            if (id && !ids.includes(id) && backupTeacher && canTeacherTeachMode(backupTeacher, sessionMode, subjectSetting)) ids.push(id);
+          });
         }
       }
       if (includeFallback) {
         getActivePlannerTeacherList().forEach(function(teacher) {
           const id = getTeacherPlannerId(teacher);
-          if (id && !ids.includes(id) && teacherCanTeachSubject(teacher, subject || session.subject)) ids.push(id);
+          if (id && !ids.includes(id) && teacherCanTeachSubject(teacher, subject || session.subject) && canTeacherTeachMode(teacher, getMonthlyPlanSessionTypeKey(session), subjectSetting)) ids.push(id);
         });
       }
       return ids;
@@ -14621,26 +14865,23 @@ function receiptStatusText(status) {
       const warnings = getMonthlySubjectBalanceWarnings(sessions);
       const byCourse = {};
       warnings.forEach(function(row) {
-        if (!byCourse[row.courseId]) byCourse[row.courseId] = { over: [], under: [] };
-        if (row.diff > 0) byCourse[row.courseId].over.push(row);
+        if (!byCourse[row.courseId]) byCourse[row.courseId] = { under: [] };
         if (row.diff < 0) byCourse[row.courseId].under.push(row);
       });
       const suggestions = [];
       Object.keys(byCourse).forEach(function(courseId) {
         const group = byCourse[courseId];
         group.under.forEach(function(under) {
-          const over = group.over[0];
-          if (!over) return;
           const candidates = sessions.filter(function(session) {
             const status = session.status || 'draft';
             return String(session.courseId || '') === String(courseId) &&
+              session.type === 'online' &&
               status !== 'cancelled' &&
               status !== 'holiday' &&
-              session.type !== 'makeup' &&
-              String(session.subject || '') === String(over.subject || '');
+              !String(session.subject || '').trim();
           });
           if (candidates.length) {
-            suggestions.push({ session: candidates[0], fromSubject: over.subject, toSubject: under.subject });
+            suggestions.push({ session: candidates[0], fromSubject: 'Online ว่าง', toSubject: under.subject });
           }
         });
       });
@@ -14668,10 +14909,16 @@ function receiptStatusText(status) {
     async function applyMonthlyPlannerSubjectSuggestion(sessionId, newSubject) {
       const session = monthlyPlanSessions.find(function(item) { return String(item.id || item.firebaseDocId || '') === String(sessionId || ''); });
       if (!session || !newSubject) return;
-      if (!confirm('ต้องการเปลี่ยนวิชาของคาบนี้เป็น ' + newSubject + ' ใช่หรือไม่?')) return;
+      if (session.type !== 'online') {
+        const result = getElement('editBubbleResult');
+        if (result) { result.textContent = 'Quick Fix สมดุลวิชาใช้เติมคาบ Online เท่านั้น'; result.style.color = '#dc2626'; }
+        return;
+      }
+      if (!confirm('ต้องการเติมวิชา Online คาบนี้เป็น ' + newSubject + ' ใช่หรือไม่?')) return;
       const currentTeacher = findTeacherByPlannerId(session.teacherId || session.teacherUid || session.teacherAuthUid || '');
       const fields = { subject: newSubject };
-      if (!currentTeacher || !teacherCanTeachSubject(currentTeacher, newSubject)) {
+      const subjectSetting = getMonthlySubjectSetting(Object.assign({}, session, { subject: newSubject }), newSubject);
+      if (!currentTeacher || !teacherCanTeachSubject(currentTeacher, newSubject) || !canTeacherTeachMode(currentTeacher, session.type, subjectSetting)) {
         const suggestedTeacher = findAvailableTeacherForMonthlySession(session, newSubject, []);
         if (suggestedTeacher) {
           Object.assign(fields, buildMonthlySessionTeacherDraft(Object.assign({}, session, { subject: newSubject }), suggestedTeacher));
@@ -14810,9 +15057,10 @@ function receiptStatusText(status) {
 
     function renderMonthlySubjectBalanceControls() {
       const monthSelect = getElement('monthlySubjectBalanceMonth');
+      const centerSelect = getElement('monthlySubjectBalanceCenter');
       const courseSelect = getElement('monthlySubjectBalanceCourse');
       const months = Array.from(new Set(monthlyPlanSessions.map(function(session) { return session.monthKey || ''; }).concat(monthlyPlans.map(function(plan) { return plan.monthKey || ''; })))).filter(Boolean).sort();
-      const courseIds = Array.from(new Set(monthlyPlanSessions.map(function(session) { return session.courseId || ''; }).concat(monthlyPlans.map(function(plan) { return plan.courseId || ''; })))).filter(Boolean);
+      const centers = Array.from(new Set(monthlyPlanSessions.map(function(session) { return String(session.center || '').trim(); }).concat(monthlyPlans.map(function(plan) { return String(plan.center || '').trim(); })))).filter(Boolean).sort();
       if (monthSelect) {
         const currentMonth = monthSelect.value;
         monthSelect.innerHTML = months.length ? months.map(function(monthKey) {
@@ -14820,6 +15068,18 @@ function receiptStatusText(status) {
         }).join('') : '<option value="">ยังไม่มีเดือน</option>';
         monthSelect.value = months.includes(currentMonth) ? currentMonth : (months[0] || '');
       }
+      if (centerSelect) {
+        const currentCenter = centerSelect.value || (getElement('monthlyPlanGeneratorCenter') ? getElement('monthlyPlanGeneratorCenter').value : '');
+        centerSelect.innerHTML = centers.length ? centers.map(function(center) {
+          return '<option value="' + escapeHtml(center) + '">' + escapeHtml(center) + '</option>';
+        }).join('') : '<option value="">ยังไม่มีศูนย์</option>';
+        centerSelect.value = centers.includes(currentCenter) ? currentCenter : (centers[0] || '');
+      }
+      const selectedCenter = centerSelect ? centerSelect.value : '';
+      const courseIds = Array.from(new Set(
+        monthlyPlanSessions.filter(function(session) { return !selectedCenter || String(session.center || '') === selectedCenter; }).map(function(session) { return session.courseId || ''; })
+          .concat(monthlyPlans.filter(function(plan) { return !selectedCenter || !plan.center || String(plan.center || '') === selectedCenter; }).map(function(plan) { return plan.courseId || ''; }))
+      )).filter(Boolean);
       if (courseSelect) {
         const currentCourse = courseSelect.value;
         courseSelect.innerHTML = courseIds.length ? courseIds.map(function(courseId) {
@@ -14896,6 +15156,7 @@ function receiptStatusText(status) {
     async function saveMonthlySubjectWeights() {
       const result = getElement('monthlySubjectBalanceResult');
       const monthKey = getElement('monthlySubjectBalanceMonth') ? getElement('monthlySubjectBalanceMonth').value : '';
+      const center = getElement('monthlySubjectBalanceCenter') ? getElement('monthlySubjectBalanceCenter').value : '';
       const courseId = getElement('monthlySubjectBalanceCourse') ? getElement('monthlySubjectBalanceCourse').value : '';
       const mode = 'target';
       const readResult = readMonthlySubjectWeightRows();
@@ -14906,7 +15167,7 @@ function receiptStatusText(status) {
       }
       if (!monthKey || !courseId) {
         if (result) {
-          result.textContent = 'กรุณาเลือกเดือนและคอร์สก่อนบันทึกน้ำหนักวิชา';
+          result.textContent = 'กรุณาเลือกเดือนและคอร์สก่อนบันทึกจำนวนครั้ง';
           result.style.color = '#dc2626';
         }
         return;
@@ -14915,7 +15176,7 @@ function receiptStatusText(status) {
       const targetTotal = readResult.items.reduce(function(sum, item) { return sum + Number(item.targetCount || item.weight || 0); }, 0);
       if (targetTotal > totalSessions) {
         if (result) {
-          result.textContent = 'จำนวนครั้งรวมเกินจำนวนคาบในเดือนนี้: ใส่ ' + targetTotal + ' จาก ' + totalSessions + ' คาบ';
+          result.textContent = 'จำนวนครั้งรวมเกินจำนวนคาบ Onsite ในเดือนนี้: ใส่ ' + targetTotal + ' จาก ' + totalSessions + ' คาบ';
           result.style.color = '#dc2626';
         }
         renderMonthlySubjectBalanceTargetTotal();
@@ -14932,7 +15193,7 @@ function receiptStatusText(status) {
           firebaseDocId: planId,
           monthKey: monthKey,
           monthText: formatMonthTextFromKey(monthKey),
-          center: '',
+          center: center,
           courseId: courseId,
           courseName: courseName,
           pattern: { onsitePerWeek: 0, onlinePerWeek: 0, ondemandPerWeek: 0, onsiteSlots: [], onlineSlots: [], ondemandSlots: [] },
@@ -14954,7 +15215,7 @@ function receiptStatusText(status) {
         renderMonthlyPlannerDashboardSummary();
         if (result) {
           const remaining = totalSessions - targetTotal;
-          result.textContent = 'บันทึกจำนวนครั้งเรียบร้อย' + (remaining > 0 ? ' เหลือยังไม่ได้จัดสรร ' + remaining + ' คาบ' : '') + warningText;
+          result.textContent = 'บันทึกจำนวนครั้ง Onsite เรียบร้อย' + (remaining > 0 ? ' เหลือยังไม่ได้จัดสรร ' + remaining + ' คาบ' : '') + warningText;
           result.style.color = '#16a34a';
         }
         addActivityLog('บันทึกจำนวนครั้งวิชาแผนสอน', (plan.monthText || monthKey) + ' · ' + courseName + ' · รวม ' + targetTotal + '/' + totalSessions);
@@ -14988,24 +15249,23 @@ function receiptStatusText(status) {
       const readResult = readMonthlySubjectWeightRows();
       const weights = readResult.items.length ? readResult.items : DEFAULT_MONTHLY_SUBJECT_WEIGHTS.map(function(item) { return { subject: item.subject, targetCount: 0, weight: 0 }; });
       const sessions = getMonthlySubjectBalanceSessions();
-      const plannedSessions = sessions.filter(isMonthlyBalancePotentialSession);
-      if (!sessions.length || !plannedSessions.length) {
+      const onsiteSessions = sessions.filter(isOnsiteBalancePotentialSession);
+      if (!sessions.length || !onsiteSessions.length) {
         box.innerHTML = '<div class="notice">ยังไม่มี session สำหรับเดือน/คอร์สนี้</div>';
         renderMonthlySubjectBalanceTargetTotal();
         return;
       }
       const targetTotal = weights.reduce(function(sum, item) { return sum + Number(item.targetCount || item.weight || 0); }, 0);
-      const totalWarning = targetTotal > plannedSessions.length
-        ? '<div class="notice" style="border-color:#fca5a5;">จำนวนครั้งรวมเกินจำนวนคาบในเดือนนี้ กรุณาลดจำนวนก่อนบันทึก</div>'
-        : (targetTotal < plannedSessions.length ? '<div class="notice">ยังเหลือ ' + (plannedSessions.length - targetTotal) + ' คาบที่ยังไม่ได้จัดสรรวิชา</div>' : '');
+      const totalWarning = targetTotal > onsiteSessions.length
+        ? '<div class="notice" style="border-color:#fca5a5;">จำนวนครั้งรวมเกินจำนวนคาบ Onsite ในเดือนนี้ กรุณาลดจำนวนก่อนบันทึก</div>'
+        : (targetTotal < onsiteSessions.length ? '<div class="notice">ยังเหลือคาบ Onsite ' + (onsiteSessions.length - targetTotal) + ' คาบที่ยังไม่ได้จัดสรรวิชา</div>' : '');
       const summary = calculateSubjectBalanceByType(sessions, weights, 'target');
       box.innerHTML =
         totalWarning +
-        renderMonthlyBalanceTable('Overall', summary.overall) +
-        renderMonthlyBalanceTable('Onsite', summary.onsite) +
-        renderMonthlyBalanceTable('Online', summary.online) +
-        renderMonthlyBalanceTable('On-demand', summary.ondemand) +
-        renderMonthlyBalanceTable('Makeup', summary.makeup);
+        renderMonthlyBalanceTable('Onsite Balance', summary.onsite) +
+        renderOnlineFillForOnsiteBalance(sessions, weights) +
+        renderMonthlyActualSubjectTable('Online Actual', sessions.filter(function(item) { return item.type === 'online'; })) +
+        renderMonthlyActualSubjectTable('On-demand Actual', sessions.filter(function(item) { return item.type === 'ondemand'; }));
       renderMonthlySubjectBalanceTargetTotal();
     }
 
@@ -15046,7 +15306,7 @@ function receiptStatusText(status) {
           '<td>' + escapeHtml(getMonthlyPlanDateText(item)) + '<br><span class="mini-muted">' + escapeHtml(getMonthlyPlanDayText(item.dayName || '')) + '</span></td>' +
           '<td>' + escapeHtml(getMonthlyPlanCourseName(item)) + '</td>' +
           '<td>' + escapeHtml(getMonthlyPlanTeacherName(item)) + '</td>' +
-          '<td><span class="tag">' + escapeHtml(getMonthlyPlanTypeText(item.type)) + '</span><br><strong>' + escapeHtml(item.subject || 'ยังไม่กำหนดวิชา') + '</strong><br><span class="mini-muted">' + escapeHtml(item.topic || item.objective || '') + '</span></td>' +
+          '<td><span class="tag">' + escapeHtml(getMonthlyPlanTypeText(item.type)) + '</span><br><strong>' + escapeHtml(item.subject || 'ยังไม่กำหนดวิชา') + '</strong>' + (item.type === 'oneOnOne' ? '<br><span class="mini-muted">นักเรียน: ' + escapeHtml(item.studentName || item.studentMemberId || '-') + '</span>' : '') + '<br><span class="mini-muted">' + escapeHtml(item.topic || item.objective || '') + '</span></td>' +
           '<td><span class="' + getMonthlyPlanStatusClass(status) + '">' + getMonthlyPlanStatusText(status) + '</span>' + getMonthlyPlanConflictBadge(item) + getMonthlyPlanExtraBadges(item) + '</td>' +
           '<td>' + escapeHtml(item.updatedAtText || item.createdAtText || '-') + '</td>' +
           '<td>' + actionButtons + '</td>' +
@@ -15068,6 +15328,7 @@ function receiptStatusText(status) {
       if (getElement('monthlyPlanTimeEnd')) getElement('monthlyPlanTimeEnd').value = '';
       if (getElement('monthlyPlanPublishTime')) getElement('monthlyPlanPublishTime').value = '';
       if (getElement('monthlyPlanCourse')) getElement('monthlyPlanCourse').value = '';
+      if (getElement('monthlyPlanStudent')) getElement('monthlyPlanStudent').value = '';
       if (getElement('monthlyPlanTeacher')) getElement('monthlyPlanTeacher').value = '';
       if (getElement('monthlyPlanStatus')) getElement('monthlyPlanStatus').value = 'planned';
       if (getElement('monthlyPlanCenter')) getElement('monthlyPlanCenter').value = '';
@@ -15090,6 +15351,14 @@ function receiptStatusText(status) {
       updateMonthlyPlanTeacherOptions();
       const form = getElement('admin-monthly-planner');
       if (form) form.scrollIntoView({ behavior: 'smooth' });
+    }
+
+    function openOneOnOneMonthlyPlanSessionForm() {
+      openManualMonthlyPlanSessionForm();
+      if (getElement('monthlyPlanType')) getElement('monthlyPlanType').value = 'oneOnOne';
+      if (getElement('monthlyPlanStatus')) getElement('monthlyPlanStatus').value = 'confirmed';
+      updateMonthlyPlanTypeFields();
+      updateMonthlyPlanTeacherOptions();
     }
 
     function showMonthlyPlanSaveError(result, error) {
@@ -15132,18 +15401,35 @@ function receiptStatusText(status) {
         return;
       }
 
-      if (['onsite','online','makeup'].includes(type)) {
+      if (['onsite','online','makeup','oneOnOne'].includes(type)) {
         if (!timeStart || !timeEnd || parseTimeToMinutes(timeStart) === null || parseTimeToMinutes(timeEnd) === null || parseTimeToMinutes(timeStart) >= parseTimeToMinutes(timeEnd)) {
           if (result) {
-            result.textContent = 'กรุณาระบุเวลาเริ่มและเวลาจบให้ถูกต้องสำหรับ onsite/online/makeup';
+            result.textContent = 'กรุณาระบุเวลาเริ่มและเวลาจบให้ถูกต้องสำหรับ onsite/online/makeup/สอนเดี่ยว';
             result.style.color = '#dc2626';
           }
           return;
         }
       }
 
+      if (type === 'oneOnOne' && !sessionDraft.studentId) {
+        if (result) {
+          result.textContent = 'กรุณาเลือกนักเรียนสำหรับคาบสอนเดี่ยว 1:1';
+          result.style.color = '#dc2626';
+        }
+        return;
+      }
+
       const selectedCourse = courses.find(function(course) { return String(course.id || course.firebaseDocId || '') === String(courseId); });
       const selectedTeacher = teachers.find(function(teacher) { return String(teacher.id || teacher.firebaseDocId || '') === String(teacherId); });
+      const subjectSetting = getMonthlySubjectSetting(sessionDraft, subject);
+      if (selectedTeacher && !canTeacherTeachMode(selectedTeacher, type, subjectSetting)) {
+        if (result) {
+          result.textContent = 'ครูคนนี้ไม่ได้ตั้งค่าว่าสอนได้กับรูปแบบคาบนี้ กรุณาเลือกครูใหม่';
+          result.style.color = '#dc2626';
+        }
+        updateMonthlyPlanTeacherOptions();
+        return;
+      }
       const nowText = new Date().toLocaleString('th-TH');
       const conflicts = findTeacherConflicts(sessionDraft);
       if (conflicts.length) {
@@ -15172,6 +15458,9 @@ function receiptStatusText(status) {
             teacherUid: selectedTeacher ? (selectedTeacher.teacherUid || selectedTeacher.authUid || '') : item.teacherUid || '',
             teacherAuthUid: selectedTeacher ? (selectedTeacher.authUid || selectedTeacher.teacherUid || '') : item.teacherAuthUid || '',
             teacherName: selectedTeacher ? (selectedTeacher.name || selectedTeacher.displayName || selectedTeacher.email || '') : item.teacherName || '',
+            studentId: sessionDraft.studentId || '',
+            studentName: sessionDraft.studentName || '',
+            studentMemberId: sessionDraft.studentMemberId || '',
             subject: subject,
             topic: sessionDraft.topic || item.topic || '',
             objective: sessionDraft.objective || item.objective || '',
@@ -15228,6 +15517,8 @@ function receiptStatusText(status) {
       if (getElement('monthlyPlanMonth')) getElement('monthlyPlanMonth').value = item.month || '';
       if (getElement('monthlyPlanDate')) getElement('monthlyPlanDate').value = item.sessionDate || '';
       if (getElement('monthlyPlanType')) getElement('monthlyPlanType').value = item.type || 'onsite';
+      updateMonthlyPlanTypeFields();
+      if (getElement('monthlyPlanStudent')) getElement('monthlyPlanStudent').value = item.studentId || '';
       if (getElement('monthlyPlanTimeStart')) getElement('monthlyPlanTimeStart').value = item.timeStart || item.sessionTime || item.publishTime || '';
       if (getElement('monthlyPlanTimeEnd')) getElement('monthlyPlanTimeEnd').value = item.timeEnd || '';
       if (getElement('monthlyPlanPublishTime')) getElement('monthlyPlanPublishTime').value = item.publishTime || '';
@@ -15249,7 +15540,6 @@ function receiptStatusText(status) {
         getElement('monthlyPlanSaveResult').textContent = 'กำลังแก้ไขแผนสอน';
         getElement('monthlyPlanSaveResult').style.color = '#0f4cbd';
       }
-      updateMonthlyPlanTypeFields();
       updateMonthlyPlanConflictPreview();
       const form = getElement('admin-monthly-planner');
       if (form) form.scrollIntoView({ behavior: 'smooth' });
