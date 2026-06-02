@@ -907,6 +907,10 @@
                   <button class="btn btn-dark" type="button" onclick="showTeacherTab('teacher-students')">ดูรายชื่อนักเรียน</button>
                 </div>
               </div>
+              <div id="teacherAdminShortcutCard" class="card hidden">
+                <h3>ฟังก์ชันแอดมินที่ได้รับสิทธิ์</h3>
+                <div id="teacherAdminShortcutList" class="test-actions"></div>
+              </div>
               <div class="card">
                 <h3>วันนี้มีสอนระดับชั้นใดบ้าง</h3>
                 <div id="todayTeachingList">
@@ -4092,6 +4096,29 @@
       return isSuperAdmin ? 'SuperAdmin' : 'Teacher';
     }
 
+    function getPrimaryAppRole(record) {
+      const source = record || getActiveAccessRecord() || {};
+      if (isStudentAccount(source)) return 'Student';
+      if (source.appRole) return normalizeAppRole(source.appRole);
+      if (source.role && ROLE_DEFINITIONS[source.role]) return normalizeAppRole(source.role);
+      return getCurrentAppRole();
+    }
+
+    function isPrimaryTeacherOnlyRole(record) {
+      const role = getPrimaryAppRole(record);
+      return role === 'Teacher' || role === 'Assistant';
+    }
+
+    function isPrimaryAdminRole(record) {
+      return isAdminRole(getPrimaryAppRole(record));
+    }
+
+    function hasAnyAdminPermission(record) {
+      return getEffectivePermissions(record).some(function(permission) {
+        return String(permission || '').indexOf('admin.') === 0;
+      });
+    }
+
     function getEffectivePermissions(record) {
       const source = record || getActiveAccessRecord() || {};
       if (isStudentAccount(source) || String(source.accountType || '').trim().toLowerCase() === 'student') {
@@ -4324,8 +4351,8 @@
         if (match && canOpenTeacherTab(match[1])) link.classList.remove('role-hidden');
       });
 
-      if (getElement('superAdminTeacherLink')) getElement('superAdminTeacherLink').classList.toggle('hidden', !hasPermission('teacher.dashboard'));
-      if (getElement('superAdminAdminLink')) getElement('superAdminAdminLink').classList.toggle('hidden', !Object.keys(ADMIN_TAB_PERMISSIONS).some(canOpenAdminTab));
+      applyStaffNavigationVisibility();
+      renderTeacherAdminShortcuts();
     }
 
     function getDefaultCourseFeaturesByAccess(access) {
@@ -4696,13 +4723,96 @@
       if (adminSidebarTitle) adminSidebarTitle.textContent = 'admin Ideaclub';
     }
 
+    function applyStaffNavigationVisibility() {
+      const activeRecord = getActiveAccessRecord();
+      const isStudent = isCurrentStudentSession();
+      const teacherLink = getElement('superAdminTeacherLink');
+      const adminLink = getElement('superAdminAdminLink');
+      const studentLink = getElement('superAdminStudentLink');
+      if (studentLink) studentLink.classList.add('hidden');
+      if (teacherLink) {
+        teacherLink.classList.toggle('hidden', isStudent || !hasPermission('teacher.dashboard'));
+      }
+      if (adminLink) {
+        const canOpenAnyAdminTab = Object.keys(ADMIN_TAB_PERMISSIONS).some(canOpenAdminTab);
+        adminLink.classList.toggle('hidden', isStudent || !isPrimaryAdminRole(activeRecord) || !canOpenAnyAdminTab);
+      }
+      applyIdeaclubPageLabels();
+    }
+
+    const TEACHER_ADMIN_SHORTCUTS = [
+      { tabId: 'admin-students', permission: 'admin.students', label: 'นักเรียน' },
+      { tabId: 'admin-courses', permission: 'admin.courses', label: 'คอร์สเรียน' },
+      { tabId: 'admin-online-class', permission: 'admin.online', label: 'ห้องเรียน Online' },
+      { tabId: 'admin-video', permission: 'admin.ondemand', label: 'คลิป On-demand' },
+      { tabId: 'admin-payment', permission: 'admin.finance', label: 'การเงิน' },
+      { tabId: 'admin-receipts', permission: 'admin.receipts', label: 'ใบเสร็จ' },
+      { tabId: 'admin-monthly-test', permission: 'admin.exams', label: 'สอบ / คะแนน' },
+      { tabId: 'admin-monthly-planner', permission: 'admin.monthlyPlanner', label: 'แผนสอนรายเดือน' },
+      { tabId: 'admin-announcements', permission: 'admin.announcements', label: 'ประกาศ' },
+      { tabId: 'admin-settings', permission: 'admin.settings', label: 'ตั้งค่าระบบ' },
+      { tabId: 'admin-activity-log', permission: 'admin.logs', label: 'ประวัติการแก้ไข' }
+    ];
+
+    function getTeacherAdminShortcuts() {
+      const activeRecord = getActiveAccessRecord();
+      if (!isPrimaryTeacherOnlyRole(activeRecord) || !hasAnyAdminPermission(activeRecord)) return [];
+      return TEACHER_ADMIN_SHORTCUTS.filter(function(item) {
+        return hasPermission(item.permission);
+      });
+    }
+
+    function renderTeacherAdminShortcuts() {
+      const card = getElement('teacherAdminShortcutCard');
+      const list = getElement('teacherAdminShortcutList');
+      if (!card || !list) return;
+      const shortcuts = getTeacherAdminShortcuts();
+      card.classList.toggle('hidden', !shortcuts.length);
+      list.innerHTML = shortcuts.map(function(item) {
+        return '<button class="btn btn-blue" type="button" onclick="openTeacherAdminShortcut(\'' + jsArg(item.tabId) + '\')">' + item.label + '</button>';
+      }).join('');
+    }
+
+    function setTeacherAdminReturnVisible(visible) {
+      const sidebar = document.querySelector('#adminInterface .admin-sidebar');
+      if (!sidebar) return;
+      let link = document.getElementById('teacherAdminReturnLink');
+      if (!link) {
+        link = document.createElement('a');
+        link.id = 'teacherAdminReturnLink';
+        link.innerHTML = '<span class="menu-icon">↩</span>กลับหน้าครู';
+        link.onclick = returnToTeacherPanel;
+        sidebar.insertBefore(link, sidebar.firstElementChild ? sidebar.firstElementChild.nextSibling : null);
+      }
+      link.classList.toggle('hidden', !visible);
+    }
+
+    function openTeacherAdminShortcut(tabId) {
+      if (!isPrimaryTeacherOnlyRole(getActiveAccessRecord()) || !canOpenAdminTab(tabId)) {
+        alert('บัญชีนี้ไม่มีสิทธิ์เข้าเมนูนี้');
+        return;
+      }
+      hideAllMain();
+      getElement('adminInterface').classList.remove('hidden');
+      getElement('mainMenu').classList.add('hidden');
+      getElement('adminMenu').classList.add('hidden');
+      getElement('profileMenu').classList.remove('hidden');
+      getElement('profilePanel').classList.add('hidden');
+      refreshProfileBox();
+      setTeacherAdminReturnVisible(true);
+      applyRoleAccessToUI();
+      showAdminTab(tabId);
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+
+    function returnToTeacherPanel() {
+      setTeacherAdminReturnVisible(false);
+      showTeacherPanel(currentTeacher || getActiveAccessRecord());
+    }
+
     function setSuperAdminMode(enabled) {
       isSuperAdmin = enabled;
-      ['superAdminStudentLink', 'superAdminTeacherLink', 'superAdminAdminLink'].forEach(function(id) {
-        const item = getElement(id);
-        if (item) item.classList.toggle('hidden', !enabled);
-      });
-      applyIdeaclubPageLabels();
+      applyStaffNavigationVisibility();
     }
 
     async function createAuthUserFromAdmin(email, password) {
@@ -5377,11 +5487,13 @@
             loginId: displayLoginId
           });
 
-          const isAdminProfile = accountType === 'staff' || accountType === 'admin' || userRole === 'admin' || isAdminRole(userRole) || isAdminRole(activeAppRole);
+          const primaryStaffRole = getPrimaryAppRole(firebaseUserProfile);
+          const isAdminProfile = isAdminRole(primaryStaffRole);
           if (isAdminProfile) {
             console.log('admin-route-execute', {
               userRole: userRole,
-              appRole: activeAppRole
+              appRole: activeAppRole,
+              primaryStaffRole: primaryStaffRole
             });
             const linkedTeacherId = String(firebaseUserProfile.linkedTeacherId || firebaseUserProfile.teacherDocId || firebaseUserProfile.teacherId || '').trim();
             currentTeacher = teachers.find(function(t) {
@@ -5395,11 +5507,12 @@
             return;
           }
 
-          const isTeacherProfile = accountType === 'teacher' || userRole === 'teacher' || isTeacherRole(userRole) || isTeacherRole(activeAppRole);
+          const isTeacherProfile = isTeacherRole(primaryStaffRole);
           if (isTeacherProfile) {
             console.log('teacher-route-execute', {
               userRole: userRole,
-              appRole: activeAppRole
+              appRole: activeAppRole,
+              primaryStaffRole: primaryStaffRole
             });
             const linkedTeacherId = String(firebaseUserProfile.linkedTeacherId || firebaseUserProfile.teacherDocId || '').trim();
             const profileTeacherId = String(firebaseUserProfile.teacherId || '').trim();
@@ -5944,20 +6057,8 @@
     }
 
     function showStudentPanelForAdmin() {
-      if (currentStudent || isStudentAccount(getActiveAccessRecord())) {
-        alert('บัญชีนักเรียนไม่มีสิทธิ์เข้าหน้านี้');
-        return;
-      }
-      currentStudent = null;
-      currentTeacher = null;
-      hideAllMain();
-      getElement('publicInterface').classList.remove('hidden');
-      getElement('profileMenu').classList.remove('hidden');
-      getElement('mainMenu').classList.add('hidden');
-      hideAuthSections();
-      showStudentAreas();
-      refreshProfileBox();
-      getElement('studentDashboard').scrollIntoView({ behavior: 'smooth' });
+      alert('ปิดทางเข้าใช้งานหน้านักเรียนจากบัญชี staff/admin แล้ว');
+      applyStaffNavigationVisibility();
     }
 
     function showTeacherPanelForAdmin() {
@@ -6002,6 +6103,7 @@
       }
       currentStudent = null;
       currentTeacher = teacher || null;
+      setTeacherAdminReturnVisible(false);
       hideAllMain();
       getElement('teacherInterface').classList.remove('hidden');
       getElement('mainMenu').classList.add('hidden');
@@ -6595,6 +6697,10 @@
         alert('บัญชีนักเรียนไม่มีสิทธิ์เข้าหน้านี้');
         return;
       }
+      if ((currentTeacher || firebaseUserProfile) && isPrimaryTeacherOnlyRole(getActiveAccessRecord())) {
+        alert('บัญชีครูเข้าได้เฉพาะหน้าครู หากได้รับสิทธิ์แอดมินบางส่วนให้ใช้ shortcut ในหน้าครู');
+        return;
+      }
       if (!skipCheck) {
         if (PRODUCTION_MODE) {
           if (!firebaseUser || !firebaseUserProfile || firebaseUserProfile.role !== 'admin') {
@@ -6616,6 +6722,7 @@
       }
 
       hideAllMain();
+      setTeacherAdminReturnVisible(false);
       if (firebaseUserProfile && firebaseUserProfile.role === 'admin') {
         currentStudent = null;
         currentTeacher = null;
@@ -17549,26 +17656,6 @@ function receiptStatusText(status) {
       ensureElement(tab, 'paymentOwnerDiagnosticPanel', '<div id="paymentOwnerDiagnosticPanel" class="form-box"><h3>ตรวจข้อมูลรายการชำระเงิน</h3><p style="color:#6b7280; margin-bottom:14px;">OCR ยังไม่เปิดใช้งาน เครื่องมือนี้ใช้ตรวจ payment ที่ขาดข้อมูลนักเรียนหรือยอดเงินเท่านั้น</p><button class="btn btn-blue" type="button" onclick="diagnosePaymentOwnerFields()">ตรวจข้อมูล payment</button></div>', 'prepend');
     }
 
-    function previewStudentAsAdmin(id) {
-      const student = (students || []).find(function(s) { return String(s.id) === String(id); });
-      if (!student) return;
-      currentStudent = student;
-      hideAllMain();
-      getElement('publicInterface').classList.remove('hidden');
-      getElement('mainMenu').classList.add('hidden');
-      getElement('profileMenu').classList.remove('hidden');
-      getElement('profileName').textContent = 'ดูแทนนักเรียน: ' + (student.nickname || student.name || 'นักเรียน');
-      hideAuthSections();
-      showStudentAreas();
-      updateStudentCourseDisplay();
-      renderStudentExamFilters();
-      renderStudentReceipts();
-      setSuperAdminMode(true);
-      const hero = getElement('studentDashboard');
-      if (hero) hero.scrollIntoView({ behavior:'smooth' });
-      alert('กำลังดูหน้าระบบแบบนักเรียนคนนี้ หากต้องการกลับหลังบ้าน กด หลังบ้าน ด้านบน');
-    }
-
     function editStudentInternalNote(id) {
       const student = (students || []).find(function(s) { return String(s.id) === String(id); });
       if (!student) return;
@@ -17977,6 +18064,7 @@ function receiptStatusText(status) {
     }
 
     function applyAdminRoleVisibility() {
+      if (!isPrimaryAdminRole(getActiveAccessRecord())) return;
       const level = getAdminRoleLevel();
       const allLinks = document.querySelectorAll('.admin-sidebar a');
       allLinks.forEach(function(link) { link.classList.remove('role-hidden'); });
@@ -18057,7 +18145,7 @@ function receiptStatusText(status) {
         const cell = row.children[8];
         if (!cell || cell.getAttribute('data-final-tools') === '1') return;
         cell.setAttribute('data-final-tools', '1');
-        cell.innerHTML += '<button class="btn btn-green" type="button" onclick="previewStudentAsAdmin(\'' + jsArg(student.id) + '\')">ดูแบบนักเรียน</button><button class="btn btn-dark" type="button" onclick="editStudentInternalNote(\'' + jsArg(student.id) + '\')">หมายเหตุ</button>';
+        cell.innerHTML += '<button class="btn btn-dark" type="button" onclick="editStudentInternalNote(\'' + jsArg(student.id) + '\')">หมายเหตุ</button>';
       });
     };
 
@@ -18068,7 +18156,7 @@ function receiptStatusText(status) {
       if (!student) return;
       const body = getElement('editBubbleBody');
       if (!body || getElement('studentInternalNoteInView')) return;
-      body.innerHTML += '<br><div id="studentInternalNoteInView" class="card" style="box-shadow:none; border:1px solid #e5e7eb;"><h3>หมายเหตุภายใน Admin</h3><p>' + (student.internalNote || 'ยังไม่มีหมายเหตุ') + '</p><div class="test-actions"><button class="btn btn-green" type="button" onclick="previewStudentAsAdmin(\'' + jsArg(student.id) + '\')">ดูหน้าระบบแบบนักเรียนคนนี้</button><button class="btn btn-dark" type="button" onclick="editStudentInternalNote(\'' + jsArg(student.id) + '\')">แก้ไขหมายเหตุ</button></div></div>';
+      body.innerHTML += '<br><div id="studentInternalNoteInView" class="card" style="box-shadow:none; border:1px solid #e5e7eb;"><h3>หมายเหตุภายใน Admin</h3><p>' + (student.internalNote || 'ยังไม่มีหมายเหตุ') + '</p><div class="test-actions"><button class="btn btn-dark" type="button" onclick="editStudentInternalNote(\'' + jsArg(student.id) + '\')">แก้ไขหมายเหตุ</button></div></div>';
     };
 
     const originalDeleteStudentFinal = deleteStudent;
