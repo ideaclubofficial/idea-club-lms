@@ -404,6 +404,10 @@
           <p>2. เลือกคอร์สที่ต้องการเรียน</p>
           <p>3. รอเจ้าหน้าที่อนุมัติคอร์ส</p>
         </div>
+        <div class="notice" style="margin-bottom:18px; background:#fef3c7; color:#92400e;">
+          <strong>หมายเหตุ</strong>
+          <p>กรุณากรอกข้อมูลทุกช่องก่อนสมัคร หากไม่มีข้อมูลในช่องใดให้ใส่ "-" แทน</p>
+        </div>
 
         <div class="register-form-stack">
           <div class="register-field-group">
@@ -427,7 +431,7 @@
               </div>
               <div>
                 <label>โรงเรียน</label>
-                <input id="registerSchool" type="text" placeholder="ชื่อโรงเรียน" />
+                <input id="registerSchool" type="text" placeholder="ชื่อโรงเรียน หรือ - ถ้าไม่มี" />
               </div>
             </div>
           </div>
@@ -445,11 +449,11 @@
               </div>
               <div>
                 <label>LINE ID</label>
-                <input id="registerLineId" type="text" placeholder="เช่น idea_parent" />
+                <input id="registerLineId" type="text" placeholder="เช่น idea_parent หรือ - ถ้าไม่มี" />
               </div>
               <div>
                 <label>อีเมล</label>
-                <input id="registerEmail" type="email" placeholder="ถ้ามี" />
+                <input id="registerEmail" type="email" placeholder="ถ้ามี หรือ - ถ้าไม่มี" />
               </div>
               <div>
                 <label>ศูนย์ที่สนใจ</label>
@@ -1307,6 +1311,43 @@
                     <option value="ลาออก">ลาออก</option>
                     <option value="จบคอร์ส">จบคอร์ส</option>
                   </select>
+                </div>
+              </div>
+
+              <div class="notice" style="margin-bottom:14px;">
+                <strong>ข้อมูลเรียนเดี่ยว 1:1</strong>
+                <p>บันทึกวันประจำสัปดาห์ เวลา และครูไว้ในข้อมูลนักเรียน แล้วค่อยส่งไปลงวันที่จริงในหน้าจัดตาราง</p>
+              </div>
+              <div class="form-row">
+                <div>
+                  <label>ประเภทการเรียน</label>
+                  <select id="adminStudentLearningType" onchange="updateAdminStudentPrivateLessonFields()">
+                    <option value="group">group</option>
+                    <option value="private">private</option>
+                    <option value="both">both</option>
+                  </select>
+                </div>
+                <div>
+                  <label>วันเรียนเดี่ยวประจำสัปดาห์</label>
+                  <select id="adminStudentPrivateLessonDay"></select>
+                </div>
+                <div>
+                  <label>เวลาเริ่ม 1:1</label>
+                  <input id="adminStudentPrivateLessonTimeStart" type="time" />
+                </div>
+                <div>
+                  <label>เวลาจบ 1:1</label>
+                  <input id="adminStudentPrivateLessonTimeEnd" type="time" />
+                </div>
+                <div>
+                  <label>ครู 1:1</label>
+                  <select id="adminStudentPrivateLessonTeacher"></select>
+                </div>
+              </div>
+              <div class="form-row">
+                <div>
+                  <label>หมายเหตุเรียนเดี่ยว</label>
+                  <textarea id="adminStudentPrivateLessonNote" placeholder="เช่น เน้นคณิตศาสตร์ / ต้องการครูคนเดิม / เวลาโดยประมาณ"></textarea>
                 </div>
               </div>
 
@@ -5739,8 +5780,8 @@
       const passwordConfirm = getElement('registerPasswordConfirm') ? getElement('registerPasswordConfirm').value.trim() : '';
       const result = getElement('registerResult');
 
-      if (!parentName || !studentName || !nickname || !phone || !registerGrade || !password || !passwordConfirm) {
-        result.textContent = 'กรุณากรอกข้อมูลสำคัญให้ครบถ้วน';
+      if (!parentName || !studentName || !nickname || !phone || !school || !lineId || !contactEmail || !registerGrade || !registerLocation || !password || !passwordConfirm) {
+        result.textContent = 'กรุณากรอกข้อมูลทุกช่องให้ครบถ้วน หากไม่มีข้อมูลให้ใส่ "-" แทน';
         result.style.color = '#dc2626';
         return;
       }
@@ -7083,6 +7124,10 @@
       renderPendingCourseApprovalList();
       tbody.innerHTML = pageItems.length ? pageItems.map(function(s, i) {
         const learningStatus = s.learningStatus || s.status || 'เรียนอยู่';
+        const learningType = normalizeStudentLearningType(s.learningType);
+        const privateLessonText = isPrivateLessonStudentEnabled(s)
+          ? '<br><span class="mini-muted">1:1 ' + (getMonthlyPlanDayText(s.privateLessonDay || '') || '-') + ' ' + ((s.privateLessonTimeStart || '-') + '-' + (s.privateLessonTimeEnd || '-')) + '</span>'
+          : '';
         const learningClass = learningStatus === 'เรียนอยู่' || learningStatus === 'จบคอร์ส' ? 'status-paid' : learningStatus === 'พักเรียน' ? 'status-waiting' : 'status-absent';
         const courseStatus = s.courseStatus || 'ยังไม่ได้สมัครคอร์ส';
         const paymentStatus = s.paymentStatus || 'ยังไม่ได้สมัครคอร์ส';
@@ -7103,7 +7148,7 @@
           '<td>' + (s.course || '-') + '</td>' +
           '<td><span class="' + courseStatusClass + '">' + courseStatus + '</span></td>' +
           '<td><span class="' + paymentClass + '">' + paymentStatus + '</span></td>' +
-          '<td><span class="' + learningClass + '">' + learningStatus + '</span></td>' +
+          '<td><span class="' + learningClass + '">' + learningStatus + '</span><br><span class="mini-muted">' + learningType + '</span>' + privateLessonText + '</td>' +
           '<td class="row-actions-cell">' + renderAdminStudentActions(s) + '</td>' +
         '</tr>';
       }).join('') : '<tr><td colspan="16">ยังไม่มีนักเรียนในเงื่อนไขที่เลือก</td></tr>';
@@ -7125,6 +7170,8 @@
       const courseStatusInput = getElement('adminStudentCourseStatus') ? getElement('adminStudentCourseStatus').value : '';
       const paymentStatusInput = getElement('adminStudentPaymentStatus') ? getElement('adminStudentPaymentStatus').value : '';
       const learningStatus = getElement('adminStudentLearningStatus') ? getElement('adminStudentLearningStatus').value : 'เรียนอยู่';
+      const learningType = normalizeStudentLearningType(getElement('adminStudentLearningType') ? getElement('adminStudentLearningType').value : 'group');
+      const privateLessonTeacherId = getElement('adminStudentPrivateLessonTeacher') ? getElement('adminStudentPrivateLessonTeacher').value : '';
       const selectedCourse = courses.find(function(c) { return String(c.id) === String(courseValue); });
       const course = selectedCourse ? selectedCourse.name : 'ยังไม่ได้สมัครคอร์ส';
       const result = getElement('studentSaveResult');
@@ -7163,6 +7210,14 @@
           s.paymentStatus = selectedCourse ? (paymentStatusInput || s.paymentStatus || 'รอชำระเงิน') : 'ยังไม่ได้สมัครคอร์ส';
           s.status = learningStatus;
           s.learningStatus = learningStatus;
+          s.learningType = learningType;
+          s.privateLessonEnabled = isLearningTypePrivateEnabled(learningType);
+          s.privateLessonDay = getElement('adminStudentPrivateLessonDay') ? getElement('adminStudentPrivateLessonDay').value : '';
+          s.privateLessonTimeStart = getElement('adminStudentPrivateLessonTimeStart') ? getElement('adminStudentPrivateLessonTimeStart').value : '';
+          s.privateLessonTimeEnd = getElement('adminStudentPrivateLessonTimeEnd') ? getElement('adminStudentPrivateLessonTimeEnd').value : '';
+          s.privateLessonTeacherId = privateLessonTeacherId;
+          s.privateLessonTeacherName = getPrivateLessonTeacherNameById(privateLessonTeacherId);
+          s.privateLessonNote = getElement('adminStudentPrivateLessonNote') ? getElement('adminStudentPrivateLessonNote').value.trim() : '';
           s.role = 'student';
           s.appRole = 'student';
           s.accountType = 'student';
@@ -7241,8 +7296,16 @@
             courseAccess: selectedCourse ? selectedCourse.access : '-',
             courseStatus: selectedCourse ? (courseStatusInput || 'อนุมัติแล้ว') : 'ยังไม่ได้สมัครคอร์ส',
             paymentStatus: selectedCourse ? (paymentStatusInput || 'รอชำระเงิน') : 'ยังไม่ได้สมัครคอร์ส',
-            status: 'active',
-            learningStatus: 'เรียนอยู่',
+            status: learningStatus,
+            learningStatus: learningStatus,
+            learningType: learningType,
+            privateLessonEnabled: isLearningTypePrivateEnabled(learningType),
+            privateLessonDay: getElement('adminStudentPrivateLessonDay') ? getElement('adminStudentPrivateLessonDay').value : '',
+            privateLessonTimeStart: getElement('adminStudentPrivateLessonTimeStart') ? getElement('adminStudentPrivateLessonTimeStart').value : '',
+            privateLessonTimeEnd: getElement('adminStudentPrivateLessonTimeEnd') ? getElement('adminStudentPrivateLessonTimeEnd').value : '',
+            privateLessonTeacherId: privateLessonTeacherId,
+            privateLessonTeacherName: getPrivateLessonTeacherNameById(privateLessonTeacherId),
+            privateLessonNote: getElement('adminStudentPrivateLessonNote') ? getElement('adminStudentPrivateLessonNote').value.trim() : '',
             role: 'student',
             appRole: 'student',
             accountType: 'student',
@@ -7388,6 +7451,19 @@
           '</select></div>' +
           '<div><label>สถานะการเรียน</label><select id="bubbleStudentLearningStatus"><option value="เรียนอยู่"' + ((s.learningStatus || s.status || 'เรียนอยู่') === 'เรียนอยู่' ? ' selected' : '') + '>เรียนอยู่</option><option value="พักเรียน"' + ((s.learningStatus || s.status) === 'พักเรียน' ? ' selected' : '') + '>พักเรียน</option><option value="ลาออก"' + ((s.learningStatus || s.status) === 'ลาออก' ? ' selected' : '') + '>ลาออก</option><option value="จบคอร์ส"' + ((s.learningStatus || s.status) === 'จบคอร์ส' ? ' selected' : '') + '>จบคอร์ส</option></select></div>' +
         '</div>' +
+        '<div class="notice"><strong>ข้อมูลเรียนเดี่ยว 1:1</strong><p>เลือกวันประจำสัปดาห์ เวลา และครู แล้วค่อยส่งไปลงวันที่จริงในหน้าจัดตาราง</p></div>' +
+        '<div class="form-row">' +
+          '<div><label>ประเภทการเรียน</label><select id="bubbleStudentLearningType" onchange="updateBubblePrivateLessonFields()">' +
+            '<option value="group"' + (normalizeStudentLearningType(s.learningType) === 'group' ? ' selected' : '') + '>group</option>' +
+            '<option value="private"' + (normalizeStudentLearningType(s.learningType) === 'private' ? ' selected' : '') + '>private</option>' +
+            '<option value="both"' + (normalizeStudentLearningType(s.learningType) === 'both' ? ' selected' : '') + '>both</option>' +
+          '</select></div>' +
+          '<div><label>วันเรียนเดี่ยวประจำสัปดาห์</label><select id="bubbleStudentPrivateLessonDay">' + privateLessonDayOptionsHtml(s.privateLessonDay || '') + '</select></div>' +
+          '<div><label>เวลาเริ่ม 1:1</label><input id="bubbleStudentPrivateLessonTimeStart" type="time" value="' + (s.privateLessonTimeStart || '') + '"></div>' +
+          '<div><label>เวลาจบ 1:1</label><input id="bubbleStudentPrivateLessonTimeEnd" type="time" value="' + (s.privateLessonTimeEnd || '') + '"></div>' +
+          '<div><label>ครู 1:1</label><select id="bubbleStudentPrivateLessonTeacher">' + privateLessonTeacherOptionsHtml(s.privateLessonTeacherId || '') + '</select></div>' +
+        '</div>' +
+        '<div class="form-row"><div><label>หมายเหตุเรียนเดี่ยว</label><textarea id="bubbleStudentPrivateLessonNote">' + escapeHtml(s.privateLessonNote || '') + '</textarea></div></div>' +
         '<div class="notice"><strong>หมายเหตุ</strong><p>ถ้าเปลี่ยนเบอร์เข้าสู่ระบบ อาจต้อง Sync Firebase Auth เพิ่ม จึงควรใช้ปุ่ม Reset รหัสผ่านแยกต่างหาก</p></div>',
         async function() {
           const name = bubbleValue('bubbleStudentName');
@@ -7402,6 +7478,8 @@
           const selectedCourseId = bubbleSelectValue('bubbleStudentCourseId');
           const selectedCourse = courses.find(function(c) { return String(c.id) === String(selectedCourseId); });
           const finalGrade = selectedCourse ? selectedCourse.grade : bubbleSelectValue('bubbleStudentGrade');
+          const learningType = normalizeStudentLearningType(bubbleSelectValue('bubbleStudentLearningType'));
+          const privateLessonTeacherId = bubbleSelectValue('bubbleStudentPrivateLessonTeacher');
           Object.assign(s, {
             name: name,
             nickname: nickname,
@@ -7419,6 +7497,14 @@
             paymentStatus: selectedCourse ? bubbleSelectValue('bubbleStudentPaymentStatus') : 'ยังไม่ได้สมัครคอร์ส',
             learningStatus: bubbleSelectValue('bubbleStudentLearningStatus'),
             status: bubbleSelectValue('bubbleStudentLearningStatus'),
+            learningType: learningType,
+            privateLessonEnabled: isLearningTypePrivateEnabled(learningType),
+            privateLessonDay: bubbleSelectValue('bubbleStudentPrivateLessonDay'),
+            privateLessonTimeStart: bubbleValue('bubbleStudentPrivateLessonTimeStart'),
+            privateLessonTimeEnd: bubbleValue('bubbleStudentPrivateLessonTimeEnd'),
+            privateLessonTeacherId: privateLessonTeacherId,
+            privateLessonTeacherName: getPrivateLessonTeacherNameById(privateLessonTeacherId),
+            privateLessonNote: bubbleValue('bubbleStudentPrivateLessonNote'),
             role: 'student'
           });
           try {
@@ -7453,6 +7539,7 @@
           }
         }
       );
+      updateBubblePrivateLessonFields();
     }
 
     
@@ -7536,8 +7623,15 @@
       if (getElement('adminStudentCourseStatus')) getElement('adminStudentCourseStatus').value = 'ยังไม่ได้สมัครคอร์ส';
       if (getElement('adminStudentPaymentStatus')) getElement('adminStudentPaymentStatus').value = 'ยังไม่ได้สมัครคอร์ส';
       if (getElement('adminStudentLearningStatus')) getElement('adminStudentLearningStatus').value = 'เรียนอยู่';
+      if (getElement('adminStudentLearningType')) getElement('adminStudentLearningType').value = 'group';
+      if (getElement('adminStudentPrivateLessonDay')) getElement('adminStudentPrivateLessonDay').value = '';
+      if (getElement('adminStudentPrivateLessonTimeStart')) getElement('adminStudentPrivateLessonTimeStart').value = '';
+      if (getElement('adminStudentPrivateLessonTimeEnd')) getElement('adminStudentPrivateLessonTimeEnd').value = '';
+      if (getElement('adminStudentPrivateLessonTeacher')) getElement('adminStudentPrivateLessonTeacher').value = '';
+      if (getElement('adminStudentPrivateLessonNote')) getElement('adminStudentPrivateLessonNote').value = '';
       renderAdminStudentCourseOptions();
       getElement('adminStudentCourse').value = '';
+      updateAdminStudentPrivateLessonFields();
       updateMemberIdPreview();
       if (getElement('studentLoginInfoBox') && clearMessage !== false) getElement('studentLoginInfoBox').classList.add('hidden');
       if (clearMessage !== false) getElement('studentSaveResult').textContent = '';
@@ -8099,6 +8193,60 @@
       return options.join('');
     }
 
+    function privateLessonDayOptionsHtml(selectedValue) {
+      const selected = String(selectedValue || '');
+      const options = ['<option value="">เลือกวันประจำสัปดาห์</option>'];
+      MONTHLY_PLAN_DAYS.forEach(function(day) {
+        options.push('<option value="' + day.key + '"' + (day.key === selected ? ' selected' : '') + '>' + day.text + '</option>');
+      });
+      return options.join('');
+    }
+
+    function privateLessonTeacherOptionsHtml(selectedValue) {
+      const selected = String(selectedValue || '');
+      const activeTeachers = teachers.filter(function(teacher) {
+        return teacher && teacher.deleted !== true && teacher.status !== 'inactive' && teacher.status !== 'archived';
+      });
+      return '<option value="">เลือกครู</option>' + activeTeachers.map(function(teacher) {
+        const id = String(teacher.id || teacher.firebaseDocId || '');
+        const label = teacher.name || teacher.displayName || teacher.email || id;
+        return '<option value="' + escapeHtml(id) + '"' + (id === selected ? ' selected' : '') + '>' + escapeHtml(label) + '</option>';
+      }).join('');
+    }
+
+    function getPrivateLessonTeacherNameById(teacherId) {
+      const teacher = teachers.find(function(item) {
+        return String(item.id || item.firebaseDocId || '') === String(teacherId || '');
+      });
+      return teacher ? (teacher.name || teacher.displayName || teacher.email || '') : '';
+    }
+
+    function normalizeStudentLearningType(value) {
+      const type = String(value || 'group').trim().toLowerCase();
+      return ['group','private','both'].includes(type) ? type : 'group';
+    }
+
+    function isLearningTypePrivateEnabled(value) {
+      const type = normalizeStudentLearningType(value);
+      return type === 'private' || type === 'both';
+    }
+
+    function updateAdminStudentPrivateLessonFields() {
+      const enabled = isLearningTypePrivateEnabled(getElement('adminStudentLearningType') ? getElement('adminStudentLearningType').value : 'group');
+      ['adminStudentPrivateLessonDay','adminStudentPrivateLessonTimeStart','adminStudentPrivateLessonTimeEnd','adminStudentPrivateLessonTeacher','adminStudentPrivateLessonNote'].forEach(function(id) {
+        const el = getElement(id);
+        if (el) el.disabled = !enabled;
+      });
+    }
+
+    function updateBubblePrivateLessonFields() {
+      const enabled = isLearningTypePrivateEnabled(bubbleSelectValue('bubbleStudentLearningType'));
+      ['bubbleStudentPrivateLessonDay','bubbleStudentPrivateLessonTimeStart','bubbleStudentPrivateLessonTimeEnd','bubbleStudentPrivateLessonTeacher','bubbleStudentPrivateLessonNote'].forEach(function(id) {
+        const el = getElement(id);
+        if (el) el.disabled = !enabled;
+      });
+    }
+
     function renderAdminStudentCourseOptions() {
       const select = getElement('adminStudentCourse');
       if (!select) return;
@@ -8107,6 +8255,11 @@
       if (Array.from(select.options).some(function(option) { return option.value === current; })) {
         select.value = current;
       }
+      const daySelect = getElement('adminStudentPrivateLessonDay');
+      if (daySelect) daySelect.innerHTML = privateLessonDayOptionsHtml(daySelect.value);
+      const teacherSelect = getElement('adminStudentPrivateLessonTeacher');
+      if (teacherSelect) teacherSelect.innerHTML = privateLessonTeacherOptionsHtml(teacherSelect.value);
+      updateAdminStudentPrivateLessonFields();
     }
 
     function dayCheckboxesHtml(selectedDays) {
@@ -16621,14 +16774,27 @@ function receiptStatusText(status) {
       openOneOnOneMonthlyPlanSessionForm();
       renderMonthlyPlanStudentOptions();
       if (getElement('monthlyPlanStudent')) getElement('monthlyPlanStudent').value = getStudentPrivateLessonReferenceId(student);
+      if (getElement('monthlyPlanCourse')) getElement('monthlyPlanCourse').value = student.courseId || '';
       if (getElement('monthlyPlanCenter') && !getElement('monthlyPlanCenter').value) getElement('monthlyPlanCenter').value = student.preferredLocation || '';
+      if (getElement('monthlyPlanTimeStart')) getElement('monthlyPlanTimeStart').value = student.privateLessonTimeStart || '';
+      if (getElement('monthlyPlanTimeEnd')) getElement('monthlyPlanTimeEnd').value = student.privateLessonTimeEnd || '';
+      if (getElement('monthlyPlanNote')) {
+        const dayText = getMonthlyPlanDayText(student.privateLessonDay || '') || '-';
+        const privateNote = 'ข้อมูลเรียนเดี่ยวประจำสัปดาห์: ' + dayText + ' ' + ((student.privateLessonTimeStart || '-') + '-' + (student.privateLessonTimeEnd || '-')) + (student.privateLessonNote ? ' · ' + student.privateLessonNote : '');
+        getElement('monthlyPlanNote').value = privateNote;
+      }
+      updateMonthlyPlanTeacherOptions();
+      if (getElement('monthlyPlanTeacher')) getElement('monthlyPlanTeacher').value = student.privateLessonTeacherId || '';
       if (result) {
-        result.textContent = 'เลือกนักเรียน 1:1: ' + (student.name || student.nickname || '-');
+        result.textContent = 'เลือกนักเรียน 1:1: ' + (student.name || student.nickname || '-') + ' · ข้อมูลนี้เป็นวันประจำสัปดาห์ กรุณาเลือกวันที่เรียนจริงก่อนบันทึก';
         result.style.color = '#16a34a';
+      }
+      updateMonthlyPlanConflictPreview();
+      if (getElement('monthlyPlanConflictWarning')) {
+        getElement('monthlyPlanConflictWarning').innerHTML = '<div class="notice"><strong>ข้อมูลเรียนเดี่ยว 1:1 จากโปรไฟล์นักเรียน</strong><p>วันประจำสัปดาห์: ' + escapeHtml(getMonthlyPlanDayText(student.privateLessonDay || '') || '-') + ' · เวลา: ' + escapeHtml((student.privateLessonTimeStart || '-') + '-' + (student.privateLessonTimeEnd || '-')) + '</p><p>กรุณาเลือกวันที่เรียนจริงในช่อง “วันที่เรียน” ก่อนกดบันทึกแผนสอน</p></div>';
       }
       const form = getElement('admin-monthly-planner');
       if (form) form.scrollIntoView({ behavior: 'smooth' });
-      updateMonthlyPlanConflictPreview();
     }
 
     function showMonthlyPlanSaveError(result, error) {
