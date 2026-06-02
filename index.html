@@ -1819,7 +1819,7 @@
               <div class="form-row">
                 <div>
                   <label>เลือกเดือนที่ต้องการตั้งราคา</label>
-                  <select id="paymentPriceMonthSelect" onchange="renderPaymentCoursePriceSettings()"></select>
+                  <select id="paymentPriceMonthSelect" onchange="renderPaymentCoursePriceSettings(); renderPaymentRecordPreview()"></select>
                 </div>
               </div>
 
@@ -1850,7 +1850,23 @@
 
               <h3 style="color:#0f4cbd; margin-bottom:10px;">ขั้นที่ 3 สร้างรายการเรียกเก็บ</h3>
               <p style="color:#6b7280; margin-bottom:10px;">สร้างรายการชำระเงินให้เด็กในเดือนที่เลือก</p>
+              <div id="paymentRecordPreviewSummary" class="dashboard-grid"></div>
+              <div class="table-wrap" style="margin-top:14px;">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>นักเรียน</th>
+                      <th>คอร์ส</th>
+                      <th>ราคาที่ต้องจ่าย</th>
+                      <th>สถานะรายการ</th>
+                      <th>สถานะชำระเงิน</th>
+                    </tr>
+                  </thead>
+                  <tbody id="paymentRecordPreviewTableBody"></tbody>
+                </table>
+              </div>
               <button class="btn btn-green" type="button" onclick="createMonthlyPaymentRecords()">สร้างรายการชำระเงินของเดือนนี้</button>
+              <p id="paymentRecordPreviewResult" style="margin-top:14px; font-weight:bold;"></p>
             </div>
           </section>
 
@@ -10279,6 +10295,7 @@ function getCourseOnlineDocs(course, includeInactive) {
       renderAdminReceipts();
       renderStudentReceipts();
       renderPaymentCoursePriceSettings();
+      renderPaymentRecordPreview();
     }
 
     function getPaymentCoursePriceInputId(courseId) {
@@ -10306,6 +10323,7 @@ function getCourseOnlineDocs(course, includeInactive) {
       const item = getPaymentMonthItem(selectedMonth);
       if (!selectedMonth || !item) {
         tbody.innerHTML = '<tr><td colspan="4">ยังไม่มีเดือนชำระเงิน</td></tr>';
+        renderPaymentRecordPreview();
         return;
       }
 
@@ -10317,6 +10335,7 @@ function getCourseOnlineDocs(course, includeInactive) {
       });
 
       tbody.innerHTML = rows.length ? rows.join('') : '<tr><td colspan="4">ยังไม่มีคอร์สให้ตั้งราคา</td></tr>';
+      renderPaymentRecordPreview();
     }
 
     function setHalfPriceForCourse(courseId) {
@@ -10390,8 +10409,9 @@ function getCourseOnlineDocs(course, includeInactive) {
       try {
         await setFirebaseDocument('paymentMonths', item);
         addActivityLog('บันทึกราคาคอร์สทั้งเดือน', month + ' · ' + savedCount + ' คอร์ส');
-        if (result) { result.textContent = 'บันทึกราคาของเดือน ' + month + ' เรียบร้อย ' + savedCount + ' คอร์ส'; result.style.color = '#16a34a'; }
+        if (result) { result.textContent = 'บันทึกราคาของเดือน ' + month + ' เรียบร้อย ' + savedCount + ' คอร์ส พร้อมสร้างรายการเรียกเก็บ'; result.style.color = '#16a34a'; }
         renderPaymentMonths();
+        renderPaymentRecordPreview('บันทึกราคาแล้ว พร้อมสร้างรายการเรียกเก็บ');
         updateStudentSelectedPaymentMonth();
         renderDashboardPaymentSummary();
       } catch (error) {
@@ -10598,6 +10618,81 @@ function getCourseOnlineDocs(course, includeInactive) {
     function getPaymentCoursePriceCount(item) {
       if (!item || !item.coursePrices) return 0;
       return Object.keys(item.coursePrices).filter(function(key) { return Number(item.coursePrices[key] || 0) > 0; }).length;
+    }
+
+    function getSelectedPaymentRecordMonth() {
+      const pricingMonth = getElement('paymentPriceMonthSelect') ? getElement('paymentPriceMonthSelect').value : '';
+      const statusMonth = getElement('paymentStatusMonthFilter') ? getElement('paymentStatusMonthFilter').value : '';
+      const month = pricingMonth || (statusMonth && statusMonth !== 'ทั้งหมด' ? statusMonth : (paymentMonths[0] ? paymentMonths[0].month : ''));
+      return paymentMonths.some(function(item) { return item.month === month; }) ? month : '';
+    }
+
+    function getMonthlyPaymentTargetStudents() {
+      return students.filter(function(s) {
+        return s.courseId && (s.courseStatus === 'อนุมัติแล้ว' || s.courseStatus === 'รออนุมัติคอร์ส') && (s.learningStatus || s.status || 'เรียนอยู่') === 'เรียนอยู่';
+      });
+    }
+
+    function findPaymentForStudentMonth(student, month) {
+      return payments.find(function(p) {
+        return String(p.studentId || '') === String(student.id || '') && p.month === month;
+      }) || null;
+    }
+
+    function renderPaymentRecordPreview(message, isError) {
+      const summaryBox = getElement('paymentRecordPreviewSummary');
+      const tbody = getElement('paymentRecordPreviewTableBody');
+      const result = getElement('paymentRecordPreviewResult');
+      if (!summaryBox || !tbody) return;
+
+      const month = getSelectedPaymentRecordMonth();
+      if (!month) {
+        summaryBox.innerHTML = '<div class="stat"><h4>เดือนที่เลือก</h4><p>-</p></div><div class="stat"><h4>นักเรียนที่ต้องเรียกเก็บ</h4><p>0 คน</p></div><div class="stat"><h4>ยอดรวม</h4><p>0 บาท</p></div>';
+        tbody.innerHTML = '<tr><td colspan="5">ยังไม่มีเดือนชำระเงิน ให้เพิ่มรอบเดือนก่อน</td></tr>';
+        if (result) result.textContent = message || '';
+        return;
+      }
+
+      const targetStudents = getMonthlyPaymentTargetStudents();
+      const rows = targetStudents.map(function(student) {
+        const amount = getExpectedPaymentAmountForStudent(student, month);
+        const payment = findPaymentForStudentMonth(student, month);
+        return {
+          student: student,
+          amount: amount,
+          payment: payment
+        };
+      });
+      const createdRows = rows.filter(function(row) { return !!row.payment; });
+      const pendingRows = rows.filter(function(row) { return !row.payment; });
+      const totalAmount = rows.reduce(function(sum, row) { return sum + (Number(row.amount || 0) || 0); }, 0);
+
+      summaryBox.innerHTML =
+        '<div class="stat"><h4>เดือนที่เลือก</h4><p>' + escapeHtml(month) + '</p></div>' +
+        '<div class="stat"><h4>นักเรียนที่ต้องเรียกเก็บ</h4><p>' + rows.length + ' คน</p></div>' +
+        '<div class="stat"><h4>ยอดรวมที่ต้องเรียกเก็บ</h4><p>' + formatPrice(totalAmount) + '</p></div>' +
+        '<div class="stat"><h4>สร้างแล้ว</h4><p>' + createdRows.length + ' รายการ</p></div>' +
+        '<div class="stat"><h4>ยังไม่ได้สร้าง</h4><p>' + pendingRows.length + ' รายการ</p></div>';
+
+      tbody.innerHTML = rows.length ? rows.map(function(row) {
+        const student = row.student;
+        const payment = row.payment;
+        const paymentStatus = payment ? (payment.status || payment.paymentStatus || 'รอชำระเงิน') : '-';
+        const recordStatus = payment ? '<span class="status-paid">สร้างแล้ว</span>' : '<span class="status-waiting">ยังไม่ได้สร้าง</span>';
+        const paymentStatusClass = paymentStatus === 'ชำระแล้ว' ? 'status-paid' : paymentStatus === 'ค้างชำระ' || paymentStatus === 'สลิปไม่ผ่าน' ? 'status-absent' : 'status-waiting';
+        return '<tr>' +
+          '<td><strong>' + escapeHtml(student.name || '-') + '</strong><br><span class="mini-muted">' + escapeHtml(student.memberId || student.phone || '-') + '</span></td>' +
+          '<td>' + escapeHtml(student.course || '-') + '</td>' +
+          '<td><strong>' + formatPrice(row.amount) + '</strong></td>' +
+          '<td>' + recordStatus + '</td>' +
+          '<td>' + (payment ? '<span class="' + paymentStatusClass + '">' + escapeHtml(paymentStatus) + '</span>' : '-') + '</td>' +
+        '</tr>';
+      }).join('') : '<tr><td colspan="5">ยังไม่มีนักเรียนที่เข้าเงื่อนไขสำหรับสร้างรายการเรียกเก็บ</td></tr>';
+
+      if (result) {
+        result.textContent = message || '';
+        result.style.color = isError ? '#dc2626' : '#16a34a';
+      }
     }
 
     function formatPaymentSlipCell(payment) {
@@ -17276,25 +17371,23 @@ function receiptStatusText(status) {
     }
 
     async function createMonthlyPaymentRecords() {
-      const pricingMonth = getElement('paymentPriceMonthSelect') ? getElement('paymentPriceMonthSelect').value : '';
-      const month = getElement('paymentStatusMonthFilter') ? getElement('paymentStatusMonthFilter').value : '';
-      const targetMonth = pricingMonth || (month && month !== 'ทั้งหมด' ? month : (paymentMonths[0] ? paymentMonths[0].month : ''));
+      const targetMonth = getSelectedPaymentRecordMonth();
       if (!targetMonth) {
         alert('กรุณาเพิ่มเดือนชำระเงินก่อน');
         return;
       }
       if (!confirm('สร้างรายการชำระเงินสำหรับเดือน ' + targetMonth + ' จากราคาคอร์สของนักเรียนทุกคนที่อนุมัติคอร์สแล้ว ใช่หรือไม่?')) return;
 
-      const targetStudents = students.filter(function(s) {
-        return s.courseId && (s.courseStatus === 'อนุมัติแล้ว' || s.courseStatus === 'รออนุมัติคอร์ส') && (s.learningStatus || s.status || 'เรียนอยู่') === 'เรียนอยู่';
-      });
+      const targetStudents = getMonthlyPaymentTargetStudents();
 
       let created = 0;
+      let existedCount = 0;
       for (const student of targetStudents) {
-        const existed = payments.some(function(p) {
-          return String(p.studentId || '') === String(student.id || '') && p.month === targetMonth;
-        });
-        if (existed) continue;
+        const existed = findPaymentForStudentMonth(student, targetMonth);
+        if (existed) {
+          existedCount++;
+          continue;
+        }
         const baseAmount = getExpectedPaymentAmountForStudent(student, targetMonth);
         const paymentId = createFirebaseDocId('payments');
         const payment = {
@@ -17329,9 +17422,11 @@ function receiptStatusText(status) {
       }
 
       addActivityLog('สร้างรายการชำระเงินรายเดือน', targetMonth + ' · สร้างใหม่ ' + created + ' รายการ');
+      if (getElement('paymentStatusMonthFilter')) getElement('paymentStatusMonthFilter').value = targetMonth;
+      if (getElement('dashboardPaymentMonthFilter')) getElement('dashboardPaymentMonthFilter').value = targetMonth;
       renderPaymentTable();
       renderAdminDashboard();
-      alert('สร้างรายการชำระเงินเดือน ' + targetMonth + ' เรียบร้อย: ' + created + ' รายการ');
+      renderPaymentRecordPreview('สร้างรายการชำระเงินเดือน ' + targetMonth + ' เรียบร้อย: สร้างใหม่ ' + created + ' รายการ, มีอยู่แล้ว ' + existedCount + ' รายการ');
     }
 
     function editPaymentAmountDiscount(button) {
