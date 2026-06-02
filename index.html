@@ -3520,18 +3520,40 @@
       return Date.now() + '-' + Math.random().toString(16).slice(2);
     }
 
+    function stripUndefinedDeep(value) {
+      if (value === undefined) return undefined;
+      if (value === null) return null;
+      if (Array.isArray(value)) {
+        return value.map(function(entry) {
+          const cleaned = stripUndefinedDeep(entry);
+          return cleaned === undefined ? null : cleaned;
+        });
+      }
+      if (value && typeof value === 'object') {
+        if (value instanceof Date) return value;
+        const cleanedObject = {};
+        Object.keys(value).forEach(function(key) {
+          const cleaned = stripUndefinedDeep(value[key]);
+          if (cleaned !== undefined) cleanedObject[key] = cleaned;
+        });
+        return cleanedObject;
+      }
+      return value;
+    }
+
     function buildFirebasePayload(item, docId, isNewDoc) {
       const auditUser = getFirebaseAuditUser();
-      const cleanItem = Object.assign({}, item, {
+      const safeItem = stripUndefinedDeep(item || {});
+      const cleanItem = Object.assign({}, safeItem, {
         firebaseDocId: docId,
-        deleted: item.deleted === true ? true : false,
+        deleted: safeItem.deleted === true ? true : false,
         updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
         updatedBy: auditUser.uid,
         updatedByEmail: auditUser.email,
         updatedByName: auditUser.displayName
       });
 
-      if (isNewDoc && !item.createdAt) {
+      if (isNewDoc && !safeItem.createdAt) {
         cleanItem.createdAt = firebase.firestore.FieldValue.serverTimestamp();
         cleanItem.createdBy = auditUser.uid;
         cleanItem.createdByEmail = auditUser.email;
