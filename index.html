@@ -2706,7 +2706,8 @@
                 </div>
                 <div id="monthlyPlanStudentRow" class="hidden">
                   <label>นักเรียน 1:1</label>
-                  <select id="monthlyPlanStudent"></select>
+                  <select id="monthlyPlanStudent" onchange="updateMonthlyPlanConflictPreview()"></select>
+                  <p class="mini-muted">คาบเรียนเดี่ยว 1:1 ต้องเลือกจากนักเรียนที่มีอยู่ในระบบเท่านั้น หากยังไม่มีรายชื่อ ให้เพิ่มนักเรียนก่อน</p>
                 </div>
                 <div>
                   <label>ครูผู้สอน</label>
@@ -7039,10 +7040,14 @@
       const accountButtons =
         '<button class="btn btn-dark" type="button" onclick="' + actionCall('openResetStudentPassword', s.id) + '">Reset รหัสผ่าน</button>' +
         '<button class="btn btn-dark" type="button" onclick="' + actionCall('copyStudentLoginInfoById', s.id) + '">คัดลอกข้อมูลเข้าสู่ระบบ</button>';
+      const privateLessonButtons = canOpenAdminTab('admin-monthly-planner')
+        ? '<button class="btn btn-blue" type="button" onclick="' + actionCall('openOneOnOneMonthlyPlanSessionFormForStudent', s.id) + '">เพิ่มคาบ 1:1</button>'
+        : '';
       const deleteButtons = '<button class="btn btn-red" type="button" onclick="' + actionCall('deleteStudent', s.id) + '">ลบ</button>';
 
       return '<div class="row-action-stack">' +
         renderAdminStudentActionGroup('งานหลัก', primaryButtons) +
+        renderAdminStudentActionGroup('เรียนเดี่ยว', privateLessonButtons) +
         renderAdminStudentActionGroup('เอกสาร', documentButtons) +
         renderAdminStudentActionGroup('บัญชี', accountButtons) +
         renderAdminStudentActionGroup('ลบ', deleteButtons) +
@@ -12981,6 +12986,97 @@ function receiptStatusText(status) {
       }).join('');
     }
 
+    function getStudentPrivateLessonReferenceId(student) {
+      return String((student && (student.id || student.firebaseDocId || student.memberId || student.authUid || student.studentId)) || '').trim();
+    }
+
+    function findStudentForPrivateLesson(reference) {
+      const key = String(reference || '').trim();
+      if (!key) return null;
+      return students.find(function(student) {
+        if (!student || student.deleted === true) return false;
+        return [student.id, student.firebaseDocId, student.memberId, student.studentId, student.authUid].some(function(value) {
+          return String(value || '').trim() === key;
+        });
+      }) || null;
+    }
+
+    function isPrivateLessonStudentEnabled(student) {
+      const learningType = String((student && student.learningType) || 'group').trim().toLowerCase();
+      return !!(student && (student.privateLessonEnabled === true || learningType === 'private' || learningType === 'both'));
+    }
+
+    function buildPrivateLessonStudentSessionReference(student) {
+      if (!student) return {
+        studentId: '',
+        studentName: '',
+        studentMemberId: '',
+        studentAuthUid: '',
+        studentPhone: ''
+      };
+      return {
+        studentId: getStudentPrivateLessonReferenceId(student),
+        studentName: student.name || student.nickname || '',
+        studentMemberId: student.memberId || student.studentId || '',
+        studentAuthUid: student.authUid || student.studentAuthUid || '',
+        studentPhone: student.phone || ''
+      };
+    }
+
+    function applyPrivateLessonStudentSessionReference(target, student) {
+      const reference = buildPrivateLessonStudentSessionReference(student);
+      Object.assign(target, reference);
+      delete target.studentProfile;
+      delete target.studentRecord;
+      delete target.studentData;
+      delete target.student;
+      delete target.studentNickname;
+      delete target.studentGrade;
+      delete target.studentParentName;
+      delete target.studentSchool;
+      delete target.studentLineId;
+      delete target.studentContactEmail;
+      return target;
+    }
+
+    async function ensurePrivateLessonStudentEnabled(student, result) {
+      if (!student) {
+        if (result) {
+          result.textContent = 'คาบเรียนเดี่ยว 1:1 ต้องเลือกจากนักเรียนที่มีอยู่ในระบบเท่านั้น หากยังไม่มีรายชื่อ ให้เพิ่มนักเรียนก่อน';
+          result.style.color = '#dc2626';
+        }
+        return false;
+      }
+      if (isPrivateLessonStudentEnabled(student)) return true;
+      if (!confirm('นักเรียนคนนี้ยังไม่ได้ตั้งเป็นเรียนเดี่ยว ต้องการเปิดประเภทเรียนเดี่ยวให้หรือไม่?')) {
+        if (result) {
+          result.textContent = 'ยกเลิกการสร้างคาบเรียนเดี่ยว 1:1';
+          result.style.color = '#dc2626';
+        }
+        return false;
+      }
+
+      const previousLearningType = student.learningType;
+      const previousPrivateLessonEnabled = student.privateLessonEnabled;
+      student.learningType = 'both';
+      student.privateLessonEnabled = true;
+      student.updatedAtText = new Date().toLocaleString('th-TH');
+      try {
+        await setFirebaseDocument('students', student);
+        renderAdminStudents();
+        return true;
+      } catch (error) {
+        console.error('enable private lesson student error:', error);
+        student.learningType = previousLearningType;
+        student.privateLessonEnabled = previousPrivateLessonEnabled;
+        if (result) {
+          result.textContent = 'เปิดประเภทเรียนเดี่ยวให้นักเรียนไม่สำเร็จ: ' + (error.message || error.code || error);
+          result.style.color = '#dc2626';
+        }
+        return false;
+      }
+    }
+
     function updateMonthlyPlanTypeFields() {
       const type = getElement('monthlyPlanType') ? getElement('monthlyPlanType').value : 'onsite';
       const publishRow = getElement('monthlyPlanPublishTimeRow');
@@ -12998,13 +13094,15 @@ function receiptStatusText(status) {
       const activeStudents = students.filter(function(student) {
         return student && student.deleted !== true && student.status !== 'inactive' && student.status !== 'archived';
       });
-      select.innerHTML = '<option value="">เลือกนักเรียน</option>' + activeStudents.map(function(student) {
-        const id = String(student.id || student.firebaseDocId || student.authUid || student.memberId || '');
-        const label = (student.name || student.nickname || id) + (student.grade ? ' · ' + student.grade : '') + (student.preferredLocation ? ' · ' + student.preferredLocation : '');
+      select.innerHTML = '<option value="">' + (activeStudents.length ? 'เลือกนักเรียน' : 'ยังไม่มีนักเรียนในระบบ') + '</option>' + activeStudents.map(function(student) {
+        const id = getStudentPrivateLessonReferenceId(student);
+        const learningType = String(student.learningType || 'group').toLowerCase();
+        const privateTag = isPrivateLessonStudentEnabled(student) ? ' · 1:1 พร้อมใช้' : ' · group';
+        const label = (student.name || student.nickname || id) + (student.grade ? ' · ' + student.grade : '') + (student.preferredLocation ? ' · ' + student.preferredLocation : '') + (learningType ? privateTag : '');
         return '<option value="' + escapeHtml(id) + '">' + escapeHtml(label) + '</option>';
       }).join('');
       select.value = activeStudents.some(function(student) {
-        return String(student.id || student.firebaseDocId || student.authUid || student.memberId || '') === current;
+        return getStudentPrivateLessonReferenceId(student) === current;
       }) ? current : '';
     }
 
@@ -13576,9 +13674,7 @@ function receiptStatusText(status) {
       const selectedTeacher = teachers.find(function(teacher) { return String(teacher.id || teacher.firebaseDocId || '') === String(teacherId); });
       const selectedCourse = courses.find(function(course) { return String(course.id || course.firebaseDocId || '') === String(getElement('monthlyPlanCourse') ? getElement('monthlyPlanCourse').value : ''); });
       const studentId = getElement('monthlyPlanStudent') ? getElement('monthlyPlanStudent').value : (existing ? existing.studentId || '' : '');
-      const selectedStudent = students.find(function(student) {
-        return String(student.id || student.firebaseDocId || student.authUid || student.memberId || '') === String(studentId || '');
-      });
+      const selectedStudent = findStudentForPrivateLesson(studentId);
       const type = getElement('monthlyPlanType') ? getElement('monthlyPlanType').value : (existing ? existing.type || 'onsite' : 'onsite');
       const timeStart = getElement('monthlyPlanTimeStart') ? getElement('monthlyPlanTimeStart').value : '';
       const timeEnd = getElement('monthlyPlanTimeEnd') ? getElement('monthlyPlanTimeEnd').value : '';
@@ -13601,9 +13697,11 @@ function receiptStatusText(status) {
       draft.teacherUid = selectedTeacher ? (selectedTeacher.teacherUid || selectedTeacher.authUid || '') : '';
       draft.teacherAuthUid = selectedTeacher ? (selectedTeacher.authUid || selectedTeacher.teacherUid || '') : '';
       draft.teacherName = selectedTeacher ? (selectedTeacher.name || selectedTeacher.displayName || selectedTeacher.email || '') : '';
-      draft.studentId = type === 'oneOnOne' ? studentId : (existing ? existing.studentId || '' : '');
-      draft.studentName = type === 'oneOnOne' && selectedStudent ? (selectedStudent.name || selectedStudent.nickname || '') : (existing ? existing.studentName || '' : '');
-      draft.studentMemberId = type === 'oneOnOne' && selectedStudent ? (selectedStudent.memberId || selectedStudent.studentId || '') : (existing ? existing.studentMemberId || '' : '');
+      if (type === 'oneOnOne' && selectedStudent) {
+        applyPrivateLessonStudentSessionReference(draft, selectedStudent);
+      } else {
+        applyPrivateLessonStudentSessionReference(draft, null);
+      }
       draft.center = getElement('monthlyPlanCenter') ? getElement('monthlyPlanCenter').value.trim() : (existing ? existing.center || '' : '');
       draft.status = getElement('monthlyPlanStatus') ? getElement('monthlyPlanStatus').value : (existing ? existing.status : 'draft');
       draft.subject = getElement('monthlyPlanSubject') ? getElement('monthlyPlanSubject').value : (existing ? existing.subject : '');
@@ -16411,6 +16509,33 @@ function receiptStatusText(status) {
       updateMonthlyPlanTeacherOptions();
     }
 
+    async function openOneOnOneMonthlyPlanSessionFormForStudent(studentId) {
+      const result = getElement('monthlyPlanSaveResult');
+      if (!canOpenAdminTab('admin-monthly-planner')) {
+        alert('บัญชีนี้ไม่มีสิทธิ์เข้าเมนูแผนสอนรายเดือน');
+        return;
+      }
+      const student = findStudentForPrivateLesson(studentId);
+      if (!student) {
+        alert('คาบเรียนเดี่ยว 1:1 ต้องเลือกจากนักเรียนที่มีอยู่ในระบบเท่านั้น หากยังไม่มีรายชื่อ ให้เพิ่มนักเรียนก่อน');
+        return;
+      }
+      const enabled = await ensurePrivateLessonStudentEnabled(student, result);
+      if (!enabled) return;
+      showAdminTab('admin-monthly-planner');
+      openOneOnOneMonthlyPlanSessionForm();
+      renderMonthlyPlanStudentOptions();
+      if (getElement('monthlyPlanStudent')) getElement('monthlyPlanStudent').value = getStudentPrivateLessonReferenceId(student);
+      if (getElement('monthlyPlanCenter') && !getElement('monthlyPlanCenter').value) getElement('monthlyPlanCenter').value = student.preferredLocation || '';
+      if (result) {
+        result.textContent = 'เลือกนักเรียน 1:1: ' + (student.name || student.nickname || '-');
+        result.style.color = '#16a34a';
+      }
+      const form = getElement('admin-monthly-planner');
+      if (form) form.scrollIntoView({ behavior: 'smooth' });
+      updateMonthlyPlanConflictPreview();
+    }
+
     function showMonthlyPlanSaveError(result, error) {
       const isPermissionDenied = error && (error.code === 'permission-denied' || String(error.message || '').includes('permission-denied'));
       if (result) {
@@ -16463,10 +16588,24 @@ function receiptStatusText(status) {
 
       if (type === 'oneOnOne' && !sessionDraft.studentId) {
         if (result) {
-          result.textContent = 'กรุณาเลือกนักเรียนสำหรับคาบสอนเดี่ยว 1:1';
+          result.textContent = 'คาบเรียนเดี่ยว 1:1 ต้องเลือกจากนักเรียนที่มีอยู่ในระบบเท่านั้น หากยังไม่มีรายชื่อ ให้เพิ่มนักเรียนก่อน';
           result.style.color = '#dc2626';
         }
         return;
+      }
+
+      const selectedStudent = type === 'oneOnOne' ? findStudentForPrivateLesson(sessionDraft.studentId) : null;
+      if (type === 'oneOnOne') {
+        if (!selectedStudent) {
+          if (result) {
+            result.textContent = 'คาบเรียนเดี่ยว 1:1 ต้องเลือกจากนักเรียนที่มีอยู่ในระบบเท่านั้น หากยังไม่มีรายชื่อ ให้เพิ่มนักเรียนก่อน';
+            result.style.color = '#dc2626';
+          }
+          return;
+        }
+        const enabled = await ensurePrivateLessonStudentEnabled(selectedStudent, result);
+        if (!enabled) return;
+        applyPrivateLessonStudentSessionReference(sessionDraft, selectedStudent);
       }
 
       const selectedCourse = courses.find(function(course) { return String(course.id || course.firebaseDocId || '') === String(courseId); });
@@ -16511,6 +16650,8 @@ function receiptStatusText(status) {
             studentId: sessionDraft.studentId || '',
             studentName: sessionDraft.studentName || '',
             studentMemberId: sessionDraft.studentMemberId || '',
+            studentAuthUid: sessionDraft.studentAuthUid || '',
+            studentPhone: sessionDraft.studentPhone || '',
             subject: subject,
             topic: sessionDraft.topic || item.topic || '',
             objective: sessionDraft.objective || item.objective || '',
@@ -16520,6 +16661,7 @@ function receiptStatusText(status) {
             status: status,
             updatedAtText: nowText
           });
+          applyPrivateLessonStudentSessionReference(item, type === 'oneOnOne' ? selectedStudent : null);
           appendMonthlyPlanChangeLog(item, 'edited', 'แก้ไขแผนสอน');
           await setFirebaseDocument('monthlyPlanSessions', item);
           if (result) result.textContent = 'แก้ไขแผนสอนเรียบร้อย';
@@ -16543,6 +16685,7 @@ function receiptStatusText(status) {
             newItem.timeStart = newItem.timeStart || '';
             newItem.timeEnd = newItem.timeEnd || '';
           }
+          applyPrivateLessonStudentSessionReference(newItem, type === 'oneOnOne' ? selectedStudent : null);
           appendMonthlyPlanChangeLog(newItem, 'created', manualAdded ? 'เพิ่มเอง' : 'สร้างอัตโนมัติ');
           monthlyPlanSessions.push(newItem);
           await setFirebaseDocument('monthlyPlanSessions', newItem);
@@ -16568,7 +16711,10 @@ function receiptStatusText(status) {
       if (getElement('monthlyPlanDate')) getElement('monthlyPlanDate').value = item.sessionDate || '';
       if (getElement('monthlyPlanType')) getElement('monthlyPlanType').value = item.type || 'onsite';
       updateMonthlyPlanTypeFields();
-      if (getElement('monthlyPlanStudent')) getElement('monthlyPlanStudent').value = item.studentId || '';
+      if (getElement('monthlyPlanStudent')) {
+        const sessionStudent = findStudentForPrivateLesson(item.studentId || item.studentMemberId || item.studentAuthUid || '');
+        getElement('monthlyPlanStudent').value = sessionStudent ? getStudentPrivateLessonReferenceId(sessionStudent) : '';
+      }
       if (getElement('monthlyPlanTimeStart')) getElement('monthlyPlanTimeStart').value = item.timeStart || item.sessionTime || item.publishTime || '';
       if (getElement('monthlyPlanTimeEnd')) getElement('monthlyPlanTimeEnd').value = item.timeEnd || '';
       if (getElement('monthlyPlanPublishTime')) getElement('monthlyPlanPublishTime').value = item.publishTime || '';
