@@ -258,6 +258,7 @@
     .student-mobile-home,
     .student-mobile-learning,
     .student-mobile-payment,
+    .student-mobile-exam,
     .student-mobile-bottom-nav {
       display: none;
     }
@@ -293,7 +294,13 @@
       #student-learning > .grid,
       #student-services > #studentPaymentLocked,
       #student-services > #studentPaymentContent,
-      #student-services > #studentReceiptContent {
+      #student-services > #studentReceiptContent,
+      #student-monthly-test > .section-title,
+      #student-monthly-test > .section-subtitle,
+      #student-monthly-test > #studentExamLocked,
+      #student-monthly-test > #studentExamContent,
+      #student-monthly-test > #monthlyExamPage,
+      #student-monthly-test > #scoreHistoryPage {
         display: none !important;
       }
 
@@ -305,7 +312,8 @@
       }
 
       .student-mobile-learning,
-      .student-mobile-payment {
+      .student-mobile-payment,
+      .student-mobile-exam {
         display: grid;
         gap: 14px;
         width: 100%;
@@ -427,6 +435,26 @@
         border-radius: 14px;
       }
 
+      .student-mobile-score-list {
+        display: grid;
+        gap: 10px;
+      }
+
+      .student-mobile-score-row {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        gap: 10px;
+        align-items: center;
+        padding: 12px;
+        border: 1px solid #e5e7eb;
+        border-radius: 14px;
+        background: #f8fafc;
+      }
+
+      .student-mobile-score-row strong {
+        font-size: 16px;
+      }
+
       .student-mobile-qr-box {
         display: grid;
         place-items: center;
@@ -481,6 +509,50 @@
       .student-mobile-bottom-nav button:hover {
         background: #eff6ff;
         color: #0f4cbd;
+      }
+
+      .profile-panel {
+        position: fixed;
+        inset: 0;
+        z-index: 1100;
+        width: 100vw;
+        max-width: 100vw;
+        height: 100dvh;
+        overflow-y: auto;
+        padding: 18px 16px 96px;
+        border-radius: 0;
+        background: #f8fafc;
+        box-shadow: none;
+      }
+
+      .profile-panel .close-btn {
+        position: sticky;
+        top: 0;
+        margin-left: auto;
+        min-width: 44px;
+        min-height: 44px;
+        border-radius: 999px;
+        z-index: 2;
+      }
+
+      .profile-panel .form-row {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) !important;
+        gap: 12px;
+      }
+
+      .profile-panel input,
+      .profile-panel select,
+      .profile-panel textarea,
+      .profile-panel .btn {
+        width: 100%;
+        min-height: 48px;
+        border-radius: 14px;
+      }
+
+      .profile-panel h3 {
+        font-size: 20px;
+        line-height: 1.35;
       }
     }
   </style>
@@ -1137,6 +1209,43 @@
     </section>
 
     <section class="section hidden student-area" id="student-monthly-test">
+      <div id="studentMobileExam" class="student-mobile-exam">
+        <div class="student-mobile-hero-card">
+          <p class="student-mobile-muted" style="color:rgba(255,255,255,0.82);">แบบทดสอบ / คะแนน</p>
+          <h2>Monthly Test</h2>
+          <p id="studentMobileExamHero">ทำแบบทดสอบและดูคะแนนย้อนหลัง</p>
+        </div>
+
+        <div class="student-mobile-card">
+          <h3>แบบทดสอบประจำเดือน</h3>
+          <div class="student-mobile-card-main">
+            <div>
+              <strong id="studentMobileExamTitle">Monthly Test</strong>
+              <p class="student-mobile-muted">เดือน: <span id="studentMobileExamMonth">-</span></p>
+              <p class="student-mobile-muted">วิชา: <span id="studentMobileExamSubject">-</span></p>
+              <p class="student-mobile-muted">คะแนนเต็ม: 50 คะแนน</p>
+            </div>
+            <span id="studentMobileExamStatus" class="student-mobile-tag">-</span>
+          </div>
+          <div class="student-mobile-actions">
+            <button class="btn btn-blue" type="button" onclick="openMonthlyExamPage()">เปิด Google Form</button>
+            <button class="btn btn-dark" type="button" onclick="studentMobileOpenScoreHistory()">ดูคะแนนย้อนหลัง</button>
+          </div>
+        </div>
+
+        <div class="student-mobile-card">
+          <h3>คะแนนล่าสุด</h3>
+          <strong id="studentMobileLatestScoreMonth">-</strong>
+          <p id="studentMobileLatestScoreStatus" class="student-mobile-muted">ยังไม่มีคะแนนที่ประกาศ</p>
+          <div id="studentMobileLatestScoreSummary" class="student-mobile-score-list"></div>
+        </div>
+
+        <div class="student-mobile-card">
+          <h3>ประวัติคะแนน</h3>
+          <div id="studentMobileScoreHistoryList" class="student-mobile-score-list"></div>
+        </div>
+      </div>
+
       <h2 class="section-title">แบบทดสอบ / คะแนน</h2>
       <p class="section-subtitle">ทำแบบทดสอบและดูคะแนนย้อนหลัง</p>
 
@@ -6637,7 +6746,24 @@
     }
 
     function toggleProfileBox() {
-      openProfileSettings();
+      const panel = getElement('profilePanel');
+      if (panel && !panel.classList.contains('hidden')) {
+        panel.classList.add('hidden');
+        return;
+      }
+      openMobileProfile();
+    }
+
+    function openMobileProfile() {
+      const panel = getElement('profilePanel');
+      const isMobile = window.matchMedia && window.matchMedia('(max-width: 768px)').matches;
+      if (!panel || !isMobile) {
+        openProfileSettings();
+        return;
+      }
+      refreshProfileBox();
+      panel.classList.remove('hidden');
+      panel.scrollTop = 0;
     }
 
     function openProfileSettings() {
@@ -10936,8 +11062,8 @@ function getCourseOnlineDocs(course, includeInactive) {
     }
 
     function studentMobileOpenProfile() {
-      if (typeof openProfileSettings === 'function') {
-        openProfileSettings();
+      if (typeof openMobileProfile === 'function') {
+        openMobileProfile();
         return;
       }
       scrollToStudentSection('student-profile');
@@ -14625,6 +14751,98 @@ function receiptStatusText(status) {
           return '<div class="chart-row"><strong>' + item.subject + '</strong><div class="chart-track"><div class="chart-bar" style="width:' + width + '%;"></div></div><span>' + item.score + '</span></div>';
         }).join('') : '<p class="status-waiting">ยังไม่มีกราฟคะแนนสำหรับเงื่อนไขนี้</p>';
       }
+
+      safeRun(renderStudentMobileExam, 'student-mobile-exam-score-history');
+    }
+
+    function getStudentScoreRecordForMonth(month, grade) {
+      return adminScoreRecords.find(function(record) {
+        if (!currentStudent) return false;
+        const sameMonth = !month || record.month === month;
+        const sameGrade = !grade || record.grade === grade;
+        const sameStatus = record.status === 'published';
+        const sameStudentId = record.studentId && currentStudent.id && String(record.studentId) === String(currentStudent.id);
+        const sameAuthUid = record.authUid && currentStudent.authUid && String(record.authUid) === String(currentStudent.authUid);
+        const sameName = record.student === currentStudent.name;
+        return sameMonth && sameGrade && sameStatus && (sameStudentId || sameAuthUid || sameName);
+      }) || null;
+    }
+
+    function getStudentPublishedScoreRecords() {
+      if (!currentStudent) return [];
+      return adminScoreRecords.filter(function(record) {
+        if (record.status !== 'published') return false;
+        const sameStudentId = record.studentId && currentStudent.id && String(record.studentId) === String(currentStudent.id);
+        const sameAuthUid = record.authUid && currentStudent.authUid && String(record.authUid) === String(currentStudent.authUid);
+        const sameName = record.student === currentStudent.name;
+        return sameStudentId || sameAuthUid || sameName;
+      }).slice().sort(function(a, b) {
+        return String(b.month || '').localeCompare(String(a.month || ''), 'th');
+      });
+    }
+
+    function getStudentMobileScoreSubjects(record) {
+      const gradeRecords = record ? adminScoreRecords.filter(function(item) {
+        return item.month === record.month && item.grade === record.grade && item.status === 'published';
+      }) : [];
+      return ['วิทยาศาสตร์', 'คณิตศาสตร์', 'ภาษาอังกฤษ'].map(function(subject) {
+        const stat = calculateSubjectStats(gradeRecords, subject);
+        return {
+          subject: subject,
+          score: record ? Number((record.scores || {})[subject] || 0) : 0,
+          max: stat.max,
+          min: stat.min,
+          avg: stat.avg
+        };
+      });
+    }
+
+    function renderStudentMobileScoreRows(targetId, subjects, emptyText) {
+      const box = getElement(targetId);
+      if (!box) return;
+      if (!subjects || !subjects.length) {
+        box.innerHTML = '<div class="student-mobile-media-card"><strong>' + escapeHtml(emptyText || 'ยังไม่มีคะแนน') + '</strong></div>';
+        return;
+      }
+      box.innerHTML = subjects.map(function(item) {
+        return '<div class="student-mobile-score-row">' +
+          '<span><strong>' + escapeHtml(item.subject || '-') + '</strong><br><span class="student-mobile-muted">เฉลี่ย ' + escapeHtml(item.avg || 0) + ' · สูงสุด ' + escapeHtml(item.max || 0) + ' · ต่ำสุด ' + escapeHtml(item.min || 0) + '</span></span>' +
+          '<strong>' + escapeHtml(item.score || 0) + '/50</strong>' +
+        '</div>';
+      }).join('');
+    }
+
+    function updateStudentMobileExamFromExistingData() {
+      if (!getElement('studentMobileExam')) return;
+      const selectedMonth = getElement('studentExamMonthFilter') ? getElement('studentExamMonthFilter').value : '';
+      const selectedSubject = getElement('studentExamSubjectFilter') ? getElement('studentExamSubjectFilter').value : '';
+      const examLink = getSelectedMonthlyExamLink();
+      const availability = examLink ? getExamLinkAvailability(examLink) : null;
+      const grade = currentStudent && currentStudent.grade ? currentStudent.grade : getProfileGrade();
+      const selectedScoreMonth = getElement('scoreHistoryMonthFilter') ? getElement('scoreHistoryMonthFilter').value : selectedMonth;
+      const selectedRecord = getStudentScoreRecordForMonth(selectedScoreMonth, grade);
+      const latestRecord = getStudentPublishedScoreRecords()[0] || null;
+
+      setStudentMobileText('studentMobileExamHero', selectedMonth ? ('เดือน ' + selectedMonth + (selectedSubject ? ' · ' + selectedSubject : '')) : 'ยังไม่มีเดือนสอบ');
+      setStudentMobileText('studentMobileExamTitle', examLink ? (examLink.title || 'Monthly Test') : 'Monthly Test');
+      setStudentMobileText('studentMobileExamMonth', selectedMonth || '-');
+      setStudentMobileText('studentMobileExamSubject', selectedSubject || '-');
+      setStudentMobileTag('studentMobileExamStatus', availability ? availability.text : 'ยังไม่มีลิงก์');
+
+      setStudentMobileText('studentMobileLatestScoreMonth', latestRecord ? latestRecord.month : '-');
+      setStudentMobileText('studentMobileLatestScoreStatus', latestRecord ? 'ประกาศคะแนนแล้ว' : 'ยังไม่มีคะแนนที่ประกาศ');
+      renderStudentMobileScoreRows('studentMobileLatestScoreSummary', latestRecord ? getStudentMobileScoreSubjects(latestRecord) : [], 'ยังไม่มีคะแนนล่าสุด');
+      renderStudentMobileScoreRows('studentMobileScoreHistoryList', selectedRecord ? getStudentMobileScoreSubjects(selectedRecord) : [], 'ยังไม่มีคะแนนย้อนหลังสำหรับเดือนนี้');
+    }
+
+    function renderStudentMobileExam() {
+      updateStudentMobileExamFromExistingData();
+    }
+
+    function studentMobileOpenScoreHistory() {
+      openScoreHistory();
+      safeRun(renderStudentMobileExam, 'student-mobile-exam-open-history');
+      scrollToStudentSection('student-monthly-test');
     }
 
     const adminScoreRecords = [];
@@ -19008,6 +19226,7 @@ function receiptStatusText(status) {
         getElement('scorePublishStatus').textContent = 'รอประกาศคะแนน';
         getElement('scorePublishStatus').className = 'status-waiting';
       }
+      safeRun(renderStudentMobileExam, 'student-mobile-exam-info');
     }
 
     function openMonthlyExamPage() {
@@ -20445,6 +20664,7 @@ function receiptStatusText(status) {
       safeRun(renderStudentMobileHome, 'student-mobile-home');
       safeRun(renderStudentMobileLearning, 'student-mobile-learning');
       safeRun(renderStudentMobilePayment, 'student-mobile-payment');
+      safeRun(renderStudentMobileExam, 'student-mobile-exam');
     };
 
     const originalFilterPaymentStatusByMonthFinal = filterPaymentStatusByMonth;
