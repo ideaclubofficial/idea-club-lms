@@ -8481,6 +8481,40 @@
       return !!studentLocation && !!courseLocation && normalizeTextValue(courseLocation) === normalizeTextValue(studentLocation);
     }
 
+    function getStudentAppliedCourseId(student) {
+      return String((student && student.courseId) || '').trim();
+    }
+
+    function studentHasAppliedCourse(student) {
+      const activeStudent = student || currentStudent;
+      const courseId = getStudentAppliedCourseId(activeStudent);
+      const courseName = String((activeStudent && activeStudent.course) || '').trim();
+      return !!courseId && courseName !== 'ยังไม่ได้สมัครคอร์ส';
+    }
+
+    function getStudentAppliedCourse(student) {
+      const activeStudent = student || currentStudent;
+      const appliedCourseId = getStudentAppliedCourseId(activeStudent);
+      return courses.find(function(item) {
+        return String(item.id || '') === appliedCourseId;
+      }) || null;
+    }
+
+    function renderStudentCourseApplyState(course) {
+      if (!studentHasAppliedCourse()) {
+        return '<button class="btn btn-blue" type="button" onclick="' + actionCall('applyCourse', course.id) + '">สมัครคอร์สนี้</button>';
+      }
+      const appliedCourse = getStudentAppliedCourse();
+      const appliedCourseName = (appliedCourse && appliedCourse.name) || currentStudent.course || '-';
+      const courseStatus = currentStudent.courseStatus || 'รออนุมัติคอร์ส';
+      const paymentStatus = getCurrentStudentPaymentStatusText ? getCurrentStudentPaymentStatusText() : (currentStudent.paymentStatus || 'รอชำระเงิน');
+      const isCurrentCourse = getStudentAppliedCourseId(currentStudent) === String(course.id || '') || currentStudent.course === course.name;
+      if (isCurrentCourse) {
+        return '<div class="feature-ok"><strong>สมัครคอร์สนี้แล้ว</strong><p>สถานะคอร์ส: ' + escapeHtml(courseStatus) + '</p><p>สถานะชำระเงิน: ' + escapeHtml(paymentStatus) + '</p></div><button class="btn btn-green" type="button" onclick="scrollToStudentSection(\'student-services\')">ไปหน้าชำระเงิน</button>';
+      }
+      return '<div class="notice"><strong>สมัครคอร์สแล้ว</strong><p>คุณสมัครคอร์ส ' + escapeHtml(appliedCourseName) + ' แล้ว จึงไม่สามารถสมัครซ้ำหรือสมัครคอร์สอื่นได้</p></div><button class="btn btn-dark" type="button" disabled>สมัครซ้ำไม่ได้</button>';
+    }
+
     function renderStudentCourses() {
       const gradeFilter = getElement('courseGradeFilter');
       const list = getElement('studentCourseList');
@@ -8502,7 +8536,7 @@
       }
       const filtered = courses.filter(function(c) { return c.grade === grade && c.status === 'open' && isCourseInCurrentStudentCenter(c); });
       list.innerHTML = filtered.length ? filtered.map(function(c) {
-        return '<div class="card"><span class="tag">' + c.grade + ' · ' + getStudentCourseTag(c) + '</span><h3>' + c.name + '</h3><p>' + c.desc + '</p>' + renderCourseFeatureBadges(c) + '<p><strong>สถานที่เรียน:</strong> ' + c.location + '</p><p><strong>วันเรียน:</strong> ' + ((c.days || []).join(' / ') || '-') + '</p><p class="price">' + formatPrice(getCourseMonthlyPrice(c)) + ' / เดือน</p><button class="btn btn-blue" type="button" onclick="' + actionCall('applyCourse', c.id) + '">สมัครคอร์สนี้</button></div>';
+        return '<div class="card"><span class="tag">' + c.grade + ' · ' + getStudentCourseTag(c) + '</span><h3>' + c.name + '</h3><p>' + c.desc + '</p>' + renderCourseFeatureBadges(c) + '<p><strong>สถานที่เรียน:</strong> ' + c.location + '</p><p><strong>วันเรียน:</strong> ' + ((c.days || []).join(' / ') || '-') + '</p><p class="price">' + formatPrice(getCourseMonthlyPrice(c)) + ' / เดือน</p>' + renderStudentCourseApplyState(c) + '</div>';
       }).join('') : '<div class="card"><h3>ยังไม่มีคอร์สเปิดรับสมัครตามข้อมูลที่ลงทะเบียนไว้</h3><p>ระดับชั้น ' + grade + ' ที่ ' + studentLocation + ' ยังไม่มีคอร์สเปิดรับสมัครในขณะนี้</p></div>';
     }
 
@@ -9239,6 +9273,18 @@ function getCourseOnlineDocs(course, includeInactive) {
         alert('กรุณาเข้าสู่ระบบด้วยบัญชีนักเรียนก่อนสมัครคอร์ส');
         return;
       }
+      currentStudent = activeStudent;
+      if (studentHasAppliedCourse(activeStudent)) {
+        currentStudentCourseId = getStudentAppliedCourseId(activeStudent);
+        updateStudentCourseDisplay();
+        scrollToStudentPaymentSection();
+        if (String(currentStudentCourseId) === String(id)) {
+          alert('คุณสมัครคอร์สนี้แล้ว กำลังพาไปหน้าชำระเงิน');
+        } else {
+          alert('คุณสมัครคอร์สแล้ว จึงไม่สามารถสมัครซ้ำได้ กำลังพาไปหน้าชำระเงิน');
+        }
+        return;
+      }
       if (!activeStudent.preferredLocation) {
         alert('ยังไม่พบข้อมูลศูนย์ที่ลงทะเบียนไว้ กรุณาติดต่อเจ้าหน้าที่');
         return;
@@ -9261,8 +9307,17 @@ function getCourseOnlineDocs(course, includeInactive) {
         return;
       }
 
+      const previousCourseState = {
+        courseId: activeStudent.courseId,
+        course: activeStudent.course,
+        courseAccess: activeStudent.courseAccess,
+        courseStatus: activeStudent.courseStatus,
+        paymentStatus: activeStudent.paymentStatus,
+        registeredCourseMonth: activeStudent.registeredCourseMonth,
+        currentStudentCourseId: currentStudentCourseId
+      };
       currentStudentCourseId = c.id;
-      Object.assign(currentStudent, {
+      Object.assign(activeStudent, {
         courseId: c.id,
         course: c.name,
         courseAccess: c.access,
@@ -9270,10 +9325,28 @@ function getCourseOnlineDocs(course, includeInactive) {
         paymentStatus: 'รอชำระเงิน',
         registeredCourseMonth: getElement('studentPaymentMonth') ? getElement('studentPaymentMonth').value : getThaiMonthFromDate(new Date().toISOString().slice(0, 10))
       });
+      currentStudent = activeStudent;
 
-      setFirebaseDocument('students', currentStudent).catch(function(error) { console.error('apply course firebase error:', error); });
+      try {
+        await setFirebaseDocument('students', currentStudent);
+      } catch (error) {
+        console.error('apply course firebase error:', error);
+        Object.assign(activeStudent, {
+          courseId: previousCourseState.courseId,
+          course: previousCourseState.course,
+          courseAccess: previousCourseState.courseAccess,
+          courseStatus: previousCourseState.courseStatus,
+          paymentStatus: previousCourseState.paymentStatus,
+          registeredCourseMonth: previousCourseState.registeredCourseMonth
+        });
+        currentStudentCourseId = previousCourseState.currentStudentCourseId;
+        updateStudentCourseDisplay();
+        alert('บันทึกการสมัครคอร์สไม่สำเร็จ กรุณาลองใหม่หรือติดต่อเจ้าหน้าที่');
+        return;
+      }
       updateStudentCourseDisplay();
       if (!isCurrentStudentSession()) renderAdminStudents();
+      scrollToStudentPaymentSection();
       alert('สมัครคอร์ส ' + c.name + ' เรียบร้อยแล้ว กรุณาชำระเงินและอัปโหลดสลิป');
     }
 
@@ -9366,6 +9439,12 @@ function getCourseOnlineDocs(course, includeInactive) {
     function scrollToStudentSection(sectionId) {
       const target = getElement(sectionId);
       if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+
+    function scrollToStudentPaymentSection() {
+      window.setTimeout(function() {
+        scrollToStudentSection('student-services');
+      }, 120);
     }
 
     function openStudentLineOfficial() {
