@@ -13025,6 +13025,8 @@ function getCourseOnlineDocs(course, includeInactive) {
       await setFirebaseDocument('payments', payment);
       const receipt = await issueReceiptFromPayment(payment);
       await approveStudentCourseFromPayment(payment);
+      renderPaymentTable();
+      safeRun(renderStudentMobilePayment, 'approve-payment-mobile');
       if (receipt) addActivityLog('อนุมัติชำระเงินและสร้างใบเสร็จ', (receipt.receiptNo || '-') + ' · ' + (payment.student || '-'));
       return payment;
     }
@@ -22379,14 +22381,6 @@ function receiptStatusText(status) {
       return map[status] || status || 'รอออกใบเสร็จ';
     }
 
-    function normalizeReceiptStatus(receipt) {
-      if (!receipt) return 'draft';
-      if (receipt.status === 'published') return 'published';
-      if (receipt.status === 'hidden') return 'ready';
-      if (receipt.status === 'cancelled') return 'cancelled';
-      if (receipt.status === 'draft') return 'draft';
-      return receipt.status || 'draft';
-    }
 
     function exportAllDataBackup() {
       const backup = {
@@ -22906,8 +22900,8 @@ function receiptStatusText(status) {
         const receiptNo = row.children[0] ? row.children[0].innerText.trim() : '';
         const receipt = (receipts || []).find(function(r) { return r.receiptNo === receiptNo; });
         if (!receipt) return;
-        const status = normalizeReceiptStatus(receipt);
-        row.children[5].innerHTML = '<span class="' + (status === 'published' ? 'status-paid' : status === 'cancelled' ? 'status-absent' : 'status-waiting') + '">' + receiptStatusThai(status) + '</span>';
+        const status = normalizeReceiptStatus(receipt.status);
+        row.children[5].innerHTML = '<span class="' + (status === 'published' ? 'status-paid' : status === 'hidden' ? 'status-absent' : 'status-waiting') + '">' + receiptStatusThai(status) + '</span>';
         const actionCell = row.children[6];
         if (actionCell && actionCell.getAttribute('data-receipt-final') !== '1') {
           actionCell.setAttribute('data-receipt-final','1');
