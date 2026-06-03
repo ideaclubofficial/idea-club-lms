@@ -13021,14 +13021,15 @@ function getCourseOnlineDocs(course, includeInactive) {
       payment.slipStatus = 'approved';
       payment.receiptStatus = 'issued';
       await setFirebaseDocument('payments', payment);
-      await issueReceiptFromPayment(payment);
+      const receipt = await issueReceiptFromPayment(payment);
       await approveStudentCourseFromPayment(payment);
+      if (receipt) addActivityLog('อนุมัติชำระเงินและสร้างใบเสร็จ', (receipt.receiptNo || '-') + ' · ' + (payment.student || '-'));
       return payment;
     }
 
-    function issueReceiptFromPayment(payment) {
+    async function issueReceiptFromPayment(payment) {
       if (!payment) return null;
-      return createReceipt({
+      return await createReceipt({
         paymentId: payment.id,
         studentId: payment.studentId || '',
         authUid: payment.authUid || '',
@@ -14977,18 +14978,9 @@ function receiptStatusText(status) {
         return Number(b.id || 0) - Number(a.id || 0);
       });
 
-      const receiptPaymentIds = visibleReceipts.map(function(r) { return String(r.paymentId || ''); });
-      const paidPaymentsWithoutReceipt = payments.filter(function(p) {
-        return isCurrentStudentMatchRecord(p) && p.status === 'ชำระแล้ว' && !receiptPaymentIds.includes(String(p.id || ''));
-      }).slice().sort(function(a, b) {
-        return Number(b.id || 0) - Number(a.id || 0);
-      });
-
       const rows = visibleReceipts.map(function(r) {
         return { type: 'receipt', id: r.id, sortId: Number(r.id || 0), receiptNo: r.receiptNo, month: getReceiptMonth(r), course: r.course, amount: formatPrice(getReceiptDisplayTotal(r)).replace(' บาท', ''), status: 'ชำระแล้ว' };
-      }).concat(paidPaymentsWithoutReceipt.map(function(p) {
-        return { type: 'payment', id: p.id, sortId: Number(p.id || 0), receiptNo: 'AUTO-' + String(p.id || '').slice(-6), month: p.month || '-', course: p.course || '-', amount: formatPrice(getPaymentFinalAmount(p)).replace(' บาท', ''), status: 'ชำระแล้ว' };
-      })).sort(function(a, b) {
+      }).sort(function(a, b) {
         return b.sortId - a.sortId;
       });
 
@@ -15000,9 +14992,8 @@ function receiptStatusText(status) {
       const pageItems = rows.slice(start, start + studentReceiptPerPage);
 
       tbody.innerHTML = pageItems.length ? pageItems.map(function(r) {
-        const openAction = r.type === 'receipt' ? actionCall('openReceiptStudent', r.id) : actionCall('openStudentPaymentReceipt', r.id);
-        return '<tr><td data-label="เลขที่ใบเสร็จ">' + r.receiptNo + '</td><td data-label="เดือน">' + r.month + '</td><td data-label="คอร์ส">' + r.course + '</td><td data-label="ยอดเงิน">' + r.amount + ' บาท</td><td data-label="สถานะ"><span class="status-paid">' + r.status + '</span></td><td data-label="ดูย้อนหลัง"><button class="btn btn-blue" type="button" onclick="' + openAction + '">ดูใบเสร็จ</button></td></tr>';
-      }).join('') : '<tr><td colspan="6">ยังไม่มีใบเสร็จหรือรายการชำระแล้วที่แสดงให้ผู้ปกครอง</td></tr>';
+        return '<tr><td data-label="เลขที่ใบเสร็จ">' + r.receiptNo + '</td><td data-label="เดือน">' + r.month + '</td><td data-label="คอร์ส">' + r.course + '</td><td data-label="ยอดเงิน">' + r.amount + ' บาท</td><td data-label="สถานะ"><span class="status-paid">' + r.status + '</span></td><td data-label="ดูย้อนหลัง"><button class="btn btn-blue" type="button" onclick="' + actionCall('openReceiptStudent', r.id) + '">ดูใบเสร็จ</button></td></tr>';
+      }).join('') : '<tr><td colspan="6">ยังไม่มีใบเสร็จที่ปิดการให้เห็นแล้ว</td></tr>';
 
       renderStudentReceiptPagination(rows.length, totalPages);
       safeRun(renderStudentMobilePayment, 'student-mobile-payment-receipts');
@@ -15014,17 +15005,9 @@ function receiptStatusText(status) {
       }).slice().sort(function(a, b) {
         return Number(b.id || 0) - Number(a.id || 0);
       });
-      const receiptPaymentIds = visibleReceipts.map(function(r) { return String(r.paymentId || ''); });
-      const paidPaymentsWithoutReceipt = payments.filter(function(p) {
-        return isCurrentStudentMatchRecord(p) && p.status === 'ชำระแล้ว' && !receiptPaymentIds.includes(String(p.id || ''));
-      }).slice().sort(function(a, b) {
-        return Number(b.id || 0) - Number(a.id || 0);
-      });
       return visibleReceipts.map(function(r) {
         return { type: 'receipt', id: r.id, sortId: Number(r.id || 0), receiptNo: r.receiptNo, month: getReceiptMonth(r), course: r.course, amount: formatPrice(getReceiptDisplayTotal(r)).replace(' บาท', ''), status: 'ชำระแล้ว' };
-      }).concat(paidPaymentsWithoutReceipt.map(function(p) {
-        return { type: 'payment', id: p.id, sortId: Number(p.id || 0), receiptNo: 'AUTO-' + String(p.id || '').slice(-6), month: p.month || '-', course: p.course || '-', amount: formatPrice(getPaymentFinalAmount(p)).replace(' บาท', ''), status: 'ชำระแล้ว' };
-      })).sort(function(a, b) {
+      }).sort(function(a, b) {
         return b.sortId - a.sortId;
       });
     }
