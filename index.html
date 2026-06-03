@@ -138,6 +138,95 @@
       color: #111827;
     }
 
+    .simple-schedule-layout {
+      display: grid;
+      grid-template-columns: minmax(320px, 0.9fr) minmax(0, 1.5fr);
+      gap: 18px;
+      align-items: start;
+    }
+
+    .simple-schedule-grid-wrap {
+      overflow-x: auto;
+      width: 100%;
+    }
+
+    .simple-schedule-grid-table {
+      min-width: 900px;
+      width: 100%;
+      border-collapse: collapse;
+      border-spacing: 0;
+    }
+
+    .simple-schedule-grid-table th,
+    .simple-schedule-grid-table td {
+      border: 1px solid #e5e7eb;
+      padding: 10px;
+      vertical-align: top;
+      text-align: left;
+      background: #ffffff;
+    }
+
+    .simple-schedule-grid-table th:first-child,
+    .simple-schedule-grid-table td:first-child {
+      min-width: 130px;
+      background: #f8fafc;
+      font-weight: 800;
+    }
+
+    .simple-schedule-cell {
+      display: grid;
+      gap: 8px;
+      min-width: 220px;
+    }
+
+    .simple-schedule-card {
+      border: 1px solid #bfdbfe;
+      background: #eff6ff;
+      border-radius: 10px;
+      padding: 10px;
+      display: grid;
+      gap: 6px;
+      line-height: 1.35;
+    }
+
+    .simple-schedule-card.simple-schedule-card-oneOnOne {
+      border-color: #86efac;
+      background: #f0fdf4;
+    }
+
+    .simple-schedule-card.simple-schedule-card-online {
+      border-color: #93c5fd;
+      background: #dbeafe;
+    }
+
+    .simple-schedule-card.simple-schedule-card-ondemand {
+      border-color: #c4b5fd;
+      background: #f5f3ff;
+    }
+
+    .simple-schedule-card.simple-schedule-card-makeup {
+      border-color: #fde047;
+      background: #fefce8;
+    }
+
+    .simple-schedule-card.simple-schedule-card-cancelled {
+      border-color: #d1d5db;
+      background: #f3f4f6;
+      color: #4b5563;
+    }
+
+    .simple-schedule-card-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-top: 4px;
+    }
+
+    .simple-schedule-card-actions .btn {
+      padding: 8px 12px;
+      min-height: 38px;
+    }
+
     .monthly-plan-grid-card .grid-card-time {
       font-size: 12px;
       color: #374151;
@@ -862,6 +951,25 @@
         width: 100%;
         min-height: 46px;
         border-radius: 14px;
+      }
+
+      .simple-schedule-layout {
+        grid-template-columns: minmax(0, 1fr);
+      }
+
+      .simple-schedule-grid-table {
+        min-width: 760px;
+      }
+
+      .simple-schedule-card-actions {
+        display: grid;
+        grid-template-columns: 1fr;
+      }
+
+      .simple-schedule-card-actions .btn {
+        width: 100%;
+        min-height: 44px;
+        border-radius: 12px;
       }
     }
   </style>
@@ -3517,7 +3625,11 @@
 
             <div class="form-box">
               <div class="planner-tab-nav">
-                <button type="button" class="planner-tab-button active" data-planner-tab-button="plannerTab1" onclick="switchMonthlyPlannerTab('plannerTab1')">
+                <button type="button" class="planner-tab-button active" data-planner-tab-button="plannerTabSimple" onclick="switchMonthlyPlannerTab('plannerTabSimple')">
+                  <span class="planner-tab-title">Simple Schedule</span>
+                  <span class="planner-tab-desc">กรอกคาบเองและดู Grid แบบง่าย</span>
+                </button>
+                <button type="button" class="planner-tab-button" data-planner-tab-button="plannerTab1" onclick="switchMonthlyPlannerTab('plannerTab1')">
                   <span class="planner-tab-title">สร้างตาราง</span>
                   <span class="planner-tab-desc">ตั้ง pattern และสร้างตารางทั้งเดือน</span>
                 </button>
@@ -3531,7 +3643,146 @@
                 </button>
               </div>
             </div>
-            <div id="plannerTab1" data-planner-tab>
+            <div id="plannerTabSimple" data-planner-tab>
+              <div class="simple-schedule-layout">
+                <div class="form-box">
+                  <h3>กรอกตารางแบบง่าย</h3>
+                  <p style="margin-bottom:18px; color:#6b7280;">กรอกคาบเรียนเอง แล้วบันทึกลง monthlyPlanSessions เดิม</p>
+                  <input id="simpleScheduleEditingId" type="hidden" value="" />
+                  <div class="form-row">
+                    <div>
+                      <label>เดือน</label>
+                      <input id="simpleScheduleMonth" type="hidden" />
+                      <div class="form-row">
+                        <div><select id="simpleScheduleMonthMonthSelect" onchange="syncThaiMonthYearPicker('simpleScheduleMonth', 'text')"></select></div>
+                        <div><select id="simpleScheduleMonthYearSelect" onchange="syncThaiMonthYearPicker('simpleScheduleMonth', 'text')"></select></div>
+                      </div>
+                    </div>
+                    <div>
+                      <label>วันที่</label>
+                      <input id="simpleScheduleDate" type="date" onchange="updateSimpleScheduleConflictWarning()" />
+                    </div>
+                  </div>
+                  <div class="form-row">
+                    <div>
+                      <label>เวลาเริ่ม</label>
+                      <input id="simpleScheduleTimeStart" type="time" onchange="updateSimpleScheduleConflictWarning()" />
+                    </div>
+                    <div>
+                      <label>เวลาจบ</label>
+                      <input id="simpleScheduleTimeEnd" type="time" onchange="updateSimpleScheduleConflictWarning()" />
+                    </div>
+                    <div>
+                      <label>ประเภทคาบ</label>
+                      <select id="simpleScheduleType" onchange="updateSimpleScheduleTypeFields(); updateSimpleScheduleConflictWarning()">
+                        <option value="onsite">Onsite</option>
+                        <option value="online">Online</option>
+                        <option value="ondemand">On-demand</option>
+                        <option value="oneOnOne">สอนเดี่ยว 1:1</option>
+                        <option value="makeup">Makeup</option>
+                      </select>
+                    </div>
+                  </div>
+                  <div class="form-row">
+                    <div>
+                      <label>คอร์ส</label>
+                      <select id="simpleScheduleCourse" onchange="updateSimpleScheduleConflictWarning()"></select>
+                    </div>
+                    <div id="simpleScheduleStudentRow" class="hidden">
+                      <label>นักเรียน 1:1</label>
+                      <select id="simpleScheduleStudent" onchange="updateSimpleScheduleConflictWarning()"></select>
+                      <p class="mini-muted">เลือกจากนักเรียนที่มีอยู่ในระบบเท่านั้น</p>
+                    </div>
+                  </div>
+                  <div class="form-row">
+                    <div>
+                      <label>วิชา</label>
+                      <select id="simpleScheduleSubject">
+                        <option value="">เลือกวิชา</option>
+                        <option>คณิตศาสตร์</option>
+                        <option>วิทยาศาสตร์</option>
+                        <option>ภาษาอังกฤษ</option>
+                        <option>ภาษาไทย</option>
+                        <option>สังคมศึกษา</option>
+                        <option>อื่นๆ</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label>ครู</label>
+                      <select id="simpleScheduleTeacher" onchange="updateSimpleScheduleConflictWarning()"></select>
+                    </div>
+                  </div>
+                  <div class="form-row">
+                    <div>
+                      <label>สถานที่ / รูปแบบเรียน</label>
+                      <input id="simpleScheduleLocation" type="text" placeholder="เช่น IDEA CLUB ศูนย์ หนองฉาง / Online" />
+                    </div>
+                    <div>
+                      <label>ห้องเรียน</label>
+                      <input id="simpleScheduleRoomName" type="text" placeholder="เช่น ห้อง 1 / Zoom" />
+                    </div>
+                  </div>
+                  <label>หมายเหตุ</label>
+                  <textarea id="simpleScheduleNote" placeholder="รายละเอียดเพิ่มเติม"></textarea>
+                  <div id="simpleScheduleConflictWarning" style="margin-top:14px;"></div>
+                  <button class="btn btn-green" type="button" onclick="saveSimpleScheduleSession()">บันทึกคาบ</button>
+                  <button class="btn btn-dark" type="button" onclick="clearSimpleScheduleForm()">ล้างฟอร์ม</button>
+                  <p id="simpleScheduleSaveResult" style="margin-top:14px; font-weight:bold;"></p>
+                </div>
+
+                <div class="form-box">
+                  <h3>Simple Grid View</h3>
+                  <p style="margin-bottom:18px; color:#6b7280;">แถวเป็นวันที่ คอลัมน์เป็นครู แสดงคาบจาก monthlyPlanSessions</p>
+                  <div class="form-row">
+                    <div>
+                      <label>เดือน</label>
+                      <select id="simpleScheduleGridMonthFilter" onchange="renderSimpleScheduleGrid()">
+                        <option value="ทั้งหมด">ทั้งหมด</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label>ศูนย์ / สถานที่</label>
+                      <select id="simpleScheduleGridLocationFilter" onchange="renderSimpleScheduleGrid()">
+                        <option value="ทั้งหมด">ทั้งหมด</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label>ครู</label>
+                      <select id="simpleScheduleGridTeacherFilter" onchange="renderSimpleScheduleGrid()">
+                        <option value="ทั้งหมด">ทั้งหมด</option>
+                      </select>
+                    </div>
+                  </div>
+                  <div class="form-row">
+                    <div>
+                      <label>คอร์ส</label>
+                      <select id="simpleScheduleGridCourseFilter" onchange="renderSimpleScheduleGrid()">
+                        <option value="ทั้งหมด">ทั้งหมด</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label>ประเภทคาบ</label>
+                      <select id="simpleScheduleGridTypeFilter" onchange="renderSimpleScheduleGrid()">
+                        <option value="ทั้งหมด">ทั้งหมด</option>
+                      </select>
+                    </div>
+                    <div></div>
+                  </div>
+                  <div class="simple-schedule-grid-wrap">
+                    <table class="simple-schedule-grid-table">
+                      <thead>
+                        <tr id="simpleScheduleGridTeacherHeaders">
+                          <th>วันที่</th>
+                        </tr>
+                      </thead>
+                      <tbody id="simpleScheduleGridBody"></tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div id="plannerTab1" data-planner-tab class="hidden">
               <div class="form-box">
                 <h3>สร้างตารางอัตโนมัติ</h3>
                 <p style="margin-bottom:18px; color:#6b7280;">บันทึก pattern คอร์ส แล้วสร้าง session ทั้งเดือนจาก Onsite / Online / On-demand</p>
@@ -8645,6 +8896,8 @@
       }
       if (tabId === 'admin-monthly-planner') {
         safeRun(initializeThaiMonthYearPickers, 'month-year-pickers-monthly-planner');
+        safeRun(renderSimpleScheduleSelectOptions, 'simple-schedule-select-options');
+        safeRun(renderSimpleScheduleGrid, 'simple-schedule-grid');
         safeRun(renderMonthlyPlanOptions, 'monthly-plan-options');
         safeRun(renderMonthlyPlanGeneratorDefaults, 'monthly-plan-generator-defaults');
         safeRun(renderHolidayTools, 'holiday-tools');
@@ -15411,6 +15664,7 @@ function receiptStatusText(status) {
     function initializeThaiMonthYearPickers() {
       setThaiMonthYearPickerValue('newPaymentMonth', getElement('newPaymentMonth') ? getElement('newPaymentMonth').value : '', 'text');
       setThaiMonthYearPickerValue('examLinkMonth', getElement('examLinkMonth') ? getElement('examLinkMonth').value : '', 'text');
+      setThaiMonthYearPickerValue('simpleScheduleMonth', getElement('simpleScheduleMonth') ? getElement('simpleScheduleMonth').value : '', 'text');
       setThaiMonthYearPickerValue('monthlyPlanMonth', getElement('monthlyPlanMonth') ? getElement('monthlyPlanMonth').value : '', 'text');
       setThaiMonthYearPickerValue('monthlyPlanGeneratorMonthKey', getElement('monthlyPlanGeneratorMonthKey') ? getElement('monthlyPlanGeneratorMonthKey').value : '', 'key');
     }
@@ -17379,6 +17633,402 @@ function receiptStatusText(status) {
       return session.teacherName || getTeacherNameById(session.teacherId);
     }
 
+    function getSimpleScheduleActiveCourses() {
+      return courses.filter(function(course) {
+        return course && course.deleted !== true && course.status !== 'closed' && course.status !== 'archived';
+      });
+    }
+
+    function getSimpleScheduleActiveTeachers() {
+      return teachers.filter(function(teacher) {
+        return teacher && teacher.deleted !== true && teacher.status !== 'inactive' && teacher.status !== 'archived';
+      });
+    }
+
+    function getSimpleScheduleAvailableStudents() {
+      return students.filter(function(student) {
+        return student && student.deleted !== true && student.archived !== true && student.status !== 'ปิดใช้งาน';
+      });
+    }
+
+    function renderSimpleScheduleSelectOptions() {
+      const courseSelect = getElement('simpleScheduleCourse');
+      const studentSelect = getElement('simpleScheduleStudent');
+      const teacherSelect = getElement('simpleScheduleTeacher');
+      const currentCourse = courseSelect ? courseSelect.value : '';
+      const currentStudent = studentSelect ? studentSelect.value : '';
+      const currentTeacher = teacherSelect ? teacherSelect.value : '';
+      const activeCourses = getSimpleScheduleActiveCourses();
+      const activeTeachers = getSimpleScheduleActiveTeachers();
+      const availableStudents = getSimpleScheduleAvailableStudents();
+
+      if (courseSelect) {
+        courseSelect.innerHTML = '<option value="">เลือกคอร์ส</option>' + activeCourses.map(function(course) {
+          const id = String(course.id || course.firebaseDocId || '');
+          const label = [course.grade, course.name || course.title || id].filter(Boolean).join(' · ');
+          return '<option value="' + escapeHtml(id) + '">' + escapeHtml(label) + '</option>';
+        }).join('');
+        courseSelect.value = activeCourses.some(function(course) { return String(course.id || course.firebaseDocId || '') === currentCourse; }) ? currentCourse : '';
+      }
+
+      if (studentSelect) {
+        studentSelect.innerHTML = '<option value="">เลือกนักเรียน</option>' + availableStudents.map(function(student) {
+          const id = getStudentPrivateLessonReferenceId(student);
+          const label = [student.name || student.nickname || id, student.nickname ? 'ชื่อเล่น ' + student.nickname : '', student.grade || '', student.memberId || ''].filter(Boolean).join(' · ');
+          return '<option value="' + escapeHtml(id) + '">' + escapeHtml(label) + '</option>';
+        }).join('');
+        studentSelect.value = availableStudents.some(function(student) { return getStudentPrivateLessonReferenceId(student) === currentStudent; }) ? currentStudent : '';
+      }
+
+      if (teacherSelect) {
+        teacherSelect.innerHTML = '<option value="">เลือกครู</option>' + activeTeachers.map(function(teacher) {
+          const id = String(teacher.id || teacher.firebaseDocId || '');
+          return '<option value="' + escapeHtml(id) + '">' + escapeHtml(teacher.name || teacher.displayName || teacher.email || id) + '</option>';
+        }).join('');
+        teacherSelect.value = activeTeachers.some(function(teacher) { return String(teacher.id || teacher.firebaseDocId || '') === currentTeacher; }) ? currentTeacher : '';
+      }
+
+      updateSimpleScheduleTypeFields();
+    }
+
+    function updateSimpleScheduleTypeFields() {
+      const type = getElement('simpleScheduleType') ? getElement('simpleScheduleType').value : 'onsite';
+      const row = getElement('simpleScheduleStudentRow');
+      if (row) row.classList.toggle('hidden', type !== 'oneOnOne');
+    }
+
+    function clearSimpleScheduleForm(clearMessage) {
+      if (getElement('simpleScheduleEditingId')) getElement('simpleScheduleEditingId').value = '';
+      setThaiMonthYearPickerValue('simpleScheduleMonth', '', 'text');
+      ['simpleScheduleDate','simpleScheduleTimeStart','simpleScheduleTimeEnd','simpleScheduleCourse','simpleScheduleStudent','simpleScheduleSubject','simpleScheduleTeacher','simpleScheduleLocation','simpleScheduleRoomName','simpleScheduleNote'].forEach(function(id) {
+        const el = getElement(id);
+        if (el) el.value = '';
+      });
+      if (getElement('simpleScheduleType')) getElement('simpleScheduleType').value = 'onsite';
+      updateSimpleScheduleTypeFields();
+      if (getElement('simpleScheduleConflictWarning')) getElement('simpleScheduleConflictWarning').innerHTML = '';
+      if (clearMessage !== false && getElement('simpleScheduleSaveResult')) getElement('simpleScheduleSaveResult').textContent = '';
+    }
+
+    function buildSimpleScheduleDraftFromForm() {
+      syncThaiMonthYearPicker('simpleScheduleMonth', 'text');
+      const editingId = getElement('simpleScheduleEditingId') ? getElement('simpleScheduleEditingId').value : '';
+      const existing = editingId ? monthlyPlanSessions.find(function(session) { return String(session.id || session.firebaseDocId || '') === String(editingId); }) : null;
+      const type = getElement('simpleScheduleType') ? getElement('simpleScheduleType').value : 'onsite';
+      const courseId = getElement('simpleScheduleCourse') ? getElement('simpleScheduleCourse').value : '';
+      const selectedCourse = getSimpleScheduleActiveCourses().find(function(course) { return String(course.id || course.firebaseDocId || '') === String(courseId); });
+      const teacherId = getElement('simpleScheduleTeacher') ? getElement('simpleScheduleTeacher').value : '';
+      const selectedTeacher = getSimpleScheduleActiveTeachers().find(function(teacher) { return String(teacher.id || teacher.firebaseDocId || '') === String(teacherId); });
+      const studentRef = getElement('simpleScheduleStudent') ? getElement('simpleScheduleStudent').value : '';
+      const selectedStudent = type === 'oneOnOne' ? findStudentForPrivateLesson(studentRef) : null;
+      const date = getElement('simpleScheduleDate') ? getElement('simpleScheduleDate').value : '';
+      const location = getElement('simpleScheduleLocation') ? getElement('simpleScheduleLocation').value.trim() : '';
+      const roomName = getElement('simpleScheduleRoomName') ? getElement('simpleScheduleRoomName').value.trim() : '';
+      const draft = Object.assign({}, existing || {});
+      draft.id = existing ? (existing.id || existing.firebaseDocId || editingId) : editingId;
+      draft.firebaseDocId = existing ? (existing.firebaseDocId || existing.id || editingId) : editingId;
+      draft.month = getElement('simpleScheduleMonth') ? getElement('simpleScheduleMonth').value.trim() : '';
+      draft.monthText = draft.month;
+      draft.monthKey = date ? date.slice(0, 7) : normalizeMonthKey(draft.month);
+      draft.date = date;
+      draft.sessionDate = date;
+      draft.type = type;
+      draft.timeStart = getElement('simpleScheduleTimeStart') ? getElement('simpleScheduleTimeStart').value : '';
+      draft.timeEnd = getElement('simpleScheduleTimeEnd') ? getElement('simpleScheduleTimeEnd').value : '';
+      draft.sessionTime = draft.timeStart;
+      draft.publishTime = type === 'ondemand' ? draft.timeStart : (existing ? existing.publishTime || '' : '');
+      draft.courseId = courseId;
+      draft.courseName = selectedCourse ? (selectedCourse.name || selectedCourse.title || '') : (existing ? existing.courseName || '' : '');
+      draft.subject = getElement('simpleScheduleSubject') ? getElement('simpleScheduleSubject').value : '';
+      draft.teacherId = teacherId;
+      draft.teacherUid = selectedTeacher ? (selectedTeacher.teacherUid || selectedTeacher.authUid || '') : (existing ? existing.teacherUid || '' : '');
+      draft.teacherAuthUid = selectedTeacher ? (selectedTeacher.authUid || selectedTeacher.teacherUid || '') : (existing ? existing.teacherAuthUid || '' : '');
+      draft.teacherName = selectedTeacher ? (selectedTeacher.name || selectedTeacher.displayName || selectedTeacher.email || '') : (existing ? existing.teacherName || '' : '');
+      draft.location = location;
+      draft.roomName = roomName;
+      draft.center = location || (existing ? existing.center || '' : '');
+      draft.note = getElement('simpleScheduleNote') ? getElement('simpleScheduleNote').value.trim() : '';
+      draft.status = 'confirmed';
+      draft.source = 'simpleSchedule';
+      draft.manualAdded = true;
+      draft.topic = draft.note || draft.topic || '';
+      if (type === 'oneOnOne' && selectedStudent) {
+        applyPrivateLessonStudentSessionReference(draft, selectedStudent);
+      } else if (type !== 'oneOnOne') {
+        applyPrivateLessonStudentSessionReference(draft, null);
+      }
+      return { draft: draft, existing: existing, selectedStudent: selectedStudent, selectedCourse: selectedCourse, selectedTeacher: selectedTeacher };
+    }
+
+    function updateSimpleScheduleConflictWarning() {
+      const box = getElement('simpleScheduleConflictWarning');
+      if (!box) return;
+      const built = buildSimpleScheduleDraftFromForm();
+      box.innerHTML = renderMonthlyPlanConflictWarning(findTeacherConflicts(built.draft));
+    }
+
+    async function saveSimpleScheduleSession() {
+      const result = getElement('simpleScheduleSaveResult');
+      const built = buildSimpleScheduleDraftFromForm();
+      const draft = built.draft;
+      const editingId = draft.id || '';
+      if (!draft.month || !draft.date || !draft.timeStart || !draft.timeEnd || !draft.type || !draft.subject || !draft.teacherId) {
+        if (result) {
+          result.textContent = 'กรุณากรอกเดือน วันที่ เวลา ประเภทคาบ วิชา และครูให้ครบ';
+          result.style.color = '#dc2626';
+        }
+        return;
+      }
+      if (parseTimeToMinutes(draft.timeStart) === null || parseTimeToMinutes(draft.timeEnd) === null || parseTimeToMinutes(draft.timeStart) >= parseTimeToMinutes(draft.timeEnd)) {
+        if (result) {
+          result.textContent = 'กรุณาระบุเวลาเริ่มและเวลาจบให้ถูกต้อง';
+          result.style.color = '#dc2626';
+        }
+        return;
+      }
+      if (draft.type !== 'oneOnOne' && !draft.courseId) {
+        if (result) {
+          result.textContent = 'กรุณาเลือกคอร์สสำหรับคาบกลุ่ม';
+          result.style.color = '#dc2626';
+        }
+        return;
+      }
+      if (draft.type === 'oneOnOne') {
+        if (!built.selectedStudent) {
+          if (result) {
+            result.textContent = 'คาบเรียนเดี่ยว 1:1 ต้องเลือกจากนักเรียนที่มีอยู่ในระบบเท่านั้น';
+            result.style.color = '#dc2626';
+          }
+          return;
+        }
+        const enabled = await ensurePrivateLessonStudentEnabled(built.selectedStudent, result);
+        if (!enabled) return;
+        applyPrivateLessonStudentSessionReference(draft, built.selectedStudent);
+        applyPrivateLessonBillingSnapshot(draft, built.selectedStudent);
+      }
+      const conflicts = findTeacherConflicts(draft);
+      if (conflicts.length) {
+        if (getElement('simpleScheduleConflictWarning')) getElement('simpleScheduleConflictWarning').innerHTML = renderMonthlyPlanConflictWarning(conflicts);
+        if (!confirm('ครูคนนี้มีคาบชนเวลา ต้องการบันทึกต่อหรือไม่?')) return;
+      }
+      const nowText = new Date().toLocaleString('th-TH');
+      try {
+        if (editingId) {
+          const item = monthlyPlanSessions.find(function(session) { return String(session.id || session.firebaseDocId || '') === String(editingId); });
+          if (!item) throw new Error('ไม่พบคาบที่ต้องการแก้ไข');
+          Object.assign(item, draft, { updatedAtText: nowText });
+          appendMonthlyPlanChangeLog(item, 'simple_schedule_edited', 'แก้ไขจาก Simple Schedule');
+          await setFirebaseDocument('monthlyPlanSessions', item);
+          if (result) result.textContent = 'แก้ไขคาบเรียบร้อย';
+        } else {
+          const newId = createFirebaseDocId('monthlyPlanSessions');
+          const newItem = Object.assign({}, draft, {
+            id: newId,
+            firebaseDocId: newId,
+            createdAtText: nowText,
+            updatedAtText: nowText
+          });
+          appendMonthlyPlanChangeLog(newItem, 'simple_schedule_created', 'สร้างจาก Simple Schedule');
+          monthlyPlanSessions.push(newItem);
+          await setFirebaseDocument('monthlyPlanSessions', newItem);
+          if (result) result.textContent = 'บันทึกคาบเรียบร้อย';
+        }
+        if (result) result.style.color = '#16a34a';
+        clearSimpleScheduleForm(false);
+        renderMonthlyPlanOptions();
+        renderSimpleScheduleGrid();
+        renderMonthlyPlanSessions();
+        renderTeacherMonthlyPlanSummary();
+        renderStudentMonthlyPlanSummary();
+      } catch (error) {
+        console.error('simple schedule save error:', error);
+        showMonthlyPlanSaveError(result, error);
+      }
+    }
+
+    function editSimpleScheduleSession(id) {
+      const item = monthlyPlanSessions.find(function(session) { return String(session.id || session.firebaseDocId || '') === String(id); });
+      if (!item) return;
+      switchMonthlyPlannerTab('plannerTabSimple');
+      renderSimpleScheduleSelectOptions();
+      if (getElement('simpleScheduleEditingId')) getElement('simpleScheduleEditingId').value = item.id || item.firebaseDocId || '';
+      setThaiMonthYearPickerValue('simpleScheduleMonth', item.monthText || item.month || item.monthKey || '', 'text');
+      if (getElement('simpleScheduleDate')) getElement('simpleScheduleDate').value = getMonthlySessionDate(item) || '';
+      if (getElement('simpleScheduleTimeStart')) getElement('simpleScheduleTimeStart').value = item.timeStart || item.sessionTime || item.publishTime || '';
+      if (getElement('simpleScheduleTimeEnd')) getElement('simpleScheduleTimeEnd').value = item.timeEnd || '';
+      if (getElement('simpleScheduleType')) getElement('simpleScheduleType').value = getMonthlyPlanSessionTypeKey(item) === 'holiday' ? 'onsite' : getMonthlyPlanSessionTypeKey(item);
+      updateSimpleScheduleTypeFields();
+      if (getElement('simpleScheduleCourse')) getElement('simpleScheduleCourse').value = item.courseId || '';
+      if (getElement('simpleScheduleStudent')) {
+        const student = findStudentForPrivateLesson(item.studentId || item.studentMemberId || item.studentAuthUid || '');
+        getElement('simpleScheduleStudent').value = student ? getStudentPrivateLessonReferenceId(student) : '';
+      }
+      if (getElement('simpleScheduleSubject')) getElement('simpleScheduleSubject').value = item.subject || '';
+      if (getElement('simpleScheduleTeacher')) getElement('simpleScheduleTeacher').value = item.teacherId || '';
+      if (getElement('simpleScheduleLocation')) getElement('simpleScheduleLocation').value = item.location || item.center || '';
+      if (getElement('simpleScheduleRoomName')) getElement('simpleScheduleRoomName').value = item.roomName || '';
+      if (getElement('simpleScheduleNote')) getElement('simpleScheduleNote').value = item.note || item.topic || '';
+      if (getElement('simpleScheduleSaveResult')) {
+        getElement('simpleScheduleSaveResult').textContent = 'กำลังแก้ไขคาบจาก Simple Schedule';
+        getElement('simpleScheduleSaveResult').style.color = '#0f4cbd';
+      }
+      updateSimpleScheduleConflictWarning();
+      const panel = getElement('plannerTabSimple');
+      if (panel) panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+
+    async function cancelSimpleScheduleSession(id) {
+      const item = monthlyPlanSessions.find(function(session) { return String(session.id || session.firebaseDocId || '') === String(id); });
+      if (!item) return;
+      if (!confirm('ต้องการยกเลิกคาบนี้ใช่หรือไม่?')) return;
+      const result = getElement('simpleScheduleSaveResult');
+      item.status = 'cancelled';
+      item.updatedAtText = new Date().toLocaleString('th-TH');
+      appendMonthlyPlanChangeLog(item, 'simple_schedule_cancelled', 'ยกเลิกจาก Simple Schedule');
+      try {
+        await setFirebaseDocument('monthlyPlanSessions', item);
+        if (result) {
+          result.textContent = 'ยกเลิกคาบเรียบร้อย';
+          result.style.color = '#dc2626';
+        }
+        renderSimpleScheduleGrid();
+        renderMonthlyPlanSessions();
+        renderTeacherMonthlyPlanSummary();
+        renderStudentMonthlyPlanSummary();
+      } catch (error) {
+        console.error('simple schedule cancel error:', error);
+        showMonthlyPlanSaveError(result, error);
+      }
+    }
+
+    function getSimpleScheduleLocationText(session) {
+      return session.location || session.roomName || session.center || '-';
+    }
+
+    function getSimpleScheduleFilteredSessions() {
+      const monthFilter = getElement('simpleScheduleGridMonthFilter') ? getElement('simpleScheduleGridMonthFilter').value : 'ทั้งหมด';
+      const locationFilter = getElement('simpleScheduleGridLocationFilter') ? getElement('simpleScheduleGridLocationFilter').value : 'ทั้งหมด';
+      const teacherFilter = getElement('simpleScheduleGridTeacherFilter') ? getElement('simpleScheduleGridTeacherFilter').value : 'ทั้งหมด';
+      const courseFilter = getElement('simpleScheduleGridCourseFilter') ? getElement('simpleScheduleGridCourseFilter').value : 'ทั้งหมด';
+      const typeFilter = getElement('simpleScheduleGridTypeFilter') ? getElement('simpleScheduleGridTypeFilter').value : 'ทั้งหมด';
+      return monthlyPlanSessions.filter(function(session) {
+        const status = session.status || 'planned';
+        const typeKey = getMonthlyPlanSessionTypeKey(session);
+        const monthMatched = monthFilter === 'ทั้งหมด' || getMonthlyPlanMonthLabel(session) === monthFilter || getMonthlySessionMonthKey(session) === monthFilter;
+        const locationText = getSimpleScheduleLocationText(session);
+        const locationMatched = locationFilter === 'ทั้งหมด' || locationText === locationFilter || session.center === locationFilter || session.roomName === locationFilter;
+        const teacherMatched = teacherFilter === 'ทั้งหมด' || getSessionTeacherKey(session) === teacherFilter;
+        const courseMatched = courseFilter === 'ทั้งหมด' || String(session.courseId || '') === String(courseFilter);
+        const typeMatched = typeFilter === 'ทั้งหมด' || typeKey === typeFilter;
+        return status !== 'cancelled' && monthMatched && locationMatched && teacherMatched && courseMatched && typeMatched;
+      }).sort(function(a, b) {
+        return String(getMonthlySessionDate(a) || '').localeCompare(String(getMonthlySessionDate(b) || '')) ||
+          String(getMonthlySessionTimeRange(a).start || '').localeCompare(String(getMonthlySessionTimeRange(b).start || ''));
+      });
+    }
+
+    function renderSimpleScheduleFilterOptions() {
+      const sessions = monthlyPlanSessions || [];
+      const selects = {
+        month: getElement('simpleScheduleGridMonthFilter'),
+        location: getElement('simpleScheduleGridLocationFilter'),
+        teacher: getElement('simpleScheduleGridTeacherFilter'),
+        course: getElement('simpleScheduleGridCourseFilter'),
+        type: getElement('simpleScheduleGridTypeFilter')
+      };
+      const current = {};
+      Object.keys(selects).forEach(function(key) { current[key] = selects[key] ? selects[key].value || 'ทั้งหมด' : 'ทั้งหมด'; });
+      const months = Array.from(new Set(sessions.map(function(session) { return getMonthlyPlanMonthLabel(session); }).filter(Boolean))).sort();
+      const locations = Array.from(new Set(sessions.map(getSimpleScheduleLocationText).filter(function(value) { return value && value !== '-'; }))).sort();
+      const teacherMap = {};
+      sessions.forEach(function(session) {
+        const key = getSessionTeacherKey(session);
+        if (key && !teacherMap[key]) teacherMap[key] = getMonthlyPlanTeacherName(session) || key;
+      });
+      const courseMap = {};
+      sessions.forEach(function(session) {
+        if (session.courseId && !courseMap[session.courseId]) courseMap[session.courseId] = getMonthlyPlanCourseName(session) || session.courseId;
+      });
+      const types = ['onsite','online','ondemand','oneOnOne','makeup'];
+      if (selects.month) {
+        selects.month.innerHTML = '<option value="ทั้งหมด">ทั้งหมด</option>' + months.map(function(month) { return '<option value="' + escapeHtml(month) + '">' + escapeHtml(month) + '</option>'; }).join('');
+        selects.month.value = months.includes(current.month) ? current.month : 'ทั้งหมด';
+      }
+      if (selects.location) {
+        selects.location.innerHTML = '<option value="ทั้งหมด">ทั้งหมด</option>' + locations.map(function(location) { return '<option value="' + escapeHtml(location) + '">' + escapeHtml(location) + '</option>'; }).join('');
+        selects.location.value = locations.includes(current.location) ? current.location : 'ทั้งหมด';
+      }
+      if (selects.teacher) {
+        const teacherKeys = Object.keys(teacherMap).sort(function(a, b) { return String(teacherMap[a]).localeCompare(String(teacherMap[b])); });
+        selects.teacher.innerHTML = '<option value="ทั้งหมด">ทั้งหมด</option>' + teacherKeys.map(function(key) { return '<option value="' + escapeHtml(key) + '">' + escapeHtml(teacherMap[key]) + '</option>'; }).join('');
+        selects.teacher.value = teacherKeys.includes(current.teacher) ? current.teacher : 'ทั้งหมด';
+      }
+      if (selects.course) {
+        const courseKeys = Object.keys(courseMap).sort(function(a, b) { return String(courseMap[a]).localeCompare(String(courseMap[b])); });
+        selects.course.innerHTML = '<option value="ทั้งหมด">ทั้งหมด</option>' + courseKeys.map(function(key) { return '<option value="' + escapeHtml(key) + '">' + escapeHtml(courseMap[key]) + '</option>'; }).join('');
+        selects.course.value = courseKeys.includes(current.course) ? current.course : 'ทั้งหมด';
+      }
+      if (selects.type) {
+        selects.type.innerHTML = '<option value="ทั้งหมด">ทั้งหมด</option>' + types.map(function(type) { return '<option value="' + escapeHtml(type) + '">' + escapeHtml(getMonthlyPlanTypeText(type)) + '</option>'; }).join('');
+        selects.type.value = types.includes(current.type) ? current.type : 'ทั้งหมด';
+      }
+    }
+
+    function renderSimpleScheduleCard(session) {
+      const id = session.id || session.firebaseDocId || '';
+      const typeKey = getMonthlyPlanSessionTypeKey(session);
+      const isOneOnOne = typeKey === 'oneOnOne';
+      return '<div class="simple-schedule-card simple-schedule-card-' + escapeHtml(typeKey) + '">' +
+        '<strong>' + escapeHtml(formatMonthlySessionTimeRange(session) || '-') + '</strong>' +
+        '<div><strong>' + escapeHtml(session.subject || '-') + (isOneOnOne ? ' 1:1' : '') + '</strong></div>' +
+        '<div>' + escapeHtml(isOneOnOne ? (session.studentName || session.studentMemberId || '-') : (getMonthlyPlanCourseName(session) || '-')) + '</div>' +
+        '<div class="mini-muted">ครู: ' + escapeHtml(getMonthlyPlanTeacherName(session) || '-') + '</div>' +
+        '<div class="mini-muted">' + escapeHtml(getSimpleScheduleLocationText(session)) + ' / ' + escapeHtml(getMonthlyPlanTypeText(typeKey)) + '</div>' +
+        '<div class="simple-schedule-card-actions">' +
+          '<button class="btn btn-blue" type="button" onclick="' + actionCall('editSimpleScheduleSession', id) + '">แก้ไข</button>' +
+          '<button class="btn btn-red" type="button" onclick="' + actionCall('cancelSimpleScheduleSession', id) + '">ยกเลิก</button>' +
+        '</div>' +
+      '</div>';
+    }
+
+    function getSimpleScheduleDateLabel(dateText) {
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(String(dateText || ''))) return dateText || 'ไม่ระบุวันที่';
+      const date = new Date(dateText + 'T00:00:00');
+      return getMonthlyPlanDayText(getMonthlyPlanDayKey(date)) + ' ' + Number(dateText.slice(8, 10)) + ' ' + getThaiMonthLabel(dateText.slice(0, 7), true);
+    }
+
+    function renderSimpleScheduleGrid() {
+      renderSimpleScheduleFilterOptions();
+      const header = getElement('simpleScheduleGridTeacherHeaders');
+      const body = getElement('simpleScheduleGridBody');
+      if (!header || !body) return;
+      const filtered = getSimpleScheduleFilteredSessions();
+      if (!filtered.length) {
+        header.innerHTML = '<th>วันที่</th>';
+        body.innerHTML = '<tr><td colspan="20">ยังไม่มีคาบในเงื่อนไขที่เลือก</td></tr>';
+        return;
+      }
+      const teacherKeys = [];
+      const teacherNames = {};
+      filtered.forEach(function(session) {
+        const key = getSessionTeacherKey(session) || 'unassigned';
+        if (!teacherKeys.includes(key)) teacherKeys.push(key);
+        teacherNames[key] = getMonthlyPlanTeacherName(session) || 'ไม่ระบุครู';
+      });
+      teacherKeys.sort(function(a, b) { return String(teacherNames[a]).localeCompare(String(teacherNames[b])); });
+      const dates = Array.from(new Set(filtered.map(function(session) { return getMonthlySessionDate(session) || 'ไม่ระบุวันที่'; }))).sort();
+      header.innerHTML = '<th>วันที่</th>' + teacherKeys.map(function(key) { return '<th>' + escapeHtml(teacherNames[key] || key) + '</th>'; }).join('');
+      body.innerHTML = dates.map(function(dateText) {
+        const cells = teacherKeys.map(function(key) {
+          const cellSessions = filtered.filter(function(session) {
+            return (getMonthlySessionDate(session) || 'ไม่ระบุวันที่') === dateText && (getSessionTeacherKey(session) || 'unassigned') === key;
+          });
+          return '<td><div class="simple-schedule-cell">' + (cellSessions.length ? cellSessions.map(renderSimpleScheduleCard).join('') : '<span class="mini-muted">-</span>') + '</div></td>';
+        }).join('');
+        return '<tr><td>' + escapeHtml(getSimpleScheduleDateLabel(dateText)) + '</td>' + cells + '</tr>';
+      }).join('');
+    }
+
     function renderMonthlyPlanOptions() {
       const courseSelect = getElement('monthlyPlanCourse');
       const generatorCourseSelect = getElement('monthlyPlanGeneratorCourse');
@@ -17567,6 +18217,10 @@ function receiptStatusText(status) {
       if (tab) tab.classList.remove('hidden');
       const btn = Array.from(document.querySelectorAll('[data-planner-tab-button]')).find(function(b) { return b.getAttribute('data-planner-tab-button') === tabId; });
       if (btn) btn.classList.add('active');
+      if (tabId === 'plannerTabSimple') {
+        safeRun(renderSimpleScheduleSelectOptions, 'simple-schedule-select-options-after-tab');
+        safeRun(renderSimpleScheduleGrid, 'simple-schedule-grid-after-tab');
+      }
       if (tabId === 'plannerTab1') {
         safeRun(renderMonthlyPlanGeneratorDefaults, 'monthly-plan-generator-defaults-after-tab');
         safeRun(function() { renderCourseTeachingSettingsForSelectedCourse(); }, 'course-teaching-settings-after-tab');
@@ -19569,6 +20223,7 @@ function receiptStatusText(status) {
       }).join('') : '<tr><td colspan="8">' + (monthlyPlannerIssueFilter === 'all' ? 'ยังไม่มีแผนสอนรายเดือน' : 'ไม่พบรายการตามตัวกรองนี้') + '</td></tr>';
       renderMonthlyPlanGrid(filtered);
       renderMonthlyPlannerMobileTimeline(filtered);
+      safeRun(renderSimpleScheduleGrid, 'simple-schedule-grid-after-monthly-render');
       renderMonthlyPlanSummary();
       renderMonthlySubjectBalance();
       renderMonthlyPlannerDashboardSummary();
