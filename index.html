@@ -3196,12 +3196,12 @@
                     <section id="admin-payment-round" class="admin-tab hidden">
             <div class="form-box">
               <h3>ตั้งค่ารอบชำระเงิน</h3>
-              <p style="margin-bottom:18px; color:#6b7280;">เลือกเดือน ตั้งราคาเฉพาะที่ต่างจากราคาคอร์ส แล้วสร้างรายการเรียกเก็บในหน้าเดียว</p>
+              <p style="margin-bottom:18px; color:#6b7280;">เลือกเดือน ตั้งราคาเฉพาะที่ต่างจากราคาคอร์ส แล้วบันทึกให้นักเรียนเห็นยอดได้ทันที</p>
 
               <div class="notice" style="margin-bottom:18px;">
                 <strong>วิธีใช้งาน</strong>
                 <p>เลือกเดือนแล้วกดเตรียมรอบ ระบบจะสร้างเดือนให้ถ้ายังไม่มี และเติมราคาปกติของคอร์สให้ทันที</p>
-                <p>แก้เฉพาะคอร์สที่เดือนนี้มีราคาต่าง จากนั้นบันทึกราคาและสร้างรายการเรียกเก็บ</p>
+                <p>แก้เฉพาะคอร์สที่เดือนนี้มีราคาต่าง จากนั้นบันทึกและเปิดแสดงยอดให้นักเรียน ไม่ต้องสร้างรายการชำระเงินล่วงหน้า</p>
               </div>
 
               <h3 style="color:#0f4cbd; margin-bottom:10px;">เลือกรอบชำระเงิน</h3>
@@ -3232,6 +3232,7 @@
                         <th>ลำดับ</th>
                         <th>เดือน</th>
                         <th>ราคาคอร์สที่ตั้งไว้</th>
+                        <th>แสดงให้นักเรียน</th>
                         <th>จัดการ</th>
                       </tr>
                     </thead>
@@ -3253,7 +3254,7 @@
               <div class="test-actions">
                 <button class="btn btn-blue" type="button" onclick="useDefaultCoursePricesForSelectedMonth()">ใช้ราคาปกติของคอร์สทั้งหมด</button>
                 <button class="btn btn-dark" type="button" onclick="copyPricesFromPreviousMonth()">คัดลอกราคาจากเดือนก่อน</button>
-                <button class="btn btn-green" type="button" onclick="saveAllPaymentCoursePrices()">บันทึกราคาและดูรายการเรียกเก็บ</button>
+                <button class="btn btn-green" type="button" onclick="saveAllPaymentCoursePrices()">บันทึกและเผยแพร่ยอดให้นักเรียน</button>
               </div>
               <p id="paymentCoursePriceResult" style="margin-top:14px; font-weight:bold;"></p>
 
@@ -3275,8 +3276,8 @@
 
               <br />
 
-              <h3 style="color:#0f4cbd; margin-bottom:10px;">รายการเรียกเก็บของเดือนนี้</h3>
-              <p style="color:#6b7280; margin-bottom:10px;">ตรวจยอดก่อนสร้างรายการชำระเงิน ระบบจะข้ามรายการที่สร้างไว้แล้ว</p>
+              <h3 style="color:#0f4cbd; margin-bottom:10px;">Preview ยอดของเดือนนี้</h3>
+              <p style="color:#6b7280; margin-bottom:10px;">ตรวจยอดที่นักเรียนจะเห็นทันทีหลังบันทึก หากต้องการสร้าง payment records ล่วงหน้าให้ใช้ส่วนขั้นสูงด้านล่าง</p>
               <div id="paymentRecordPreviewSummary" class="dashboard-grid"></div>
               <div class="table-wrap" style="margin-top:14px;">
                 <table>
@@ -3292,7 +3293,11 @@
                   <tbody id="paymentRecordPreviewTableBody"></tbody>
                 </table>
               </div>
-              <button class="btn btn-green" type="button" onclick="createMonthlyPaymentRecords()">สร้างรายการชำระเงินของเดือนนี้</button>
+              <details style="margin-top:14px;">
+                <summary style="cursor:pointer; font-weight:800; color:#0f4cbd;">ขั้นสูง: สร้าง payment records ล่วงหน้า</summary>
+                <p style="color:#6b7280; margin:10px 0;">ปกติไม่ต้องกด นักเรียนจะเห็นยอดจากรอบบิลทันที ระบบจะสร้างรายการจริงเมื่ออัปโหลดสลิปหรือ Admin บันทึกชำระเงิน</p>
+                <button class="btn btn-dark" type="button" onclick="createMonthlyPaymentRecords()">สร้าง payment records ล่วงหน้าของเดือนนี้</button>
+              </details>
               <p id="paymentRecordPreviewResult" style="margin-top:14px; font-weight:bold;"></p>
             </div>
           </section>
@@ -12127,9 +12132,11 @@ function getCourseOnlineDocs(course, includeInactive) {
 
     function getCurrentStudentPaymentForSelectedMonth() {
       if (!currentStudent) return null;
+      const visiblePaymentMonths = getVisiblePaymentMonthsForStudents();
       const selectedMonth = getElement('studentPaymentMonth') && getElement('studentPaymentMonth').value
         ? getElement('studentPaymentMonth').value
-        : (paymentMonths[0] ? paymentMonths[0].month : '');
+        : (visiblePaymentMonths[0] ? visiblePaymentMonths[0].month : '');
+      if (!selectedMonth || !isPaymentMonthVisibleByName(selectedMonth)) return null;
       const selectedPayment = payments.find(function(p) {
         return isCurrentStudentMatchRecord(p)
           && (
@@ -12147,6 +12154,11 @@ function getCourseOnlineDocs(course, includeInactive) {
     }
 
     function getCurrentStudentPaymentStatusText() {
+      const visiblePaymentMonths = getVisiblePaymentMonthsForStudents();
+      const selectedMonth = getElement('studentPaymentMonth') && getElement('studentPaymentMonth').value
+        ? getElement('studentPaymentMonth').value
+        : (visiblePaymentMonths[0] ? visiblePaymentMonths[0].month : '');
+      if (!selectedMonth || !isPaymentMonthVisibleByName(selectedMonth)) return '-';
       const selectedMonthPayment = getCurrentStudentPaymentForSelectedMonth();
       if (selectedMonthPayment && selectedMonthPayment.status) return selectedMonthPayment.status;
       if (currentStudent && currentStudent.courseId) return 'รอชำระเงิน';
@@ -12225,9 +12237,10 @@ function getCourseOnlineDocs(course, includeInactive) {
       const name = currentStudent ? (currentStudent.nickname || currentStudent.name || 'นักเรียน') : 'นักเรียน';
       if (getElement('studentGreetingName')) getElement('studentGreetingName').textContent = name;
 
+      const visiblePaymentMonths = getVisiblePaymentMonthsForStudents();
       const selectedPaymentMonth = getElement('studentPaymentMonth') && getElement('studentPaymentMonth').value
         ? getElement('studentPaymentMonth').value
-        : (Array.isArray(paymentMonths) && paymentMonths.length ? paymentMonths[0].month : '-');
+        : (visiblePaymentMonths.length ? visiblePaymentMonths[0].month : '-');
       if (getElement('studentDashPaymentMonth')) getElement('studentDashPaymentMonth').textContent = selectedPaymentMonth || '-';
       if (getElement('studentDashPaymentStatus')) {
         const paymentText = hasRegisteredCourse ? getCurrentStudentPaymentStatusText() : 'ยังไม่ได้สมัครคอร์ส';
@@ -12299,9 +12312,10 @@ function getCourseOnlineDocs(course, includeInactive) {
     }
 
     function getStudentMobileSelectedMonth() {
+      const visiblePaymentMonths = getVisiblePaymentMonthsForStudents();
       return getElement('studentPaymentMonth') && getElement('studentPaymentMonth').value
         ? getElement('studentPaymentMonth').value
-        : (Array.isArray(paymentMonths) && paymentMonths.length ? paymentMonths[0].month : '');
+        : (visiblePaymentMonths.length ? visiblePaymentMonths[0].month : '');
     }
 
     function updateStudentMobileHomeFromCurrentStudent(selectedCourse, hasRegisteredCourse) {
@@ -12457,10 +12471,13 @@ function getCourseOnlineDocs(course, includeInactive) {
 
 
       if (getElement('studentPaymentCourseName')) getElement('studentPaymentCourseName').textContent = selectedCourse ? selectedCourse.name : '-';
+      const visiblePaymentMonths = getVisiblePaymentMonthsForStudents();
       const selectedPaymentMonth = getElement('studentPaymentMonth') && getElement('studentPaymentMonth').value
         ? getElement('studentPaymentMonth').value
-        : (Array.isArray(paymentMonths) && paymentMonths.length ? paymentMonths[0].month : '-');
-      const selectedPaymentAmount = getPaymentMonthAmount(selectedPaymentMonth) || (selectedCourse ? Number(selectedCourse.price || 0) : 0);
+        : (visiblePaymentMonths.length ? visiblePaymentMonths[0].month : '-');
+      const selectedPaymentAmount = currentStudent && selectedPaymentMonth && selectedPaymentMonth !== '-'
+        ? getExpectedPaymentAmountForStudent(currentStudent, selectedPaymentMonth)
+        : (selectedCourse ? getCourseMonthlyPrice(selectedCourse) : 0);
       if (getElement('studentPaymentAmount')) getElement('studentPaymentAmount').textContent = selectedPaymentAmount ? formatPrice(selectedPaymentAmount) : '-';
       if (getElement('studentPaymentCurrentMonth')) {
         getElement('studentPaymentCurrentMonth').textContent = selectedPaymentMonth || '-';
@@ -13024,7 +13041,8 @@ function getCourseOnlineDocs(course, includeInactive) {
       if (currentStudent) {
         const result = getElement('studentSlipResult');
         const monthSelect = getElement('studentPaymentMonth');
-        const month = monthSelect && monthSelect.value ? monthSelect.value : (paymentMonths[0] ? paymentMonths[0].month : '');
+        const visiblePaymentMonths = getVisiblePaymentMonthsForStudents();
+        const month = monthSelect && monthSelect.value ? monthSelect.value : (visiblePaymentMonths[0] ? visiblePaymentMonths[0].month : '');
         if (month && !month.includes('ยังไม่มี')) {
           try {
             let payment = getCurrentStudentPaymentForSelectedMonth();
@@ -13211,9 +13229,13 @@ function getCourseOnlineDocs(course, includeInactive) {
 
     function updateStudentSelectedPaymentMonth() {
       const monthSelect = getElement('studentPaymentMonth');
-      const month = monthSelect && monthSelect.value ? monthSelect.value : (paymentMonths[0] ? paymentMonths[0].month : '-');
-      const amount = currentStudent ? getExpectedPaymentAmountForStudent(currentStudent, month) : (getCurrentStudentCourse() ? getCourseMonthlyPrice(getCurrentStudentCourse()) : getPaymentMonthAmount(month));
-      const statusText = getCurrentStudentPaymentStatusText();
+      const visiblePaymentMonths = getVisiblePaymentMonthsForStudents();
+      const month = monthSelect && monthSelect.value ? monthSelect.value : (visiblePaymentMonths[0] ? visiblePaymentMonths[0].month : '-');
+      const canShowMonth = !!(month && month !== '-' && isPaymentMonthVisibleByName(month));
+      const amount = canShowMonth
+        ? (currentStudent ? getExpectedPaymentAmountForStudent(currentStudent, month) : (getCurrentStudentCourse() ? getCourseMonthlyPrice(getCurrentStudentCourse()) : getPaymentMonthAmount(month)))
+        : 0;
+      const statusText = canShowMonth ? getCurrentStudentPaymentStatusText() : '-';
       if (getElement('studentPaymentCurrentMonth')) getElement('studentPaymentCurrentMonth').textContent = month || '-';
       if (getElement('studentPaymentAmount')) getElement('studentPaymentAmount').textContent = amount ? formatPrice(amount) : '-';
       if (getElement('studentPaymentStatus')) {
@@ -13235,7 +13257,7 @@ function getCourseOnlineDocs(course, includeInactive) {
       if (!tbody) return;
 
       if (!Array.isArray(paymentMonths) || paymentMonths.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="4">ยังไม่มีเดือนชำระเงิน ให้เพิ่มจากฟอร์มด้านบน</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="5">ยังไม่มีเดือนชำระเงิน ให้เพิ่มจากฟอร์มด้านบน</td></tr>';
         if (studentSelect) studentSelect.innerHTML = '<option value="">ยังไม่มีเดือนชำระเงิน</option>';
         if (statusFilter) statusFilter.innerHTML = '<option value="ทั้งหมด">ทั้งหมด</option>';
         if (priceMonthSelect) priceMonthSelect.innerHTML = '<option value="">ยังไม่มีเดือนชำระเงิน</option>';
@@ -13247,15 +13269,25 @@ function getCourseOnlineDocs(course, includeInactive) {
 
       tbody.innerHTML = paymentMonths.map(function(item, index) {
         const priceCount = getPaymentCoursePriceCount(item);
-        return '<tr><td>' + (index + 1) + '</td><td>' + item.month + '</td><td>' + (priceCount ? 'ตั้งราคาแล้ว ' + priceCount + ' คอร์ส' : 'ใช้ราคาปกติจากคอร์ส') + '</td><td><button class="btn btn-blue" type="button" onclick="' + actionCall('selectPaymentMonthForPricing', item.month) + '">เลือกเดือนนี้</button><button class="btn btn-red" type="button" onclick="' + actionCall('deletePaymentMonth', item.id) + '">ลบ</button></td></tr>';
+        const isVisible = isPaymentMonthVisibleToStudents(item);
+        const visibleBadge = isVisible ? '<span class="status-paid">แสดง</span>' : '<span class="status-waiting">ซ่อน</span>';
+        const toggleLabel = isVisible ? 'ซ่อนจากนักเรียน' : 'แสดงให้นักเรียน';
+        const toggleClass = isVisible ? 'btn-dark' : 'btn-green';
+        return '<tr><td>' + (index + 1) + '</td><td>' + item.month + '</td><td>' + (priceCount ? 'ตั้งราคาแล้ว ' + priceCount + ' คอร์ส' : 'ใช้ราคาปกติจากคอร์ส') + '</td><td>' + visibleBadge + '</td><td><button class="btn btn-blue" type="button" onclick="' + actionCall('selectPaymentMonthForPricing', item.month) + '">เลือกเดือนนี้</button><button class="btn ' + toggleClass + '" type="button" onclick="' + actionCall('togglePaymentMonthStudentVisibility', item.id) + '">' + toggleLabel + '</button><button class="btn btn-red" type="button" onclick="' + actionCall('deletePaymentMonth', item.id) + '">ลบ</button></td></tr>';
       }).join('');
 
       if (studentSelect) {
-        const currentStudentMonth = studentSelect.value || (paymentMonths[0] ? paymentMonths[0].month : '');
-        studentSelect.innerHTML = paymentMonths.map(function(item) {
-          return '<option value="' + item.month + '">' + item.month + '</option>';
-        }).join('');
-        studentSelect.value = paymentMonths.some(function(item) { return item.month === currentStudentMonth; }) ? currentStudentMonth : (paymentMonths[0] ? paymentMonths[0].month : '');
+        const visiblePaymentMonths = getVisiblePaymentMonthsForStudents();
+        const currentStudentMonth = studentSelect.value || (visiblePaymentMonths[0] ? visiblePaymentMonths[0].month : '');
+        if (!visiblePaymentMonths.length) {
+          studentSelect.innerHTML = '<option value="">ยังไม่มีรอบบิลที่เปิดให้ชำระ</option>';
+          studentSelect.value = '';
+        } else {
+          studentSelect.innerHTML = visiblePaymentMonths.map(function(item) {
+            return '<option value="' + item.month + '">' + item.month + '</option>';
+          }).join('');
+          studentSelect.value = visiblePaymentMonths.some(function(item) { return item.month === currentStudentMonth; }) ? currentStudentMonth : (visiblePaymentMonths[0] ? visiblePaymentMonths[0].month : '');
+        }
         updateStudentSelectedPaymentMonth();
       }
 
@@ -13346,7 +13378,7 @@ function getCourseOnlineDocs(course, includeInactive) {
       const input = getElement(getPaymentCoursePriceInputId(course.id));
       if (input) input.value = Math.round(normalPrice / 2);
       if (result) {
-        result.textContent = 'ตั้งครึ่งราคาของคอร์สนี้แล้ว กรุณากด “บันทึกราคาและดูรายการเรียกเก็บ”';
+        result.textContent = 'ตั้งครึ่งราคาของคอร์สนี้แล้ว กรุณากด “บันทึกและเผยแพร่ยอดให้นักเรียน”';
         result.style.color = '#0f4cbd';
       }
     }
@@ -13357,7 +13389,7 @@ function getCourseOnlineDocs(course, includeInactive) {
         if (input) input.value = getCourseMonthlyPrice(c) || '';
       });
       const result = getElement('paymentCoursePriceResult');
-      if (result) { result.textContent = 'เติมราคาปกติของคอร์สทั้งหมดแล้ว กรุณากด “บันทึกราคาและดูรายการเรียกเก็บ”'; result.style.color = '#0f4cbd'; }
+      if (result) { result.textContent = 'เติมราคาปกติของคอร์สทั้งหมดแล้ว กรุณากด “บันทึกและเผยแพร่ยอดให้นักเรียน”'; result.style.color = '#0f4cbd'; }
       renderPaymentRecordPreview();
     }
 
@@ -13377,7 +13409,7 @@ function getCourseOnlineDocs(course, includeInactive) {
         const previousPrice = previousMonth && previousMonth.coursePrices ? Number(previousMonth.coursePrices[String(c.id)] || 0) : 0;
         input.value = previousPrice || getCourseMonthlyPrice(c) || '';
       });
-      if (result) { result.textContent = 'คัดลอกราคาจาก ' + previousMonth.month + ' แล้ว กรุณากด “บันทึกราคาและดูรายการเรียกเก็บ”'; result.style.color = '#0f4cbd'; }
+      if (result) { result.textContent = 'คัดลอกราคาจาก ' + previousMonth.month + ' แล้ว กรุณากด “บันทึกและเผยแพร่ยอดให้นักเรียน”'; result.style.color = '#0f4cbd'; }
       renderPaymentRecordPreview();
     }
 
@@ -13402,12 +13434,14 @@ function getCourseOnlineDocs(course, includeInactive) {
         }
       });
       try {
+        if (item.visibleToStudents === undefined) item.visibleToStudents = true;
         await setFirebaseDocument('paymentMonths', item);
         addActivityLog('บันทึกราคาคอร์สทั้งเดือน', month + ' · ' + savedCount + ' คอร์ส');
-        if (result) { result.textContent = 'บันทึกราคาของเดือน ' + month + ' เรียบร้อย ' + savedCount + ' คอร์ส พร้อมสร้างรายการเรียกเก็บ'; result.style.color = '#16a34a'; }
+        if (result) { result.textContent = 'บันทึกราคาของเดือน ' + month + ' เรียบร้อย ' + savedCount + ' คอร์ส นักเรียนเห็นยอดได้ทันที'; result.style.color = '#16a34a'; }
         renderPaymentMonths();
-        renderPaymentRecordPreview('บันทึกราคาแล้ว พร้อมสร้างรายการเรียกเก็บ');
+        renderPaymentRecordPreview('บันทึกราคาแล้ว นักเรียนเห็นยอดได้ทันที');
         updateStudentSelectedPaymentMonth();
+        updateStudentCourseDisplay();
         renderDashboardPaymentSummary();
       } catch (error) {
         if (result) { result.textContent = 'บันทึกไม่สำเร็จ: ' + (error.message || error.code); result.style.color = '#dc2626'; }
@@ -13432,7 +13466,7 @@ function getCourseOnlineDocs(course, includeInactive) {
       try {
         if (!item) {
           const paymentMonthId = createFirebaseDocId('paymentMonths');
-          item = { id: paymentMonthId, firebaseDocId: paymentMonthId, month: month, amount: 0, coursePrices: {} };
+          item = { id: paymentMonthId, firebaseDocId: paymentMonthId, month: month, amount: 0, coursePrices: {}, visibleToStudents: true };
           paymentMonths.push(item);
           await setFirebaseDocument('paymentMonths', item);
           addActivityLog('เพิ่มรอบชำระเงิน', month);
@@ -13482,6 +13516,30 @@ function getCourseOnlineDocs(course, includeInactive) {
       }
     }
 
+    async function togglePaymentMonthStudentVisibility(id) {
+      const item = paymentMonths.find(function(month) { return String(month.id) === String(id); });
+      const result = getElement('paymentMonthResult');
+      if (!item) return;
+      item.visibleToStudents = item.visibleToStudents === false;
+      try {
+        await setFirebaseDocument('paymentMonths', item);
+        if (result) {
+          result.textContent = (item.visibleToStudents ? 'เปิดแสดงยอดให้นักเรียนแล้ว: ' : 'ซ่อนยอดจากนักเรียนแล้ว: ') + item.month;
+          result.style.color = item.visibleToStudents ? '#16a34a' : '#d97706';
+        }
+        renderPaymentMonths();
+        renderPaymentRecordPreview();
+        updateStudentSelectedPaymentMonth();
+        updateStudentCourseDisplay();
+      } catch (error) {
+        item.visibleToStudents = !item.visibleToStudents;
+        if (result) {
+          result.textContent = 'ปรับสถานะไม่สำเร็จ: ' + (error.message || error.code || 'ไม่ทราบสาเหตุ');
+          result.style.color = '#dc2626';
+        }
+      }
+    }
+
     async function addPaymentMonth() {
       syncThaiMonthYearPicker('newPaymentMonth', 'text');
       const monthInput = getElement('newPaymentMonth');
@@ -13504,7 +13562,7 @@ function getCourseOnlineDocs(course, includeInactive) {
       }
 
       const paymentMonthId = createFirebaseDocId('paymentMonths');
-      const newItem = { id: paymentMonthId, firebaseDocId: paymentMonthId, month: month, amount: amount, coursePrices: {} };
+      const newItem = { id: paymentMonthId, firebaseDocId: paymentMonthId, month: month, amount: amount, coursePrices: {}, visibleToStudents: true };
       paymentMonths.push(newItem);
       await setFirebaseDocument('paymentMonths', newItem);
       setThaiMonthYearPickerValue('newPaymentMonth', '', 'text');
@@ -13641,6 +13699,19 @@ function getCourseOnlineDocs(course, includeInactive) {
       });
 
       updatePaymentSummary();
+    }
+
+    function isPaymentMonthVisibleToStudents(item) {
+      return !item || item.visibleToStudents !== false;
+    }
+
+    function getVisiblePaymentMonthsForStudents() {
+      return (Array.isArray(paymentMonths) ? paymentMonths : []).filter(isPaymentMonthVisibleToStudents);
+    }
+
+    function isPaymentMonthVisibleByName(month) {
+      const item = getPaymentMonthItem(month);
+      return !!item && isPaymentMonthVisibleToStudents(item);
     }
 
     function getPaymentMonthItem(month) {
@@ -14739,10 +14810,12 @@ function receiptStatusText(status) {
     function updateStudentMobilePaymentFromExistingData() {
       if (!getElement('studentMobilePayment')) return;
       const selectedCourse = getCurrentStudentCourse();
+      const visiblePaymentMonths = getVisiblePaymentMonthsForStudents();
       const selectedMonth = getElement('studentPaymentMonth') && getElement('studentPaymentMonth').value
         ? getElement('studentPaymentMonth').value
-        : (Array.isArray(paymentMonths) && paymentMonths.length ? paymentMonths[0].month : '-');
-      const amount = currentStudent && selectedMonth ? getExpectedPaymentAmountForStudent(currentStudent, selectedMonth) : (selectedCourse ? getCourseMonthlyPrice(selectedCourse) : 0);
+        : (visiblePaymentMonths.length ? visiblePaymentMonths[0].month : '-');
+      const canShowMonth = !!(selectedMonth && selectedMonth !== '-' && isPaymentMonthVisibleByName(selectedMonth));
+      const amount = currentStudent && canShowMonth ? getExpectedPaymentAmountForStudent(currentStudent, selectedMonth) : 0;
       const statusText = currentStudent && currentStudent.courseId ? getCurrentStudentPaymentStatusText() : '-';
       const courseText = selectedCourse ? selectedCourse.name : '-';
 
@@ -15013,6 +15086,11 @@ function receiptStatusText(status) {
         result.style.color = '#dc2626';
         return;
       }
+      if (!isPaymentMonthVisibleByName(month)) {
+        result.textContent = 'รอบบิลเดือนนี้ยังไม่เปิดให้ชำระ กรุณาติดต่อเจ้าหน้าที่';
+        result.style.color = '#dc2626';
+        return;
+      }
       if (!file) {
         result.textContent = 'กรุณาเลือกไฟล์สลิปก่อนอัปโหลด';
         result.style.color = '#dc2626';
@@ -15034,13 +15112,38 @@ function receiptStatusText(status) {
         return;
       }
 
-      const payment = getCurrentStudentPaymentForSelectedMonth();
-      const paymentId = payment ? String(payment.firebaseDocId || payment.id || '') : '';
-      if (!paymentId) {
-        result.textContent = 'ไม่พบรายการชำระเงินของเดือนนี้ กรุณาติดต่อเจ้าหน้าที่';
-        result.style.color = '#dc2626';
-        return;
+      let payment = getCurrentStudentPaymentForSelectedMonth();
+      if (!payment) {
+        const baseAmount = getExpectedPaymentAmountForStudent(currentStudent, month);
+        const paymentId = createFirebaseDocId('payments');
+        payment = {
+          id: paymentId,
+          firebaseDocId: paymentId,
+          studentId: currentStudent.id || '',
+          memberId: currentStudent.memberId || '',
+          studentName: currentStudent.name || '',
+          studentAuthUid: currentStudent.authUid || (firebaseUser ? firebaseUser.uid : ''),
+          authUid: currentStudent.authUid || (firebaseUser ? firebaseUser.uid : ''),
+          student: currentStudent.name || '',
+          courseId: currentStudent.courseId || '',
+          courseName: currentStudent.course || '',
+          course: currentStudent.course || '',
+          month: month,
+          studentSelectedMonth: month,
+          baseAmount: baseAmount,
+          expectedAmount: baseAmount,
+          discount: 0,
+          finalAmount: baseAmount,
+          amount: baseAmount,
+          slipUrl: '',
+          slipNote: 'นักเรียนอัปโหลดสลิปของเดือน ' + month,
+          paymentStatus: 'รอชำระเงิน',
+          status: 'รอชำระเงิน',
+          createdAtText: new Date().toLocaleString('th-TH')
+        };
+        payments.push(payment);
       }
+      const paymentId = String(payment.firebaseDocId || payment.id || '');
 
       try {
         result.textContent = 'กำลังอัปโหลดสลิป...';
@@ -15086,7 +15189,15 @@ function receiptStatusText(status) {
             fileName: file.name
           });
           data = response && response.data ? response.data : {};
+          Object.assign(payment, {
+            slipStatus: 'waiting_admin_review',
+            adminReviewStatus: 'pending',
+            paymentStatus: 'รอตรวจสลิป',
+            status: 'รอตรวจสลิป'
+          });
+          await setFirebaseDocument('payments', payment);
         }
+        currentStudent.paymentStatus = 'รอตรวจสลิป';
         result.textContent = data.message || 'อัปโหลดสลิปเรียบร้อย รอเจ้าหน้าที่ตรวจสอบ';
         result.style.color = '#16a34a';
         if (fileInput) fileInput.value = '';
