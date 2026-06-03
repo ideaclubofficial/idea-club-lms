@@ -260,6 +260,8 @@
     .student-mobile-payment,
     .student-mobile-exam,
     .teacher-mobile-home,
+    .teacher-mobile-attendance,
+    .teacher-mobile-students,
     .teacher-mobile-bottom-nav,
     .student-mobile-bottom-nav {
       display: none;
@@ -564,11 +566,20 @@
         display: none !important;
       }
 
+      #teacher-attendance > .form-box,
+      #teacher-students > .form-box,
+      #teacher-students > br,
+      #teacher-students > .table-wrap {
+        display: none !important;
+      }
+
       #teacherInterface .admin-sidebar {
         display: none !important;
       }
 
-      .teacher-mobile-home {
+      .teacher-mobile-home,
+      .teacher-mobile-attendance,
+      .teacher-mobile-students {
         display: grid;
         gap: 14px;
         width: 100%;
@@ -610,11 +621,35 @@
         gap: 10px;
       }
 
+      .teacher-mobile-filter-stack {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr);
+        gap: 10px;
+      }
+
+      .teacher-mobile-filter-stack input,
+      .teacher-mobile-filter-stack select {
+        width: 100%;
+        min-height: 48px;
+        border-radius: 14px;
+      }
+
       .teacher-mobile-schedule-card {
         border: 1px solid #e5e7eb;
         border-radius: 16px;
         padding: 12px;
         background: #f8fafc;
+      }
+
+      .teacher-mobile-student-card,
+      .teacher-mobile-attendance-card,
+      .teacher-mobile-approval-card {
+        border: 1px solid #e5e7eb;
+        border-radius: 16px;
+        padding: 12px;
+        background: #f8fafc;
+        display: grid;
+        gap: 8px;
       }
 
       .teacher-mobile-schedule-card strong {
@@ -640,6 +675,27 @@
         width: 100%;
         min-height: 46px;
         border-radius: 14px;
+      }
+
+      .teacher-mobile-quick-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 8px;
+      }
+
+      .teacher-mobile-quick-grid .btn {
+        width: 100%;
+        min-height: 48px;
+        border-radius: 14px;
+        padding-left: 8px;
+        padding-right: 8px;
+      }
+
+      .teacher-mobile-card-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        align-items: center;
       }
 
       .teacher-mobile-summary-grid {
@@ -1690,6 +1746,39 @@
           </section>
 
           <section id="teacher-students" class="teacher-tab hidden">
+            <div id="teacherMobileStudents" class="teacher-mobile-students">
+              <div class="teacher-mobile-hero-card">
+                <h2>รายชื่อนักเรียน</h2>
+                <p>ค้นหาและดูนักเรียนในคอร์สที่สอน</p>
+              </div>
+
+              <div class="teacher-mobile-card">
+                <h3>ค้นหา / กรองรายชื่อ</h3>
+                <div class="teacher-mobile-filter-stack">
+                  <div>
+                    <label>ค้นหานักเรียน</label>
+                    <input id="teacherMobileStudentSearch" type="text" placeholder="ชื่อ ชื่อเล่น หรือเบอร์ผู้ปกครอง" oninput="syncTeacherMobileStudentFilters()" />
+                  </div>
+                  <div>
+                    <label>เลือกคอร์ส</label>
+                    <select id="teacherMobileCourseFilter" onchange="syncTeacherMobileStudentFilters()">
+                      <option value="ทั้งหมด">ทั้งหมด</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+
+              <div class="teacher-mobile-card">
+                <h3>รายการรออนุมัติคอร์ส</h3>
+                <div id="teacherMobilePendingApprovals" class="teacher-mobile-list"></div>
+              </div>
+
+              <div class="teacher-mobile-card">
+                <h3>รายชื่อนักเรียนในคอร์ส</h3>
+                <div id="teacherMobileStudentList" class="teacher-mobile-list"></div>
+              </div>
+            </div>
+
             <div class="form-box">
               <h3>รายชื่อนักเรียนในคอร์สที่สอน</h3>
               <p style="margin-bottom:18px; color:#6b7280;">ค้นหาและกรองรายชื่อตามคอร์ส</p>
@@ -1732,6 +1821,74 @@
           </section>
 
           <section id="teacher-attendance" class="teacher-tab hidden">
+            <div id="teacherMobileAttendance" class="teacher-mobile-attendance">
+              <div class="teacher-mobile-hero-card">
+                <h2>เช็คชื่อนักเรียน</h2>
+                <p>เลือกวันที่และคอร์ส แล้วกดสถานะได้ทันที</p>
+              </div>
+
+              <div class="teacher-mobile-card">
+                <h3>สรุปเช็คชื่อวันนี้</h3>
+                <div class="teacher-mobile-summary-grid">
+                  <div class="teacher-mobile-stat"><span class="teacher-mobile-muted">นักเรียนทั้งหมด</span><strong id="teacherMobilePickupTotal">0</strong></div>
+                  <div class="teacher-mobile-stat"><span class="teacher-mobile-muted">มาเรียนแล้ว</span><strong id="teacherMobilePickupDone">0</strong></div>
+                  <div class="teacher-mobile-stat"><span class="teacher-mobile-muted">วิธีมาเรียน</span><strong id="teacherMobilePickupParent">0</strong></div>
+                  <div class="teacher-mobile-stat"><span class="teacher-mobile-muted">ยังไม่เช็ค / ไม่มา</span><strong id="teacherMobilePickupWaiting">0</strong></div>
+                </div>
+              </div>
+
+              <div class="teacher-mobile-card">
+                <h3>ตัวกรอง</h3>
+                <div class="teacher-mobile-filter-stack">
+                  <div>
+                    <label>วันที่เช็คชื่อ</label>
+                    <input id="teacherMobilePickupDate" type="date" onchange="syncTeacherMobileAttendanceFilters()" />
+                  </div>
+                  <div>
+                    <label>คอร์ส</label>
+                    <select id="teacherMobileAttendanceCourseFilter" onchange="syncTeacherMobileAttendanceFilters()">
+                      <option value="ทั้งหมด">ทั้งหมด</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label>ระดับชั้น</label>
+                    <select id="teacherMobilePickupGradeFilter" onchange="syncTeacherMobileAttendanceFilters()">
+                      <option value="ทั้งหมด">ทั้งหมด</option>
+                      <option value="ป.4">ป.4</option>
+                      <option value="ป.5">ป.5</option>
+                      <option value="ป.6">ป.6</option>
+                      <option value="ม.1">ม.1</option>
+                      <option value="ม.2">ม.2</option>
+                      <option value="ม.3">ม.3</option>
+                      <option value="ม.4">ม.4</option>
+                      <option value="ม.5">ม.5</option>
+                      <option value="ม.6">ม.6</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label>สถานะ</label>
+                    <select id="teacherMobilePickupStatusFilter" onchange="syncTeacherMobileAttendanceFilters()">
+                      <option value="ทั้งหมด">ทั้งหมด</option>
+                      <option value="มาเรียน">มาเรียน</option>
+                      <option value="ผู้ปกครองมาส่ง">ผู้ปกครองมาส่ง</option>
+                      <option value="รถรับส่ง">รถรับส่ง</option>
+                      <option value="ยังไม่เช็คชื่อ">ยังไม่เช็คชื่อ</option>
+                      <option value="ไม่มีเรียน">ไม่มีเรียน</option>
+                      <option value="ไม่มา">ไม่มา</option>
+                    </select>
+                  </div>
+                </div>
+                <div class="teacher-mobile-actions">
+                  <button class="btn btn-blue" type="button" onclick="teacherSaveAttendance()">บันทึกเช็คชื่อ</button>
+                </div>
+              </div>
+
+              <div class="teacher-mobile-card">
+                <h3>รายชื่อนักเรียน</h3>
+                <div id="teacherMobilePickupList" class="teacher-mobile-list"></div>
+              </div>
+            </div>
+
             <div class="form-box">
               <h3>เช็คชื่อนักเรียน</h3>
               <p style="margin-bottom:18px; color:#6b7280;">เลือกวันที่ คอร์ส หรือระดับชั้น แล้วกดสถานะให้นักเรียนได้ทันที</p>
@@ -7354,6 +7511,8 @@
       if (tabId === 'teacher-attendance') renderPickupList();
       if (tabId === 'teacher-profile') renderProfileSettingsForRole('teacher');
       safeRun(renderTeacherMobileHome, 'teacher-mobile-home-tab');
+      safeRun(renderTeacherMobileAttendance, 'teacher-mobile-attendance-tab');
+      safeRun(renderTeacherMobileStudents, 'teacher-mobile-students-tab');
     }
 
     function getTeacherVisibleCourses() {
@@ -7374,7 +7533,7 @@
 
     function renderTeacherCourseOptions() {
       const teacherCourses = getTeacherVisibleCourses();
-      const selects = ['teacherCourseFilter', 'teacherAttendanceCourseFilter'];
+      const selects = ['teacherCourseFilter', 'teacherAttendanceCourseFilter', 'teacherMobileCourseFilter', 'teacherMobileAttendanceCourseFilter'];
       selects.forEach(function(id) {
         const select = getElement(id);
         if (!select) return;
@@ -7404,7 +7563,87 @@
         const statusClass = getPickupStatusClass(s.pickupStatus || 'ไม่มา');
         return '<tr><td>' + (i + 1) + '</td><td class="student-name">' + (s.name || '-') + '</td><td>' + (s.nickname || '-') + '</td><td>' + (s.grade || '-') + '</td><td>' + (s.course || '-') + '</td><td>' + (s.phone || '-') + '</td><td><span class="' + statusClass + '">' + (s.pickupStatus || 'ไม่มา') + '</span></td></tr>';
       }).join('') : '<tr><td colspan="7">ยังไม่มีนักเรียนในเงื่อนไขที่เลือก</td></tr>';
+      safeRun(renderTeacherMobileStudents, 'teacher-mobile-students');
       renderTeacherDashboardSummary();
+    }
+
+    function syncTeacherMobileStudentFilters() {
+      const mobileSearch = getElement('teacherMobileStudentSearch');
+      const desktopSearch = getElement('teacherStudentSearch');
+      const mobileCourse = getElement('teacherMobileCourseFilter');
+      const desktopCourse = getElement('teacherCourseFilter');
+      if (mobileSearch && desktopSearch) desktopSearch.value = mobileSearch.value;
+      if (mobileCourse && desktopCourse) desktopCourse.value = mobileCourse.value;
+      renderTeacherStudents();
+    }
+
+    function getTeacherFilteredStudentsForMobile() {
+      const courseFilter = getElement('teacherCourseFilter') ? getElement('teacherCourseFilter').value : 'ทั้งหมด';
+      const keyword = getElement('teacherStudentSearch') ? getElement('teacherStudentSearch').value.trim().toLowerCase() : '';
+      const teacherCourseNames = getTeacherVisibleCourses().map(function(c) { return c.name; });
+      return students.filter(function(s) {
+        const courseMatchedByTeacher = !teacherCourseNames.length || teacherCourseNames.includes(s.course) || (currentTeacher && currentTeacher.role === 'Admin');
+        const courseMatched = courseFilter === 'ทั้งหมด' || s.course === courseFilter;
+        const text = [s.name, s.nickname, s.phone, s.memberId, s.grade, s.course].join(' ').toLowerCase();
+        const keywordMatched = !keyword || text.indexOf(keyword) !== -1;
+        return courseMatchedByTeacher && courseMatched && keywordMatched;
+      });
+    }
+
+    function renderTeacherMobileApprovalCard(student) {
+      const payment = payments.slice().reverse().find(function(p) { return String(p.studentId) === String(student.id) || p.student === student.name; });
+      return '<div class="teacher-mobile-approval-card">' +
+        '<strong>' + escapeHtml(student.name || '-') + '</strong>' +
+        '<div class="teacher-mobile-muted">' + escapeHtml(student.grade || '-') + ' · ' + escapeHtml(student.course || '-') + '</div>' +
+        '<div class="teacher-mobile-card-row"><span class="status-waiting">' + escapeHtml(student.courseStatus || 'รออนุมัติคอร์ส') + '</span></div>' +
+        '<div class="teacher-mobile-muted">เดือนแรก: ' + escapeHtml(student.registeredCourseMonth || '-') + ' · สลิป: ' + escapeHtml(payment ? ((payment.month || '-') + ' / ' + (payment.status || '-')) : '-') + '</div>' +
+        '<div class="teacher-mobile-actions">' +
+          '<button class="btn btn-green" type="button" onclick="' + actionCall('approveStudentCourse', student.id) + '">อนุมัติคอร์ส</button>' +
+          '<button class="btn btn-red" type="button" onclick="' + actionCall('cancelStudentCourse', student.id) + '">ยกเลิกคอร์ส</button>' +
+        '</div>' +
+      '</div>';
+    }
+
+    function renderTeacherMobileStudentCard(student) {
+      const status = student.pickupStatus || 'ไม่มา';
+      const statusClass = getPickupStatusClass(status);
+      return '<div class="teacher-mobile-student-card">' +
+        '<strong>' + escapeHtml(student.name || '-') + '</strong>' +
+        '<div class="teacher-mobile-muted">ชื่อเล่น: ' + escapeHtml(student.nickname || '-') + ' · ระดับชั้น: ' + escapeHtml(student.grade || '-') + '</div>' +
+        '<div class="teacher-mobile-muted">คอร์ส: ' + escapeHtml(student.course || '-') + '</div>' +
+        '<div class="teacher-mobile-muted">เบอร์ผู้ปกครอง: ' + escapeHtml(student.phone || '-') + '</div>' +
+        '<div class="teacher-mobile-card-row"><span class="' + statusClass + '">' + escapeHtml(status) + '</span></div>' +
+      '</div>';
+    }
+
+    function updateTeacherMobileStudentsFromExistingData() {
+      const desktopSearch = getElement('teacherStudentSearch');
+      const mobileSearch = getElement('teacherMobileStudentSearch');
+      const desktopCourse = getElement('teacherCourseFilter');
+      const mobileCourse = getElement('teacherMobileCourseFilter');
+      if (mobileSearch && desktopSearch) mobileSearch.value = desktopSearch.value;
+      if (mobileCourse && desktopCourse) mobileCourse.value = desktopCourse.value;
+    }
+
+    function renderTeacherMobileStudents() {
+      if (!getElement('teacherMobileStudents')) return;
+      updateTeacherMobileStudentsFromExistingData();
+
+      const pendingBox = getElement('teacherMobilePendingApprovals');
+      if (pendingBox) {
+        const pending = students.filter(function(s) { return s.courseStatus === 'รออนุมัติคอร์ส'; });
+        pendingBox.innerHTML = pending.length
+          ? pending.map(renderTeacherMobileApprovalCard).join('')
+          : '<div class="teacher-mobile-approval-card"><strong>ไม่มีรายการรออนุมัติ</strong><p class="teacher-mobile-muted">รายการจะขึ้นเมื่อมีนักเรียนสมัครคอร์สใหม่</p></div>';
+      }
+
+      const listBox = getElement('teacherMobileStudentList');
+      if (listBox) {
+        const filtered = getTeacherFilteredStudentsForMobile();
+        listBox.innerHTML = filtered.length
+          ? filtered.map(renderTeacherMobileStudentCard).join('')
+          : '<div class="teacher-mobile-student-card"><strong>ไม่พบนักเรียน</strong><p class="teacher-mobile-muted">ลองเปลี่ยนคำค้นหาหรือคอร์สที่เลือก</p></div>';
+      }
     }
 
     function getTeacherVisibleOnlineCourses() {
@@ -7851,6 +8090,80 @@
       return 'status-absent';
     }
 
+    function syncTeacherMobileAttendanceFilters() {
+      const map = [
+        ['teacherMobilePickupDate', 'pickupDate'],
+        ['teacherMobileAttendanceCourseFilter', 'teacherAttendanceCourseFilter'],
+        ['teacherMobilePickupGradeFilter', 'pickupGradeFilter'],
+        ['teacherMobilePickupStatusFilter', 'pickupStatusFilter']
+      ];
+      map.forEach(function(pair) {
+        const mobile = getElement(pair[0]);
+        const desktop = getElement(pair[1]);
+        if (mobile && desktop) desktop.value = mobile.value;
+      });
+      pickupCurrentPage = 1;
+      renderPickupList();
+    }
+
+    function updateTeacherMobileAttendanceFromExistingData() {
+      const map = [
+        ['pickupDate', 'teacherMobilePickupDate'],
+        ['teacherAttendanceCourseFilter', 'teacherMobileAttendanceCourseFilter'],
+        ['pickupGradeFilter', 'teacherMobilePickupGradeFilter'],
+        ['pickupStatusFilter', 'teacherMobilePickupStatusFilter']
+      ];
+      map.forEach(function(pair) {
+        const desktop = getElement(pair[0]);
+        const mobile = getElement(pair[1]);
+        if (desktop && mobile) mobile.value = desktop.value;
+      });
+    }
+
+    function renderTeacherMobileAttendanceCard(item) {
+      const statusClass = getPickupStatusClass(item.status);
+      const actionHtml = item.hasClassToday
+        ? '<div class="teacher-mobile-quick-grid">' +
+            '<button class="btn btn-green" type="button" onclick="setPickupStatus(\'' + jsArg(item.id) + '\', \'มาเรียน\')">มาเรียน</button>' +
+            '<button class="btn btn-dark" type="button" onclick="setPickupStatus(\'' + jsArg(item.id) + '\', \'ผู้ปกครองมาส่ง\')">ผู้ปกครองมาส่ง</button>' +
+            '<button class="btn btn-blue" type="button" onclick="setPickupStatus(\'' + jsArg(item.id) + '\', \'รถรับส่ง\')">รถรับส่ง</button>' +
+            '<button class="btn btn-red" type="button" onclick="setPickupStatus(\'' + jsArg(item.id) + '\', \'ไม่มา\')">ไม่มา</button>' +
+          '</div>'
+        : '<div class="teacher-mobile-muted">ไม่มีเรียนในวันที่เลือก</div>';
+      return '<div class="teacher-mobile-attendance-card">' +
+        '<strong>' + escapeHtml(item.name || '-') + '</strong>' +
+        '<div class="teacher-mobile-muted">ชื่อเล่น: ' + escapeHtml(item.nickname || '-') + ' · ระดับชั้น: ' + escapeHtml(item.grade || '-') + '</div>' +
+        '<div class="teacher-mobile-muted">คอร์ส: ' + escapeHtml(item.course || '-') + '</div>' +
+        '<div class="teacher-mobile-card-row"><span class="' + statusClass + '">' + escapeHtml(item.status || '-') + '</span></div>' +
+        actionHtml +
+      '</div>';
+    }
+
+    function renderTeacherMobileAttendance() {
+      if (!getElement('teacherMobileAttendance')) return;
+      updateTeacherMobileAttendanceFromExistingData();
+      const filtered = getFilteredPickupList();
+      updateTeacherMobileAttendanceSummary(filtered);
+      const listBox = getElement('teacherMobilePickupList');
+      if (listBox) {
+        listBox.innerHTML = filtered.length
+          ? filtered.map(renderTeacherMobileAttendanceCard).join('')
+          : '<div class="teacher-mobile-attendance-card"><strong>ไม่พบรายชื่อนักเรียน</strong><p class="teacher-mobile-muted">ลองเปลี่ยนวันที่ คอร์ส ระดับชั้น หรือสถานะ</p></div>';
+      }
+    }
+
+    function updateTeacherMobileAttendanceSummary(list) {
+      const data = Array.isArray(list) ? list : getFilteredPickupList();
+      const classData = data.filter(function(item) { return item.hasClassToday; });
+      const present = classData.filter(function(item) { return item.status === 'มาเรียน' || item.status === 'ผู้ปกครองมาส่ง' || item.status === 'รถรับส่ง'; }).length;
+      const parent = classData.filter(function(item) { return item.status === 'ผู้ปกครองมาส่ง' || item.status === 'รถรับส่ง'; }).length;
+      const absent = classData.filter(function(item) { return item.status === 'ไม่มา' || item.status === 'ยังไม่เช็คชื่อ'; }).length;
+      setTeacherMobileText('teacherMobilePickupTotal', classData.length + '');
+      setTeacherMobileText('teacherMobilePickupDone', present + '');
+      setTeacherMobileText('teacherMobilePickupParent', parent + '');
+      setTeacherMobileText('teacherMobilePickupWaiting', absent + '');
+    }
+
     function renderPickupList() {
       const tbody = getElement('teacherPickupTableBody');
       if (!tbody) return;
@@ -7884,6 +8197,7 @@
 
       updatePickupSummary(filtered);
       renderPickupPagination(filtered.length, totalPages);
+      safeRun(renderTeacherMobileAttendance, 'teacher-mobile-attendance');
     }
 
     function renderPickupPagination(totalItems, totalPages) {
@@ -8002,6 +8316,7 @@
       if (getElement('pickupDoneCount')) getElement('pickupDoneCount').textContent = present + ' คน';
       if (getElement('pickupParentCount')) getElement('pickupParentCount').textContent = parent + ' คน';
       if (getElement('pickupWaitingCount')) getElement('pickupWaitingCount').textContent = absent + ' คน';
+      safeRun(function() { updateTeacherMobileAttendanceSummary(data); }, 'teacher-mobile-attendance-summary');
       const result = getElement('teacherAttendanceResult');
       if (result && noClass && !result.textContent) {
         result.textContent = 'มีนักเรียนไม่มีเรียนในวันที่เลือก ' + noClass + ' คน ระบบไม่นับเป็นยังไม่เช็คชื่อ';
@@ -8673,6 +8988,7 @@
       const pending = students.filter(function(s) { return s.courseStatus === 'รออนุมัติคอร์ส'; });
       if (!pending.length) {
         box.innerHTML = '<div class="notice">ไม่มีรายการรออนุมัติคอร์สในขณะนี้</div>';
+        safeRun(renderTeacherMobileStudents, 'teacher-mobile-students-pending-empty');
         return;
       }
       box.innerHTML = pending.map(function(s) {
@@ -8685,6 +9001,7 @@
           '<button class="btn btn-red" type="button" onclick="' + actionCall('cancelStudentCourse', s.id) + '">ยกเลิกคอร์ส</button></span>' +
         '</div>';
       }).join('');
+      safeRun(renderTeacherMobileStudents, 'teacher-mobile-students-pending');
     }
 
     function editStudent(id) {
