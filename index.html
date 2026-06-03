@@ -357,6 +357,59 @@
       display: none;
     }
 
+    .student-profile-modal.hidden {
+      display: none;
+    }
+
+    .student-profile-modal {
+      position: fixed;
+      inset: 0;
+      z-index: 1200;
+      display: grid;
+      place-items: center;
+      padding: 28px;
+      background: rgba(15, 23, 42, 0.56);
+      overflow-y: auto;
+    }
+
+    .student-profile-modal .form-box {
+      position: relative;
+      width: min(960px, 100%);
+      max-height: calc(100dvh - 56px);
+      overflow-y: auto;
+      margin: 0;
+    }
+
+    .student-profile-modal-title {
+      margin-bottom: 8px;
+      color: #0f4cbd;
+      font-size: 28px;
+      line-height: 1.25;
+      text-align: center;
+    }
+
+    .student-profile-modal-subtitle {
+      margin-bottom: 18px;
+      color: #6b7280;
+      font-weight: 700;
+      text-align: center;
+    }
+
+    .student-profile-modal-close {
+      position: absolute;
+      top: 14px;
+      right: 14px;
+      width: 40px;
+      height: 40px;
+      border: 0;
+      border-radius: 999px;
+      background: #eff6ff;
+      color: #0f4cbd;
+      font-size: 24px;
+      font-weight: 900;
+      cursor: pointer;
+    }
+
     @media (max-width: 768px) {
       html,
       body {
@@ -645,6 +698,32 @@
         display: grid;
         grid-template-columns: 1fr;
         gap: 10px;
+      }
+
+      .student-profile-modal {
+        align-items: stretch;
+        padding: 12px;
+      }
+
+      .student-profile-modal .form-box {
+        width: 100%;
+        max-height: calc(100dvh - 24px);
+        border-radius: 18px;
+        padding: 54px 18px 28px;
+      }
+
+      .student-profile-modal-title {
+        font-size: 24px;
+      }
+
+      .student-profile-modal .form-row {
+        grid-template-columns: 1fr;
+      }
+
+      .student-profile-modal .btn {
+        width: 100%;
+        min-height: 48px;
+        margin-top: 8px;
       }
 
       .profile-panel {
@@ -1421,10 +1500,11 @@
       <button id="studentMobileNavToggle" class="student-mobile-nav-toggle" type="button" onclick="toggleStudentMobileBottomNav()" aria-label="ย่อเมนู"><span id="studentMobileNavToggleText">⌄</span></button>
     </nav>
 
-    <section class="section hidden student-area" id="student-profile">
-      <h2 class="section-title">แก้ไขข้อมูลนักเรียน</h2>
-      <p class="section-subtitle">ตรวจสอบ Member ID แก้ไขข้อมูลติดต่อ และเปลี่ยนรหัสผ่าน</p>
+    <section class="student-profile-modal hidden" id="student-profile" role="dialog" aria-modal="true" aria-labelledby="studentProfileModalTitle">
       <div class="form-box">
+        <button class="student-profile-modal-close" type="button" onclick="closeStudentProfileEdit()" aria-label="ปิดหน้าต่างแก้ไขข้อมูล">×</button>
+        <h2 id="studentProfileModalTitle" class="student-profile-modal-title">แก้ไขข้อมูล</h2>
+        <p class="student-profile-modal-subtitle">ตรวจสอบ Member ID แก้ไขข้อมูลติดต่อ และเปลี่ยนรหัสผ่าน</p>
         <div id="studentProfileSummary" class="notice" style="margin-bottom:16px;"></div>
         <div class="student-profile-summary-actions">
           <button id="studentProfileEditToggle" class="btn btn-blue" type="button" onclick="toggleStudentProfileEdit(true)">แก้ไขข้อมูล</button>
@@ -1454,7 +1534,7 @@
             </div>
           </div>
           <button class="btn btn-green" type="button" onclick="saveProfileForRole('student')">บันทึกข้อมูลส่วนตัว</button>
-          <button class="btn btn-dark" type="button" onclick="toggleStudentProfileEdit(false)">ยกเลิก</button>
+          <button class="btn btn-dark" type="button" onclick="closeStudentProfileEdit()">ยกเลิก</button>
           <br /><br />
           <h3 style="font-size:18px;">เปลี่ยนรหัสผ่าน</h3>
           <label>รหัสผ่านใหม่</label>
@@ -6281,6 +6361,7 @@
 
     function hideStudentAreas() {
       document.querySelectorAll('.student-area').forEach(function(area) { area.classList.add('hidden'); });
+      closeStudentProfileEdit();
       setStudentMobileBottomNavCollapsed(false);
     }
 
@@ -7571,6 +7652,10 @@
     }
 
     function openMobileProfile() {
+      if (currentStudent || isCurrentStudentSession()) {
+        openStudentProfileEdit();
+        return;
+      }
       const panel = getElement('profilePanel');
       const isMobile = window.matchMedia && window.matchMedia('(max-width: 768px)').matches;
       if (!panel || !isMobile) {
@@ -7587,8 +7672,7 @@
       const panel = getElement('profilePanel');
       if (panel) panel.classList.add('hidden');
       if (currentStudent || isCurrentStudentSession()) {
-        renderProfileSettingsForRole('student');
-        scrollToStudentSection('student-profile');
+        openStudentProfileEdit();
         return;
       }
       if (!getElement('teacherInterface').classList.contains('hidden') && currentTeacher) {
@@ -7609,9 +7693,27 @@
     function openStudentProfileEdit() {
       const panel = getElement('profilePanel');
       if (panel) panel.classList.add('hidden');
+      const modal = getElement('student-profile');
       renderProfileSettingsForRole('student');
       toggleStudentProfileEdit(true);
-      scrollToStudentSection('student-profile');
+      if (modal) {
+        modal.classList.remove('hidden');
+        const firstInput = getElement('studentProfileNickname');
+        window.setTimeout(function() {
+          if (firstInput) firstInput.focus();
+        }, 50);
+      }
+    }
+
+    function closeStudentProfileEdit() {
+      const modal = getElement('student-profile');
+      if (modal) modal.classList.add('hidden');
+      toggleStudentProfileEdit(false);
+      const result = getElement('studentProfileResult');
+      if (result) {
+        result.textContent = '';
+        result.style.color = '';
+      }
     }
 
     function getProfileRoleConfig(role) {
@@ -7759,7 +7861,7 @@
           result.textContent = 'บันทึกข้อมูลส่วนตัวเรียบร้อย';
           result.style.color = '#16a34a';
         }
-        if (role === 'student') toggleStudentProfileEdit(false);
+        if (role === 'student') closeStudentProfileEdit();
       } catch (error) {
         if (result) {
           result.textContent = 'บันทึกไม่สำเร็จ: ' + (error.message || error.code || 'ไม่ทราบสาเหตุ');
@@ -12256,11 +12358,7 @@ function getCourseOnlineDocs(course, includeInactive) {
     }
 
     function studentMobileOpenProfile() {
-      if (typeof openMobileProfile === 'function') {
-        openMobileProfile();
-        return;
-      }
-      scrollToStudentSection('student-profile');
+      openStudentProfileEdit();
     }
 
     function updateStudentCourseDisplay() {
