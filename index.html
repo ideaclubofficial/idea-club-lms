@@ -1449,7 +1449,6 @@
         <div class="student-status-tile">
           <h4>การชำระเงิน</h4>
           <p><span id="studentDashPaymentStatus" class="status-badge parent">-</span></p>
-          <p class="mini-muted">เดือนที่เลือก: <span id="studentDashPaymentMonth">-</span></p>
         </div>
         <div class="student-status-tile">
           <h4>ห้องเรียนวันนี้</h4>
@@ -12053,6 +12052,7 @@ function getCourseOnlineDocs(course, includeInactive) {
 
       try {
         await setFirebaseDocument('students', currentStudent);
+        await ensureCurrentStudentPaymentForMonth(currentStudent.registeredCourseMonth);
       } catch (error) {
         console.error('apply course firebase error:', error);
         Object.assign(activeStudent, {
@@ -12113,19 +12113,169 @@ function getCourseOnlineDocs(course, includeInactive) {
       return studentPayments[0] || null;
     }
 
+    function parseThaiMonthYear(monthText) {
+      if (!monthText) return null;
+      const text = String(monthText || '').trim();
+      const parts = text.split(/\s+/);
+      if (parts.length < 2) return null;
+      const year = Number(parts[parts.length - 1] || 0);
+      const monthName = parts.slice(0, parts.length - 1).join(' ');
+      const monthNames = getThaiCalendarMonthNames();
+      const monthIndex = monthNames.indexOf(monthName);
+      if (monthIndex < 0 || !year) return null;
+      return { month: monthIndex + 1, year: year };
+    }
+
+    function getStudentSignupDate(student) {
+      if (!student) return null;
+      const signupDate = parseRecordDate(student.registeredAt || student.registeredAtText || student.createdAt || student.createdAtText);
+      if (signupDate) return signupDate;
+      const parsed = parseThaiMonthYear(student.registeredCourseMonth);
+      if (parsed) return new Date(parsed.year - 543, parsed.month - 1, 1);
+      return null;
+    }
+
+    function isPaymentMonthBeforeSignup(paymentMonth, signupDate) {
+      if (!paymentMonth || !signupDate) return false;
+      const paymentData = parseThaiMonthYear(paymentMonth);
+      if (!paymentData) return false;
+      const paymentYear = paymentData.year - 543;
+      const signupYear = signupDate.getFullYear();
+      if (paymentYear < signupYear) return true;
+      if (paymentYear > signupYear) return false;
+      return paymentData.month < (signupDate.getMonth() + 1);
+    }
+
+    function isStudentPaymentRecord(student, record) {
+      if (!student || !record) return false;
+      const targetId = student.id !== undefined && student.id !== null ? String(student.id) : '';
+      const targetAuthUid = student.authUid ? String(student.authUid) : (firebaseUser ? String(firebaseUser.uid) : '');
+      const targetName = normalizeTextValue(student.name);
+      const targetPhone = String(student.phone || '').replace(/[^0-9]/g, '');
+      const recordStudentId = record.studentId !== undefined && record.studentId !== null ? String(record.studentId) : '';
+      const recordAuthUid = record.authUid ? String(record.authUid) : '';
+      const recordName = normalizeTextValue(record.student || record.studentName);
+      const recordPhone = String(record.phone || record.studentPhone || '').replace(/[^0-9]/g, '');
+
+      if (targetId && recordStudentId && targetId === recordStudentId) return true;
+      if (targetAuthUid && recordAuthUid && targetAuthUid === recordAuthUid) return true;
+      if (targetPhone && recordPhone && targetPhone === recordPhone) return true;
+      if (targetName && recordName && targetName === recordName) return true;
+      return false;
+    }
+
+    function getStudentVisiblePayments(student) {
+      if (!student || !Array.isArray(payments)) return [];
+      const signupDate = getStudentSignupDate(student);
+      return payments.filter(function(payment) {
+        if (!isStudentPaymentRecord(student, payment)) return false;
+        if (!payment.month) return false;
+        return !isPaymentMonthBeforeSignup(payment.month, signupDate);
+      });
+    }
+
+    function getCurrentStudentRelevantPaymentMonthNames() {
+      if (!currentStudent || !currentStudent.courseId) return [];
+      const months = getStudentVisiblePayments(currentStudent).map(function(p) { return p.month; }).filter(function(month) { return month; });
+      if (currentStudent.registeredCourseMonth) months.push(String(currentStudent.registeredCourseMonth || '').trim());
+      months.push(getThaiMonthFromDate(new Date().toISOString().slice(0, 10)));
+      return Array.from(new Set(months));
+    }
+
+    function getStudentPaymentMonthOptions() {
+      if (!currentStudent || !currentStudent.courseId) return [];
+      const studentMonths = getStudentVisiblePayments(currentStudent).map(function(p) { return String(p.month || '').trim(); }).filter(function(month) { return month; });
+      const monthSet = new Set(studentMonths);
+      if (currentStudent.registeredCourseMonth) monthSet.add(String(currentStudent.registeredCourseMonth || '').trim());
+      monthSet.add(getThaiMonthFromDate(new Date().toISOString().slice(0, 10)));
+      return Array.from(monthSet);
+    }
+
+    function getStudentSelectedPaymentMonth() {
+      const monthSelect = getElement('studentPaymentMonth');
+      const options = getStudentPaymentMonthOptions();
+      const selected = monthSelect && monthSelect.value ? monthSelect.value : (options[0] || '');
+      return options.includes(selected) ? selected : (options[0] || '');
+    }
+
+    function shouldApplyHalfMonthDiscount(signupDate) {
+      if (!signupDate) return false;
+      return signupDate.getDate() > 15;
+    }
+
+    function calculateStudentMonthlyAmount(coursePrice, signupDate) {
+      if (Number(coursePrice) <= 0) return 0;
+      return shouldApplyHalfMonthDiscount(signupDate) ? Math.ceil(Number(coursePrice) / 2) : Number(coursePrice);
+    }
+
+    function buildStudentMonthlyPaymentRecord(student, course, month) {
+      if (!student || !month) return null;
+      const coursePrice = getCourseMonthlyPrice(course);
+      const signupDate = getStudentSignupDate(student);
+      const finalAmount = calculateStudentMonthlyAmount(coursePrice, signupDate);
+      const discount = Math.max(0, coursePrice - finalAmount);
+      const paymentId = createFirebaseDocId('payments');
+      return {
+        id: paymentId,
+        firebaseDocId: paymentId,
+        studentId: student.id || '',
+        memberId: student.memberId || '',
+        studentName: student.name || '',
+        studentAuthUid: student.authUid || (firebaseUser ? firebaseUser.uid : ''),
+        authUid: student.authUid || (firebaseUser ? firebaseUser.uid : ''),
+        student: student.name || '',
+        courseId: student.courseId || (course ? course.id : ''),
+        courseName: student.course || (course ? course.name : ''),
+        course: student.course || (course ? course.name : ''),
+        month: month,
+        studentSelectedMonth: month,
+        baseAmount: coursePrice,
+        expectedAmount: coursePrice,
+        discount: discount,
+        finalAmount: finalAmount,
+        amount: finalAmount,
+        lineItems: Array.isArray(student.lineItems) ? student.lineItems.slice() : [],
+        slipUrl: '',
+        slipNote: 'ระบบสร้างยอดอัตโนมัติสำหรับเดือนสมัครคอร์ส',
+        paymentStatus: 'รอชำระเงิน',
+        status: 'รอชำระเงิน',
+        createdAtText: new Date().toLocaleDateString('th-TH')
+      };
+    }
+
+    async function ensurePaymentForStudentMonth(student, month) {
+      if (!student || !student.courseId || !month) return null;
+      const existing = (payments || []).find(function(p) {
+        return isStudentPaymentRecord(student, p) && String(p.month || '') === String(month);
+      });
+      if (existing) return existing;
+      const course = getCourseByStudentOrName(student, student.course || '');
+      const payment = buildStudentMonthlyPaymentRecord(student, course, month);
+      if (!payment) return null;
+      payments.push(payment);
+      try {
+        await setFirebaseDocument('payments', payment);
+      } catch (error) {
+        console.error('ensure payment for student month firebase error:', error);
+      }
+      return payment;
+    }
+
+    async function ensureCurrentMonthPaymentForStudent(student) {
+      const month = getThaiMonthFromDate(new Date().toISOString().slice(0, 10));
+      return ensurePaymentForStudentMonth(student, month);
+    }
+
+    async function ensureCurrentStudentPaymentForMonth(month) {
+      return ensurePaymentForStudentMonth(currentStudent, month);
+    }
+
     function getCurrentStudentPaymentForSelectedMonth() {
       if (!currentStudent) return null;
-      const visiblePaymentMonths = getVisiblePaymentMonthsForStudents();
-      const selectedMonth = getElement('studentPaymentMonth') && getElement('studentPaymentMonth').value
-        ? getElement('studentPaymentMonth').value
-        : (visiblePaymentMonths[0] ? visiblePaymentMonths[0].month : '');
-      if (!selectedMonth || !isPaymentMonthVisibleByName(selectedMonth)) return null;
+      const selectedMonth = getStudentSelectedPaymentMonth();
+      if (!selectedMonth) return null;
       const selectedPayment = payments.find(function(p) {
-        return isCurrentStudentMatchRecord(p)
-          && (
-            String(p.id || '') === String(selectedMonth)
-            || String(p.firebaseDocId || '') === String(selectedMonth)
-          );
+        return isCurrentStudentMatchRecord(p) && String(p.month || '') === String(selectedMonth);
       });
       if (selectedPayment) return selectedPayment;
       const matched = payments.filter(function(p) {
@@ -12173,10 +12323,7 @@ function getCourseOnlineDocs(course, includeInactive) {
     }
 
     function getCurrentStudentPaymentStatusText() {
-      const visiblePaymentMonths = getVisiblePaymentMonthsForStudents();
-      const selectedMonth = getElement('studentPaymentMonth') && getElement('studentPaymentMonth').value
-        ? getElement('studentPaymentMonth').value
-        : (visiblePaymentMonths[0] ? visiblePaymentMonths[0].month : '');
+      const selectedMonth = getStudentSelectedPaymentMonth();
       if (!selectedMonth || !isPaymentMonthVisibleByName(selectedMonth)) return '-';
       const selectedMonthPayment = getCurrentStudentPaymentForSelectedMonth();
       if (selectedMonthPayment && selectedMonthPayment.status) return selectedMonthPayment.status;
@@ -12257,10 +12404,6 @@ function getCourseOnlineDocs(course, includeInactive) {
       if (getElement('studentGreetingName')) getElement('studentGreetingName').textContent = name;
 
       const visiblePaymentMonths = getVisiblePaymentMonthsForStudents();
-      const selectedPaymentMonth = getElement('studentPaymentMonth') && getElement('studentPaymentMonth').value
-        ? getElement('studentPaymentMonth').value
-        : (visiblePaymentMonths.length ? visiblePaymentMonths[0].month : '-');
-      if (getElement('studentDashPaymentMonth')) getElement('studentDashPaymentMonth').textContent = selectedPaymentMonth || '-';
       if (getElement('studentDashPaymentStatus')) {
         const paymentText = hasRegisteredCourse ? getCurrentStudentPaymentStatusText() : 'ยังไม่ได้สมัครคอร์ส';
         getElement('studentDashPaymentStatus').textContent = paymentText;
@@ -12331,10 +12474,11 @@ function getCourseOnlineDocs(course, includeInactive) {
     }
 
     function getStudentMobileSelectedMonth() {
-      const visiblePaymentMonths = getVisiblePaymentMonthsForStudents();
-      return getElement('studentPaymentMonth') && getElement('studentPaymentMonth').value
-        ? getElement('studentPaymentMonth').value
-        : (visiblePaymentMonths.length ? visiblePaymentMonths[0].month : '');
+      if (getElement('studentPaymentMonth') && getElement('studentPaymentMonth').value) {
+        return getElement('studentPaymentMonth').value;
+      }
+      const studentMonths = currentStudent ? getStudentVisiblePayments(currentStudent).map(function(p) { return String(p.month || '').trim(); }).filter(function(month) { return month; }) : [];
+      return studentMonths.length ? studentMonths[0] : '';
     }
 
     function updateStudentMobileHomeFromCurrentStudent(selectedCourse, hasRegisteredCourse) {
@@ -12490,12 +12634,9 @@ function getCourseOnlineDocs(course, includeInactive) {
 
 
       if (getElement('studentPaymentCourseName')) getElement('studentPaymentCourseName').textContent = selectedCourse ? selectedCourse.name : '-';
-      const visiblePaymentMonths = getVisiblePaymentMonthsForStudents();
-      const selectedPaymentMonth = getElement('studentPaymentMonth') && getElement('studentPaymentMonth').value
-        ? getElement('studentPaymentMonth').value
-        : (visiblePaymentMonths.length ? visiblePaymentMonths[0].month : '-');
+      const selectedPaymentMonth = getStudentSelectedPaymentMonth();
       const selectedPaymentAmount = currentStudent && selectedPaymentMonth && selectedPaymentMonth !== '-'
-        ? getExpectedPaymentAmountForStudent(currentStudent, selectedPaymentMonth)
+        ? getCurrentStudentAdjustedPaymentAmount(selectedPaymentMonth)
         : (selectedCourse ? getCourseMonthlyPrice(selectedCourse) : 0);
       if (getElement('studentPaymentAmount')) getElement('studentPaymentAmount').textContent = selectedPaymentAmount ? formatPrice(selectedPaymentAmount) : '-';
       if (getElement('studentPaymentCurrentMonth')) {
@@ -12832,6 +12973,15 @@ function getCourseOnlineDocs(course, includeInactive) {
       const payment = payments.find(function(p) { return String(p.id) === String(paymentId); });
       if (payment) {
         payment.status = status;
+        payment.paymentStatus = status;
+        if (status === 'ชำระแล้ว') {
+          payment.slipStatus = 'approved';
+          payment.receiptStatus = 'issued';
+        } else if (status === 'สลิปไม่ผ่าน') {
+          payment.slipStatus = 'rejected';
+        } else if (status === 'รอตรวจสลิป') {
+          payment.slipStatus = 'waiting_admin_review';
+        }
         await setFirebaseDocument('payments', payment);
         addActivityLog('เปลี่ยนสถานะชำระเงิน', (payment.student || '-') + ' · ' + (payment.month || '-') + ' · ' + status);
       }
@@ -12839,7 +12989,10 @@ function getCourseOnlineDocs(course, includeInactive) {
         row.children[4].innerHTML = payment ? formatPaymentSlipReviewCell(payment) : '<span class="status-paid">ตรวจแล้ว</span>';
         row.children[5].innerHTML = '<span class="status-paid">ชำระแล้ว</span>';
         await syncStudentPaymentStatusFromRow(row, 'ชำระแล้ว');
-        if (payment) await createReceipt(getPaymentDataFromRow(row), { publish: true, silent: true, source: 'auto-approve' });
+        if (payment) {
+          await createReceipt(getPaymentDataFromRow(row), { publish: true, silent: true, source: 'auto-approve' });
+          await approveStudentCourseFromPayment(payment);
+        }
       } else if (status === 'สลิปไม่ผ่าน') {
         row.children[4].innerHTML = payment ? formatPaymentSlipReviewCell(payment) : '<span class="status-absent">สลิปไม่ผ่าน</span>';
         row.children[5].innerHTML = '<span class="status-absent">สลิปไม่ผ่าน</span>';
@@ -12858,6 +13011,51 @@ function getCourseOnlineDocs(course, includeInactive) {
       updatePaymentSummary();
       renderAdminReceipts();
       renderStudentReceipts();
+    }
+
+    async function approvePaymentAndIssueReceipt(paymentId) {
+      const payment = payments.find(function(p) { return String(p.id) === String(paymentId); });
+      if (!payment) return null;
+      payment.status = 'ชำระแล้ว';
+      payment.paymentStatus = 'ชำระแล้ว';
+      payment.slipStatus = 'approved';
+      payment.receiptStatus = 'issued';
+      await setFirebaseDocument('payments', payment);
+      await issueReceiptFromPayment(payment);
+      await approveStudentCourseFromPayment(payment);
+      return payment;
+    }
+
+    function issueReceiptFromPayment(payment) {
+      if (!payment) return null;
+      return createReceipt({
+        paymentId: payment.id,
+        studentId: payment.studentId || '',
+        authUid: payment.authUid || '',
+        courseId: payment.courseId || '',
+        phone: payment.phone || payment.studentPhone || '',
+        student: payment.student || '',
+        course: payment.course || payment.courseName || '',
+        month: payment.month || '',
+        amount: String(getPaymentFinalAmount(payment)),
+        lineItems: Array.isArray(payment.lineItems) ? payment.lineItems : [],
+        status: payment.status || 'ชำระแล้ว'
+      }, { publish: true, silent: true, source: 'issueReceiptFromPayment' });
+    }
+
+    async function approveStudentCourseFromPayment(payment) {
+      if (!payment || !payment.studentId) return null;
+      const student = students.find(function(s) {
+        return String(s.id || s.firebaseDocId || s.authUid || '') === String(payment.studentId || payment.authUid || '')
+          || normalizeTextValue(s.name) === normalizeTextValue(payment.student);
+      });
+      if (!student) return null;
+      if (student.courseId && String(student.courseId) === String(payment.courseId) && student.courseStatus === 'รออนุมัติคอร์ส') {
+        student.courseStatus = 'อนุมัติแล้ว';
+        await setFirebaseDocument('students', student);
+        if (currentStudent && String(currentStudent.id) === String(student.id)) currentStudent = student;
+      }
+      return student;
     }
 
     async function deletePaymentRecord(button) {
@@ -13247,12 +13445,11 @@ function getCourseOnlineDocs(course, includeInactive) {
     }
 
     function updateStudentSelectedPaymentMonth() {
-      const monthSelect = getElement('studentPaymentMonth');
-      const visiblePaymentMonths = getVisiblePaymentMonthsForStudents();
-      const month = monthSelect && monthSelect.value ? monthSelect.value : (visiblePaymentMonths[0] ? visiblePaymentMonths[0].month : '-');
-      const canShowMonth = !!(month && month !== '-' && isPaymentMonthVisibleByName(month));
+      const month = getStudentSelectedPaymentMonth();
+      const selectedPayment = currentStudent && month ? getStudentPaymentForSelectedMonth() : null;
+      const canShowMonth = !!(month && month !== '-' && selectedPayment);
       const amount = canShowMonth
-        ? (currentStudent ? getExpectedPaymentAmountForStudent(currentStudent, month) : (getCurrentStudentCourse() ? getCourseMonthlyPrice(getCurrentStudentCourse()) : getPaymentMonthAmount(month)))
+        ? (currentStudent ? getCurrentStudentAdjustedPaymentAmount(month) : (getCurrentStudentCourse() ? getCourseMonthlyPrice(getCurrentStudentCourse()) : getPaymentMonthAmount(month)))
         : 0;
       const statusText = canShowMonth ? getCurrentStudentPaymentStatusText() : '-';
       if (getElement('studentPaymentCurrentMonth')) getElement('studentPaymentCurrentMonth').textContent = month || '-';
@@ -13264,6 +13461,15 @@ function getCourseOnlineDocs(course, includeInactive) {
       if (getElement('studentDashPaymentStatus')) {
         getElement('studentDashPaymentStatus').textContent = statusText;
         getElement('studentDashPaymentStatus').className = 'status-badge ' + (statusText === 'ชำระแล้ว' ? 'present' : statusText === 'ค้างชำระ' || statusText === 'สลิปไม่ผ่าน' ? 'absent' : 'parent');
+      }
+      if (currentStudent && month && month === getThaiMonthFromDate(new Date().toISOString().slice(0, 10)) && !selectedPayment && currentStudent.courseId) {
+        safeRun(async function() {
+          const payment = await ensureCurrentMonthPaymentForStudent(currentStudent);
+          if (payment) {
+            updateStudentSelectedPaymentMonth();
+            updateStudentCourseDisplay();
+          }
+        }, 'ensure-current-month-payment');
       }
       updateStudentSlipUploadControls();
     }
@@ -13297,16 +13503,16 @@ function getCourseOnlineDocs(course, includeInactive) {
       }).join('');
 
       if (studentSelect) {
-        const visiblePaymentMonths = getVisiblePaymentMonthsForStudents();
-        const currentStudentMonth = studentSelect.value || (visiblePaymentMonths[0] ? visiblePaymentMonths[0].month : '');
-        if (!visiblePaymentMonths.length) {
-          studentSelect.innerHTML = '<option value="">ยังไม่มีรอบบิลที่เปิดให้ชำระ</option>';
+        const studentMonths = getStudentPaymentMonthOptions();
+        const currentStudentMonth = studentSelect.value || (studentMonths[0] || '');
+        if (!studentMonths.length) {
+          studentSelect.innerHTML = '<option value="">ยังไม่มีเดือนชำระเงิน</option>';
           studentSelect.value = '';
         } else {
-          studentSelect.innerHTML = visiblePaymentMonths.map(function(item) {
-            return '<option value="' + item.month + '">' + item.month + '</option>';
+          studentSelect.innerHTML = studentMonths.map(function(month) {
+            return '<option value="' + month + '">' + month + '</option>';
           }).join('');
-          studentSelect.value = visiblePaymentMonths.some(function(item) { return item.month === currentStudentMonth; }) ? currentStudentMonth : (visiblePaymentMonths[0] ? visiblePaymentMonths[0].month : '');
+          studentSelect.value = studentMonths.includes(currentStudentMonth) ? currentStudentMonth : (studentMonths[0] || '');
         }
         updateStudentSelectedPaymentMonth();
       }
@@ -13726,7 +13932,10 @@ function getCourseOnlineDocs(course, includeInactive) {
     }
 
     function getVisiblePaymentMonthsForStudents() {
-      return (Array.isArray(paymentMonths) ? paymentMonths : []).filter(isPaymentMonthVisibleToStudents);
+      const visible = (Array.isArray(paymentMonths) ? paymentMonths : []).filter(isPaymentMonthVisibleToStudents);
+      if (!currentStudent || !currentStudent.courseId) return visible;
+      const studentMonths = getCurrentStudentRelevantPaymentMonthNames();
+      return visible.filter(function(item) { return studentMonths.includes(item.month); });
     }
 
     function isPaymentMonthVisibleByName(month) {
@@ -14830,10 +15039,7 @@ function receiptStatusText(status) {
     function updateStudentMobilePaymentFromExistingData() {
       if (!getElement('studentMobilePayment')) return;
       const selectedCourse = getCurrentStudentCourse();
-      const visiblePaymentMonths = getVisiblePaymentMonthsForStudents();
-      const selectedMonth = getElement('studentPaymentMonth') && getElement('studentPaymentMonth').value
-        ? getElement('studentPaymentMonth').value
-        : (visiblePaymentMonths.length ? visiblePaymentMonths[0].month : '-');
+      const selectedMonth = getStudentSelectedPaymentMonth();
       const canShowMonth = !!(selectedMonth && selectedMonth !== '-' && isPaymentMonthVisibleByName(selectedMonth));
       const amount = currentStudent && canShowMonth ? getExpectedPaymentAmountForStudent(currentStudent, selectedMonth) : 0;
       const statusText = currentStudent && currentStudent.courseId ? getCurrentStudentPaymentStatusText() : '-';
@@ -15140,7 +15346,9 @@ function receiptStatusText(status) {
 
       let payment = getCurrentStudentPaymentForSelectedMonth();
       if (!payment) {
-        const baseAmount = getExpectedPaymentAmountForStudent(currentStudent, month);
+        const fullAmount = getExpectedPaymentAmountForStudent(currentStudent, month);
+        const finalAmount = getCurrentStudentAdjustedPaymentAmount(month);
+        const discountAmount = Math.max(0, fullAmount - finalAmount);
         const paymentId = createFirebaseDocId('payments');
         payment = {
           id: paymentId,
@@ -15156,11 +15364,11 @@ function receiptStatusText(status) {
           course: currentStudent.course || '',
           month: month,
           studentSelectedMonth: month,
-          baseAmount: baseAmount,
-          expectedAmount: baseAmount,
-          discount: 0,
-          finalAmount: baseAmount,
-          amount: baseAmount,
+          baseAmount: fullAmount,
+          expectedAmount: fullAmount,
+          discount: discountAmount,
+          finalAmount: finalAmount,
+          amount: finalAmount,
           slipUrl: '',
           slipNote: 'นักเรียนอัปโหลดสลิปของเดือน ' + month,
           paymentStatus: 'รอชำระเงิน',
