@@ -12136,6 +12136,42 @@ function getCourseOnlineDocs(course, includeInactive) {
       return matched[0] || null;
     }
 
+    function getStudentPaymentForSelectedMonth() {
+      return getCurrentStudentPaymentForSelectedMonth();
+    }
+
+    function canStudentUploadSlipForMonth(month) {
+      const selectedMonth = month || (getElement('studentPaymentMonth') && getElement('studentPaymentMonth').value ? getElement('studentPaymentMonth').value : '');
+      if (!currentStudent || !selectedMonth) return true;
+      const payment = getStudentPaymentForSelectedMonth();
+      if (!payment) return true;
+      const slipStatus = String(payment.slipStatus || '').toLowerCase();
+      if (slipStatus === 'rejected') return true;
+      if (['waiting_admin_review', 'approved', 'paid'].includes(slipStatus)) return false;
+      if (payment.driveFileId || payment.driveFileUrl || payment.slipFileId || payment.slipUrl) return false;
+      return true;
+    }
+
+    function updateStudentSlipUploadControls() {
+      const canUpload = canStudentUploadSlipForMonth();
+      const fileInput = getElement('studentSlipFile');
+      const uploadButton = document.querySelector('#studentSlipWebUploadBox button[onclick="uploadStudentSlipToDrive()"]');
+      const mobileUploadButton = document.querySelector('button[onclick="studentMobileUploadSlip()"]');
+      if (fileInput) fileInput.disabled = !canUpload;
+      if (uploadButton) uploadButton.disabled = !canUpload;
+      if (mobileUploadButton) mobileUploadButton.disabled = !canUpload;
+      const result = getElement('studentSlipResult') || getElement('studentSlipOcrResult');
+      if (!canUpload) {
+        if (result) {
+          result.classList.remove('hidden');
+          result.textContent = 'เดือนนี้อัปโหลดสลิปแล้ว กรุณารอเจ้าหน้าที่ตรวจสอบ หากต้องการแก้ไขสลิป กรุณาติดต่อเจ้าหน้าที่';
+          result.style.color = '#d97706';
+        }
+      } else if (result) {
+        result.textContent = '';
+      }
+    }
+
     function getCurrentStudentPaymentStatusText() {
       const visiblePaymentMonths = getVisiblePaymentMonthsForStudents();
       const selectedMonth = getElement('studentPaymentMonth') && getElement('studentPaymentMonth').value
@@ -13229,6 +13265,7 @@ function getCourseOnlineDocs(course, includeInactive) {
         getElement('studentDashPaymentStatus').textContent = statusText;
         getElement('studentDashPaymentStatus').className = 'status-badge ' + (statusText === 'ชำระแล้ว' ? 'present' : statusText === 'ค้างชำระ' || statusText === 'สลิปไม่ผ่าน' ? 'absent' : 'parent');
       }
+      updateStudentSlipUploadControls();
     }
 
     function renderPaymentMonths() {
@@ -15064,6 +15101,12 @@ function receiptStatusText(status) {
         result.style.color = '#dc2626';
         return;
       }
+      if (!canStudentUploadSlipForMonth(month)) {
+        result.textContent = 'เดือนนี้อัปโหลดสลิปแล้ว กรุณารอเจ้าหน้าที่ตรวจสอบ หากต้องการแก้ไขสลิป กรุณาติดต่อเจ้าหน้าที่';
+        result.style.color = '#d97706';
+        updateStudentSlipUploadControls();
+        return;
+      }
       if (!month || month.indexOf('ยังไม่มี') !== -1) {
         result.textContent = 'กรุณาเลือกเดือนที่ชำระก่อนอัปโหลดสลิป';
         result.style.color = '#dc2626';
@@ -15166,6 +15209,7 @@ function receiptStatusText(status) {
         result.textContent = 'อัปโหลดสลิปสำเร็จ รอเจ้าหน้าที่ตรวจสอบ';
         result.style.color = '#16a34a';
         if (fileInput) fileInput.value = '';
+        updateStudentSlipUploadControls();
 
         await loadCoreDataFromFirebase();
         updateStudentCourseDisplay();
