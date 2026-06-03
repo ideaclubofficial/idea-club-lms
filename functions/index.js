@@ -2,7 +2,6 @@ const { onCall, HttpsError } = require("firebase-functions/v2/https");
 const { setGlobalOptions } = require("firebase-functions/v2");
 const admin = require("firebase-admin");
 const { google } = require("googleapis");
-const vision = require("@google-cloud/vision");
 const path = require("path");
 const os = require("os");
 const fs = require("fs");
@@ -81,102 +80,6 @@ function getDriveClient() {
   });
 
   return google.drive({ version: "v3", auth });
-}
-
-function parseThaiSlipText(text) {
-  const rawText = String(text || "");
-  const lines = rawText
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter(Boolean);
-  const normalized = rawText.replace(/,/g, "");
-  const amountMatch =
-    normalized.match(/(?:จำนวน|ยอด|amount|total)[^\d]{0,20}(\d+(?:\.\d{1,2})?)/i) ||
-    normalized.match(/(\d+\.\d{2})\s*(?:บาท|THB|฿)?/i);
-  const referenceMatch =
-    rawText.match(/(?:เลขที่รายการ|เลขอ้างอิง|reference|ref|transaction)[^\w\d]{0,20}([A-Z0-9-]{8,})/i) ||
-    rawText.match(/\b([0-9A-Z]{12,})\b/);
-  const timeMatch = rawText.match(/\b([01]?\d|2[0-3])[:.][0-5]\d(?::[0-5]\d)?\b/);
-  const dateMatch =
-    rawText.match(/\b\d{1,2}[/-]\d{1,2}[/-]\d{2,4}\b/) ||
-    rawText.match(/\b\d{1,2}\s*(?:ม\.ค\.|ก\.พ\.|มี\.ค\.|เม\.ย\.|พ\.ค\.|มิ\.ย\.|ก\.ค\.|ส\.ค\.|ก\.ย\.|ต\.ค\.|พ\.ย\.|ธ\.ค\.)\s*\d{2,4}\b/);
-
-  return {
-    amount: amountMatch ? Number(amountMatch[1]) : null,
-    referenceNo: referenceMatch ? referenceMatch[1] : "",
-    transferTime: timeMatch ? timeMatch[0].replace(".", ":") : "",
-    transferDateText: dateMatch ? dateMatch[0] : "",
-    payerName: extractPossiblePayerName(rawText, lines),
-    receiverName: extractPossibleReceiverName(rawText, lines),
-    rawText,
-  };
-}
-
-function extractPossiblePayerName(text, lines) {
-  const sourceLines = lines || String(text || "").split(/\r?\n/);
-  const keywordLine = sourceLines.find((line) => /(จาก|ผู้โอน|sender|from)/i.test(line));
-  if (keywordLine) return keywordLine.replace(/^(จาก|ผู้โอน|sender|from)[:\s-]*/i, "").trim();
-  return "";
-}
-
-function extractPossibleReceiverName(text, lines) {
-  const sourceLines = lines || String(text || "").split(/\r?\n/);
-  const keywordLine = sourceLines.find((line) => /(ไปยัง|ผู้รับ|receiver|to)/i.test(line));
-  if (keywordLine) return keywordLine.replace(/^(ไปยัง|ผู้รับ|receiver|to)[:\s-]*/i, "").trim();
-  return "";
-}
-
-async function checkDuplicateReference(referenceNo, currentPaymentId) {
-  if (!referenceNo) return false;
-  const snapshot = await db.collection("payments").where("ocrReferenceNo", "==", referenceNo).limit(5).get();
-  return snapshot.docs.some((doc) => doc.id !== currentPaymentId);
-}
-
-function buildOcrCheckResult({ expectedAmount, ocrAmount, duplicateRef, referenceNo }) {
-  const expected = Number(expectedAmount || 0);
-  const actual = Number(ocrAmount || 0);
-  const notes = [];
-
-  if (duplicateRef) {
-    notes.push("พบเลขอ้างอิงซ้ำในระบบ");
-    if (expected > 0 && actual > 0 && Math.abs(expected - actual) > 0.01) {
-      notes.push(`ยอด OCR ${actual.toLocaleString("th-TH")} บาท ไม่ตรงกับยอดที่ต้องชำระ ${expected.toLocaleString("th-TH")} บาท`);
-    }
-    notes.push("กรุณาตรวจสอบก่อนอนุมัติ");
-    return {
-      ocrCheckStatus: "duplicate_reference",
-      ocrCheckNote: notes.join(" / "),
-    };
-  }
-  if (!referenceNo) {
-    return {
-      ocrCheckStatus: "no_reference",
-      ocrCheckNote: "OCR อ่านเลขอ้างอิงไม่ได้ / รอ Admin ตรวจสอบ",
-    };
-  }
-  if (!actual) {
-    return {
-      ocrCheckStatus: "no_amount",
-      ocrCheckNote: "OCR อ่านยอดเงินไม่ได้ / รอ Admin ตรวจสอบ",
-    };
-  }
-  if (expected > 0 && Math.abs(expected - actual) > 0.01) {
-    return {
-      ocrCheckStatus: "amount_mismatch",
-      ocrCheckNote: `ยอด OCR ${actual.toLocaleString("th-TH")} บาท ไม่ตรงกับยอดที่ต้องชำระ ${expected.toLocaleString("th-TH")} บาท`,
-    };
-  }
-  if (!expected) {
-    return {
-      ocrCheckStatus: "need_manual_review",
-      ocrCheckNote: "ไม่พบยอดที่ต้องชำระในระบบ / รอ Admin ตรวจสอบ",
-    };
-  }
-
-  return {
-    ocrCheckStatus: "passed",
-    ocrCheckNote: "ยอดเงินตรง / เลขอ้างอิงไม่ซ้ำ / รอ Admin ตรวจสอบ",
-  };
 }
 
 async function isBackOfficeUser(uid) {
@@ -523,18 +426,22 @@ exports.uploadPaymentSlipToDrive = onCall(async (request) => {
       { merge: true }
     );
 
-    await writeActivityLog({
-      ...logBase,
-      functionName: "uploadPaymentSlipToDrive",
-      type: "payment_slip_uploaded",
-      severity: "info",
-      uploadedByName,
-      driveFileId,
-      driveViewUrl,
-      driveFolderId: gradeFolder.id,
-      driveFolderName: `${monthFolder.name} / ${gradeFolder.name}`,
-      paymentGrade: gradeFolder.name,
-    });
+    try {
+      await writeActivityLog({
+        ...logBase,
+        functionName: "uploadPaymentSlipToDrive",
+        type: "payment_slip_uploaded",
+        severity: "info",
+        uploadedByName,
+        driveFileId,
+        driveViewUrl,
+        driveFolderId: gradeFolder.id,
+        driveFolderName: `${monthFolder.name} / ${gradeFolder.name}`,
+        paymentGrade: gradeFolder.name,
+      });
+    } catch (logError) {
+      console.warn("payment_slip_uploaded log failed:", logError);
+    }
 
     return {
       ok: true,
@@ -844,7 +751,7 @@ exports.uploadPaymentSlipToDriveAndOcr = onCall(async (request) => {
 
   await paymentRef.set(
     {
-      slipStatus: "ocr_processing",
+      slipStatus: "uploading",
       slipUploadedByUid: uid,
       updatedAt: admin.firestore.FieldValue.serverTimestamp(),
     },
@@ -878,22 +785,6 @@ exports.uploadPaymentSlipToDriveAndOcr = onCall(async (request) => {
     const driveFileId = uploadResult.data.id;
     const driveViewUrl = uploadResult.data.webViewLink || `https://drive.google.com/file/d/${driveFileId}/view`;
 
-    const visionClient = new vision.ImageAnnotatorClient({ keyFilename: SERVICE_ACCOUNT_PATH });
-    const [ocrResult] = await visionClient.textDetection(tempFilePath);
-    const ocrRawText =
-      (ocrResult.fullTextAnnotation && ocrResult.fullTextAnnotation.text) ||
-      ((ocrResult.textAnnotations || [])[0] && ocrResult.textAnnotations[0].description) ||
-      "";
-    const parsed = parseThaiSlipText(ocrRawText);
-    const duplicateRef = await checkDuplicateReference(parsed.referenceNo, safePaymentId);
-    const expectedAmount = payment.finalAmount || payment.amount || payment.baseAmount || 0;
-    const checkResult = buildOcrCheckResult({
-      expectedAmount,
-      ocrAmount: parsed.amount,
-      duplicateRef,
-      referenceNo: parsed.referenceNo,
-    });
-
     await paymentRef.set(
       {
         slipStorageType: "google_drive",
@@ -903,66 +794,47 @@ exports.uploadPaymentSlipToDriveAndOcr = onCall(async (request) => {
         slipUploadedByUid: uid,
         slipUploadedAt: admin.firestore.FieldValue.serverTimestamp(),
         slipStatus: "waiting_admin_review",
-        ocrStatus: ocrRawText ? "completed" : "no_text_found",
-        ocrRawText: parsed.rawText,
-        ocrPayerName: parsed.payerName,
-        ocrReceiverName: parsed.receiverName,
-        ocrTransferDateText: parsed.transferDateText,
-        ocrTransferTime: parsed.transferTime,
-        ocrAmount: parsed.amount,
-        ocrReferenceNo: parsed.referenceNo,
-        ocrCheckStatus: checkResult.ocrCheckStatus,
-        ocrCheckNote: checkResult.ocrCheckNote,
         adminReviewStatus: "pending",
         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
       },
       { merge: true }
     );
 
-    await writeActivityLog({
-      ...logBase,
-      type: "payment_slip_ocr_success",
-      severity: checkResult.ocrCheckStatus === "passed" ? "info" : "warning",
-      driveFileId,
-      ocrAmount: parsed.amount || "",
-      ocrReferenceNo: parsed.referenceNo || "",
-      ocrCheckStatus: checkResult.ocrCheckStatus,
-      ocrCheckNote: checkResult.ocrCheckNote,
-    });
-    if (duplicateRef) {
+    try {
       await writeActivityLog({
         ...logBase,
-        type: "payment_slip_duplicate_reference",
-        severity: "warning",
-        referenceNo: parsed.referenceNo,
-        ocrReferenceNo: parsed.referenceNo || "",
+        type: "payment_slip_uploaded",
+        severity: "info",
+        driveFileId,
+        driveViewUrl,
       });
+    } catch (logError) {
+      console.warn("payment_slip_uploaded log failed:", logError);
     }
 
     return {
       ok: true,
       driveViewUrl,
-      ocrCheckStatus: checkResult.ocrCheckStatus,
-      ocrCheckNote: checkResult.ocrCheckNote,
+      slipStatus: "waiting_admin_review",
+      message: "อัปโหลดสลิปเรียบร้อย รอเจ้าหน้าที่ตรวจสอบ",
     };
   } catch (error) {
     await writeActivityLog({
       ...logBase,
-      type: "payment_slip_ocr_failed",
+      type: "payment_slip_upload_failed",
       severity: "error",
       error: error.message || String(error),
     });
     await paymentRef.set(
       {
-        slipStatus: "ocr_failed",
-        ocrStatus: "failed",
-        ocrError: error.message || String(error),
+        slipStatus: "upload_failed",
+        slipUploadError: error.message || String(error),
         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
       },
       { merge: true }
     );
     if (error instanceof HttpsError) throw error;
-    throw new HttpsError("internal", error.message || "อัปโหลดหรือ OCR สลิปไม่สำเร็จ");
+    throw new HttpsError("internal", error.message || "อัปโหลดสลิปไม่สำเร็จ");
   } finally {
     if (tempFilePath && fs.existsSync(tempFilePath)) {
       fs.unlinkSync(tempFilePath);

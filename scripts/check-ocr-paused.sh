@@ -9,17 +9,14 @@ if ! grep -q "const ENABLE_PAYMENT_SLIP_OCR = false;" "$INDEX_FILE"; then
   exit 1
 fi
 
-guard_line="$(grep -n "if (!ENABLE_PAYMENT_SLIP_OCR)" "$INDEX_FILE" | head -n 1 | cut -d: -f1 || true)"
-call_line="$(grep -n "httpsCallable('uploadPaymentSlipToDriveAndOcr')" "$INDEX_FILE" | head -n 1 | cut -d: -f1 || true)"
-
-if [[ -z "$guard_line" || -z "$call_line" ]]; then
-  echo "FAIL: OCR guard or callable reference was not found"
+if grep -q "httpsCallable('uploadPaymentSlipToDriveAndOcr')" "$INDEX_FILE"; then
+  echo "FAIL: OCR callable is still reachable from index.html"
   exit 1
 fi
 
-if (( guard_line >= call_line )); then
-  echo "FAIL: OCR callable appears before the pause guard"
+if grep -q "upload slip OCR error" "$INDEX_FILE"; then
+  echo "FAIL: OCR upload error path is still present in index.html"
   exit 1
 fi
 
-echo "OK: OCR upload is paused and callable is behind the guard"
+echo "OK: OCR upload is paused and no client OCR callable remains"

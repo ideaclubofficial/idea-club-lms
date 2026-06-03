@@ -34,6 +34,21 @@ function doPost(e) {
     const bytes = Utilities.base64Decode(fileBase64);
     const blob = Utilities.newBlob(bytes, mimeType, buildFileName(fileName, data));
     const file = targetFolder.createFile(blob);
+    const fileId = file.getId();
+    const responsePayload = {
+      ok: true,
+      fileId: fileId,
+      viewUrl: file.getUrl(),
+      directImageUrl: "https://drive.google.com/uc?export=view&id=" + fileId,
+      thumbnailUrl: "https://drive.google.com/thumbnail?id=" + fileId + "&sz=w1000",
+      folderId: targetFolder.getId(),
+      folderName: targetFolder.getName()
+    };
+
+    if (folderType === "payment-slips") {
+      return jsonResponse(responsePayload);
+    }
+
     let sharingWarning = "";
 
     if (folderType === "site-assets" || assetType) {
@@ -44,17 +59,8 @@ function doPost(e) {
       }
     }
 
-    const fileId = file.getId();
-    return jsonResponse({
-      ok: true,
-      fileId: fileId,
-      viewUrl: file.getUrl(),
-      directImageUrl: "https://drive.google.com/uc?export=view&id=" + fileId,
-      thumbnailUrl: "https://drive.google.com/thumbnail?id=" + fileId + "&sz=w1000",
-      folderId: targetFolder.getId(),
-      folderName: targetFolder.getName(),
-      sharingWarning: sharingWarning
-    });
+    responsePayload.sharingWarning = sharingWarning;
+    return jsonResponse(responsePayload);
   } catch (error) {
     return jsonResponse({
       ok: false,
