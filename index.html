@@ -3236,8 +3236,9 @@
               <div class="test-actions">
                 <button class="btn btn-blue" type="button" onclick="useDefaultCoursePricesForSelectedMonth()">ใช้ราคาปกติของคอร์สทั้งหมด</button>
                 <button class="btn btn-dark" type="button" onclick="copyPricesFromPreviousMonth()">คัดลอกราคาจากเดือนก่อน</button>
-                <button class="btn btn-green" type="button" onclick="saveAllPaymentCoursePrices()">บันทึกและเผยแพร่ยอดให้นักเรียน</button>
+                <button class="btn btn-green" type="button" onclick="saveAllPaymentCoursePrices()">บันทึกยอดและสร้างรายการเรียกเก็บ</button>
               </div>
+              <p style="color:#6b7280; margin-top:8px; margin-bottom:0;">จะสร้างรายการเรียกเก็บให้นักเรียนโดยอัตโนมัติ เมื่อกดบันทึกและเผยแพร่ยอด</p>
               <p id="paymentCoursePriceResult" style="margin-top:14px; font-weight:bold;"></p>
 
               <br />
@@ -3259,7 +3260,7 @@
               <br />
 
               <h3 style="color:#0f4cbd; margin-bottom:10px;">Preview ยอดของเดือนนี้</h3>
-              <p style="color:#6b7280; margin-bottom:10px;">ตรวจยอดที่นักเรียนจะเห็นทันทีหลังบันทึก หากต้องการสร้าง payment records ล่วงหน้าให้ใช้ส่วนขั้นสูงด้านล่าง</p>
+              <p style="color:#6b7280; margin-bottom:10px;">ตรวจยอดที่นักเรียนจะเห็นทันทีหลังบันทึก ยอดจะสร้างรายการชำระเงินโดยอัตโนมัติเมื่อกดบันทึกและเผยแพร่ หากต้องการสร้าง payment records ล่วงหน้าแบบชัดเจนให้ใช้ส่วนขั้นสูงด้านล่าง</p>
               <div id="paymentRecordPreviewSummary" class="dashboard-grid"></div>
               <div class="table-wrap" style="margin-top:14px;">
                 <table>
@@ -9535,6 +9536,7 @@
           if (getElement('studentLoginInfoBox')) getElement('studentLoginInfoBox').classList.remove('hidden');
         }
         clearStudentForm(false);
+        clearStudentFilters();
         renderAdminStudents();
         renderPrivateStudents();
         renderMemberTable();
@@ -12210,10 +12212,10 @@ function getCourseOnlineDocs(course, includeInactive) {
 
     function buildStudentMonthlyPaymentRecord(student, course, month) {
       if (!student || !month) return null;
-      const coursePrice = getCourseMonthlyPrice(course);
+      const listAmount = getExpectedPaymentAmountForStudent(student, month);
       const signupDate = getStudentSignupDate(student);
-      const finalAmount = calculateStudentMonthlyAmount(coursePrice, signupDate);
-      const discount = Math.max(0, coursePrice - finalAmount);
+      const finalAmount = calculateStudentMonthlyAmount(listAmount, signupDate);
+      const discount = Math.max(0, listAmount - finalAmount);
       const paymentId = createFirebaseDocId('payments');
       return {
         id: paymentId,
@@ -12229,8 +12231,8 @@ function getCourseOnlineDocs(course, includeInactive) {
         course: student.course || (course ? course.name : ''),
         month: month,
         studentSelectedMonth: month,
-        baseAmount: coursePrice,
-        expectedAmount: coursePrice,
+        baseAmount: listAmount,
+        expectedAmount: listAmount,
         discount: discount,
         finalAmount: finalAmount,
         amount: finalAmount,
@@ -13664,9 +13666,13 @@ function getCourseOnlineDocs(course, includeInactive) {
         if (item.visibleToStudents === undefined) item.visibleToStudents = true;
         await setFirebaseDocument('paymentMonths', item);
         addActivityLog('บันทึกราคาคอร์สทั้งเดือน', month + ' · ' + savedCount + ' คอร์ส');
-        if (result) { result.textContent = 'บันทึกราคาของเดือน ' + month + ' เรียบร้อย ' + savedCount + ' คอร์ส นักเรียนเห็นยอดได้ทันที'; result.style.color = '#16a34a'; }
+        const paymentCounts = await createOrUpdateMonthlyPaymentRecordsForMonth(month);
+        const paymentDetail = paymentCounts.created || paymentCounts.updated ? ' สร้าง/อัปเดตรายการชำระเงิน: สร้างใหม่ ' + paymentCounts.created + ' รายการ, อัปเดต ' + paymentCounts.updated + ' รายการ' : '';
+        if (result) { result.textContent = 'บันทึกราคาของเดือน ' + month + ' เรียบร้อย ' + savedCount + ' คอร์ส นักเรียนเห็นยอดได้ทันที' + paymentDetail; result.style.color = '#16a34a'; }
         renderPaymentMonths();
-        renderPaymentRecordPreview('บันทึกราคาแล้ว นักเรียนเห็นยอดได้ทันที');
+        renderPaymentTable();
+        renderAdminDashboard();
+        renderPaymentRecordPreview('บันทึกราคาแล้ว นักเรียนเห็นยอดได้ทันที' + paymentDetail);
         updateStudentSelectedPaymentMonth();
         updateStudentCourseDisplay();
         renderDashboardPaymentSummary();
@@ -13983,6 +13989,74 @@ function getCourseOnlineDocs(course, includeInactive) {
       }) || null;
     }
 
+    function getMonthlyPaymentAmountForStudent(student, month) {
+      const listedAmount = getExpectedPaymentAmountForStudent(student, month);
+      const signupDate = getStudentSignupDate(student);
+      return calculateStudentMonthlyAmount(listedAmount, signupDate);
+    }
+
+    function getMonthlyPaymentTargetStudentsForMonth(month) {
+      if (!month) return [];
+      return getMonthlyPaymentTargetStudents().filter(function(student) {
+        return !isPaymentMonthBeforeSignup(month, getStudentSignupDate(student));
+      });
+    }
+
+    function isPaymentRecordUpdatable(payment) {
+      if (!payment) return false;
+      const status = String(payment.status || payment.paymentStatus || '').trim();
+      const slipStatus = String(payment.slipStatus || '').trim();
+      return status === 'รอชำระเงิน' || status === 'ค้างชำระ' || status === 'รอตรวจสลิป' ||
+        slipStatus === 'รอตรวจสลิป' || slipStatus === 'pending' || slipStatus === 'waiting';
+    }
+
+    async function createOrUpdateMonthlyPaymentRecordsForMonth(month) {
+      if (!month) return { created: 0, updated: 0, skipped: 0 };
+      const targetStudents = getMonthlyPaymentTargetStudentsForMonth(month);
+      let created = 0;
+      let updated = 0;
+      let skipped = 0;
+
+      for (const student of targetStudents) {
+        const existing = findPaymentForStudentMonth(student, month);
+        const listAmount = getExpectedPaymentAmountForStudent(student, month);
+        const finalAmount = getMonthlyPaymentAmountForStudent(student, month);
+
+        if (existing) {
+          if (!isPaymentRecordUpdatable(existing)) {
+            skipped++;
+            continue;
+          }
+          existing.baseAmount = listAmount;
+          existing.expectedAmount = listAmount;
+          existing.discount = Math.max(0, listAmount - finalAmount);
+          existing.finalAmount = finalAmount;
+          existing.amount = finalAmount;
+          existing.studentSelectedMonth = month;
+          existing.slipNote = existing.slipNote || 'ปรับยอดชำระเงินตามราคาที่เผยแพร่';
+          try { await setFirebaseDocument('payments', existing); } catch (error) { console.error('update monthly payment firebase error:', error); }
+          updated++;
+          continue;
+        }
+
+        const course = getCourseByStudentOrName(student, student.course || '');
+        const payment = buildStudentMonthlyPaymentRecord(student, course, month);
+        if (!payment) {
+          skipped++;
+          continue;
+        }
+        payment.slipNote = 'ระบบสร้างรายการรอชำระเงินจากราคาคอร์ส';
+        payment.adminNote = payment.adminNote || '';
+        payment.paymentStatus = 'รอชำระเงิน';
+        payment.status = 'รอชำระเงิน';
+        payments.push(payment);
+        try { await setFirebaseDocument('payments', payment); } catch (error) { console.error('create monthly payment firebase error:', error); }
+        created++;
+      }
+
+      return { created: created, updated: updated, skipped: skipped };
+    }
+
     function renderPaymentRecordPreview(message, isError) {
       const summaryBox = getElement('paymentRecordPreviewSummary');
       const tbody = getElement('paymentRecordPreviewTableBody');
@@ -13997,9 +14071,9 @@ function getCourseOnlineDocs(course, includeInactive) {
         return;
       }
 
-      const targetStudents = getMonthlyPaymentTargetStudents();
+      const targetStudents = getMonthlyPaymentTargetStudentsForMonth(month);
       const rows = targetStudents.map(function(student) {
-        const amount = getExpectedPaymentAmountForStudent(student, month);
+        const amount = getMonthlyPaymentAmountForStudent(student, month);
         const payment = findPaymentForStudentMonth(student, month);
         return {
           student: student,
@@ -21561,55 +21635,13 @@ function receiptStatusText(status) {
       }
       if (!confirm('สร้างรายการชำระเงินสำหรับเดือน ' + targetMonth + ' จากราคาคอร์สของนักเรียนทุกคนที่อนุมัติคอร์สแล้ว ใช่หรือไม่?')) return;
 
-      const targetStudents = getMonthlyPaymentTargetStudents();
-
-      let created = 0;
-      let existedCount = 0;
-      for (const student of targetStudents) {
-        const existed = findPaymentForStudentMonth(student, targetMonth);
-        if (existed) {
-          existedCount++;
-          continue;
-        }
-        const baseAmount = getExpectedPaymentAmountForStudent(student, targetMonth);
-        const paymentId = createFirebaseDocId('payments');
-        const payment = {
-          id: paymentId,
-          firebaseDocId: paymentId,
-          studentId: student.id,
-          memberId: student.memberId || '',
-          studentName: student.name || '',
-          studentAuthUid: student.authUid || '',
-          authUid: student.authUid || '',
-          student: student.name || '',
-          courseId: student.courseId || '',
-          courseName: student.course || '',
-          course: student.course || '',
-          month: targetMonth,
-          studentSelectedMonth: targetMonth,
-          baseAmount: baseAmount,
-          expectedAmount: baseAmount,
-          discount: 0,
-          finalAmount: baseAmount,
-          amount: baseAmount,
-          slipUrl: '',
-          slipNote: 'ระบบสร้างรายการรอชำระเงินจากราคาคอร์ส',
-          adminNote: '',
-          paymentStatus: 'รอชำระเงิน',
-          status: 'รอชำระเงิน',
-          createdAtText: new Date().toLocaleString('th-TH')
-        };
-        payments.push(payment);
-        try { await setFirebaseDocument('payments', payment); } catch (error) { console.error('create monthly payment firebase error:', error); }
-        created++;
-      }
-
-      addActivityLog('สร้างรายการชำระเงินรายเดือน', targetMonth + ' · สร้างใหม่ ' + created + ' รายการ');
+      const paymentCounts = await createOrUpdateMonthlyPaymentRecordsForMonth(targetMonth);
+      addActivityLog('สร้างรายการชำระเงินรายเดือน', targetMonth + ' · สร้างใหม่ ' + paymentCounts.created + ' รายการ · อัปเดต ' + paymentCounts.updated + ' รายการ');
       if (getElement('paymentStatusMonthFilter')) getElement('paymentStatusMonthFilter').value = targetMonth;
       if (getElement('dashboardPaymentMonthFilter')) getElement('dashboardPaymentMonthFilter').value = targetMonth;
       renderPaymentTable();
       renderAdminDashboard();
-      renderPaymentRecordPreview('สร้างรายการชำระเงินเดือน ' + targetMonth + ' เรียบร้อย: สร้างใหม่ ' + created + ' รายการ, มีอยู่แล้ว ' + existedCount + ' รายการ');
+      renderPaymentRecordPreview('สร้างรายการชำระเงินเดือน ' + targetMonth + ' เรียบร้อย: สร้างใหม่ ' + paymentCounts.created + ' รายการ, อัปเดต ' + paymentCounts.updated + ' รายการ');
     }
 
     function editPaymentAmountDiscount(button) {
