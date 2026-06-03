@@ -37,7 +37,10 @@ function doPost(e) {
     const fileId = file.getId();
     const responsePayload = {
       ok: true,
+      success: true,
       fileId: fileId,
+      fileUrl: file.getUrl(),
+      fileName: file.getName(),
       viewUrl: file.getUrl(),
       directImageUrl: "https://drive.google.com/uc?export=view&id=" + fileId,
       thumbnailUrl: "https://drive.google.com/thumbnail?id=" + fileId + "&sz=w1000",

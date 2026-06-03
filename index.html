@@ -15089,9 +15089,9 @@ function receiptStatusText(status) {
         result.style.color = '#dc2626';
         return;
       }
-      if (!USE_APPS_SCRIPT_DRIVE_UPLOAD && !functionsApi) {
-        result.textContent = 'Firebase Functions ยังไม่พร้อมใช้งาน';
-        result.style.color = '#dc2626';
+      if (!USE_APPS_SCRIPT_DRIVE_UPLOAD) {
+        result.textContent = 'ระบบอัปโหลดสลิปผ่านเว็บยังไม่เปิดใช้งาน กรุณาติดต่อเจ้าหน้าที่';
+        result.style.color = '#d97706';
         return;
       }
 
@@ -15132,56 +15132,38 @@ function receiptStatusText(status) {
         result.textContent = 'กำลังอัปโหลดสลิป...';
         const fileBase64 = await fileToBase64(file);
         let data = {};
-        if (USE_APPS_SCRIPT_DRIVE_UPLOAD) {
-          data = await uploadFileToDriveViaAppsScript({
-            file: file,
-            fileBase64: fileBase64,
-            fileName: file.name,
-            mimeType: file.type,
-            folderType: 'payment-slips',
-            studentId: currentStudent.memberId || currentStudent.studentId || currentStudent.id || '',
-            studentName: currentStudent.name || '',
-            paymentId: paymentId,
-            month: payment.month || month,
-            courseId: payment.courseId || currentStudent.courseId || '',
-            courseName: payment.courseName || payment.course || currentStudent.course || '',
-            grade: currentStudent.grade || payment.studentGrade || payment.grade || '',
-          });
-          Object.assign(payment, {
-            slipStorageType: 'google_drive',
-            driveFileId: data.fileId || '',
-            driveViewUrl: data.viewUrl || data.driveViewUrl || '',
-            driveFolderId: data.folderId || '',
-            driveFolderName: data.folderName || '',
-            slipUploadedByUid: firebaseUser ? firebaseUser.uid : (currentStudent.authUid || ''),
-            slipUploadedByName: getActiveProfileDisplayInfo().displayName || currentStudent.name || '',
-            slipUploadedAt: firebase.firestore.FieldValue.serverTimestamp(),
-            slipUploadedAtText: new Date().toLocaleString('th-TH'),
-            slipStatus: 'waiting_admin_review',
-            adminReviewStatus: 'pending',
-            paymentStatus: 'รอตรวจสลิป',
-            status: 'รอตรวจสลิป'
-          });
-          await setFirebaseDocument('payments', payment);
-        } else {
-          const uploadSlip = functionsApi.httpsCallable('uploadPaymentSlipToDrive');
-          const response = await uploadSlip({
-            paymentId: paymentId,
-            fileBase64: fileBase64,
-            mimeType: file.type,
-            fileName: file.name
-          });
-          data = response && response.data ? response.data : {};
-          Object.assign(payment, {
-            slipStatus: 'waiting_admin_review',
-            adminReviewStatus: 'pending',
-            paymentStatus: 'รอตรวจสลิป',
-            status: 'รอตรวจสลิป'
-          });
-          await setFirebaseDocument('payments', payment);
-        }
+        data = await uploadFileToDriveViaAppsScript({
+          file: file,
+          fileBase64: fileBase64,
+          fileName: file.name,
+          mimeType: file.type,
+          folderType: 'payment-slips',
+          studentId: currentStudent.memberId || currentStudent.studentId || currentStudent.id || '',
+          studentName: currentStudent.name || '',
+          paymentId: paymentId,
+          month: payment.month || month,
+          courseId: payment.courseId || currentStudent.courseId || '',
+          courseName: payment.courseName || payment.course || currentStudent.course || '',
+          grade: currentStudent.grade || payment.studentGrade || payment.grade || '',
+        });
+        Object.assign(payment, {
+          slipStorageType: 'google_drive',
+          driveFileId: data.fileId || '',
+          driveFileUrl: data.fileUrl || data.viewUrl || data.driveViewUrl || '',
+          driveFolderId: data.folderId || '',
+          driveFolderName: data.folderName || '',
+          slipUploadedByUid: firebaseUser ? firebaseUser.uid : (currentStudent.authUid || ''),
+          slipUploadedByName: getActiveProfileDisplayInfo().displayName || currentStudent.name || '',
+          slipUploadedAt: firebase.firestore.FieldValue.serverTimestamp(),
+          slipUploadedAtText: new Date().toLocaleString('th-TH'),
+          slipStatus: 'waiting_admin_review',
+          adminReviewStatus: 'pending',
+          paymentStatus: 'รอตรวจสลิป',
+          status: 'รอตรวจสลิป'
+        });
+        await setFirebaseDocument('payments', payment);
         currentStudent.paymentStatus = 'รอตรวจสลิป';
-        result.textContent = data.message || 'อัปโหลดสลิปเรียบร้อย รอเจ้าหน้าที่ตรวจสอบ';
+        result.textContent = 'อัปโหลดสลิปสำเร็จ รอเจ้าหน้าที่ตรวจสอบ';
         result.style.color = '#16a34a';
         if (fileInput) fileInput.value = '';
 
