@@ -14057,6 +14057,14 @@ function getCourseOnlineDocs(course, includeInactive) {
       return !!(payment && (payment.ocrRawText || payment.ocrCheckNote || payment.ocrReferenceNo || payment.ocrAmount));
     }
 
+    function getPaymentSlipUrl(payment) {
+      if (!payment) return '';
+      const url = payment.driveViewUrl || payment.driveFileUrl || payment.slipUrl || payment.fileUrl;
+      if (url) return String(url || '');
+      if (payment.driveFileId) return 'https://drive.google.com/file/d/' + encodeURIComponent(String(payment.driveFileId)) + '/view';
+      return '';
+    }
+
     function formatPaymentSlipReviewCell(payment) {
       if (!payment) return 'ยังไม่มีสลิป';
       const noteText = payment.ocrCheckNote ? '<br><span class="mini-muted">' + escapeHtml(payment.ocrCheckNote) + '</span>' : '';
@@ -14068,10 +14076,20 @@ function getCourseOnlineDocs(course, includeInactive) {
       const folderText = payment.driveFolderName
         ? '<br><span class="mini-muted">โฟลเดอร์: ' + escapeHtml(payment.driveFolderName) + '</span>'
         : '';
-      if (payment.driveViewUrl) {
-        return '<a class="btn btn-blue" href="' + escapeHtml(payment.driveViewUrl) + '" target="_blank" rel="noopener">เปิดสลิป</a>' + uploadedText + folderText + pausedText + statusText + noteText;
+      const slipUrl = getPaymentSlipUrl(payment);
+      if (slipUrl) {
+        return '<a class="btn btn-blue" href="' + escapeHtml(slipUrl) + '" target="_blank" rel="noopener">ดูสลิป</a>' + uploadedText + folderText + pausedText + statusText + noteText;
       }
       return 'ยังไม่มีสลิป' + pausedText + noteText;
+    }
+
+    function getPaymentDisplayStatus(payment) {
+      if (!payment) return 'รอชำระเงิน';
+      if (payment.status === 'ชำระแล้ว' || payment.paymentStatus === 'ชำระแล้ว' || payment.slipStatus === 'approved') return 'ชำระแล้ว';
+      if (payment.status === 'รอตรวจสลิป' || payment.paymentStatus === 'รอตรวจสลิป' || payment.slipStatus === 'waiting_admin_review') return 'รอตรวจสลิป';
+      if (payment.slipStatus === 'rejected' || payment.status === 'rejected' || payment.status === 'ไม่ผ่าน') return 'สลิปไม่ผ่าน';
+      if (payment.status === 'ค้างชำระ' || payment.paymentStatus === 'ค้างชำระ') return 'ค้างชำระ';
+      return payment.status || payment.paymentStatus || 'รอชำระเงิน';
     }
 
     function viewPaymentOcrDetail(paymentId) {
@@ -14120,9 +14138,10 @@ function getCourseOnlineDocs(course, includeInactive) {
       tbody.innerHTML = payments.length ? payments.map(function(p) {
         const slipCell = formatPaymentSlipReviewCell(p);
         const ocrButton = paymentHasOcrData(p) ? '<button class="btn btn-blue" type="button" onclick="' + actionCall('viewPaymentOcrDetail', p.firebaseDocId || p.id) + '">ดู OCR</button>' : '';
-        const statusClass = p.status === 'ชำระแล้ว' ? 'status-paid' : p.status === 'ค้างชำระ' || p.status === 'สลิปไม่ผ่าน' ? 'status-absent' : 'status-waiting';
+        const statusText = getPaymentDisplayStatus(p);
+        const statusClass = statusText === 'ชำระแล้ว' ? 'status-paid' : statusText === 'ค้างชำระ' || statusText === 'สลิปไม่ผ่าน' || statusText === 'ไม่ผ่าน' ? 'status-absent' : 'status-waiting';
         const noteText = p.adminNote ? '<br><span class="mini-muted">หมายเหตุ Admin: ' + p.adminNote + '</span>' : '';
-        return '<tr data-payment-id="' + p.id + '"><td>' + (p.student || '-') + '</td><td>' + renderPaymentCourseText(p) + '</td><td>' + (p.month || '-') + '</td><td>' + renderPaymentAmountText(p) + '</td><td>' + slipCell + '<br><span class="mini-muted">เดือนที่นักเรียนแจ้ง: ' + (p.studentSelectedMonth || p.month || '-') + '</span><br><span class="mini-muted">แจ้งเมื่อ: ' + (p.createdAtText || '-') + '</span>' + noteText + '</td><td><span class="' + statusClass + '">' + (p.status || 'รอชำระเงิน') + '</span></td><td>' + paymentActionButtons(p.status || 'รอชำระเงิน') + ocrButton + '<button class="btn btn-blue" type="button" onclick="editPaymentAmountDiscount(this)">แก้ยอด/ส่วนลด</button><button class="btn btn-dark" type="button" onclick="editPaymentAdminNote(this)">หมายเหตุ</button></td></tr>';
+        return '<tr data-payment-id="' + p.id + '"><td>' + (p.student || '-') + '</td><td>' + renderPaymentCourseText(p) + '</td><td>' + (p.month || '-') + '</td><td>' + renderPaymentAmountText(p) + '</td><td>' + slipCell + '<br><span class="mini-muted">เดือนที่นักเรียนแจ้ง: ' + (p.studentSelectedMonth || p.month || '-') + '</span><br><span class="mini-muted">แจ้งเมื่อ: ' + (p.createdAtText || '-') + '</span>' + noteText + '</td><td><span class="' + statusClass + '">' + statusText + '</span></td><td>' + paymentActionButtons(p.status || p.paymentStatus || 'รอชำระเงิน') + ocrButton + '<button class="btn btn-blue" type="button" onclick="editPaymentAmountDiscount(this)">แก้ยอด/ส่วนลด</button><button class="btn btn-dark" type="button" onclick="editPaymentAdminNote(this)">หมายเหตุ</button></td></tr>';
       }).join('') : '<tr><td colspan="7">ยังไม่มีรายการชำระเงิน</td></tr>';
       filterPaymentStatusByMonth();
     }
@@ -14488,10 +14507,10 @@ function getCourseOnlineDocs(course, includeInactive) {
 
     
     function normalizeReceiptStatus(status) {
-      const value = String(status || '').trim();
+      const value = String(status || '').trim().toLowerCase();
       if (!value || value === 'draft' || value === 'รอตรวจ') return 'draft';
-      if (value === 'published' || value === 'แสดงแล้ว') return 'published';
-      if (value === 'hidden' || value === 'ซ่อนไว้') return 'hidden';
+      if (value === 'published' || value === 'issued' || value === 'approved' || value === 'แสดงแล้ว') return 'published';
+      if (value === 'hidden' || value === 'void' || value === 'cancelled' || value === 'canceled' || value === 'ซ่อนไว้') return 'hidden';
       return value;
     }
 
@@ -14973,7 +14992,7 @@ function receiptStatusText(status) {
       if (!tbody) return;
 
       const visibleReceipts = receipts.filter(function(r) {
-        return r.status === 'published' && isCurrentStudentMatchRecord(r);
+        return normalizeReceiptStatus(r.status) === 'published' && isCurrentStudentMatchRecord(r);
       }).slice().sort(function(a, b) {
         return Number(b.id || 0) - Number(a.id || 0);
       });
@@ -15001,7 +15020,7 @@ function receiptStatusText(status) {
 
     function getStudentReceiptRowsForMobile() {
       const visibleReceipts = receipts.filter(function(r) {
-        return r.status === 'published' && isCurrentStudentMatchRecord(r);
+        return normalizeReceiptStatus(r.status) === 'published' && isCurrentStudentMatchRecord(r);
       }).slice().sort(function(a, b) {
         return Number(b.id || 0) - Number(a.id || 0);
       });
