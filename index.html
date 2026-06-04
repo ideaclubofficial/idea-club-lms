@@ -3237,7 +3237,7 @@
                 <button class="btn btn-dark" type="button" onclick="copyPricesFromPreviousMonth()">คัดลอกราคาจากเดือนก่อน</button>
                 <button class="btn btn-green" type="button" onclick="saveAllPaymentCoursePrices()">บันทึกยอดและสร้างรายการเรียกเก็บ</button>
               </div>
-              <p style="color:#6b7280; margin-top:8px; margin-bottom:0;">จะสร้างรายการเรียกเก็บให้นักเรียนโดยอัตโนมัติ เมื่อกดบันทึกและเผยแพร่ยอด</p>
+              <p style="color:#6b7280; margin-top:8px; margin-bottom:0;">เมื่อกดปุ่มนี้ ระบบจะบันทึกราคาและสร้างรายการเรียกเก็บให้นักเรียนทันที</p>
               <p id="paymentCoursePriceResult" style="margin-top:14px; font-weight:bold;"></p>
 
               <br />
@@ -3259,7 +3259,7 @@
               <br />
 
               <h3 style="color:#0f4cbd; margin-bottom:10px;">Preview ยอดของเดือนนี้</h3>
-              <p style="color:#6b7280; margin-bottom:10px;">ตรวจยอดที่นักเรียนจะเห็นทันทีหลังบันทึก ยอดจะสร้างรายการชำระเงินโดยอัตโนมัติเมื่อกดบันทึกและเผยแพร่ หากต้องการสร้าง payment records ล่วงหน้าแบบชัดเจนให้ใช้ส่วนขั้นสูงด้านล่าง</p>
+              <p style="color:#6b7280; margin-bottom:10px;">ตรวจยอดที่นักเรียนจะเห็นทันทีหลังบันทึก ยอดและรายการเรียกเก็บจะถูกสร้างพร้อมกันเมื่อกดปุ่มบันทึกด้านบน</p>
               <div id="paymentRecordPreviewSummary" class="dashboard-grid"></div>
               <div class="table-wrap" style="margin-top:14px;">
                 <table>
@@ -3276,8 +3276,8 @@
                 </table>
               </div>
               <details style="margin-top:14px;">
-                <summary style="cursor:pointer; font-weight:800; color:#0f4cbd;">ขั้นสูง: สร้าง payment records ล่วงหน้า</summary>
-                <p style="color:#6b7280; margin:10px 0;">ปกติไม่ต้องกด นักเรียนจะเห็นยอดจากรอบบิลทันที ระบบจะสร้างรายการจริงเมื่ออัปโหลดสลิปหรือ Admin บันทึกชำระเงิน</p>
+                <summary style="cursor:pointer; font-weight:800; color:#0f4cbd;">เครื่องมือซ่อมข้อมูล: สร้าง payment records</summary>
+                <p style="color:#6b7280; margin:10px 0;">ปกติไม่ต้องใช้ ใช้เฉพาะกรณีต้องซ่อมข้อมูล</p>
                 <button class="btn btn-dark" type="button" onclick="createMonthlyPaymentRecords()">สร้าง payment records ล่วงหน้าของเดือนนี้</button>
               </details>
               <p id="paymentRecordPreviewResult" style="margin-top:14px; font-weight:bold;"></p>
@@ -12500,7 +12500,9 @@ function getCourseOnlineDocs(course, includeInactive) {
       const signupDate = getStudentSignupDate(student);
       const finalAmount = calculateStudentMonthlyAmount(listAmount, signupDate);
       const discount = Math.max(0, listAmount - finalAmount);
+      const isHalfMonth = shouldApplyHalfMonthDiscount(signupDate);
       const paymentId = createFirebaseDocId('payments');
+      const nowText = new Date().toLocaleDateString('th-TH');
       return {
         id: paymentId,
         firebaseDocId: paymentId,
@@ -12514,18 +12516,26 @@ function getCourseOnlineDocs(course, includeInactive) {
         courseName: student.course || (course ? course.name : ''),
         course: student.course || (course ? course.name : ''),
         month: month,
+        paymentMonth: month,
         studentSelectedMonth: month,
         baseAmount: listAmount,
         expectedAmount: listAmount,
+        originalAmount: listAmount,
         discount: discount,
         finalAmount: finalAmount,
         amount: finalAmount,
+        totalAmount: finalAmount,
         lineItems: Array.isArray(student.lineItems) ? student.lineItems.slice() : [],
+        discountType: isHalfMonth ? 'ครึ่งเดือน' : '',
+        discountReason: isHalfMonth ? 'สมัครหลังวันที่ 15 ของเดือนแรก' : '',
         slipUrl: '',
+        slipStatus: '',
+        receiptStatus: '',
         slipNote: 'ระบบสร้างยอดอัตโนมัติสำหรับเดือนสมัครคอร์ส',
         paymentStatus: 'รอชำระเงิน',
         status: 'รอชำระเงิน',
-        createdAtText: new Date().toLocaleDateString('th-TH')
+        createdAtText: nowText,
+        updatedAtText: nowText
       };
     }
 
@@ -13893,7 +13903,7 @@ function getCourseOnlineDocs(course, includeInactive) {
       const input = getElement(getPaymentCoursePriceInputId(course.id));
       if (input) input.value = Math.round(normalPrice / 2);
       if (result) {
-        result.textContent = 'ตั้งครึ่งราคาของคอร์สนี้แล้ว กรุณากด “บันทึกและเผยแพร่ยอดให้นักเรียน”';
+        result.textContent = 'ตั้งครึ่งราคาของคอร์สนี้แล้ว กรุณากด “บันทึกยอดและสร้างรายการเรียกเก็บ”';
         result.style.color = '#0f4cbd';
       }
     }
@@ -13904,7 +13914,7 @@ function getCourseOnlineDocs(course, includeInactive) {
         if (input) input.value = getCourseMonthlyPrice(c) || '';
       });
       const result = getElement('paymentCoursePriceResult');
-      if (result) { result.textContent = 'เติมราคาปกติของคอร์สทั้งหมดแล้ว กรุณากด “บันทึกและเผยแพร่ยอดให้นักเรียน”'; result.style.color = '#0f4cbd'; }
+      if (result) { result.textContent = 'เติมราคาปกติของคอร์สทั้งหมดแล้ว กรุณากด “บันทึกยอดและสร้างรายการเรียกเก็บ”'; result.style.color = '#0f4cbd'; }
       renderPaymentRecordPreview();
     }
 
@@ -13924,7 +13934,7 @@ function getCourseOnlineDocs(course, includeInactive) {
         const previousPrice = previousMonth && previousMonth.coursePrices ? Number(previousMonth.coursePrices[String(c.id)] || 0) : 0;
         input.value = previousPrice || getCourseMonthlyPrice(c) || '';
       });
-      if (result) { result.textContent = 'คัดลอกราคาจาก ' + previousMonth.month + ' แล้ว กรุณากด “บันทึกและเผยแพร่ยอดให้นักเรียน”'; result.style.color = '#0f4cbd'; }
+      if (result) { result.textContent = 'คัดลอกราคาจาก ' + previousMonth.month + ' แล้ว กรุณากด “บันทึกยอดและสร้างรายการเรียกเก็บ”'; result.style.color = '#0f4cbd'; }
       renderPaymentRecordPreview();
     }
 
@@ -13953,12 +13963,12 @@ function getCourseOnlineDocs(course, includeInactive) {
         await setFirebaseDocument('paymentMonths', item);
         addActivityLog('บันทึกราคาคอร์สทั้งเดือน', month + ' · ' + savedCount + ' คอร์ส');
         const paymentCounts = await createOrUpdateMonthlyPaymentRecordsForMonth(month);
-        const paymentDetail = paymentCounts.created || paymentCounts.updated ? ' สร้าง/อัปเดตรายการชำระเงิน: สร้างใหม่ ' + paymentCounts.created + ' รายการ, อัปเดต ' + paymentCounts.updated + ' รายการ' : '';
-        if (result) { result.textContent = 'บันทึกราคาของเดือน ' + month + ' เรียบร้อย ' + savedCount + ' คอร์ส นักเรียนเห็นยอดได้ทันที' + paymentDetail; result.style.color = '#16a34a'; }
+        const paymentSummary = 'บันทึกยอดและสร้างรายการเรียกเก็บเรียบร้อย: สร้าง ' + paymentCounts.created + ' รายการ, อัปเดต ' + paymentCounts.updated + ' รายการ, ข้าม ' + paymentCounts.skipped + ' รายการ';
+        if (result) { result.textContent = paymentSummary; result.style.color = '#16a34a'; }
         renderPaymentMonths();
         renderPaymentTable();
         renderAdminDashboard();
-        renderPaymentRecordPreview('บันทึกราคาแล้ว นักเรียนเห็นยอดได้ทันที' + paymentDetail);
+        renderPaymentRecordPreview(paymentSummary);
         updateStudentSelectedPaymentMonth();
         updateStudentCourseDisplay();
         renderDashboardPaymentSummary();
