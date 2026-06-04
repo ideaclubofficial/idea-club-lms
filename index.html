@@ -2545,7 +2545,7 @@
                 </div>
                 <div>
                   <label>ศูนย์ที่สนใจ / ศูนย์เรียน</label>
-                  <select id="adminStudentPreferredLocation">
+                  <select id="adminStudentPreferredLocation" onchange="onAdminStudentCenterChange()">
                     <option>IDEA CLUB ศูนย์ นครสวรรค์</option>
                     <option>IDEA CLUB ศูนย์ หนองฉาง</option>
                   </select>
@@ -2559,6 +2559,7 @@
                     <option>ยังไม่ได้สมัครคอร์ส</option>
 
                   </select>
+                  <span id="adminStudentCourseCenterWarning" class="hidden" style="color:#dc2626;font-size:0.85em"></span>
                 </div>
                 <div>
                   <label>สถานะคอร์ส</label>
@@ -9597,6 +9598,11 @@
         result.style.color = '#dc2626';
         return;
       }
+      if (selectedCourse && preferredLocation && selectedCourse.location && selectedCourse.location !== preferredLocation) {
+        result.textContent = 'คอร์สที่เลือกไม่ตรงกับศูนย์ กรุณาเลือกคอร์สใหม่';
+        result.style.color = '#dc2626';
+        return;
+      }
 
       try {
         if (editingId) {
@@ -9859,13 +9865,15 @@
           '<div><label>เบอร์ผู้ปกครอง / เบอร์ติดต่อ</label><input id="bubbleStudentPhone" type="text" value="' + (s.phone || '') + '"></div>' +
           '<div><label>LINE ID</label><input id="bubbleStudentLineId" type="text" value="' + (s.lineId || '') + '"></div>' +
           '<div><label>โรงเรียน</label><input id="bubbleStudentSchool" type="text" value="' + (s.school || '') + '"></div>' +
-          '<div><label>ศูนย์</label><select id="bubbleStudentPreferredLocation">' +
+          '<div><label>ศูนย์</label><select id="bubbleStudentPreferredLocation" onchange="onBubbleStudentCenterChange()">' +
             '<option' + ((s.preferredLocation || '') === 'IDEA CLUB ศูนย์ นครสวรรค์' ? ' selected' : '') + '>IDEA CLUB ศูนย์ นครสวรรค์</option>' +
             '<option' + ((s.preferredLocation || '') === 'IDEA CLUB ศูนย์ หนองฉาง' ? ' selected' : '') + '>IDEA CLUB ศูนย์ หนองฉาง</option>' +
           '</select></div>' +
         '</div>' +
         '<div class="form-row">' +
-          '<div><label>คอร์สที่ลงเรียน</label><select id="bubbleStudentCourseId">' + studentCourseOptionsHtml(s.courseId || s.course) + '</select></div>' +
+          '<div><label>คอร์สที่ลงเรียน</label><select id="bubbleStudentCourseId">' + studentCourseOptionsHtml(s.courseId || s.course, s.preferredLocation || '') + '</select>' +
+          (function() { var sc = courses.find(function(c) { return String(c.id) === String(s.courseId || ''); }); var mismatch = sc && s.preferredLocation && sc.location && sc.location !== s.preferredLocation; return '<span id="bubbleStudentCourseCenterWarning"' + (mismatch ? '' : ' class="hidden"') + ' style="color:#dc2626;font-size:0.85em">' + (mismatch ? ' คอร์สเดิมไม่ตรงกับศูนย์ที่เลือก' : '') + '</span>'; })() +
+          '</div>' +
           '<div><label>สถานะคอร์ส</label><select id="bubbleStudentCourseStatus">' +
             '<option' + ((s.courseStatus || 'ยังไม่ได้สมัครคอร์ส') === 'ยังไม่ได้สมัครคอร์ส' ? ' selected' : '') + '>ยังไม่ได้สมัครคอร์ส</option>' +
             '<option' + ((s.courseStatus || '') === 'รออนุมัติคอร์ส' ? ' selected' : '') + '>รออนุมัติคอร์ส</option>' +
@@ -9912,6 +9920,12 @@
           }
           const selectedCourseId = bubbleSelectValue('bubbleStudentCourseId');
           const selectedCourse = courses.find(function(c) { return String(c.id) === String(selectedCourseId); });
+          const bubbleCenter = bubbleSelectValue('bubbleStudentPreferredLocation');
+          if (selectedCourse && bubbleCenter && selectedCourse.location && selectedCourse.location !== bubbleCenter) {
+            getElement('editBubbleResult').textContent = 'คอร์สที่เลือกไม่ตรงกับศูนย์ กรุณาเลือกคอร์สใหม่';
+            getElement('editBubbleResult').style.color = '#dc2626';
+            return;
+          }
           const finalGrade = selectedCourse ? selectedCourse.grade : bubbleSelectValue('bubbleStudentGrade');
           const learningType = normalizeStudentLearningType(bubbleSelectValue('bubbleStudentLearningType'));
           const privateLessonTeacherId = bubbleSelectValue('bubbleStudentPrivateLessonTeacher');
@@ -10636,14 +10650,50 @@
     }
 
 
-    function studentCourseOptionsHtml(selectedValue) {
+    function getCoursesForCenter(center) {
+      if (!center) return courses;
+      return courses.filter(function(c) {
+        return String(c.location || '') === center;
+      });
+    }
+
+    function studentCourseOptionsHtml(selectedValue, center) {
       const selectedText = String(selectedValue || '');
+      const filteredCourses = center ? getCoursesForCenter(center) : courses;
       const options = ['<option value="">ยังไม่ได้สมัครคอร์ส</option>'];
-      courses.forEach(function(c) {
+      filteredCourses.forEach(function(c) {
         const selected = String(c.id) === selectedText || c.name === selectedText ? ' selected' : '';
         options.push('<option value="' + c.id + '"' + selected + '>' + c.grade + ' · ' + c.name + '</option>');
       });
       return options.join('');
+    }
+
+    function onAdminStudentCenterChange() {
+      const center = getElement('adminStudentPreferredLocation').value;
+      const courseSelect = getElement('adminStudentCourse');
+      if (!courseSelect) return;
+      const prev = courseSelect.value;
+      const valid = getCoursesForCenter(center).some(function(c) { return String(c.id) === prev; });
+      courseSelect.innerHTML = studentCourseOptionsHtml(valid ? prev : '', center);
+      const w = getElement('adminStudentCourseCenterWarning');
+      if (w) {
+        if (!valid && prev) { w.textContent = 'คอร์สเดิมไม่ตรงกับศูนย์ที่เลือก'; w.classList.remove('hidden'); }
+        else { w.textContent = ''; w.classList.add('hidden'); }
+      }
+    }
+
+    function onBubbleStudentCenterChange() {
+      const center = bubbleSelectValue('bubbleStudentPreferredLocation');
+      const courseSelect = getElement('bubbleStudentCourseId');
+      if (!courseSelect) return;
+      const prev = courseSelect.value;
+      const valid = getCoursesForCenter(center).some(function(c) { return String(c.id) === prev; });
+      courseSelect.innerHTML = studentCourseOptionsHtml(valid ? prev : '', center);
+      const w = getElement('bubbleStudentCourseCenterWarning');
+      if (w) {
+        if (!valid && prev) { w.textContent = 'คอร์สเดิมไม่ตรงกับศูนย์ที่เลือก'; w.classList.remove('hidden'); }
+        else { w.textContent = ''; w.classList.add('hidden'); }
+      }
     }
 
     function privateLessonDayOptionsHtml(selectedValue) {
@@ -10703,8 +10753,9 @@
     function renderAdminStudentCourseOptions() {
       const select = getElement('adminStudentCourse');
       if (!select) return;
+      const center = getElement('adminStudentPreferredLocation') ? getElement('adminStudentPreferredLocation').value : '';
       const current = select.value || '';
-      select.innerHTML = studentCourseOptionsHtml(current);
+      select.innerHTML = studentCourseOptionsHtml(current, center);
       if (Array.from(select.options).some(function(option) { return option.value === current; })) {
         select.value = current;
       }
