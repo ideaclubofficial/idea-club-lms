@@ -12432,21 +12432,7 @@ function getCourseOnlineDocs(course, includeInactive) {
 
     function isCurrentStudentMatchRecord(record) {
       if (!currentStudent || !record) return false;
-      const currentId = currentStudent.id !== undefined && currentStudent.id !== null ? String(currentStudent.id) : '';
-      const currentAuthUid = currentStudent.authUid ? String(currentStudent.authUid) : (firebaseUser ? String(firebaseUser.uid) : '');
-      const currentName = normalizeTextValue(currentStudent.name);
-      const currentPhone = String(currentStudent.phone || '').replace(/[^0-9]/g, '');
-
-      const recordStudentId = record.studentId !== undefined && record.studentId !== null ? String(record.studentId) : '';
-      const recordAuthUid = record.authUid ? String(record.authUid) : '';
-      const recordName = normalizeTextValue(record.student);
-      const recordPhone = String(record.phone || record.studentPhone || '').replace(/[^0-9]/g, '');
-
-      if (currentId && recordStudentId && currentId === recordStudentId) return true;
-      if (currentAuthUid && recordAuthUid && currentAuthUid === recordAuthUid) return true;
-      if (currentPhone && recordPhone && currentPhone === recordPhone) return true;
-      if (currentName && recordName && currentName === recordName) return true;
-      return false;
+      return isStudentPaymentRecord(currentStudent, record);
     }
 
     function getCurrentStudentLatestPayment() {
@@ -12493,16 +12479,24 @@ function getCourseOnlineDocs(course, includeInactive) {
     function isStudentPaymentRecord(student, record) {
       if (!student || !record) return false;
       const targetId = student.id !== undefined && student.id !== null ? String(student.id) : '';
+      const targetStudentId = student.studentId !== undefined && student.studentId !== null ? String(student.studentId) : '';
+      const targetMemberId = student.memberId ? String(student.memberId).trim() : '';
       const targetAuthUid = student.authUid ? String(student.authUid) : (firebaseUser ? String(firebaseUser.uid) : '');
       const targetName = normalizeTextValue(student.name);
       const targetPhone = String(student.phone || '').replace(/[^0-9]/g, '');
+
       const recordStudentId = record.studentId !== undefined && record.studentId !== null ? String(record.studentId) : '';
+      const recordMemberId = record.memberId ? String(record.memberId).trim() : '';
       const recordAuthUid = record.authUid ? String(record.authUid) : '';
+      const recordStudentAuthUid = record.studentAuthUid ? String(record.studentAuthUid) : '';
       const recordName = normalizeTextValue(record.student || record.studentName);
       const recordPhone = String(record.phone || record.studentPhone || '').replace(/[^0-9]/g, '');
 
       if (targetId && recordStudentId && targetId === recordStudentId) return true;
+      if (targetStudentId && recordStudentId && targetStudentId === recordStudentId) return true;
+      if (targetMemberId && recordMemberId && targetMemberId === recordMemberId) return true;
       if (targetAuthUid && recordAuthUid && targetAuthUid === recordAuthUid) return true;
+      if (targetAuthUid && recordStudentAuthUid && targetAuthUid === recordStudentAuthUid) return true;
       if (targetPhone && recordPhone && targetPhone === recordPhone) return true;
       if (targetName && recordName && targetName === recordName) return true;
       return false;
@@ -12512,7 +12506,7 @@ function getCourseOnlineDocs(course, includeInactive) {
       if (!student || !Array.isArray(payments)) return [];
       return payments.filter(function(payment) {
         if (!isStudentPaymentRecord(student, payment)) return false;
-        return !!payment.month;
+        return !!(payment.paymentMonth || payment.month || payment.billingMonth);
       });
     }
 
@@ -12525,7 +12519,7 @@ function getCourseOnlineDocs(course, includeInactive) {
     function getStudentPaymentMonthOptions() {
       if (!currentStudent || !currentStudent.courseId) return [];
       const months = getStudentVisiblePayments(currentStudent)
-        .map(function(p) { return String(p.month || '').trim(); })
+        .map(function(p) { return String(p.paymentMonth || p.month || p.billingMonth || '').trim(); })
         .filter(function(month, idx, arr) { return month && arr.indexOf(month) === idx; });
       return months;
     }
