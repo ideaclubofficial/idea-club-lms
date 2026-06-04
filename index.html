@@ -7682,68 +7682,98 @@
         return;
       }
 
-      let autoMemberId = getNextMemberIdByGrade(registerGrade);
-      if (PRODUCTION_MODE && firebaseReady && db) {
-        try {
-          autoMemberId = await reserveNextMemberId(registerGrade);
-        } catch (error) {
-          console.error('reserve student member id error:', error);
-          autoMemberId = getNextMemberIdByGrade(registerGrade);
-          console.warn('reserve student member id fallback to local preview', {
-            memberId: autoMemberId,
-            grade: registerGrade
-          });
-        }
+      if (PRODUCTION_MODE && (!firebaseReady || !auth || !db)) {
+        result.textContent = 'Firebase ยังไม่พร้อมใช้งาน กรุณารีโหลดหน้าและลองใหม่';
+        result.style.color = '#dc2626';
+        return;
       }
 
-      const defaultPwd = buildDefaultStudentPassword({ memberId: autoMemberId });
+      result.textContent = 'กำลังสมัครสมาชิก...';
+      result.style.color = '#0f4cbd';
 
+      // Step 1: Create Firebase Auth FIRST with a temporary email so that the user
+      // is signed-in when we run the counter transaction. Firestore rules for
+      // counters/{docId} allow write only for signedIn() users, so the reservation
+      // must happen after auth creation, not before.
       let authUid = null;
-      const studentEmail = buildLocalEmailFromMemberId(autoMemberId).toLowerCase();
-      if (PRODUCTION_MODE) {
-        if (!firebaseReady || !auth || !db) {
-          result.textContent = 'Firebase ยังไม่พร้อมใช้งาน';
-          result.style.color = '#dc2626';
-          return;
-        }
+      const tempEmail = 'ic_reg_' + cleanPhone + '_' + Date.now().toString(36) + '@ideaclub.local';
+      const tempPwd = 'IcTmp' + Date.now().toString(36);
 
+      if (PRODUCTION_MODE) {
         try {
-          const credential = await auth.createUserWithEmailAndPassword(studentEmail, defaultPwd);
+          const credential = await auth.createUserWithEmailAndPassword(tempEmail, tempPwd);
           firebaseUser = credential.user;
           authUid = firebaseUser.uid;
         } catch (error) {
-          console.error('register firebase auth error:', error);
-          if (isEmailAlreadyInUseError(error)) {
+          console.error('register firebase auth (temp) error:', error);
+          result.textContent = 'สมัครสมาชิกไม่สำเร็จ: ' + (error.message || error.code);
+          result.style.color = '#dc2626';
+          return;
+        }
+      }
+
+      // Step 2: Now authenticated (signedIn() = true, userProfileExists() = false) —
+      // Firestore counters rule canWriteCounter() allows this combination,
+      // so the transaction will succeed and return the correct next memberId.
+      let autoMemberId = getNextMemberIdByGrade(registerGrade);
+      if (PRODUCTION_MODE && firebaseReady && db && authUid) {
+        try {
+          autoMemberId = await reserveNextMemberId(registerGrade);
+        } catch (error) {
+          console.error('reserve student member id error (post-auth):', error);
+          autoMemberId = getNextMemberIdByGrade(registerGrade);
+          console.warn('reserve student member id fallback to local', { memberId: autoMemberId, grade: registerGrade });
+        }
+      }
+
+      // Step 3: Update Firebase Auth to use the real memberId-based email and password.
+      // This is required so the login flow (which constructs email from memberId) works.
+      const defaultPwd = buildDefaultStudentPassword({ memberId: autoMemberId });
+      const studentEmail = buildLocalEmailFromMemberId(autoMemberId).toLowerCase();
+
+      if (PRODUCTION_MODE && authUid && auth.currentUser) {
+        try {
+          await auth.currentUser.updateEmail(studentEmail);
+          await auth.currentUser.updatePassword(defaultPwd);
+        } catch (emailError) {
+          console.error('update auth email/password error:', emailError);
+          // Clean up the temp auth account to avoid orphan records
+          try { await auth.currentUser.delete(); } catch (delErr) { console.warn('delete temp auth failed', delErr); }
+          authUid = null;
+          firebaseUser = null;
+          if (isEmailAlreadyInUseError(emailError)) {
+            // memberId email already in auth — attempt orphan recovery
             try {
-              authUid = await signInExistingAuthForRegistration(studentEmail, defaultPwd);
-              const profileExists = await hasUserProfile(authUid);
+              const recoveredUid = await signInExistingAuthForRegistration(studentEmail, defaultPwd);
+              const profileExists = await hasUserProfile(recoveredUid);
               if (profileExists) {
-                result.textContent = 'เบอร์นี้มีบัญชีอยู่แล้ว กรุณาเข้าสู่ระบบ';
+                result.textContent = 'Member ID นี้มีบัญชีอยู่แล้ว กรุณาเข้าสู่ระบบ (Member ID: ' + autoMemberId + ')';
                 result.style.color = '#dc2626';
                 return;
               }
-              console.warn('register found orphan student auth; rebuilding profile', {
-                uid: authUid,
-                email: studentEmail
-              });
-            } catch (signInError) {
-              console.error('register existing auth sign-in error:', signInError);
-              result.textContent = 'Member ID นี้มีบัญชี Auth อยู่แล้ว แต่รหัสผ่านไม่ตรงกัน กรุณาเข้าสู่ระบบหรือให้เจ้าหน้าที่ซ่อมบัญชี';
+              // Orphan auth without profile — reuse uid and continue
+              authUid = recoveredUid;
+              firebaseUser = auth.currentUser;
+              console.warn('register found orphan auth for memberId, rebuilding profile', { uid: authUid, memberId: autoMemberId });
+            } catch (recoverError) {
+              console.error('orphan auth recover failed:', recoverError);
+              result.textContent = 'Member ID ' + autoMemberId + ' มีบัญชี Auth อยู่แล้วแต่รหัสผ่านไม่ตรง กรุณาให้เจ้าหน้าที่ตรวจสอบ';
               result.style.color = '#dc2626';
               return;
             }
           } else {
-            result.textContent = 'สมัครสมาชิกไม่สำเร็จ: ' + (error.message || error.code);
+            result.textContent = 'สร้างบัญชีไม่สำเร็จ: ' + (emailError.message || emailError.code);
             result.style.color = '#dc2626';
             return;
           }
         }
       }
 
+      // Step 4: Create Firestore profile (users/{uid} + students/{uid})
       const newId = authUid || Date.now();
       const newStudent = {
         id: newId,
-        firebaseDocId: newId,
+        firebaseDocId: String(newId),
         authUid: authUid,
         authEmail: studentEmail,
         email: studentEmail,
@@ -7791,7 +7821,7 @@
         }
       } catch (error) {
         console.error('register student firebase error:', error);
-        result.textContent = 'สร้าง Auth สำเร็จแล้ว แต่บันทึก profile นักเรียนไม่ครบ กรุณากดสมัครอีกครั้งด้วยเบอร์และรหัสเดิม หรือให้เจ้าหน้าที่ซ่อมบัญชี: ' + (error.message || error.code);
+        result.textContent = 'Auth สร้างแล้ว (Member ID: ' + autoMemberId + ') แต่บันทึก profile ไม่สำเร็จ กรุณาเข้าสู่ระบบด้วย Member ID และรหัสผ่าน ' + defaultPwd + ' แล้วให้เจ้าหน้าที่ซ่อม profile: ' + (error.message || error.code);
         result.style.color = '#dc2626';
         return;
       }
@@ -7806,11 +7836,7 @@
         uid: authUid || newStudent.id,
         authUid: authUid || newStudent.authUid
       }));
-      console.log('student-register-success', {
-        uid: authUid || '',
-        memberId: autoMemberId,
-        phone: phone
-      });
+      console.log('student-register-success', { uid: authUid || '', memberId: autoMemberId, phone: phone });
       if (PRODUCTION_MODE && firebaseReady && db && authUid) {
         await ensureStudentDataLoaded(firebaseUserProfile, { force: true });
         currentStudent = students[0] || newStudent;
