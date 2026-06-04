@@ -1279,7 +1279,6 @@
 
         <div style="margin-top:22px;"> 
           <button class="btn btn-blue" type="button" onclick="loginByRole()">เข้าสู่ระบบ</button>
-          <button class="btn btn-dark" type="button" onclick="goToRegisterPage()">สมัครสมาชิกใหม่</button>
           <button class="btn btn-green" type="button" onclick="openStudentLineOfficial()">ติดต่อเจ้าหน้าที่ผ่าน LINE</button>
         </div>
         <div class="notice" style="margin-top:18px;">
@@ -1288,7 +1287,6 @@
           <p>• รหัสผ่านเริ่มต้นคือ ic + 4 ตัวท้ายของ Member ID</p>
           <p>• สามารถเปลี่ยนรหัสผ่านได้หลังเข้าสู่ระบบ</p>
           <p>• หากลืมรหัสผ่าน กรุณาติดต่อเจ้าหน้าที่</p>
-          <p>• นักเรียนใหม่สามารถสมัครสมาชิกได้ด้วยตนเอง</p>
         </div>
         <div class="notice" style="margin-top:12px; background:#eff6ff; color:#1e40af;">
           <strong>ข้อมูลสำคัญ</strong>
@@ -1300,7 +1298,7 @@
       </div>
     </section>
 
-    <section class="section auth-section hidden" id="student-register">
+    <section class="section auth-section hidden" id="student-register" style="display:none !important">
       <h2 class="section-title">สมัครสมาชิกใหม่</h2>
       <p class="section-subtitle">สมัครสมาชิกก่อน แล้วเลือกคอร์สหลังเข้าสู่ระบบ</p>
       <div class="form-box">
@@ -2772,8 +2770,10 @@
               </div>
               <div class="admin-toolbar">
                 <button class="btn btn-blue" type="button" onclick="exportStudentsCsv()">ส่งออกนักเรียน CSV</button>
+                <button class="btn btn-green" type="button" onclick="exportStudentLoginList()">Export รายชื่อเด็ก + รหัสเริ่มต้น</button>
                 <button class="btn btn-dark" type="button" onclick="clearStudentFilters()">ล้างตัวกรอง</button>
               </div>
+              <p id="exportLoginListResult" style="margin-top:8px; font-weight:bold;"></p>
             </div>
             <br />
             <p class="mini-muted" style="margin-bottom:8px;">ถ้าตารางกว้าง ให้เลื่อนซ้าย–ขวาในกรอบตาราง</p>
@@ -7636,11 +7636,8 @@
       (getElement('student-announcements') || getElement('studentDashboard')).scrollIntoView({ behavior: 'smooth' });
     }
 
-    function goToRegisterPage() {
-      getElement('student-login').classList.add('hidden');
-      getElement('student-register').classList.remove('hidden');
-      window.scrollTo({ top: 0, behavior: 'smooth' });
-    }
+    // Deprecated: self-registration removed. Admin adds students via admin panel.
+    function goToRegisterPage() { /* no-op */ }
 
     function backToLogin() {
       getElement('student-register').classList.add('hidden');
@@ -7648,6 +7645,7 @@
       getElement('student-login').scrollIntoView({ behavior: 'smooth' });
     }
 
+    // Deprecated: self-registration disabled. Students are added by Admin only.
     async function studentRegister() {
       const parentName = getElement('registerParentName').value.trim();
       const studentName = getElement('registerStudentName').value.trim();
@@ -22021,6 +22019,32 @@ function receiptStatusText(status) {
       link.click();
       document.body.removeChild(link);
       URL.revokeObjectURL(url);
+    }
+
+    function exportStudentLoginList() {
+      const result = getElement('exportLoginListResult');
+      if (!hasPermission('admin.students')) {
+        if (result) { result.textContent = 'ไม่มีสิทธิ์ export รายชื่อนักเรียน'; result.style.color = '#dc2626'; }
+        return;
+      }
+      const exportable = students.filter(function(s) {
+        return s.deleted !== true && String(s.status || '').toLowerCase() !== 'deleted';
+      });
+      if (!exportable.length) {
+        if (result) { result.textContent = 'ไม่พบรายชื่อนักเรียนสำหรับ export'; result.style.color = '#d97706'; }
+        return;
+      }
+      const rows = [['Member ID', 'Default Password', 'ชื่อจริง', 'ชื่อเล่น']];
+      exportable.forEach(function(s) {
+        const mid = s.memberId || s.studentId || '';
+        if (!mid) { console.warn('exportStudentLoginList: student missing memberId', s.id || ''); }
+        const pwd = buildDefaultStudentPassword({ memberId: mid, studentId: s.studentId });
+        rows.push([mid, pwd, s.name || '', s.nickname || '']);
+      });
+      const today = new Date().toISOString().slice(0, 10);
+      downloadCsv('idea-club-student-login-list-' + today + '.csv', rows);
+      addActivityLog('Export รายชื่อเด็ก + รหัสเริ่มต้น', 'ดาวน์โหลด CSV จำนวน ' + exportable.length + ' คน');
+      if (result) { result.textContent = 'Export รายชื่อเด็กสำเร็จ จำนวน ' + exportable.length + ' คน'; result.style.color = '#16a34a'; }
     }
 
     function exportStudentsCsv() {
