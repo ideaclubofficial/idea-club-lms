@@ -2407,6 +2407,7 @@
           <a data-menu-label="ใบเสร็จ" onclick="showAdminTab('admin-receipts')"><span class="menu-icon">🧾</span>ใบเสร็จ</a>
           <div class="sidebar-group-title"><span class="menu-icon">📊</span>แบบทดสอบ</div>
           <a data-menu-label="สอบ / คะแนน" onclick="showAdminTab('admin-monthly-test')"><span class="menu-icon">📊</span>สอบ / คะแนน</a>
+          <a data-menu-label="ระบบข้อสอบ ป.4–ป.6" onclick="showAdminTab('admin-exam-processor')"><span class="menu-icon">📝</span>ระบบข้อสอบ ป.4–ป.6</a>
           <a data-menu-label="แผนสอนรายเดือน" onclick="showAdminTab('admin-monthly-planner')"><span class="menu-icon">🗓️</span>แผนสอนรายเดือน</a>
           <div class="sidebar-group-title"><span class="menu-icon">📅</span>ครูผู้สอน</div>
           <a data-menu-label="ครู / สิทธิ์" onclick="showAdminTab('admin-teachers')"><span class="menu-icon">🔐</span>ครู / สิทธิ์</a>
@@ -2653,7 +2654,7 @@
                 <h3 style="color:#0f4cbd; margin-bottom:10px;">ข้อมูลเข้าสู่ระบบสมาชิก</h3>
                 <p><strong>Member ID:</strong> <span id="generatedMemberId">-</span></p>
                 <p><strong>ID เข้าสู่ระบบ:</strong> <span id="generatedUsername">-</span></p>
-                <p><strong>รหัสผ่านเริ่มต้น:</strong> 000000</p>
+                <p><strong>รหัสผ่านเริ่มต้น:</strong> <span id="generatedDefaultPassword">-</span></p>
                 <button class="btn btn-blue" type="button" onclick="copyMemberInfo()">Copy ข้อมูลสมาชิก</button>
               </div>
             </div>
@@ -3730,6 +3731,232 @@
               </table>
             </div>
           </section>
+
+          <!-- ========================================================
+               ระบบข้อสอบ ป.4–ป.6  (admin-exam-processor)
+               Collections: examBank / examResults / learningMaterials
+               ======================================================== -->
+          <section id="admin-exam-processor" class="admin-tab hidden">
+
+            <!-- 1. Sync จาก Google Drive -->
+            <div class="form-box">
+              <h3>Sync ข้อสอบจาก Google Drive</h3>
+              <p style="color:#6b7280; margin-bottom:12px;">
+                โฟลเดอร์ต้นทาง: <code>16t5boPIY4736OkQLv3S7JWZ02QvQeqBW</code><br/>
+                ระบบเรียก Cloud Function <code>syncExamBankFromDrive</code> แล้วบันทึก metadata เข้า collection <strong>examBank</strong>
+              </p>
+              <div style="display:flex;gap:10px;flex-wrap:wrap;">
+                <button class="btn btn-blue" type="button" onclick="syncExamBankFromDrive()">🔄 Sync ข้อสอบจาก Google Drive</button>
+                <button class="btn btn-dark" type="button" onclick="seedExamBank()" title="เพิ่มข้อสอบตัวอย่างสำหรับทดสอบระบบ — idempotent">🌱 เพิ่มข้อสอบทดสอบ</button>
+              </div>
+              <p style="color:#6b7280;font-size:0.82em;margin-top:6px;">ปุ่ม "เพิ่มข้อสอบทดสอบ" จะเพิ่ม 3 ชุดข้อสอบตัวอย่าง (ป.4/ป.5/ป.6) เข้า examBank — ไม่ทับข้อมูลที่มีอยู่</p>
+              <p id="examSyncStatus" style="margin-top:8px; font-weight:bold;"></p>
+            </div>
+
+            <!-- 2. เพิ่ม / แก้ไขข้อสอบในคลัง -->
+            <div class="form-box">
+              <h3>เพิ่ม / แก้ไขข้อสอบในคลัง (examBank)</h3>
+              <input id="editingExamBankId" type="hidden" value="" />
+              <div class="form-row">
+                <div>
+                  <label>ชื่อข้อสอบ</label>
+                  <input id="examBankTitle" type="text" placeholder="เช่น Monthly Test ป.4 วิทย์ พ.ค." />
+                </div>
+                <div>
+                  <label>ระดับชั้น</label>
+                  <select id="examBankGrade">
+                    <option>ป.4</option><option>ป.5</option><option selected>ป.6</option>
+                  </select>
+                </div>
+                <div>
+                  <label>วิชา</label>
+                  <select id="examBankSubject">
+                    <option>วิทยาศาสตร์</option>
+                    <option>คณิตศาสตร์</option>
+                    <option>ภาษาอังกฤษ</option>
+                    <option>ภาษาไทย</option>
+                    <option>สังคมศึกษา</option>
+                  </select>
+                </div>
+              </div>
+              <div class="form-row">
+                <div>
+                  <label>หัวข้อ (คั่นด้วยลูกน้ำ)</label>
+                  <input id="examBankTopics" type="text" placeholder="เช่น แสงและการมองเห็น, ระบบสุริยะ" />
+                </div>
+                <div>
+                  <label>จำนวนข้อ</label>
+                  <input id="examBankTotalItems" type="number" min="1" max="100" value="20" style="max-width:90px;" />
+                </div>
+              </div>
+              <div class="form-row">
+                <div>
+                  <label>Drive File ID (ถ้ามี)</label>
+                  <input id="examBankDriveFileId" type="text" placeholder="ID ของไฟล์ข้อสอบใน Google Drive" />
+                </div>
+                <div>
+                  <label>สถานะ</label>
+                  <select id="examBankStatus">
+                    <option value="active">ใช้งาน</option>
+                    <option value="inactive">ปิดใช้งาน</option>
+                  </select>
+                </div>
+              </div>
+              <label>เฉลย (A,B,C,D,... คั่นด้วยลูกน้ำ ตามลำดับข้อ)</label>
+              <input id="examBankAnswerKey" type="text" placeholder="เช่น A,B,C,D,A,B,C,D,A,B,A,C,D,B,A,C,D,A,B,C" style="font-family:monospace;" />
+              <p style="color:#6b7280; font-size:0.85em; margin-top:4px;">ใส่ทุกข้อตามลำดับ เช่น 20 ข้อ ใส่ 20 ตัวอักษรคั่นด้วยลูกน้ำ (A/B/C/D)</p>
+              <br />
+              <button class="btn btn-green" type="button" onclick="saveExamToBank()">บันทึกข้อสอบในคลัง</button>
+              <button class="btn btn-dark" type="button" onclick="clearExamBankForm()">ล้างฟอร์ม</button>
+              <p id="examBankSaveResult" style="margin-top:12px; font-weight:bold;"></p>
+            </div>
+
+            <!-- 3. รายการข้อสอบในคลัง -->
+            <div class="form-box">
+              <h3>รายการข้อสอบในคลัง</h3>
+              <div class="form-row" style="margin-bottom:12px;">
+                <div>
+                  <label>กรองระดับชั้น</label>
+                  <select id="examBankGradeFilter" onchange="renderExamBankList()">
+                    <option value="ทั้งหมด">ทั้งหมด</option>
+                    <option>ป.4</option><option>ป.5</option><option>ป.6</option>
+                  </select>
+                </div>
+                <div>
+                  <label>กรองวิชา</label>
+                  <select id="examBankSubjectFilter" onchange="renderExamBankList()">
+                    <option value="ทั้งหมด">ทั้งหมด</option>
+                    <option>วิทยาศาสตร์</option><option>คณิตศาสตร์</option>
+                    <option>ภาษาอังกฤษ</option><option>ภาษาไทย</option><option>สังคมศึกษา</option>
+                  </select>
+                </div>
+                <div style="display:flex; align-items:flex-end;">
+                  <button class="btn btn-blue" type="button" onclick="loadExamBank()">🔃 โหลด Exam Bank</button>
+                </div>
+              </div>
+              <div id="examBankList"><p style="color:#6b7280;">กด "โหลด Exam Bank" เพื่อดูรายการข้อสอบจาก Firestore</p></div>
+            </div>
+
+            <!-- 4a. Student Database — โหลดจาก users collection -->
+            <div class="form-box">
+              <h3>Student Database (ป.4–ป.6)</h3>
+              <p style="color:#6b7280; margin-bottom:12px;">
+                ดึงรายชื่อนักเรียนจาก <code>users</code> collection โดยตรง —
+                role == "student" · status == "active" · grade ป.4/ป.5/ป.6
+              </p>
+              <div class="form-row">
+                <div>
+                  <label>กรองระดับชั้น</label>
+                  <select id="examProcGradeFilter" onchange="loadStudentsFromFirebase()">
+                    <option value="ทั้งหมด">ทั้งหมด</option>
+                    <option>ป.4</option><option>ป.5</option><option>ป.6</option>
+                  </select>
+                </div>
+                <div style="display:flex; align-items:flex-end;">
+                  <button class="btn btn-blue" type="button" onclick="loadStudentsFromFirebase()">👥 โหลดนักเรียนจาก Firebase</button>
+                </div>
+              </div>
+              <div id="examStudentDbArea" style="margin-top:14px;">
+                <p style="color:#6b7280;">กด "โหลดนักเรียนจาก Firebase" เพื่อดึงรายชื่อ</p>
+              </div>
+            </div>
+
+            <!-- 4b. Gen ข้อสอบ + ตรวจคำตอบ -->
+            <div class="form-box">
+              <h3>Gen ข้อสอบจาก examBank + ตรวจคำตอบ</h3>
+              <div class="form-row">
+                <div>
+                  <label>เลือกนักเรียน</label>
+                  <select id="examProcStudentSelect" onchange="focusStudent(this.value)">
+                    <option value="">— เลือกนักเรียน —</option>
+                  </select>
+                </div>
+                <div>
+                  <label>Mode การสร้างข้อสอบ</label>
+                  <select id="examProcMode" onchange="onExamModeChange()">
+                    <option value="normal">ปกติ — เลือกจากคลัง</option>
+                    <option value="adaptive">Adaptive — เฉพาะ Weak Topics</option>
+                  </select>
+                </div>
+                <div>
+                  <label>เลือกข้อสอบจากคลัง</label>
+                  <select id="examProcTestSelect" onchange="generateExamFromBank()">
+                    <option value="">— เลือกข้อสอบ —</option>
+                  </select>
+                </div>
+              </div>
+              <p id="examAdaptiveHint" style="color:#d97706; font-size:0.85em; margin-top:6px; display:none;">
+                ⚡ Adaptive mode: แสดงเฉพาะข้อสอบที่ตรงกับ weak topics ของนักเรียนที่เลือก
+              </p>
+
+              <!-- Preview ก่อนตรวจ -->
+              <div id="examPreviewArea" style="margin-top:16px; display:none; background:#f8fafc; border:1px solid #e5e7eb; border-radius:8px; padding:14px;">
+                <h4 style="margin-bottom:8px; color:#374151;">📋 Preview ข้อสอบที่เลือก</h4>
+                <div id="examPreviewContent"></div>
+              </div>
+
+              <!-- ชุดกรอกคำตอบ -->
+              <div id="examAnswerInputArea" style="margin-top:16px;"></div>
+
+              <!-- ปุ่ม Submit + OCR จำลอง -->
+              <div id="examSubmitArea" style="margin-top:16px; display:none;">
+                <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:center;">
+                  <button class="btn btn-green" type="button" onclick="processOCRSubmit()">✅ ส่งคำตอบ / ตรวจข้อสอบ</button>
+                  <button class="btn btn-blue" type="button" onclick="simulateOCR()" title="จำลอง OCR — สุ่มคำตอบเพื่อทดสอบระบบ">🤖 จำลอง OCR</button>
+                </div>
+                <p style="color:#6b7280; font-size:0.82em; margin-top:6px;">
+                  จำลอง OCR: สุ่มคำตอบเพื่อทดสอบระบบตรวจและ weakTopics |
+                  OCR จริง: Cloud Function <code>processExamOCR</code> (stub พร้อม connect)
+                </p>
+              </div>
+              <p id="examSubmitResult" style="margin-top:12px; font-weight:bold;"></p>
+            </div>
+
+            <!-- 5. รายงานผลสอบ -->
+            <div class="form-box">
+              <h3>รายงานผลสอบ (examResults)</h3>
+              <div class="form-row" style="margin-bottom:12px;">
+                <div>
+                  <label>กรองระดับชั้น</label>
+                  <select id="examReportGradeFilter" onchange="renderReports()">
+                    <option value="ทั้งหมด">ทั้งหมด</option>
+                    <option>ป.4</option><option>ป.5</option><option>ป.6</option>
+                  </select>
+                </div>
+                <div>
+                  <label>กรองวิชา</label>
+                  <select id="examReportSubjectFilter" onchange="renderReports()">
+                    <option value="ทั้งหมด">ทั้งหมด</option>
+                    <option>วิทยาศาสตร์</option><option>คณิตศาสตร์</option>
+                    <option>ภาษาอังกฤษ</option><option>ภาษาไทย</option><option>สังคมศึกษา</option>
+                  </select>
+                </div>
+                <div style="display:flex; align-items:flex-end;">
+                  <button class="btn btn-blue" type="button" onclick="loadAndRenderReports()">📊 โหลดรายงาน</button>
+                </div>
+              </div>
+              <p style="color:#6b7280; font-size:0.85em; margin-bottom:8px;">
+                <span style="background:#fef2f2; padding:2px 6px; border-radius:4px; color:#dc2626;">แดง</span> = คะแนนต่ำกว่า 60% &nbsp;
+                <span style="background:#f0fdf4; padding:2px 6px; border-radius:4px; color:#16a34a;">เขียว</span> = ผ่าน (≥ 60%)
+              </p>
+              <div id="examReportArea"><p style="color:#6b7280;">กด "โหลดรายงาน" เพื่อดึงผลสอบจาก Firestore</p></div>
+            </div>
+
+            <!-- 6. E-Learning + ข้อสอบซ่อมเสริม -->
+            <div class="form-box">
+              <h3>E-Learning แนะนำ + ข้อสอบซ่อมเสริม</h3>
+              <p style="color:#6b7280; margin-bottom:12px;">
+                เลือกนักเรียนจากแผงด้านบนเพื่อดู weak topics และสื่อการเรียนที่แนะนำจาก collection <strong>learningMaterials</strong>
+              </p>
+              <div id="examElearningArea"><p style="color:#aaa;">ยังไม่ได้เลือกนักเรียน</p></div>
+              <div id="examRemedialArea" style="margin-top:16px; display:none;">
+                <button class="btn btn-blue" type="button" onclick="generateTargetedExam()">📝 สร้างข้อสอบซ่อมเสริมจาก Weak Topics</button>
+                <p style="color:#6b7280; font-size:0.85em; margin-top:6px;">ระบบจะค้นหาข้อสอบใน examBank ที่ตรงกับ weak topics แล้ว pre-select ให้อัตโนมัติ</p>
+              </div>
+            </div>
+
+          </section>
+          <!-- end admin-exam-processor -->
 
           <section id="admin-monthly-planner" class="admin-tab hidden">
             <div class="form-box">
@@ -5655,6 +5882,7 @@
       'admin-private-lesson-billing': 'admin.finance',
       'admin-receipts': 'admin.receipts',
       'admin-monthly-test': 'admin.exams',
+      'admin-exam-processor': 'admin.exams',
       'admin-monthly-planner': 'admin.monthlyPlanner',
       'admin-teachers': 'admin.users',
       'admin-announcements': 'admin.announcements',
@@ -5957,7 +6185,7 @@
     }
 
     function findFirstAllowedAdminTab() {
-      const order = ['admin-dashboard','admin-profile','admin-students','admin-private-students','admin-courses','admin-online-class','admin-video','admin-payment-round','admin-payment','admin-private-lesson-billing','admin-receipts','admin-monthly-test','admin-monthly-planner','admin-teachers','admin-announcements','admin-settings','admin-activity-log'];
+      const order = ['admin-dashboard','admin-profile','admin-students','admin-private-students','admin-courses','admin-online-class','admin-video','admin-payment-round','admin-payment','admin-private-lesson-billing','admin-receipts','admin-monthly-test','admin-exam-processor','admin-monthly-planner','admin-teachers','admin-announcements','admin-settings','admin-activity-log'];
       return order.find(function(tabId) { return canOpenAdminTab(tabId); }) || 'admin-dashboard';
     }
 
@@ -6417,6 +6645,7 @@
       { tabId: 'admin-payment', permission: 'admin.finance', label: 'การเงิน' },
       { tabId: 'admin-receipts', permission: 'admin.receipts', label: 'ใบเสร็จ' },
       { tabId: 'admin-monthly-test', permission: 'admin.exams', label: 'สอบ / คะแนน' },
+      { tabId: 'admin-exam-processor', permission: 'admin.exams', label: 'ระบบข้อสอบ ป.4–ป.6' },
       { tabId: 'admin-monthly-planner', permission: 'admin.monthlyPlanner', label: 'แผนสอนรายเดือน' },
       { tabId: 'admin-announcements', permission: 'admin.announcements', label: 'ประกาศ' },
       { tabId: 'admin-settings', permission: 'admin.settings', label: 'ตั้งค่าระบบ' },
@@ -9347,7 +9576,15 @@
       }).join('') : '<tr><td colspan="15">ยังไม่มีนักเรียนในเงื่อนไขที่เลือก</td></tr>';
     }
 
-    
+    function buildDefaultStudentPassword(student) {
+      const id = String(student.memberId || student.studentId || student.id || '');
+      const chars = id.replace(/[^a-zA-Z0-9]/g, '');
+      const last4 = chars.length >= 4 ? chars.slice(-4) : chars.padStart(4, '0');
+      if (!last4 || last4 === '0000') console.warn('buildDefaultStudentPassword: ไม่พบ 4 ตัวท้ายของรหัสนักเรียน id=', id);
+      return 'ic' + (last4 || '0000');
+    }
+
+
     async function saveStudentInfo() {
       const editingId = getElement('editingStudentId').value;
       const name = getElement('adminStudentName').value.trim();
@@ -9428,8 +9665,12 @@
           });
 
           if (PRODUCTION_MODE && db && !s.authUid) {
+            if (!s.defaultPassword) {
+              s.defaultPassword = buildDefaultStudentPassword(s);
+              s.initialPassword = s.defaultPassword;
+            }
             try {
-              s.authUid = await createOrResolveAuthUidForAccount(studentEmail, '000000', 'student');
+              s.authUid = await createOrResolveAuthUidForAccount(studentEmail, s.defaultPassword, 'student');
             } catch (authError) {
               console.error('edit student auth create error:', authError);
               throw authError;
@@ -9457,9 +9698,11 @@
           const newId = createFirebaseDocId('students');
           let authUid = null;
 
+          const defaultPwd = buildDefaultStudentPassword({ memberId: autoMemberId });
+
           if (PRODUCTION_MODE && studentEmail && db) {
             try {
-              authUid = await createOrResolveAuthUidForAccount(studentEmail, '000000', 'student');
+              authUid = await createOrResolveAuthUidForAccount(studentEmail, defaultPwd, 'student');
             } catch (authError) {
               console.error('create student auth error:', authError);
               throw authError;
@@ -9474,7 +9717,8 @@
             authEmail: studentEmail,
             email: studentEmail,
             contactEmail: '',
-            defaultPassword: '000000',
+            defaultPassword: defaultPwd,
+            initialPassword: defaultPwd,
             memberId: autoMemberId,
             studentId: autoMemberId,
             name: name,
@@ -9523,7 +9767,7 @@
             await setFirebaseDocument('students', newStudent);
           }
           students.push(newStudent);
-          result.textContent = 'เพิ่มนักเรียนใหม่เรียบร้อย รหัสเริ่มต้น 000000 และบันทึกลง Firebase แล้ว';
+          result.textContent = 'สร้างนักเรียนสำเร็จ รหัสผ่านเริ่มต้น: ' + defaultPwd;
         }
 
         result.style.color = '#16a34a';
@@ -9533,6 +9777,7 @@
         if (savedStudent) {
           if (getElement('generatedMemberId')) getElement('generatedMemberId').textContent = savedStudent.memberId || '-';
           if (getElement('generatedUsername')) getElement('generatedUsername').textContent = savedStudent.memberId || savedStudent.studentId || '-';
+          if (getElement('generatedDefaultPassword')) getElement('generatedDefaultPassword').textContent = savedStudent.defaultPassword || '-';
           if (getElement('studentLoginInfoBox')) getElement('studentLoginInfoBox').classList.remove('hidden');
         }
         clearStudentForm(false);
@@ -10337,11 +10582,12 @@
     }
 
     function copyMemberInfo() {
+      const pwd = getElement('generatedDefaultPassword') ? getElement('generatedDefaultPassword').textContent : '-';
       const text = [
         'ข้อมูลเข้าสู่ระบบ IDEA CLUB',
         'Member ID: ' + getElement('generatedMemberId').textContent,
         'ID เข้าสู่ระบบ: ' + getElement('generatedMemberId').textContent,
-        'รหัสผ่านเริ่มต้น: 000000'
+        'รหัสผ่านเริ่มต้น: ' + pwd
       ].join(String.fromCharCode(10));
 
       if (navigator.clipboard) {
@@ -22920,6 +23166,959 @@ function receiptStatusText(status) {
       renderAdminReceipts();
     }
 
+
+    // ============================================================
+    // ระบบข้อสอบ ป.4–ป.6
+    // Collections: examBank / examResults / learningMaterials
+    // ============================================================
+
+    // --- Module state ---
+    let examBankItems = [];      // โหลดจาก Firestore examBank
+    let examResultsCache = [];   // cache ผลสอบสำหรับ reports
+    let examStudentUsers = [];   // นักเรียนที่โหลดจาก users collection
+    let examProcActiveUid = '';  // UID นักเรียนที่เลือกอยู่
+    let examProcActiveName = ''; // ชื่อนักเรียนที่เลือกอยู่
+    let examProcActiveTest = null;     // ข้อสอบที่เลือกจาก examBank
+    let examProcWeakTopics = [];       // weakTopics ของนักเรียนที่ focusStudent() คำนวณ
+
+    /**
+     * getAnswerText(keyItem)
+     * รองรับ answerKey ทั้งสองรูปแบบ:
+     *   string:  "A" → "A"
+     *   object:  { no, answer, topic } → answer.toString().toUpperCase()
+     */
+    function getAnswerText(keyItem) {
+      if (!keyItem && keyItem !== 0) return '';
+      if (typeof keyItem === 'string') return keyItem.toUpperCase();
+      if (typeof keyItem === 'object' && keyItem.answer !== undefined) {
+        return String(keyItem.answer).toUpperCase();
+      }
+      return String(keyItem).toUpperCase();
+    }
+
+    /**
+     * getExamChoices(answerKey)
+     * ดึง unique choices จาก answerKey จริง เพื่อให้ dropdown ตรงกับข้อสอบ
+     * ถ้าไม่มีข้อมูลพอ fallback เป็น ['A','B','C','D']
+     */
+    function getExamChoices(answerKey) {
+      if (!answerKey || !answerKey.length) return ['A', 'B', 'C', 'D'];
+      const seen = {};
+      answerKey.forEach(function(k) { const t = getAnswerText(k); if (t) seen[t] = true; });
+      const unique = Object.keys(seen).sort();
+      // ถ้า choices เป็นตัวเลข 1–4 ให้ sort ตามตัวเลข
+      const allNumeric = unique.every(function(c) { return /^\d+$/.test(c); });
+      if (allNumeric) unique.sort(function(a, b) { return Number(a) - Number(b); });
+      return unique.length >= 2 ? unique : ['A', 'B', 'C', 'D'];
+    }
+
+    /**
+     * syncExamBankFromDrive()
+     * เรียก Cloud Function `syncExamBankFromDrive` เพื่อดึง metadata จาก Drive
+     * Folder: 16t5boPIY4736OkQLv3S7JWZ02QvQeqBW
+     * ถ้า CF ยังไม่พร้อม จะแสดง stub message และรอ connect ทีหลัง
+     */
+    async function syncExamBankFromDrive() {
+      const statusEl = getElement('examSyncStatus');
+      // permission gate — compat SDK: hasPermission ใช้ getEffectivePermissions() จาก role/permissions เดิม
+      if (!hasPermission('admin.exams')) {
+        if (statusEl) { statusEl.style.color = '#dc2626'; statusEl.textContent = 'ไม่มีสิทธิ์ admin.exams'; }
+        return;
+      }
+      if (statusEl) { statusEl.style.color = '#d97706'; statusEl.textContent = '⏳ กำลัง Sync จาก Google Drive...'; }
+      try {
+        if (!functionsApi) throw new Error('Cloud Functions ยังไม่พร้อม');
+        const fn = functionsApi.httpsCallable('syncExamBankFromDrive');
+        const result = await fn({ folderId: '16t5boPIY4736OkQLv3S7JWZ02QvQeqBW' });
+        const synced = (result.data && result.data.synced) || 0;
+        if (statusEl) { statusEl.style.color = '#16a34a'; statusEl.textContent = '✅ Sync สำเร็จ: ' + synced + ' ไฟล์จาก Drive'; }
+        await loadExamBank();
+      } catch (error) {
+        console.warn('syncExamBankFromDrive stub:', error);
+        // Stub — แสดงคำแนะนำและยังคง load ข้อมูลที่มีอยู่
+        if (statusEl) {
+          statusEl.style.color = '#d97706';
+          statusEl.textContent = '⚠️ Cloud Function ยังไม่ deploy — Stub mode: ข้อมูลจะ Sync ได้เมื่อ deploy functions/syncExamBankFromDrive';
+        }
+        // ยังโหลด examBank ที่อยู่ใน Firestore แล้ว (อาจเพิ่มด้วยมือ)
+        await loadExamBank();
+      }
+    }
+
+    /**
+     * loadExamBank()
+     * โหลดข้อสอบทั้งหมดใน collection examBank (status == "active")
+     * แล้ว render รายการและ populate dropdown
+     */
+    async function loadExamBank() {
+      if (!firebaseReady || !db) return;
+      try {
+        const snapshot = await db.collection('examBank').where('status', '==', 'active').get();
+        examBankItems = snapshot.docs.map(function(doc) { return Object.assign({ firebaseDocId: doc.id }, doc.data()); });
+      } catch (error) {
+        console.warn('loadExamBank error:', error);
+        examBankItems = [];
+      }
+      renderExamBankList();
+      updateExamProcTestSelect();
+    }
+
+    /**
+     * saveExamToBank()
+     * บันทึก / อัปเดตข้อสอบใน collection examBank
+     */
+    async function saveExamToBank() {
+      const resultEl = getElement('examBankSaveResult');
+      if (!hasPermission('admin.exams')) {
+        if (resultEl) { resultEl.style.color = '#dc2626'; resultEl.textContent = 'ไม่มีสิทธิ์ admin.exams'; }
+        return;
+      }
+      try {
+        const title = ((getElement('examBankTitle') || {}).value || '').trim();
+        const grade = (getElement('examBankGrade') || {}).value || '';
+        const subject = (getElement('examBankSubject') || {}).value || '';
+        const topicsRaw = ((getElement('examBankTopics') || {}).value || '').trim();
+        const totalItems = parseInt((getElement('examBankTotalItems') || {}).value || '20', 10);
+        const driveFileId = ((getElement('examBankDriveFileId') || {}).value || '').trim();
+        const bankStatus = (getElement('examBankStatus') || {}).value || 'active';
+        const answerKeyRaw = ((getElement('examBankAnswerKey') || {}).value || '').trim();
+        const existingId = ((getElement('editingExamBankId') || {}).value || '').trim();
+
+        if (!title) { if (resultEl) { resultEl.style.color = '#dc2626'; resultEl.textContent = 'กรุณาใส่ชื่อข้อสอบ'; } return; }
+        if (!answerKeyRaw) { if (resultEl) { resultEl.style.color = '#dc2626'; resultEl.textContent = 'กรุณาใส่เฉลย'; } return; }
+
+        const answerKey = answerKeyRaw.split(',').map(function(a) { return a.trim().toUpperCase(); }).filter(Boolean);
+        const topics = topicsRaw ? topicsRaw.split(',').map(function(t) { return t.trim(); }).filter(Boolean) : [];
+        const docId = existingId || createFirebaseDocId('examBank');
+        const driveViewUrl = driveFileId ? ('https://drive.google.com/file/d/' + driveFileId + '/view') : '';
+
+        const examDoc = {
+          firebaseDocId: docId,
+          testId: docId,
+          title: title,
+          grade: grade,
+          subject: subject,
+          topics: topics,
+          totalItems: totalItems,
+          answerKey: answerKey,
+          sourceType: driveFileId ? 'google_drive' : 'manual',
+          driveFolderId: '16t5boPIY4736OkQLv3S7JWZ02QvQeqBW',
+          driveFileId: driveFileId,
+          driveViewUrl: driveViewUrl,
+          status: bankStatus,
+          updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+        };
+        if (!existingId) examDoc.createdAt = firebase.firestore.FieldValue.serverTimestamp();
+
+        await db.collection('examBank').doc(docId).set(examDoc, { merge: true });
+
+        // อัปเดต local cache
+        const idx = examBankItems.findIndex(function(e) { return (e.testId || e.firebaseDocId) === docId; });
+        if (idx >= 0) examBankItems[idx] = examDoc; else examBankItems.push(examDoc);
+
+        safeRun(function() { addActivityLog('บันทึกข้อสอบในคลัง', title + ' (' + grade + ' ' + subject + ')'); });
+        if (resultEl) { resultEl.style.color = '#16a34a'; resultEl.textContent = '✅ บันทึกข้อสอบสำเร็จ'; }
+        clearExamBankForm();
+        renderExamBankList();
+        updateExamProcTestSelect();
+      } catch (error) {
+        console.error('saveExamToBank error:', error);
+        if (resultEl) { resultEl.style.color = '#dc2626'; resultEl.textContent = '❌ บันทึกไม่สำเร็จ: ' + (error.message || 'ตรวจสอบสิทธิ์ Firestore'); }
+      }
+    }
+
+    function clearExamBankForm() {
+      ['editingExamBankId', 'examBankTitle', 'examBankTopics', 'examBankDriveFileId', 'examBankAnswerKey'].forEach(function(id) {
+        const el = getElement(id);
+        if (el) el.value = '';
+      });
+      const totalEl = getElement('examBankTotalItems');
+      if (totalEl) totalEl.value = '20';
+      const resultEl = getElement('examBankSaveResult');
+      if (resultEl) resultEl.textContent = '';
+    }
+
+    function renderExamBankList() {
+      const container = getElement('examBankList');
+      if (!container) return;
+      const gradeFilter = ((getElement('examBankGradeFilter') || {}).value) || 'ทั้งหมด';
+      const subjectFilter = ((getElement('examBankSubjectFilter') || {}).value) || 'ทั้งหมด';
+      const filtered = examBankItems.filter(function(e) {
+        return (gradeFilter === 'ทั้งหมด' || e.grade === gradeFilter) &&
+               (subjectFilter === 'ทั้งหมด' || e.subject === subjectFilter);
+      });
+      if (!examBankItems.length) {
+        container.innerHTML = '<p style="color:#6b7280;">ยังไม่มีชุดข้อสอบในคลัง examBank — กด "🌱 เพิ่มข้อสอบทดสอบ" หรือ "Sync จาก Drive" หรือเพิ่มด้วยฟอร์มด้านบน</p>';
+        return;
+      }
+      if (!filtered.length) {
+        container.innerHTML = '<p style="color:#6b7280;">ไม่พบข้อสอบที่ตรงกับตัวกรอง — ลองเปลี่ยน ระดับชั้น / วิชา</p>';
+        return;
+      }
+      container.innerHTML = '<div class="table-wrap"><table><thead><tr>' +
+        '<th>ชื่อข้อสอบ</th><th>ระดับ</th><th>วิชา</th><th>ข้อ</th><th>หัวข้อ</th><th>Drive</th><th>จัดการ</th>' +
+        '</tr></thead><tbody>' +
+        filtered.map(function(e) {
+          const testId = e.testId || e.firebaseDocId || '';
+          const driveCell = e.driveViewUrl
+            ? '<a href="' + escapeHtml(e.driveViewUrl) + '" target="_blank" rel="noopener">เปิด</a>' : '-';
+          return '<tr>' +
+            '<td>' + escapeHtml(e.title || '-') + '</td>' +
+            '<td>' + escapeHtml(e.grade || '-') + '</td>' +
+            '<td>' + escapeHtml(e.subject || '-') + '</td>' +
+            '<td>' + (e.totalItems || (e.answerKey && e.answerKey.length) || '-') + '</td>' +
+            '<td>' + escapeHtml((e.topics || []).join(', ') || '-') + '</td>' +
+            '<td>' + driveCell + '</td>' +
+            '<td><button class="btn btn-dark" type="button" onclick="editExamFromBank(\'' + jsArg(testId) + '\')">แก้ไข</button></td>' +
+          '</tr>';
+        }).join('') + '</tbody></table></div>';
+    }
+
+    function editExamFromBank(testId) {
+      const exam = examBankItems.find(function(e) { return (e.testId || e.firebaseDocId) === testId; });
+      if (!exam) return;
+      const setVal = function(id, val) { const el = getElement(id); if (el) el.value = val; };
+      setVal('editingExamBankId', exam.testId || exam.firebaseDocId || '');
+      setVal('examBankTitle', exam.title || '');
+      setVal('examBankGrade', exam.grade || 'ป.6');
+      setVal('examBankSubject', exam.subject || '');
+      setVal('examBankTopics', (exam.topics || []).join(', '));
+      setVal('examBankTotalItems', exam.totalItems || 20);
+      setVal('examBankDriveFileId', exam.driveFileId || '');
+      setVal('examBankStatus', exam.status || 'active');
+      setVal('examBankAnswerKey', (exam.answerKey || []).join(','));
+      const titleEl = getElement('examBankTitle');
+      if (titleEl) titleEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+
+    // ตัวแปร mode: "normal" = เลือกจากคลัง, "adaptive" = กรองตาม weakTopics
+    let examProcMode = 'normal';
+
+    /**
+     * loadStudentsFromFirebase()
+     * ดึงนักเรียนจาก users collection (role == "student", status == "active")
+     * กรอง grade ใน JS เพื่อไม่ต้องสร้าง composite index
+     * render ลงตาราง Student Database และ populate select สำหรับ OCR
+     */
+    async function loadStudentsFromFirebase() {
+      if (!hasPermission('admin.exams')) return;
+      if (!firebaseReady || !db) return;
+      const gradeFilter = ((getElement('examProcGradeFilter') || {}).value) || 'ทั้งหมด';
+      const dbArea = getElement('examStudentDbArea');
+      if (dbArea) dbArea.innerHTML = '<p style="color:#d97706;">⏳ กำลังโหลดนักเรียนจาก Firebase...</p>';
+
+      try {
+        // query role == "student" แล้วกรอง grade และ status ใน JS
+        const snapshot = await db.collection('users').where('role', '==', 'student').get();
+        const targetGrades = ['ป.4', 'ป.5', 'ป.6'];
+        examStudentUsers = snapshot.docs.map(function(doc) {
+          return Object.assign({ uid: doc.id }, doc.data());
+        }).filter(function(u) {
+          const userGrade = u.grade || u.gradeLevel || '';
+          const isTarget = targetGrades.includes(userGrade);
+          const statusOk = !u.status || u.status === 'active';
+          const gradeMatch = gradeFilter === 'ทั้งหมด' ? isTarget : userGrade === gradeFilter;
+          return statusOk && gradeMatch;
+        });
+      } catch (error) {
+        console.warn('loadStudentsFromFirebase error:', error);
+        examStudentUsers = [];
+      }
+
+      // render ตาราง Student Database
+      if (dbArea) {
+        if (!examStudentUsers.length) {
+          dbArea.innerHTML = '<p style="color:#6b7280;">ไม่พบนักเรียนระดับชั้นที่เลือก</p>';
+        } else {
+          dbArea.innerHTML = '<p style="color:#16a34a; margin-bottom:8px;">✅ พบนักเรียน ' + examStudentUsers.length + ' คน</p>' +
+            '<div class="table-wrap"><table><thead><tr>' +
+            '<th>ชื่อ</th><th>Member ID</th><th>ระดับ</th><th>สถานะ</th><th>เลือก</th>' +
+            '</tr></thead><tbody>' +
+            examStudentUsers.map(function(u) {
+              const uid = u.uid || u.authUid || '';
+              const name = u.name || u.displayName || u.firstName || uid;
+              const memberId = u.memberId || u.studentId || '-';
+              const grade = u.grade || u.gradeLevel || '-';
+              const status = u.status || 'active';
+              return '<tr>' +
+                '<td>' + escapeHtml(name) + '</td>' +
+                '<td>' + escapeHtml(memberId) + '</td>' +
+                '<td>' + escapeHtml(grade) + '</td>' +
+                '<td><span class="' + (status === 'active' ? 'status-paid' : 'status-waiting') + '">' + escapeHtml(status) + '</span></td>' +
+                '<td><button class="btn btn-dark" type="button" onclick="selectStudentForExam(\'' + jsArg(uid) + '\')">เลือก</button></td>' +
+              '</tr>';
+            }).join('') + '</tbody></table></div>';
+        }
+      }
+
+      // populate select dropdown
+      const select = getElement('examProcStudentSelect');
+      if (select) {
+        select.innerHTML = '<option value="">— เลือกนักเรียน —</option>' +
+          examStudentUsers.map(function(u) {
+            const uid = u.uid || u.authUid || '';
+            const name = u.name || u.displayName || u.firstName || uid;
+            const grade = u.grade || u.gradeLevel || '-';
+            const memberId = u.memberId || u.studentId || '';
+            return '<option value="' + escapeHtml(uid) + '">' +
+              escapeHtml(name + (memberId ? ' [' + memberId + ']' : '') + ' (' + grade + ')') + '</option>';
+          }).join('');
+      }
+      updateExamProcTestSelect();
+    }
+
+    // alias เพื่อ backward-compat กับ onchange handler เดิม
+    function loadExamStudents() { return loadStudentsFromFirebase(); }
+
+    /**
+     * selectStudentForExam(uid)
+     * เลือกนักเรียนจากตาราง Student Database แล้ว sync ลง dropdown
+     */
+    function selectStudentForExam(uid) {
+      const select = getElement('examProcStudentSelect');
+      if (select) { select.value = uid; }
+      focusStudent(uid);
+      // scroll ไปยังส่วน Gen ข้อสอบ
+      const genBox = getElement('examProcStudentSelect');
+      if (genBox) genBox.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+
+    /**
+     * onExamModeChange()
+     * toggle ระหว่าง normal / adaptive mode
+     * adaptive: กรอง examProcTestSelect ให้เหลือแค่ข้อสอบที่ตรง weakTopics ของนักเรียนที่เลือก
+     */
+    function onExamModeChange() {
+      examProcMode = ((getElement('examProcMode') || {}).value) || 'normal';
+      const hint = getElement('examAdaptiveHint');
+      if (hint) hint.style.display = examProcMode === 'adaptive' ? 'block' : 'none';
+      updateExamProcTestSelect();
+    }
+
+    function updateExamProcTestSelect() {
+      const select = getElement('examProcTestSelect');
+      if (!select) return;
+      const gradeFilter = ((getElement('examProcGradeFilter') || {}).value) || 'ทั้งหมด';
+
+      let filtered = examBankItems.filter(function(e) {
+        return gradeFilter === 'ทั้งหมด' || e.grade === gradeFilter;
+      });
+
+      // adaptive mode: กรองเฉพาะข้อสอบที่มี topic ตรงกับ weakTopics ของนักเรียกที่เลือก
+      if (examProcMode === 'adaptive' && examProcActiveUid) {
+        const studentResults = examResultsCache.filter(function(r) { return r.studentUid === examProcActiveUid; });
+        const weakSet = {};
+        studentResults.forEach(function(r) {
+          (r.weakTopics || []).forEach(function(t) { weakSet[t] = true; });
+        });
+        const weakKeys = Object.keys(weakSet);
+        if (weakKeys.length) {
+          filtered = filtered.filter(function(e) {
+            return (e.topics || []).some(function(t) { return weakKeys.includes(t); });
+          });
+        }
+      }
+
+      select.innerHTML = '<option value="">— เลือกข้อสอบ —</option>' +
+        filtered.map(function(e) {
+          const id = e.testId || e.firebaseDocId || '';
+          return '<option value="' + escapeHtml(id) + '">' +
+            escapeHtml((e.title || id) + ' (' + (e.grade || '') + ' ' + (e.subject || '') + ')') + '</option>';
+        }).join('');
+    }
+
+    /**
+     * generateExamFromBank()
+     * สร้างชุดกรอกคำตอบ + แสดง preview (testId / grade / answerKey)
+     */
+    function generateExamFromBank() {
+      const testId = ((getElement('examProcTestSelect') || {}).value) || '';
+      const answerArea = getElement('examAnswerInputArea');
+      const submitArea = getElement('examSubmitArea');
+      const previewArea = getElement('examPreviewArea');
+      const previewContent = getElement('examPreviewContent');
+      if (!testId) {
+        if (answerArea) answerArea.innerHTML = '';
+        if (submitArea) submitArea.style.display = 'none';
+        if (previewArea) previewArea.style.display = 'none';
+        return;
+      }
+      examProcActiveTest = examBankItems.find(function(e) { return (e.testId || e.firebaseDocId) === testId; });
+      if (!examProcActiveTest) return;
+
+      const total = examProcActiveTest.totalItems || (examProcActiveTest.answerKey && examProcActiveTest.answerKey.length) || 20;
+      const key = examProcActiveTest.answerKey || [];
+
+      // --- Preview panel ---
+      if (previewContent) {
+        const driveLink = examProcActiveTest.driveViewUrl
+          ? '<a href="' + escapeHtml(examProcActiveTest.driveViewUrl) + '" target="_blank" rel="noopener">📄 เปิดไฟล์ Drive</a>'
+          : '-';
+        // แสดง answerKey รองรับทั้ง string[] และ object[]
+        const keyDisplay = key.map(function(k, i) {
+          const ans = getAnswerText(k);
+          const topic = (typeof k === 'object' && k.topic) ? ' <small style="color:#9ca3af;">(' + escapeHtml(k.topic) + ')</small>' : '';
+          return '<span style="margin-right:6px;"><strong>' + (i + 1) + '.</strong>' + escapeHtml(ans) + topic + '</span>';
+        }).join('');
+        previewContent.innerHTML =
+          '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:8px 24px;">' +
+          '<div><span style="color:#6b7280;font-size:0.85em;">Test ID</span><br><code style="font-size:0.82em;">' + escapeHtml(examProcActiveTest.testId || '-') + '</code></div>' +
+          '<div><span style="color:#6b7280;font-size:0.85em;">ชื่อข้อสอบ</span><br><strong>' + escapeHtml(examProcActiveTest.title || '-') + '</strong></div>' +
+          '<div><span style="color:#6b7280;font-size:0.85em;">ระดับชั้น</span><br>' + escapeHtml(examProcActiveTest.grade || '-') + '</div>' +
+          '<div><span style="color:#6b7280;font-size:0.85em;">วิชา</span><br>' + escapeHtml(examProcActiveTest.subject || '-') + '</div>' +
+          '<div><span style="color:#6b7280;font-size:0.85em;">จำนวนข้อ</span><br>' + total + ' ข้อ</div>' +
+          '<div><span style="color:#6b7280;font-size:0.85em;">หัวข้อ</span><br>' + escapeHtml((examProcActiveTest.topics || []).join(', ') || '-') + '</div>' +
+          '<div><span style="color:#6b7280;font-size:0.85em;">ไฟล์ Drive</span><br>' + driveLink + '</div>' +
+          '</div>' +
+          '<div style="margin-top:10px;"><span style="color:#6b7280;font-size:0.85em;">Answer Key (สำหรับ Admin เท่านั้น)</span><br>' +
+          '<div style="margin-top:4px;line-height:1.8;">' + (keyDisplay || '-') + '</div></div>';
+      }
+      if (previewArea) previewArea.style.display = 'block';
+
+      // --- ชุดกรอกคำตอบ — choices ดึงจาก answerKey จริง ---
+      const choices = getExamChoices(key);
+      let html = '<h4 style="margin-bottom:8px; margin-top:14px;">กรอกคำตอบ (' + total + ' ข้อ)</h4>' +
+                 '<div style="display:flex; flex-wrap:wrap; gap:10px;">';
+      for (let i = 0; i < total; i++) {
+        html += '<div style="display:flex;flex-direction:column;align-items:center;gap:2px;">' +
+          '<span style="font-size:0.8em;font-weight:bold;color:#374151;">ข้อ ' + (i + 1) + '</span>' +
+          '<select id="examAnswer_' + i + '" style="width:65px;text-align:center;">' +
+          '<option value="">-</option>' +
+          choices.map(function(c) { return '<option value="' + c + '">' + c + '</option>'; }).join('') +
+          '</select></div>';
+      }
+      html += '</div>';
+      if (answerArea) answerArea.innerHTML = html;
+      if (submitArea) submitArea.style.display = 'block';
+    }
+
+    /**
+     * simulateOCR()
+     * จำลอง OCR: สุ่มคำตอบทุกข้อเพื่อทดสอบ flow การตรวจ
+     * (ไม่ใช่คำตอบที่ถูก — จงใจทำให้บางข้อผิดเพื่อทดสอบ weakTopics)
+     */
+    function simulateOCR() {
+      if (!examProcActiveTest) { alert('กรุณาเลือกข้อสอบก่อน'); return; }
+      const total = examProcActiveTest.totalItems || (examProcActiveTest.answerKey && examProcActiveTest.answerKey.length) || 20;
+      // ใช้ choices จาก answerKey จริง เพื่อให้ตรงกับ dropdown ที่สร้างไว้
+      const choices = getExamChoices(examProcActiveTest.answerKey || []);
+      for (let i = 0; i < total; i++) {
+        const el = getElement('examAnswer_' + i);
+        if (el) el.value = choices[Math.floor(Math.random() * choices.length)];
+      }
+      const resultEl = getElement('examSubmitResult');
+      if (resultEl) { resultEl.style.color = '#d97706'; resultEl.textContent = '🤖 OCR จำลอง: สุ่มคำตอบแล้ว — กด "ส่งคำตอบ / ตรวจข้อสอบ" เพื่อดูผล'; }
+    }
+
+    /**
+     * processOCRSubmit()
+     * ตรวจคำตอบเทียบกับ answerKey
+     * weakTopics: ใช้ข้อมูล topics ของข้อสอบ (ทุก topic ถ้า failed)
+     * หรือสามารถขยายให้ map แต่ละข้อกับ topic ได้ถ้า examBank เพิ่ม field itemTopics[]
+     * OCR จริง: ให้เรียก Cloud Function processExamOCR แทน manual input
+     */
+    async function processOCRSubmit() {
+      const resultEl = getElement('examSubmitResult');
+      if (!hasPermission('admin.exams')) {
+        if (resultEl) { resultEl.style.color = '#dc2626'; resultEl.textContent = 'ไม่มีสิทธิ์ admin.exams'; }
+        return;
+      }
+      const studentUid = ((getElement('examProcStudentSelect') || {}).value) || '';
+      if (!studentUid) {
+        if (resultEl) { resultEl.style.color = '#dc2626'; resultEl.textContent = 'กรุณาเลือกนักเรียนก่อน'; }
+        return;
+      }
+      if (!examProcActiveTest) {
+        if (resultEl) { resultEl.style.color = '#dc2626'; resultEl.textContent = 'กรุณาเลือกข้อสอบก่อน'; }
+        return;
+      }
+
+      const answerKey = examProcActiveTest.answerKey || [];
+      const total = examProcActiveTest.totalItems || answerKey.length;
+
+      // รวบรวมคำตอบนักเรียนจาก dropdown
+      const studentAnswers = [];
+      for (let i = 0; i < total; i++) {
+        const el = getElement('examAnswer_' + i);
+        studentAnswers.push(el ? (el.value || '').toUpperCase() : '');
+      }
+
+      // ตรวจคำตอบทีละข้อ — ใช้ getAnswerText() รองรับ answerKey ทั้ง string และ object
+      let correct = 0;
+      const answersWithResult = studentAnswers.map(function(ans, i) {
+        const keyItem = answerKey[i];
+        const keyText = getAnswerText(keyItem);
+        const isCorrect = ans !== '' && ans === keyText;
+        if (isCorrect) correct++;
+        // เก็บ topic ต่อข้อถ้ามี (สำหรับ per-item weakTopics ในอนาคต)
+        const itemTopic = (typeof keyItem === 'object' && keyItem.topic) ? keyItem.topic : '';
+        return { q: i + 1, answer: ans, key: keyText, correct: isCorrect, topic: itemTopic };
+      });
+      const scorePercent = total > 0 ? Math.round((correct / total) * 100) : 0;
+      const passed = scorePercent >= 60;
+
+      // weakTopics: ถ้าไม่ผ่าน ให้เก็บ topics ของข้อที่ผิดก่อน (ถ้ามี itemTopic)
+      // fallback: ใช้ topics ของชุดข้อสอบทั้งหมด
+      let weakTopics = [];
+      if (!passed) {
+        const weakFromItems = answersWithResult
+          .filter(function(a) { return !a.correct && a.topic; })
+          .map(function(a) { return a.topic; });
+        const uniqueWeak = weakFromItems.filter(function(t, idx, arr) { return arr.indexOf(t) === idx; });
+        weakTopics = uniqueWeak.length ? uniqueWeak : (examProcActiveTest.topics || []);
+      }
+
+      const student = examStudentUsers.find(function(u) { return (u.uid || u.authUid) === studentUid; });
+      const studentName = student ? (student.name || student.displayName || student.firstName || '') : '';
+      const studentId = student ? (student.memberId || student.studentId || '') : '';
+      const grade = student ? (student.grade || student.gradeLevel || '') : '';
+
+      const resultData = {
+        studentUid: studentUid,
+        studentId: studentId,
+        studentName: studentName,
+        grade: grade,
+        testId: examProcActiveTest.testId || examProcActiveTest.firebaseDocId,
+        subject: examProcActiveTest.subject || '',
+        topics: examProcActiveTest.topics || [],
+        totalItems: total,
+        correctItems: correct,
+        scorePercent: scorePercent,
+        answers: answersWithResult,
+        answerKey: answerKey,
+        weakTopics: weakTopics,
+        status: passed ? 'passed' : 'failed',
+        createdAtText: new Date().toLocaleDateString('th-TH'),
+        createdAt: firebase.firestore.FieldValue.serverTimestamp()
+      };
+
+      if (resultEl) { resultEl.style.color = '#d97706'; resultEl.textContent = '⏳ กำลังบันทึกผลสอบ...'; }
+      try {
+        await saveExamResult(resultData);
+        const color = passed ? '#16a34a' : '#dc2626';
+        if (resultEl) {
+          resultEl.style.color = color;
+          resultEl.textContent = (passed ? '✅ ผ่าน' : '❌ ไม่ผ่าน') + ' — ' +
+            escapeHtml(studentName || studentUid) + ': ' +
+            correct + '/' + total + ' (' + scorePercent + '%)' +
+            (weakTopics.length ? ' · Weak: ' + weakTopics.join(', ') : '');
+        }
+        safeRun(function() { focusStudent(studentUid); }, 'focus-student-after-submit');
+      } catch (error) {
+        console.error('processOCRSubmit save error:', error);
+        if (resultEl) { resultEl.style.color = '#dc2626'; resultEl.textContent = '❌ บันทึกผลสอบไม่สำเร็จ: ' + (error.message || ''); }
+      }
+    }
+
+    /**
+     * saveExamResult(result)
+     * บันทึกผลสอบลง collection examResults
+     */
+    async function saveExamResult(result) {
+      if (!hasPermission('admin.exams')) throw new Error('ไม่มีสิทธิ์ admin.exams');
+      if (!firebaseReady || !db) throw new Error('Firebase ยังไม่พร้อม');
+      const resultId = createFirebaseDocId('examResults');
+      result.firebaseDocId = resultId;
+      result.resultId = resultId;
+      await db.collection('examResults').doc(resultId).set(result);
+      examResultsCache.unshift(result);
+      safeRun(function() {
+        addActivityLog('บันทึกผลสอบ',
+          (result.studentName || result.studentId || '-') + ' · ' +
+          (result.subject || '') + ' · ' + (result.scorePercent || 0) + '%');
+      });
+    }
+
+    /**
+     * loadAndRenderReports()
+     * โหลด examResults จาก Firestore แล้วเรียก renderReports()
+     * ใช้ orderBy('createdAt','desc') + fallback ถ้า index ยังไม่พร้อม
+     */
+    async function loadAndRenderReports() {
+      if (!hasPermission('admin.exams')) return;
+      if (!firebaseReady || !db) return;
+      const container = getElement('examReportArea');
+      if (container) container.innerHTML = '<p style="color:#d97706;">⏳ กำลังโหลดผลสอบ...</p>';
+      try {
+        const snapshot = await db.collection('examResults').orderBy('createdAt', 'desc').limit(200).get();
+        examResultsCache = snapshot.docs.map(function(doc) { return Object.assign({ firebaseDocId: doc.id }, doc.data()); });
+      } catch (error) {
+        // fallback ถ้า Firestore index ยังไม่พร้อม
+        try {
+          const snapshot = await db.collection('examResults').get();
+          examResultsCache = snapshot.docs.map(function(doc) { return Object.assign({ firebaseDocId: doc.id }, doc.data()); });
+        } catch (err2) {
+          console.warn('loadAndRenderReports error:', err2);
+          if (container) container.innerHTML = '<p style="color:#dc2626;">โหลดผลสอบไม่สำเร็จ — ตรวจสอบ Firestore index</p>';
+          return;
+        }
+      }
+      renderReports();
+    }
+
+    /**
+     * renderReports()
+     * render card ผลสอบ latest-per-student
+     * สีแดง = คะแนน < 60%  |  สีเขียว = ผ่าน ≥ 60%
+     * กดการ์ดเพื่อ focusStudent → e-learning section
+     */
+    function renderReports() {
+      const container = getElement('examReportArea');
+      if (!container) return;
+      const gradeFilter   = ((getElement('examReportGradeFilter')   || {}).value) || 'ทั้งหมด';
+      const subjectFilter = ((getElement('examReportSubjectFilter') || {}).value) || 'ทั้งหมด';
+
+      const filtered = examResultsCache.filter(function(r) {
+        return (gradeFilter   === 'ทั้งหมด' || r.grade   === gradeFilter) &&
+               (subjectFilter === 'ทั้งหมด' || r.subject === subjectFilter);
+      });
+
+      if (!filtered.length) {
+        container.innerHTML = '<p style="color:#6b7280;">ไม่มีผลสอบ — กด "📊 โหลดรายงาน" เพื่อดึงข้อมูลจาก Firestore</p>';
+        return;
+      }
+
+      // เก็บเฉพาะผลล่าสุดต่อ 1 นักเรียน (by studentUid)
+      const latestMap = {};
+      filtered.forEach(function(r) {
+        const uid = r.studentUid || r.studentId || r.firebaseDocId || 'unknown';
+        const ts = r.createdAt && r.createdAt.seconds ? r.createdAt.seconds : 0;
+        if (!latestMap[uid] || ts > (latestMap[uid]._ts || 0)) {
+          latestMap[uid] = Object.assign({ _ts: ts }, r);
+        }
+      });
+
+      const sorted = Object.values(latestMap).sort(function(a, b) { return (b._ts || 0) - (a._ts || 0); });
+
+      container.innerHTML = sorted.map(function(r) {
+        const passed     = (r.scorePercent || 0) >= 60;
+        const cardBorder = passed ? '#bbf7d0' : '#fecaca';
+        const cardBg     = passed ? '#f0fdf4' : '#fef2f2';
+        const scoreClr   = passed ? '#16a34a' : '#dc2626';
+        const badge      = passed
+          ? '<span class="status-paid">ผ่าน</span>'
+          : '<span class="status-absent">ไม่ผ่าน</span>';
+        const dateText   = r.createdAtText ||
+          (r.createdAt && typeof r.createdAt.toDate === 'function'
+            ? r.createdAt.toDate().toLocaleDateString('th-TH') : '-');
+        const weakHtml   = (r.weakTopics || []).length
+          ? '<p style="color:#dc2626;font-size:0.85em;margin-top:6px;">⚠️ Weak: ' +
+            escapeHtml((r.weakTopics || []).join(', ')) + '</p>'
+          : '';
+        const uid = r.studentUid || '';
+
+        return '<div style="border:1px solid ' + cardBorder + ';background:' + cardBg + ';border-radius:8px;padding:12px 14px;margin-bottom:10px;">' +
+          '<div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:8px;">' +
+            '<div>' +
+              '<div style="font-weight:bold;">' + escapeHtml(r.studentName || r.studentId || '-') + '</div>' +
+              '<div style="font-size:0.85em;color:#6b7280;">' +
+                escapeHtml(r.grade || '-') + ' · ' + escapeHtml(r.subject || '-') +
+                ' · Test: ' + escapeHtml(r.testId || '-') +
+              '</div>' +
+              weakHtml +
+              '<div style="font-size:0.8em;color:#9ca3af;margin-top:4px;">' + escapeHtml(dateText) + '</div>' +
+            '</div>' +
+            '<div style="text-align:right;">' +
+              '<div style="font-size:1.6em;font-weight:bold;color:' + scoreClr + ';">' + (r.scorePercent || 0) + '%</div>' +
+              '<div style="font-size:0.85em;">' + (r.correctItems || 0) + '/' + (r.totalItems || 0) + ' ' + badge + '</div>' +
+              (uid ? '<button class="btn btn-dark" type="button" style="margin-top:6px;font-size:0.8em;" onclick="focusStudent(\'' + jsArg(uid) + '\')">เลือกเพื่อ e-learning</button>' : '') +
+            '</div>' +
+          '</div>' +
+        '</div>';
+      }).join('');
+    }
+
+    /**
+     * focusStudent(uid)
+     * โหลดผลสอบและ weak topics ของนักเรียนที่เลือก
+     * แล้วแสดงสื่อ e-learning จาก learningMaterials ที่ตรงกับ weak topics
+     */
+    async function focusStudent(uid) {
+      const area = getElement('examElearningArea');
+      const remedialArea = getElement('examRemedialArea');
+      if (!uid) {
+        if (area) area.innerHTML = '<p style="color:#aaa;">ยังไม่ได้เลือกนักเรียน</p>';
+        if (remedialArea) remedialArea.style.display = 'none';
+        examProcActiveUid = '';
+        examProcActiveName = '';
+        return;
+      }
+      examProcActiveUid = uid;
+      examProcWeakTopics = [];   // reset ก่อน โหลดใหม่ด้านล่าง
+      const student = examStudentUsers.find(function(u) { return (u.uid || u.authUid) === uid; });
+      examProcActiveName = student ? (student.name || student.displayName || student.firstName || uid) : uid;
+
+      // โหลดผลสอบของนักเรียนคนนี้
+      let studentResults = examResultsCache.filter(function(r) { return r.studentUid === uid; });
+      if (!studentResults.length && firebaseReady && db) {
+        try {
+          const snapshot = await db.collection('examResults').where('studentUid', '==', uid).get();
+          studentResults = snapshot.docs.map(function(doc) { return Object.assign({ firebaseDocId: doc.id }, doc.data()); });
+          // merge เข้า cache เพื่อไม่ต้องโหลดซ้ำ
+          studentResults.forEach(function(r) {
+            if (!examResultsCache.find(function(c) { return c.resultId === r.resultId; })) {
+              examResultsCache.push(r);
+            }
+          });
+        } catch (error) {
+          console.warn('focusStudent load results error:', error);
+        }
+      }
+
+      // รวบรวม weak topics ข้ามทุก result
+      const weakTopicMap = {};
+      studentResults.forEach(function(r) {
+        (r.weakTopics || []).forEach(function(t) {
+          if (!weakTopicMap[t]) weakTopicMap[t] = { topic: t, count: 0, subjects: [] };
+          weakTopicMap[t].count++;
+          if (r.subject && !weakTopicMap[t].subjects.includes(r.subject)) weakTopicMap[t].subjects.push(r.subject);
+        });
+      });
+      const weakTopics = Object.values(weakTopicMap).sort(function(a, b) { return b.count - a.count; });
+      // เก็บไว้ใน module state เพื่อให้ generateTargetedExam() ใช้ได้ทันที
+      examProcWeakTopics = weakTopics.map(function(wt) { return wt.topic; });
+
+      // โหลด learning materials ที่ตรงกับ weak topics
+      let materials = [];
+      if (weakTopics.length && firebaseReady && db) {
+        try {
+          const snapshot = await db.collection('learningMaterials').where('status', '==', 'active').get();
+          const allMaterials = snapshot.docs.map(function(doc) { return Object.assign({ firebaseDocId: doc.id }, doc.data()); });
+          const weakLower = weakTopics.map(function(wt) { return wt.topic.toLowerCase(); });
+          materials = allMaterials.filter(function(m) {
+            const mTopics = (m.topics || [m.topic || '']).map(function(t) { return t.toLowerCase(); });
+            return mTopics.some(function(mt) {
+              return weakLower.some(function(wt) { return mt.includes(wt) || wt.includes(mt); });
+            });
+          });
+        } catch (error) {
+          console.warn('learningMaterials load error:', error);
+        }
+      }
+
+      if (!area) return;
+      let html = '<h4 style="margin-bottom:8px;">' + escapeHtml(examProcActiveName) + '</h4>';
+
+      if (!studentResults.length) {
+        html += '<p style="color:#6b7280;">ยังไม่มีผลสอบในระบบสำหรับนักเรียนคนนี้</p>';
+        area.innerHTML = html;
+        if (remedialArea) remedialArea.style.display = 'none';
+        return;
+      }
+
+      const lastResult = studentResults[studentResults.length - 1];
+      html += '<p>ผลสอบล่าสุด: <strong>' + (lastResult.subject || '') + '</strong> ' +
+        '<span style="' + ((lastResult.scorePercent || 0) >= 60 ? 'color:#16a34a' : 'color:#dc2626') + ';font-weight:bold;">' +
+        (lastResult.scorePercent || 0) + '%</span></p>';
+
+      if (weakTopics.length) {
+        html += '<p style="color:#dc2626;font-weight:bold;margin-top:10px;">⚠️ หัวข้อที่ต้องซ่อมเสริม (' + weakTopics.length + ' หัวข้อ):</p>';
+        html += '<ul style="margin-left:16px;">' + weakTopics.map(function(wt) {
+          return '<li><strong>' + escapeHtml(wt.topic) + '</strong> — พบปัญหา ' + wt.count +
+            ' ครั้ง (วิชา: ' + escapeHtml(wt.subjects.join(', ')) + ')</li>';
+        }).join('') + '</ul>';
+      } else {
+        html += '<p style="color:#16a34a;margin-top:10px;">✅ ยังไม่มี weak topics ที่ต้องซ่อมเสริม</p>';
+      }
+
+      if (materials.length) {
+        html += '<h4 style="margin-top:14px;">📚 สื่อการเรียนที่แนะนำ</h4><ul style="margin-left:16px;">';
+        materials.forEach(function(m) {
+          const link = m.url ? ' <a href="' + escapeHtml(m.url) + '" target="_blank" rel="noopener">เปิดสื่อ</a>' : '';
+          html += '<li><strong>' + escapeHtml(m.title || '-') + '</strong>' +
+            (m.description ? ' — ' + escapeHtml(m.description) : '') + link + '</li>';
+        });
+        html += '</ul>';
+      } else if (weakTopics.length) {
+        html += '<p style="color:#6b7280;margin-top:8px;font-size:0.9em;">ยังไม่มีสื่อในระบบสำหรับ weak topics เหล่านี้ — ' +
+          'Admin สามารถเพิ่มได้ใน collection <code>learningMaterials</code></p>';
+      }
+
+      area.innerHTML = html;
+      if (remedialArea) remedialArea.style.display = weakTopics.length ? 'block' : 'none';
+      // อัปเดต adaptive mode dropdown ให้กรองเฉพาะข้อสอบที่ตรง weakTopics
+      if (weakTopics.length) safeRun(function() { updateExamProcTestSelect(); }, 'update-test-select-after-focus');
+    }
+
+    /**
+     * generateTargetedExam()
+     * ค้นหาข้อสอบใน examBank ที่ตรงกับ weakTopics ของนักเรียน
+     * แล้ว pre-select ในชุดสร้างข้อสอบ
+     */
+    function generateTargetedExam() {
+      if (!examProcActiveUid) { alert('กรุณาเลือกนักเรียนก่อนสร้างข้อสอบซ่อมเสริม'); return; }
+
+      // ใช้ weakTopics ที่ focusStudent() คำนวณไว้แล้ว (examProcWeakTopics)
+      // หรือ fallback คำนวณจาก cache
+      let weakTopics = examProcWeakTopics.slice();
+      if (!weakTopics.length) {
+        const weakTopicSet = {};
+        examResultsCache.filter(function(r) { return r.studentUid === examProcActiveUid; })
+          .forEach(function(r) {
+            (r.weakTopics || []).forEach(function(t) { weakTopicSet[t] = (weakTopicSet[t] || 0) + 1; });
+          });
+        weakTopics = Object.keys(weakTopicSet);
+      }
+
+      if (!weakTopics.length) {
+        alert('นักเรียนคนนี้ยังไม่มี weak topics — กด "โหลดรายงาน" แล้วลองใหม่ หรือสร้างข้อสอบปกติก่อน');
+        return;
+      }
+
+      // switch เป็น adaptive mode เพื่อกรองเฉพาะข้อสอบที่ตรง weak topics
+      const modeSelect = getElement('examProcMode');
+      if (modeSelect) { modeSelect.value = 'adaptive'; }
+      examProcMode = 'adaptive';
+      const hint = getElement('examAdaptiveHint');
+      if (hint) hint.style.display = 'block';
+      updateExamProcTestSelect();
+
+      // หาข้อสอบที่ตรงกับ weak topics มากที่สุด
+      const scored = examBankItems.map(function(exam) {
+        const match = (exam.topics || []).filter(function(t) { return weakTopics.includes(t); }).length;
+        return { exam: exam, match: match };
+      }).filter(function(s) { return s.match > 0; })
+        .sort(function(a, b) { return b.match - a.match; });
+
+      if (scored.length) {
+        const best = scored[0].exam;
+        const testSelect = getElement('examProcTestSelect');
+        if (testSelect) testSelect.value = best.testId || best.firebaseDocId || '';
+        generateExamFromBank();
+        // scroll ไปยัง Gen exam section
+        const genArea = getElement('examAnswerInputArea');
+        if (genArea) genArea.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        alert('✅ พบข้อสอบซ่อมเสริม:\n"' + best.title + '"\n\nWeak topics: ' + weakTopics.join(', ') +
+              '\n\nกรุณาให้นักเรียนทำแล้วกด "ส่งคำตอบ / ตรวจข้อสอบ"');
+      } else {
+        // ไม่พบข้อสอบตรง — แจ้ง admin พร้อมแนะนำ
+        alert('⚠️ ยังไม่มีข้อสอบใน examBank ที่มี topics ตรงกับ:\n' + weakTopics.join(', ') +
+              '\n\nให้ Admin:\n1. กรอกฟอร์ม "เพิ่ม / แก้ไขข้อสอบในคลัง"\n2. ใส่ topics ที่ตรงกันในช่อง "หัวข้อ"\n3. บันทึกแล้วลองใหม่');
+      }
+    }
+
+    /**
+     * seedExamBank()
+     * เพิ่มชุดข้อสอบตัวอย่างเข้า Firestore examBank สำหรับทดสอบระบบ
+     * ใช้เมื่อ Google Drive Sync ยังไม่พร้อม
+     * docId ใช้ testId คงที่เพื่อให้ idempotent (seed ซ้ำได้ปลอดภัย)
+     */
+    async function seedExamBank() {
+      if (!hasPermission('admin.exams')) { alert('ไม่มีสิทธิ์ admin.exams'); return; }
+      if (!firebaseReady || !db) { alert('Firebase ยังไม่พร้อม'); return; }
+
+      const statusEl = getElement('examSyncStatus');
+      if (statusEl) { statusEl.style.color = '#d97706'; statusEl.textContent = '⏳ กำลังเพิ่มข้อสอบทดสอบ...'; }
+
+      // ชุดข้อสอบตัวอย่าง — docId คงที่เพื่อ idempotent
+      const seeds = [
+        {
+          testId: 'TEST_P6_MATH_001',
+          title: 'คณิตศาสตร์ ป.6 เรื่องเศษส่วนและทศนิยม',
+          grade: 'ป.6', subject: 'คณิตศาสตร์',
+          topics: ['เศษส่วน', 'ทศนิยม'],
+          totalItems: 10,
+          answerKey: [
+            { no: 1, answer: '1', topic: 'เศษส่วน' },
+            { no: 2, answer: '2', topic: 'เศษส่วน' },
+            { no: 3, answer: '3', topic: 'ทศนิยม' },
+            { no: 4, answer: '4', topic: 'ทศนิยม' },
+            { no: 5, answer: '1', topic: 'เศษส่วน' },
+            { no: 6, answer: '2', topic: 'ทศนิยม' },
+            { no: 7, answer: '3', topic: 'เศษส่วน' },
+            { no: 8, answer: '4', topic: 'ทศนิยม' },
+            { no: 9, answer: '1', topic: 'เศษส่วน' },
+            { no: 10, answer: '2', topic: 'ทศนิยม' }
+          ],
+          sourceType: 'manual_seed'
+        },
+        {
+          testId: 'TEST_P5_SCI_001',
+          title: 'วิทยาศาสตร์ ป.5 เรื่องแรงและการเคลื่อนที่',
+          grade: 'ป.5', subject: 'วิทยาศาสตร์',
+          topics: ['แรง', 'การเคลื่อนที่'],
+          totalItems: 10,
+          answerKey: [
+            { no: 1, answer: 'A', topic: 'แรง' },
+            { no: 2, answer: 'B', topic: 'แรง' },
+            { no: 3, answer: 'C', topic: 'การเคลื่อนที่' },
+            { no: 4, answer: 'D', topic: 'การเคลื่อนที่' },
+            { no: 5, answer: 'A', topic: 'แรง' },
+            { no: 6, answer: 'B', topic: 'การเคลื่อนที่' },
+            { no: 7, answer: 'C', topic: 'แรง' },
+            { no: 8, answer: 'D', topic: 'การเคลื่อนที่' },
+            { no: 9, answer: 'A', topic: 'แรง' },
+            { no: 10, answer: 'B', topic: 'การเคลื่อนที่' }
+          ],
+          sourceType: 'manual_seed'
+        },
+        {
+          testId: 'TEST_P4_ENG_001',
+          title: 'ภาษาอังกฤษ ป.4 Vocabulary & Grammar',
+          grade: 'ป.4', subject: 'ภาษาอังกฤษ',
+          topics: ['Vocabulary', 'Grammar'],
+          totalItems: 10,
+          answerKey: [
+            { no: 1, answer: 'A', topic: 'Vocabulary' },
+            { no: 2, answer: 'C', topic: 'Vocabulary' },
+            { no: 3, answer: 'B', topic: 'Grammar' },
+            { no: 4, answer: 'D', topic: 'Grammar' },
+            { no: 5, answer: 'A', topic: 'Vocabulary' },
+            { no: 6, answer: 'B', topic: 'Grammar' },
+            { no: 7, answer: 'C', topic: 'Vocabulary' },
+            { no: 8, answer: 'A', topic: 'Grammar' },
+            { no: 9, answer: 'D', topic: 'Vocabulary' },
+            { no: 10, answer: 'B', topic: 'Grammar' }
+          ],
+          sourceType: 'manual_seed'
+        }
+      ];
+
+      let savedCount = 0;
+      try {
+        await Promise.all(seeds.map(async function(seed) {
+          const docId = seed.testId;
+          const doc = {
+            firebaseDocId: docId,
+            testId: docId,
+            title: seed.title,
+            grade: seed.grade,
+            subject: seed.subject,
+            topics: seed.topics,
+            totalItems: seed.totalItems,
+            answerKey: seed.answerKey,
+            sourceType: seed.sourceType,
+            driveFolderId: '16t5boPIY4736OkQLv3S7JWZ02QvQeqBW',
+            driveFileId: null,
+            driveViewUrl: null,
+            status: 'active',
+            updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+          };
+          // ตรวจว่ามีอยู่แล้วหรือไม่ — ถ้ามีแล้วให้ merge เฉพาะ metadata ไม่ทับ answerKey ที่ admin แก้ไว้
+          const existing = await db.collection('examBank').doc(docId).get();
+          if (!existing.exists) {
+            doc.createdAt = firebase.firestore.FieldValue.serverTimestamp();
+            await db.collection('examBank').doc(docId).set(doc);
+            savedCount++;
+          }
+          // ถ้ามีอยู่แล้ว skip (idempotent)
+        }));
+
+        const msg = savedCount > 0
+          ? '✅ เพิ่มข้อสอบทดสอบ ' + savedCount + ' ชุดสำเร็จ'
+          : '⚠️ ข้อสอบทดสอบมีอยู่แล้วครบทุกชุด (idempotent — ไม่ทับข้อมูลเดิม)';
+        if (statusEl) { statusEl.style.color = savedCount > 0 ? '#16a34a' : '#d97706'; statusEl.textContent = msg; }
+        safeRun(function() { addActivityLog('Seed examBank', savedCount + ' ชุดข้อสอบทดสอบ'); });
+        await loadExamBank();
+      } catch (error) {
+        console.error('seedExamBank error:', error);
+        if (statusEl) { statusEl.style.color = '#dc2626'; statusEl.textContent = '❌ Seed ไม่สำเร็จ: ' + (error.message || ''); }
+      }
+    }
+
+    // ============================================================
+    // end ระบบข้อสอบ ป.4–ป.6
+    // ============================================================
 
     async function initPage() {
       const currentBEYear = new Date().getFullYear() + 543;
