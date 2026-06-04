@@ -2223,6 +2223,7 @@
                 <tbody id="teacherStudentTableBody"></tbody>
               </table>
             </div>
+            <div id="teacherStudentsPagination" class="test-actions" style="margin-top:10px;"></div>
           </section>
 
           <section id="teacher-attendance" class="teacher-tab hidden">
@@ -2800,6 +2801,7 @@
                 <tbody id="adminStudentTableBody"></tbody>
               </table>
             </div>
+            <div id="adminStudentsPagination" class="test-actions" style="margin-top:10px;"></div>
           </section>
 
           <section id="admin-private-students" class="admin-tab hidden">
@@ -2854,6 +2856,7 @@
                 <tbody id="privateStudentTableBody"></tbody>
               </table>
             </div>
+            <div id="privateStudentsPagination" class="test-actions" style="margin-top:10px;"></div>
           </section>
 
           <section id="admin-teachers" class="admin-tab hidden">
@@ -2966,6 +2969,7 @@
                 <tbody id="teacherTableBody"></tbody>
               </table>
             </div>
+            <div id="teachersPagination" class="test-actions" style="margin-top:10px;"></div>
           </section>
 
           <section id="admin-courses" class="admin-tab hidden">
@@ -3427,6 +3431,7 @@
                 <tbody id="paymentTableBody"></tbody>
               </table>
             </div>
+            <div id="paymentTablePagination" class="test-actions" style="margin-top:10px;"></div>
 
             <br />
           </section>
@@ -3552,6 +3557,7 @@
                 <tbody id="adminReceiptTableBody"></tbody>
               </table>
             </div>
+            <div id="adminReceiptsPagination" class="test-actions" style="margin-top:10px;"></div>
           </section>
 
           <section id="admin-monthly-test" class="admin-tab hidden">
@@ -3697,6 +3703,7 @@
                 <tbody id="adminExamLinkTableBody"></tbody>
               </table>
             </div>
+            <div id="adminQuestionsPagination" class="test-actions" style="margin-top:10px;"></div>
 
             <br />
 
@@ -3880,6 +3887,7 @@
                 </div>
               </div>
               <div id="examBankList"><p style="color:#6b7280;">กด "โหลด Exam Bank" เพื่อดูรายการข้อสอบจาก Firestore</p></div>
+              <div id="examBankPagination" class="test-actions" style="margin-top:10px;"></div>
             </div>
 
             <!-- 4a. Student Database — โหลดจาก users collection -->
@@ -3985,6 +3993,7 @@
                 <span style="background:#f0fdf4; padding:2px 6px; border-radius:4px; color:#16a34a;">เขียว</span> = ผ่าน (≥ 60%)
               </p>
               <div id="examReportArea"><p style="color:#6b7280;">กด "โหลดรายงาน" เพื่อดึงผลสอบจาก Firestore</p></div>
+              <div id="reportsPagination" class="test-actions" style="margin-top:10px;"></div>
             </div>
 
             <!-- 6. E-Learning + ข้อสอบซ่อมเสริม -->
@@ -4807,6 +4816,7 @@
             </div>
             <br />
             <div class="table-wrap"><table><thead><tr><th>หัวข้อ</th><th>ศูนย์</th><th>ระดับชั้น</th><th>สถานะ</th><th>เริ่มแสดง</th><th>หมดอายุ</th><th>สถานะเวลา</th><th>จัดการ</th></tr></thead><tbody id="announcementTableBody"></tbody></table></div>
+            <div id="announcementsPagination" class="test-actions" style="margin-top:10px;"></div>
           </section>
 
           <section id="admin-settings" class="admin-tab hidden">
@@ -4954,6 +4964,7 @@
               <button class="btn btn-blue" type="button" onclick="exportActivityLogsCsv()">ส่งออก Log CSV</button>
               <button class="btn btn-dark" type="button" onclick="renderActivityLogs()">โหลดใหม่</button>
               <div id="activityLogList" class="log-list" style="margin-top:18px;"></div>
+              <div id="activityLogsPagination" class="test-actions" style="margin-top:10px;"></div>
             </div>
           </section>
 
@@ -6434,7 +6445,7 @@
     let receiptRunningNumber = 1;
     let tempPaymentDetail = null;
     let studentReceiptCurrentPage = 1;
-    const studentReceiptPerPage = 5;
+    const studentReceiptPerPage = 20;
 
     const monthlyQuestions = [];
     const monthlyExamLinks = [];
@@ -8420,12 +8431,32 @@
         const keywordMatched = !keyword || text.indexOf(keyword) !== -1;
         return courseMatchedByTeacher && courseMatched && keywordMatched;
       });
-      tbody.innerHTML = filtered.length ? filtered.map(function(s, i) {
+      const tsTotalPages = Math.max(1, Math.ceil(filtered.length / LIST_PAGE_SIZE));
+      if (teacherStudentsCurrentPage > tsTotalPages) teacherStudentsCurrentPage = tsTotalPages;
+      const tsStart = (teacherStudentsCurrentPage - 1) * LIST_PAGE_SIZE;
+      const tsItems = filtered.slice(tsStart, tsStart + LIST_PAGE_SIZE);
+      tbody.innerHTML = tsItems.length ? tsItems.map(function(s, i) {
         const statusClass = getPickupStatusClass(s.pickupStatus || 'ไม่มา');
-        return '<tr><td>' + (i + 1) + '</td><td class="student-name">' + (s.name || '-') + '</td><td>' + (s.nickname || '-') + '</td><td>' + (s.grade || '-') + '</td><td>' + (s.course || '-') + '</td><td>' + (s.phone || '-') + '</td><td><span class="' + statusClass + '">' + (s.pickupStatus || 'ไม่มา') + '</span></td></tr>';
+        return '<tr><td>' + (tsStart + i + 1) + '</td><td class="student-name">' + (s.name || '-') + '</td><td>' + (s.nickname || '-') + '</td><td>' + (s.grade || '-') + '</td><td>' + (s.course || '-') + '</td><td>' + (s.phone || '-') + '</td><td><span class="' + statusClass + '">' + (s.pickupStatus || 'ไม่มา') + '</span></td></tr>';
       }).join('') : '<tr><td colspan="7">ยังไม่มีนักเรียนในเงื่อนไขที่เลือก</td></tr>';
+      renderTablePagination('teacherStudentsPagination', teacherStudentsCurrentPage, tsTotalPages, filtered.length, 'changeTeacherStudentsPage');
       safeRun(renderTeacherMobileStudents, 'teacher-mobile-students');
       renderTeacherDashboardSummary();
+    }
+
+    function changeTeacherStudentsPage(direction) {
+      const teacherCourseNames = getTeacherVisibleCourses().map(function(c) { return c.name; });
+      const courseFilter = getElement('teacherCourseFilter') ? getElement('teacherCourseFilter').value : 'ทั้งหมด';
+      const keyword = getElement('teacherStudentSearch') ? getElement('teacherStudentSearch').value.trim().toLowerCase() : '';
+      const filtered = students.filter(function(s) {
+        const courseMatchedByTeacher = !teacherCourseNames.length || teacherCourseNames.includes(s.course) || (currentTeacher && currentTeacher.role === 'Admin');
+        const courseMatched = courseFilter === 'ทั้งหมด' || s.course === courseFilter;
+        const text = [s.name, s.nickname, s.phone, s.memberId, s.grade, s.course].join(' ').toLowerCase();
+        return courseMatchedByTeacher && courseMatched && (!keyword || text.indexOf(keyword) !== -1);
+      });
+      const totalPages = Math.max(1, Math.ceil(filtered.length / LIST_PAGE_SIZE));
+      teacherStudentsCurrentPage = Math.min(Math.max(1, teacherStudentsCurrentPage + direction), totalPages);
+      renderTeacherStudents();
     }
 
     function syncTeacherMobileStudentFilters() {
@@ -9538,6 +9569,30 @@
 
     let adminStudentCurrentPage = 1;
     const adminStudentPerPage = 20;
+    let paymentCurrentPage = 1;
+    let adminReceiptsCurrentPage = 1;
+    let teacherStudentsCurrentPage = 1;
+    let teachersCurrentPage = 1;
+    let privateStudentsCurrentPage = 1;
+    let announcementsCurrentPage = 1;
+    let activityLogsCurrentPage = 1;
+    let examBankCurrentPage = 1;
+    let reportsCurrentPage = 1;
+    let adminQuestionsCurrentPage = 1;
+    const LIST_PAGE_SIZE = 20;
+
+    function renderTablePagination(containerId, currentPage, totalPages, totalItems, changeFnName) {
+      const box = getElement(containerId);
+      if (!box) return;
+      box.innerHTML = '';
+      if (totalItems <= LIST_PAGE_SIZE) return;
+      const prevDisabled = currentPage <= 1 ? ' disabled' : '';
+      const nextDisabled = currentPage >= totalPages ? ' disabled' : '';
+      box.innerHTML =
+        '<button class="btn btn-dark" type="button"' + prevDisabled + ' onclick="' + changeFnName + '(-1)">ก่อนหน้า</button>' +
+        '<span style="align-self:center; font-weight:bold; padding:10px;">หน้า ' + currentPage + ' / ' + totalPages + ' · ทั้งหมด ' + totalItems + ' รายการ</span>' +
+        '<button class="btn btn-dark" type="button"' + nextDisabled + ' onclick="' + changeFnName + '(1)">ถัดไป</button>';
+    }
 
     function renderAdminStudentActionGroup(title, buttonsHtml) {
       if (!buttonsHtml) return '';
@@ -9629,6 +9684,14 @@
           '<td class="row-actions-cell">' + renderAdminStudentActions(s) + '</td>' +
         '</tr>';
       }).join('') : '<tr><td colspan="15">ยังไม่มีนักเรียนในเงื่อนไขที่เลือก</td></tr>';
+      renderTablePagination('adminStudentsPagination', adminStudentCurrentPage, totalPages, filtered.length, 'changeAdminStudentsPage');
+    }
+
+    function changeAdminStudentsPage(direction) {
+      const filtered = sortRecordsForTable(getVisibleAdminStudents(), 'students');
+      const totalPages = Math.max(1, Math.ceil(filtered.length / adminStudentPerPage));
+      adminStudentCurrentPage = Math.min(Math.max(1, adminStudentCurrentPage + direction), totalPages);
+      renderAdminStudents();
     }
 
     function buildDefaultStudentPassword(student) {
@@ -10156,13 +10219,25 @@
         return;
       }
       const sortedTeachers = sortRecordsForTable(teachers, 'teachers');
-      tbody.innerHTML = sortedTeachers.map(function(t, i) {
+      const tTotalPages = Math.max(1, Math.ceil(sortedTeachers.length / LIST_PAGE_SIZE));
+      if (teachersCurrentPage > tTotalPages) teachersCurrentPage = tTotalPages;
+      const tStart = (teachersCurrentPage - 1) * LIST_PAGE_SIZE;
+      const tItems = sortedTeachers.slice(tStart, tStart + LIST_PAGE_SIZE);
+      tbody.innerHTML = tItems.map(function(t, i) {
         const status = t.status === 'Active' ? '<span class="status-paid">Active</span>' : '<span class="status-absent">Inactive</span>';
         const normalizedRole = normalizeAppRole(t.appRole || t.role || 'Teacher');
         const permissionCount = getEffectivePermissions(t).length;
         const role = '<span class="' + (isAdminLikeRole(normalizedRole) ? 'status-parent' : 'status-paid') + '">' + getRoleLabel(normalizedRole) + '</span><br><span class="mini-muted">' + permissionCount + ' สิทธิ์</span>';
-        return '<tr><td>' + (i + 1) + '</td><td>' + t.teacherId + '</td><td>' + t.name + '</td><td>' + t.subject + '<br><span class="mini-muted">' + escapeHtml(getTeachingModeLabel(t.teachingModes)) + '</span></td><td>' + t.username + '</td><td>' + t.branch + '</td><td>' + role + '</td><td>' + status + '</td><td><button class="btn btn-blue" type="button" onclick="' + actionCall('editTeacher', t.id) + '">แก้ไข</button><button class="btn btn-dark" type="button" onclick="' + actionCall('resetTeacherPassword', t.id) + '">Reset 000000</button><button class="btn btn-red" type="button" onclick="' + actionCall('deleteTeacher', t.id) + '">ลบ</button></td></tr>';
+        return '<tr><td>' + (tStart + i + 1) + '</td><td>' + t.teacherId + '</td><td>' + t.name + '</td><td>' + t.subject + '<br><span class="mini-muted">' + escapeHtml(getTeachingModeLabel(t.teachingModes)) + '</span></td><td>' + t.username + '</td><td>' + t.branch + '</td><td>' + role + '</td><td>' + status + '</td><td><button class="btn btn-blue" type="button" onclick="' + actionCall('editTeacher', t.id) + '">แก้ไข</button><button class="btn btn-dark" type="button" onclick="' + actionCall('resetTeacherPassword', t.id) + '">Reset 000000</button><button class="btn btn-red" type="button" onclick="' + actionCall('deleteTeacher', t.id) + '">ลบ</button></td></tr>';
       }).join('');
+      renderTablePagination('teachersPagination', teachersCurrentPage, tTotalPages, sortedTeachers.length, 'changeTeachersPage');
+    }
+
+    function changeTeachersPage(direction) {
+      const sortedTeachers = sortRecordsForTable(teachers, 'teachers');
+      const totalPages = Math.max(1, Math.ceil(sortedTeachers.length / LIST_PAGE_SIZE));
+      teachersCurrentPage = Math.min(Math.max(1, teachersCurrentPage + direction), totalPages);
+      renderTeachers();
     }
 
     function getNextTeacherId() {
@@ -10868,7 +10943,11 @@
           (dayFilter === 'ทั้งหมด' || String(student.privateLessonDay || '') === String(dayFilter)) &&
           (billingFilter === 'ทั้งหมด' || getPrivateStudentBillingType(student) === billingFilter);
       });
-      tbody.innerHTML = list.length ? list.map(function(student) {
+      const psTotalPages = Math.max(1, Math.ceil(list.length / LIST_PAGE_SIZE));
+      if (privateStudentsCurrentPage > psTotalPages) privateStudentsCurrentPage = psTotalPages;
+      const psStart = (privateStudentsCurrentPage - 1) * LIST_PAGE_SIZE;
+      const psItems = list.slice(psStart, psStart + LIST_PAGE_SIZE);
+      tbody.innerHTML = psItems.length ? psItems.map(function(student) {
         const id = student.id || student.firebaseDocId || '';
         return '<tr>' +
           '<td><strong>' + escapeHtml(student.name || '-') + '</strong><br><span class="mini-muted">' + escapeHtml((student.memberId || '-') + ' · ' + (student.grade || '-')) + '</span></td>' +
@@ -10880,6 +10959,23 @@
           '<td><button class="btn btn-blue" type="button" onclick="' + actionCall('openPrivateStudentSettings', id) + '">ตั้งค่า</button><button class="btn btn-green" type="button" onclick="' + actionCall('openOneOnOneMonthlyPlanSessionFormForStudent', id) + '">ลงตารางสอน</button></td>' +
         '</tr>';
       }).join('') : '<tr><td colspan="7">ยังไม่มีนักเรียนเดี่ยว 1:1 ตามตัวกรองนี้</td></tr>';
+      renderTablePagination('privateStudentsPagination', privateStudentsCurrentPage, psTotalPages, list.length, 'changePrivateStudentsPage');
+    }
+
+    function changePrivateStudentsPage(direction) {
+      const list = getPrivateStudents().filter(function(student) {
+        const teacherFilter = getElement('privateStudentTeacherFilter') ? getElement('privateStudentTeacherFilter').value : 'ทั้งหมด';
+        const locationFilter = getElement('privateStudentLocationFilter') ? getElement('privateStudentLocationFilter').value : 'ทั้งหมด';
+        const dayFilter = getElement('privateStudentDayFilter') ? getElement('privateStudentDayFilter').value : 'ทั้งหมด';
+        const billingFilter = getElement('privateStudentBillingFilter') ? getElement('privateStudentBillingFilter').value : 'ทั้งหมด';
+        return (teacherFilter === 'ทั้งหมด' || String(student.privateLessonTeacherId || '') === String(teacherFilter)) &&
+          (locationFilter === 'ทั้งหมด' || String(student.preferredLocation || '') === String(locationFilter)) &&
+          (dayFilter === 'ทั้งหมด' || String(student.privateLessonDay || '') === String(dayFilter)) &&
+          (billingFilter === 'ทั้งหมด' || getPrivateStudentBillingType(student) === billingFilter);
+      });
+      const totalPages = Math.max(1, Math.ceil(list.length / LIST_PAGE_SIZE));
+      privateStudentsCurrentPage = Math.min(Math.max(1, privateStudentsCurrentPage + direction), totalPages);
+      renderPrivateStudents();
     }
 
     function privateStudentSelectOptionsHtml() {
@@ -14264,32 +14360,8 @@ function getCourseOnlineDocs(course, includeInactive) {
     }
 
     function filterPaymentStatusByMonth() {
-      const selectedMonth = getElement('paymentStatusMonthFilter') ? getElement('paymentStatusMonthFilter').value : 'ทั้งหมด';
-      const selectedLocation = getElement('paymentStatusLocationFilter') ? getElement('paymentStatusLocationFilter').value : 'ทั้งหมด';
-      const selectedGrade = getElement('paymentStatusGradeFilter') ? getElement('paymentStatusGradeFilter').value : 'ทั้งหมด';
-      const selectedStatus = getElement('paymentStatusStateFilter') ? getElement('paymentStatusStateFilter').value : 'ทั้งหมด';
-      const keyword = getElement('paymentSearchKeyword') ? getElement('paymentSearchKeyword').value.trim().toLowerCase() : '';
-      const rows = document.querySelectorAll('#paymentTableBody tr');
-
-      rows.forEach(function(row) {
-        if (!row.children || row.children.length < 6) return;
-        const monthText = row.children[2] ? row.children[2].innerText.trim() : '';
-        const courseText = row.children[1] ? row.children[1].innerText.trim() : '';
-        const statusText = row.children[5] ? row.children[5].innerText.trim() : '';
-        const rowText = row.innerText.toLowerCase();
-        const student = getStudentByPaymentRow(row);
-        const course = getCourseByStudentOrName(student, courseText);
-        const locationText = course ? course.location : '';
-        const gradeText = student ? student.grade : (course ? course.grade : '');
-        const shouldShow = (selectedMonth === 'ทั้งหมด' || monthText === selectedMonth) &&
-          (selectedLocation === 'ทั้งหมด' || locationText === selectedLocation) &&
-          (selectedGrade === 'ทั้งหมด' || gradeText === selectedGrade) &&
-          (selectedStatus === 'ทั้งหมด' || statusText.includes(selectedStatus)) &&
-          (!keyword || rowText.includes(keyword));
-        row.style.display = shouldShow ? '' : 'none';
-      });
-
-      updatePaymentSummary();
+      paymentCurrentPage = 1;
+      renderPaymentTable();
     }
 
     function isPaymentMonthVisibleToStudents(item) {
@@ -14571,29 +14643,64 @@ function getCourseOnlineDocs(course, includeInactive) {
       );
     }
 
+    function getFilteredPaymentsForTable() {
+      const selectedMonth = getElement('paymentStatusMonthFilter') ? getElement('paymentStatusMonthFilter').value : 'ทั้งหมด';
+      const selectedLocation = getElement('paymentStatusLocationFilter') ? getElement('paymentStatusLocationFilter').value : 'ทั้งหมด';
+      const selectedGrade = getElement('paymentStatusGradeFilter') ? getElement('paymentStatusGradeFilter').value : 'ทั้งหมด';
+      const selectedStatus = getElement('paymentStatusStateFilter') ? getElement('paymentStatusStateFilter').value : 'ทั้งหมด';
+      const keyword = getElement('paymentSearchKeyword') ? getElement('paymentSearchKeyword').value.trim().toLowerCase() : '';
+      return payments.filter(function(p) {
+        const monthText = String(p.month || '');
+        const statusText = getPaymentDisplayStatus(p);
+        const student = students.find(function(s) {
+          return (p.studentId && String(s.id || '') === String(p.studentId)) ||
+                 (p.authUid && p.authUid === s.authUid) ||
+                 (p.memberId && p.memberId === s.memberId);
+        });
+        const course = getCourseByStudentOrName(student, p.course || p.courseName || '');
+        const locationText = course ? (course.location || '') : '';
+        const gradeText = student ? (student.grade || '') : (course ? (course.grade || '') : '');
+        const rowText = [p.student || '', p.course || '', p.month || '', p.memberId || '', p.adminNote || ''].join(' ').toLowerCase();
+        return (selectedMonth === 'ทั้งหมด' || monthText === selectedMonth) &&
+          (selectedLocation === 'ทั้งหมด' || locationText === selectedLocation) &&
+          (selectedGrade === 'ทั้งหมด' || gradeText === selectedGrade) &&
+          (selectedStatus === 'ทั้งหมด' || statusText.includes(selectedStatus)) &&
+          (!keyword || rowText.includes(keyword));
+      });
+    }
+
     function renderPaymentTable() {
       const tbody = getElement('paymentTableBody');
       if (!tbody) return;
-      tbody.innerHTML = payments.length ? payments.map(function(p) {
+      const filtered = getFilteredPaymentsForTable();
+      const ptTotalPages = Math.max(1, Math.ceil(filtered.length / LIST_PAGE_SIZE));
+      if (paymentCurrentPage > ptTotalPages) paymentCurrentPage = ptTotalPages;
+      const ptStart = (paymentCurrentPage - 1) * LIST_PAGE_SIZE;
+      const ptItems = filtered.slice(ptStart, ptStart + LIST_PAGE_SIZE);
+      tbody.innerHTML = ptItems.length ? ptItems.map(function(p) {
         const slipCell = formatPaymentSlipReviewCell(p);
         const ocrButton = paymentHasOcrData(p) ? '<button class="btn btn-blue" type="button" onclick="' + actionCall('viewPaymentOcrDetail', p.firebaseDocId || p.id) + '">ดู OCR</button>' : '';
         const statusText = getPaymentDisplayStatus(p);
         const statusClass = statusText === 'ชำระแล้ว' ? 'status-paid' : statusText === 'ค้างชำระ' || statusText === 'สลิปไม่ผ่าน' || statusText === 'ไม่ผ่าน' ? 'status-absent' : 'status-waiting';
         const noteText = p.adminNote ? '<br><span class="mini-muted">หมายเหตุ Admin: ' + p.adminNote + '</span>' : '';
         return '<tr data-payment-id="' + p.id + '"><td>' + (p.student || '-') + '</td><td>' + renderPaymentCourseText(p) + '</td><td>' + (p.month || '-') + '</td><td>' + renderPaymentAmountText(p) + '</td><td>' + slipCell + '<br><span class="mini-muted">เดือนที่นักเรียนแจ้ง: ' + (p.studentSelectedMonth || p.month || '-') + '</span><br><span class="mini-muted">แจ้งเมื่อ: ' + (p.createdAtText || '-') + '</span>' + noteText + '</td><td><span class="' + statusClass + '">' + statusText + '</span></td><td>' + paymentActionButtons(p.status || p.paymentStatus || 'รอชำระเงิน') + ocrButton + '<button class="btn btn-blue" type="button" onclick="editPaymentAmountDiscount(this)">แก้ยอด/ส่วนลด</button><button class="btn btn-dark" type="button" onclick="editPaymentAdminNote(this)">หมายเหตุ</button></td></tr>';
-      }).join('') : '<tr><td colspan="7">ยังไม่มีรายการชำระเงิน</td></tr>';
-      filterPaymentStatusByMonth();
+      }).join('') : '<tr><td colspan="7">ยังไม่มีรายการชำระเงินตามเงื่อนไขที่เลือก</td></tr>';
+      renderTablePagination('paymentTablePagination', paymentCurrentPage, ptTotalPages, filtered.length, 'changePaymentPage');
+      updatePaymentSummary();
+    }
+
+    function changePaymentPage(direction) {
+      const filtered = getFilteredPaymentsForTable();
+      const totalPages = Math.max(1, Math.ceil(filtered.length / LIST_PAGE_SIZE));
+      paymentCurrentPage = Math.min(Math.max(1, paymentCurrentPage + direction), totalPages);
+      renderPaymentTable();
     }
 
     function updatePaymentSummary() {
-      const rows = Array.from(document.querySelectorAll('#paymentTableBody tr')).filter(function(row) {
-        return row.style.display !== 'none';
-      });
-      let pending = 0;
-      let overdue = 0;
-      let paid = 0;
-      rows.forEach(function(row) {
-        const statusText = row.children[5] ? row.children[5].innerText.trim() : '';
+      const filtered = getFilteredPaymentsForTable();
+      let pending = 0, overdue = 0, paid = 0;
+      filtered.forEach(function(p) {
+        const statusText = getPaymentDisplayStatus(p);
         if (statusText.includes('รอตรวจ')) pending++;
         if (statusText.includes('ค้าง')) overdue++;
         if (statusText.includes('ชำระแล้ว')) paid++;
@@ -15397,9 +15504,14 @@ function receiptStatusText(status) {
         return Number(b.id || 0) - Number(a.id || 0);
       });
 
-      tbody.innerHTML = filtered.length ? filtered.map(function(r) {
+      const arTotalPages = Math.max(1, Math.ceil(filtered.length / LIST_PAGE_SIZE));
+      if (adminReceiptsCurrentPage > arTotalPages) adminReceiptsCurrentPage = arTotalPages;
+      const arStart = (adminReceiptsCurrentPage - 1) * LIST_PAGE_SIZE;
+      const arItems = filtered.slice(arStart, arStart + LIST_PAGE_SIZE);
+      tbody.innerHTML = arItems.length ? arItems.map(function(r) {
         return '<tr><td>' + (r.receiptNo || '-') + '</td><td>' + (r.student || '-') + '</td><td>' + (r.course || '-') + '</td><td>' + getReceiptMonth(r) + '</td><td>' + formatPrice(getReceiptDisplayTotal(r)) + '</td><td>' + receiptStatusText(r.status) + '</td><td><button class="btn btn-blue" type="button" onclick="' + actionCall('openReceiptAdmin', r.id) + '">ดูตัวอย่าง</button><button class="btn btn-blue" type="button" onclick="' + actionCall('downloadReceiptPdf', r.id) + '">ดาวน์โหลด PDF</button><button class="btn btn-green" type="button" onclick="' + actionCall('publishReceipt', r.id) + '">แสดง</button><button class="btn btn-dark" type="button" onclick="' + actionCall('hideReceipt', r.id) + '">ซ่อน</button><button class="btn btn-red" type="button" onclick="' + actionCall('deleteReceipt', r.id) + '">ลบ</button></td></tr>';
       }).join('') : '<tr><td colspan="7">ยังไม่มีใบเสร็จตามเงื่อนไขที่เลือก</td></tr>';
+      renderTablePagination('adminReceiptsPagination', adminReceiptsCurrentPage, arTotalPages, filtered.length, 'changeAdminReceiptsPage');
 
       const draftCount = (receipts || []).filter(function(r) { return normalizeReceiptStatus(r.status) === 'draft'; }).length;
       const publishedCount = (receipts || []).filter(function(r) { return normalizeReceiptStatus(r.status) === 'published'; }).length;
@@ -15407,6 +15519,19 @@ function receiptStatusText(status) {
       if (getElement('receiptDraftCount')) getElement('receiptDraftCount').textContent = draftCount + ' ใบ';
       if (getElement('receiptPublishedCount')) getElement('receiptPublishedCount').textContent = publishedCount + ' ใบ';
       if (getElement('receiptHiddenCount')) getElement('receiptHiddenCount').textContent = hiddenCount + ' ใบ';
+    }
+
+    function changeAdminReceiptsPage(direction) {
+      const statusFilter = getElement('receiptStatusFilter') ? getElement('receiptStatusFilter').value : 'ทั้งหมด';
+      const monthFilter = getElement('receiptMonthFilter') ? getElement('receiptMonthFilter').value : 'ทั้งหมด';
+      const filtered = (receipts || []).filter(function(r) {
+        const receiptMonth = getReceiptMonth(r);
+        return (statusFilter === 'ทั้งหมด' || normalizeReceiptStatus(r.status) === statusFilter) &&
+               (monthFilter === 'ทั้งหมด' || receiptMonth === monthFilter);
+      });
+      const totalPages = Math.max(1, Math.ceil(filtered.length / LIST_PAGE_SIZE));
+      adminReceiptsCurrentPage = Math.min(Math.max(1, adminReceiptsCurrentPage + direction), totalPages);
+      renderAdminReceipts();
     }
 
     async function repairReceiptMonthsFromPayments() {
@@ -21695,7 +21820,11 @@ function receiptStatusText(status) {
         const gradeMatched = gradeFilter === 'ทั้งหมด' || item.grade === gradeFilter;
         return monthMatched && subjectMatched && gradeMatched;
       });
-      tbody.innerHTML = filtered.length ? filtered.map(function(item) {
+      const aqTotalPages = Math.max(1, Math.ceil(filtered.length / LIST_PAGE_SIZE));
+      if (adminQuestionsCurrentPage > aqTotalPages) adminQuestionsCurrentPage = aqTotalPages;
+      const aqStart = (adminQuestionsCurrentPage - 1) * LIST_PAGE_SIZE;
+      const aqItems = filtered.slice(aqStart, aqStart + LIST_PAGE_SIZE);
+      tbody.innerHTML = aqItems.length ? aqItems.map(function(item) {
         const statusText = item.status === 'open' ? '<span class="status-paid">เปิดใช้งาน</span>' : '<span class="status-absent">ปิดไว้ก่อน</span>';
         const linkText = item.url ? '<a href="' + item.url + '" target="_blank">เปิดลิงก์</a>' : '-';
         return '<tr>' +
@@ -21709,6 +21838,21 @@ function receiptStatusText(status) {
           '<td><button class="btn btn-blue" type="button" onclick="' + actionCall('editMonthlyExamLink', item.id) + '">แก้ไข</button><button class="btn btn-red" type="button" onclick="' + actionCall('deleteMonthlyExamLink', item.id) + '">ลบ</button></td>' +
         '</tr>';
       }).join('') : '<tr><td colspan="8">ยังไม่มีลิงก์แบบทดสอบ ให้เพิ่มลิงก์ Google Form จากฟอร์มด้านบน</td></tr>';
+      renderTablePagination('adminQuestionsPagination', adminQuestionsCurrentPage, aqTotalPages, filtered.length, 'changeAdminQuestionsPage');
+    }
+
+    function changeAdminQuestionsPage(direction) {
+      const monthFilter = getElement('adminExamMonthFilter') ? getElement('adminExamMonthFilter').value : 'ทั้งหมด';
+      const subjectFilter = getElement('adminExamSubjectFilter') ? getElement('adminExamSubjectFilter').value : 'ทั้งหมด';
+      const gradeFilter = getElement('adminExamGradeFilter') ? getElement('adminExamGradeFilter').value : 'ทั้งหมด';
+      const filtered = monthlyExamLinks.filter(function(item) {
+        return (monthFilter === 'ทั้งหมด' || item.month === monthFilter) &&
+               (subjectFilter === 'ทั้งหมด' || item.subject === subjectFilter) &&
+               (gradeFilter === 'ทั้งหมด' || item.grade === gradeFilter);
+      });
+      const totalPages = Math.max(1, Math.ceil(filtered.length / LIST_PAGE_SIZE));
+      adminQuestionsCurrentPage = Math.min(Math.max(1, adminQuestionsCurrentPage + direction), totalPages);
+      renderAdminQuestions();
     }
 
     function renderStudentExamFilters() {
@@ -21897,9 +22041,21 @@ function receiptStatusText(status) {
       const box = getElement('activityLogList');
       if (!box) return;
       const sorted = activityLogs.slice().sort(function(a,b) { return String(b.createdAtText || '').localeCompare(String(a.createdAtText || '')); });
-      box.innerHTML = sorted.length ? sorted.map(function(log) {
+      const alTotalPages = Math.max(1, Math.ceil(sorted.length / LIST_PAGE_SIZE));
+      if (activityLogsCurrentPage > alTotalPages) activityLogsCurrentPage = alTotalPages;
+      const alStart = (activityLogsCurrentPage - 1) * LIST_PAGE_SIZE;
+      const alItems = sorted.slice(alStart, alStart + LIST_PAGE_SIZE);
+      box.innerHTML = alItems.length ? alItems.map(function(log) {
         return '<div class="log-item"><strong>' + (log.action || '-') + '</strong><br><span class="mini-muted">' + (log.createdAtText || '-') + ' · ' + (log.user || '-') + '</span><p>' + (log.detail || '') + '</p></div>';
       }).join('') : '<div class="notice">ยังไม่มีประวัติการแก้ไข</div>';
+      renderTablePagination('activityLogsPagination', activityLogsCurrentPage, alTotalPages, sorted.length, 'changeActivityLogsPage');
+    }
+
+    function changeActivityLogsPage(direction) {
+      const sorted = activityLogs.slice().sort(function(a,b) { return String(b.createdAtText || '').localeCompare(String(a.createdAtText || '')); });
+      const totalPages = Math.max(1, Math.ceil(sorted.length / LIST_PAGE_SIZE));
+      activityLogsCurrentPage = Math.min(Math.max(1, activityLogsCurrentPage + direction), totalPages);
+      renderActivityLogs();
     }
 
     function renderManualPaymentStudentOptions() {
@@ -22109,13 +22265,24 @@ function receiptStatusText(status) {
     function renderAnnouncements() {
       const tbody = getElement('announcementTableBody');
       if (!tbody) return;
-      tbody.innerHTML = announcements.length ? announcements.map(function(a) {
+      const annTotalPages = Math.max(1, Math.ceil(announcements.length / LIST_PAGE_SIZE));
+      if (announcementsCurrentPage > annTotalPages) announcementsCurrentPage = annTotalPages;
+      const annStart = (announcementsCurrentPage - 1) * LIST_PAGE_SIZE;
+      const annItems = announcements.slice(annStart, annStart + LIST_PAGE_SIZE);
+      tbody.innerHTML = annItems.length ? annItems.map(function(a) {
         const status = a.status === 'active' ? '<span class="status-paid">เปิดแสดง</span>' : '<span class="status-waiting">ปิดไว้ก่อน</span>';
         const scheduleStatus = getAnnouncementScheduleStatus(a);
         const scheduleClass = scheduleStatus === 'กำลังแสดง' ? 'status-paid' : (scheduleStatus === 'หมดอายุ' ? 'status-absent' : 'status-waiting');
         return '<tr><td>' + (a.title || '-') + '</td><td>' + (a.location || 'ทั้งหมด') + '</td><td>' + (a.grade || 'ทั้งหมด') + '</td><td>' + status + '</td><td>' + formatAnnouncementDisplayDate(a.publishStartAtText || a.publishStartAt) + '</td><td>' + formatAnnouncementDisplayDate(a.publishEndAtText || a.publishEndAt) + '</td><td><span class="' + scheduleClass + '">' + scheduleStatus + '</span></td><td><button class="btn btn-blue" type="button" onclick="editAnnouncement(\'' + jsArg(a.id) + '\')">แก้ไข</button><button class="btn btn-red" type="button" onclick="deleteAnnouncement(\'' + jsArg(a.id) + '\')">ลบ</button></td></tr>';
       }).join('') : '<tr><td colspan="8">ยังไม่มีประกาศ</td></tr>';
+      renderTablePagination('announcementsPagination', announcementsCurrentPage, annTotalPages, announcements.length, 'changeAnnouncementsPage');
       renderStudentAnnouncements();
+    }
+
+    function changeAnnouncementsPage(direction) {
+      const totalPages = Math.max(1, Math.ceil(announcements.length / LIST_PAGE_SIZE));
+      announcementsCurrentPage = Math.min(Math.max(1, announcementsCurrentPage + direction), totalPages);
+      renderAnnouncements();
     }
 
     function clearAnnouncementForm() {
@@ -22327,11 +22494,7 @@ function receiptStatusText(status) {
     function updatePaymentAmountSummary() {
       const selectedMonth = getElement('paymentStatusMonthFilter') ? getElement('paymentStatusMonthFilter').value : 'ทั้งหมด';
       const monthForExpected = selectedMonth && selectedMonth !== 'ทั้งหมด' ? selectedMonth : (paymentMonths[0] ? paymentMonths[0].month : '');
-      const visiblePaymentIds = Array.from(document.querySelectorAll('#paymentTableBody tr[data-payment-id]'))
-        .filter(function(row) { return row.style.display !== 'none'; })
-        .map(function(row) { return String(row.getAttribute('data-payment-id') || ''); });
-
-      const visiblePayments = payments.filter(function(p) { return visiblePaymentIds.includes(String(p.id || '')); });
+      const visiblePayments = getFilteredPaymentsForTable();
       const paidAmount = visiblePayments
         .filter(function(p) { return p.status === 'ชำระแล้ว'; })
         .reduce(function(sum, p) { return sum + getPaymentFinalAmount(p); }, 0);
@@ -23519,10 +23682,14 @@ function receiptStatusText(status) {
         container.innerHTML = '<p style="color:#6b7280;">ไม่พบข้อสอบที่ตรงกับตัวกรอง — ลองเปลี่ยน ระดับชั้น / วิชา</p>';
         return;
       }
+      const ebTotalPages = Math.max(1, Math.ceil(filtered.length / LIST_PAGE_SIZE));
+      if (examBankCurrentPage > ebTotalPages) examBankCurrentPage = ebTotalPages;
+      const ebStart = (examBankCurrentPage - 1) * LIST_PAGE_SIZE;
+      const ebItems = filtered.slice(ebStart, ebStart + LIST_PAGE_SIZE);
       container.innerHTML = '<div class="table-wrap"><table><thead><tr>' +
         '<th>ชื่อข้อสอบ</th><th>ระดับ</th><th>วิชา</th><th>ข้อ</th><th>หัวข้อ</th><th>Drive</th><th>จัดการ</th>' +
         '</tr></thead><tbody>' +
-        filtered.map(function(e) {
+        ebItems.map(function(e) {
           const testId = e.testId || e.firebaseDocId || '';
           const driveCell = e.driveViewUrl
             ? '<a href="' + escapeHtml(e.driveViewUrl) + '" target="_blank" rel="noopener">เปิด</a>' : '-';
@@ -23536,6 +23703,19 @@ function receiptStatusText(status) {
             '<td><button class="btn btn-dark" type="button" onclick="editExamFromBank(\'' + jsArg(testId) + '\')">แก้ไข</button></td>' +
           '</tr>';
         }).join('') + '</tbody></table></div>';
+      renderTablePagination('examBankPagination', examBankCurrentPage, ebTotalPages, filtered.length, 'changeExamBankPage');
+    }
+
+    function changeExamBankPage(direction) {
+      const gradeFilter = ((getElement('examBankGradeFilter') || {}).value) || 'ทั้งหมด';
+      const subjectFilter = ((getElement('examBankSubjectFilter') || {}).value) || 'ทั้งหมด';
+      const filtered = examBankItems.filter(function(e) {
+        return (gradeFilter === 'ทั้งหมด' || e.grade === gradeFilter) &&
+               (subjectFilter === 'ทั้งหมด' || e.subject === subjectFilter);
+      });
+      const totalPages = Math.max(1, Math.ceil(filtered.length / LIST_PAGE_SIZE));
+      examBankCurrentPage = Math.min(Math.max(1, examBankCurrentPage + direction), totalPages);
+      renderExamBankList();
     }
 
     function editExamFromBank(testId) {
@@ -23953,8 +24133,12 @@ function receiptStatusText(status) {
       });
 
       const sorted = Object.values(latestMap).sort(function(a, b) { return (b._ts || 0) - (a._ts || 0); });
+      const rpTotalPages = Math.max(1, Math.ceil(sorted.length / LIST_PAGE_SIZE));
+      if (reportsCurrentPage > rpTotalPages) reportsCurrentPage = rpTotalPages;
+      const rpStart = (reportsCurrentPage - 1) * LIST_PAGE_SIZE;
+      const rpItems = sorted.slice(rpStart, rpStart + LIST_PAGE_SIZE);
 
-      container.innerHTML = sorted.map(function(r) {
+      container.innerHTML = rpItems.map(function(r) {
         const passed     = (r.scorePercent || 0) >= 60;
         const cardBorder = passed ? '#bbf7d0' : '#fecaca';
         const cardBg     = passed ? '#f0fdf4' : '#fef2f2';
@@ -23990,6 +24174,25 @@ function receiptStatusText(status) {
           '</div>' +
         '</div>';
       }).join('');
+      renderTablePagination('reportsPagination', reportsCurrentPage, rpTotalPages, sorted.length, 'changeReportsPage');
+    }
+
+    function changeReportsPage(direction) {
+      const gradeFilter   = ((getElement('examReportGradeFilter')   || {}).value) || 'ทั้งหมด';
+      const subjectFilter = ((getElement('examReportSubjectFilter') || {}).value) || 'ทั้งหมด';
+      const filtered = examResultsCache.filter(function(r) {
+        return (gradeFilter   === 'ทั้งหมด' || r.grade   === gradeFilter) &&
+               (subjectFilter === 'ทั้งหมด' || r.subject === subjectFilter);
+      });
+      const latestMap = {};
+      filtered.forEach(function(r) {
+        const uid = r.studentUid || r.studentId || r.firebaseDocId || 'unknown';
+        const ts = r.createdAt && r.createdAt.seconds ? r.createdAt.seconds : 0;
+        if (!latestMap[uid] || ts > (latestMap[uid]._ts || 0)) latestMap[uid] = Object.assign({ _ts: ts }, r);
+      });
+      const totalPages = Math.max(1, Math.ceil(Object.keys(latestMap).length / LIST_PAGE_SIZE));
+      reportsCurrentPage = Math.min(Math.max(1, reportsCurrentPage + direction), totalPages);
+      renderReports();
     }
 
     /**
