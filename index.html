@@ -2630,17 +2630,6 @@
                   </select>
                 </div>
                 <div>
-                  <label>สถานะชำระเงิน</label>
-                  <select id="adminStudentPaymentStatus">
-                    <option>ยังไม่ได้สมัครคอร์ส</option>
-                    <option>รอชำระเงิน</option>
-                    <option>รอตรวจสลิป</option>
-                    <option>ชำระแล้ว</option>
-                    <option>ค้างชำระ</option>
-                    <option>สลิปไม่ผ่าน</option>
-                  </select>
-                </div>
-                <div>
                   <label>สถานะการเรียน</label>
                   <select id="adminStudentLearningStatus">
                     <option value="เรียนอยู่">เรียนอยู่</option>
@@ -9580,6 +9569,26 @@
       '</div>';
     }
 
+    function getStudentLatestPaymentStatus(student) {
+      if (!Array.isArray(payments)) return student.paymentStatus || '-';
+      const studentPayments = payments.filter(function(p) {
+        return isStudentPaymentRecord(student, p) && !!(p.paymentMonth || p.month || p.billingMonth);
+      });
+      if (!studentPayments.length) return 'ยังไม่มีรายการเรียกเก็บ';
+      const sorted = studentPayments.slice().sort(function(a, b) {
+        return String(b.id || '').localeCompare(String(a.id || ''));
+      });
+      const latest = sorted[0];
+      const slipStatus = String(latest.slipStatus || '').toLowerCase();
+      const status = String(latest.status || latest.paymentStatus || '');
+      if (slipStatus === 'approved' || status === 'ชำระแล้ว') return 'ชำระแล้ว';
+      if (slipStatus === 'waiting_admin_review' || status === 'รอตรวจสลิป') return 'รอตรวจสลิป';
+      if (slipStatus === 'rejected' || status === 'สลิปไม่ผ่าน') return 'สลิปไม่ผ่าน';
+      if (status === 'ค้างชำระ') return 'ค้างชำระ';
+      if (status === 'รอชำระเงิน') return 'รอชำระเงิน';
+      return status || 'รอชำระเงิน';
+    }
+
     function renderAdminStudents() {
       const tbody = getElement('adminStudentTableBody');
       if (!tbody) return;
@@ -9599,7 +9608,7 @@
           : '';
         const learningClass = learningStatus === 'เรียนอยู่' || learningStatus === 'จบคอร์ส' ? 'status-paid' : learningStatus === 'พักเรียน' ? 'status-waiting' : 'status-absent';
         const courseStatus = s.courseStatus || 'ยังไม่ได้สมัครคอร์ส';
-        const paymentStatus = s.paymentStatus || 'ยังไม่ได้สมัครคอร์ส';
+        const paymentStatus = getStudentLatestPaymentStatus(s);
         const courseStatusClass = courseStatus === 'อนุมัติแล้ว' ? 'status-paid' : courseStatus === 'รออนุมัติคอร์ส' ? 'status-waiting' : 'status-absent';
         const paymentClass = paymentStatus === 'ชำระแล้ว' ? 'status-paid' : paymentStatus === 'รอตรวจสลิป' || paymentStatus === 'รอชำระเงิน' ? 'status-waiting' : paymentStatus === 'ค้างชำระ' || paymentStatus === 'สลิปไม่ผ่าน' ? 'status-absent' : 'status-parent';
         return '<tr>' +
@@ -9643,7 +9652,6 @@
       const preferredLocation = getElement('adminStudentPreferredLocation') ? getElement('adminStudentPreferredLocation').value : '';
       const courseValue = getElement('adminStudentCourse').value;
       const courseStatusInput = getElement('adminStudentCourseStatus') ? getElement('adminStudentCourseStatus').value : '';
-      const paymentStatusInput = getElement('adminStudentPaymentStatus') ? getElement('adminStudentPaymentStatus').value : '';
       const learningStatus = getElement('adminStudentLearningStatus') ? getElement('adminStudentLearningStatus').value : 'เรียนอยู่';
       const learningType = normalizeStudentLearningType(getElement('adminStudentLearningType') ? getElement('adminStudentLearningType').value : 'group');
       const privateLessonTeacherId = getElement('adminStudentPrivateLessonTeacher') ? getElement('adminStudentPrivateLessonTeacher').value : '';
@@ -9686,7 +9694,7 @@
           s.courseId = selectedCourse ? selectedCourse.id : null;
           s.courseAccess = selectedCourse ? selectedCourse.access : '-';
           s.courseStatus = selectedCourse ? (courseStatusInput || s.courseStatus || 'อนุมัติแล้ว') : 'ยังไม่ได้สมัครคอร์ส';
-          s.paymentStatus = selectedCourse ? (paymentStatusInput || s.paymentStatus || 'รอชำระเงิน') : 'ยังไม่ได้สมัครคอร์ส';
+          s.paymentStatus = !selectedCourse ? 'ยังไม่ได้สมัครคอร์ส' : (s.paymentStatus || 'รอชำระเงิน');
           s.status = learningStatus;
           s.learningStatus = learningStatus;
           s.learningType = learningType;
@@ -9784,7 +9792,7 @@
             courseId: selectedCourse ? selectedCourse.id : null,
             courseAccess: selectedCourse ? selectedCourse.access : '-',
             courseStatus: selectedCourse ? (courseStatusInput || 'อนุมัติแล้ว') : 'ยังไม่ได้สมัครคอร์ส',
-            paymentStatus: selectedCourse ? (paymentStatusInput || 'รอชำระเงิน') : 'ยังไม่ได้สมัครคอร์ส',
+            paymentStatus: selectedCourse ? 'รอชำระเงิน' : 'ยังไม่ได้สมัครคอร์ส',
             status: learningStatus,
             learningStatus: learningStatus,
             learningType: learningType,
@@ -9939,14 +9947,6 @@
             '<option' + ((s.courseStatus || '') === 'ยกเลิก' ? ' selected' : '') + '>ยกเลิก</option>' +
             '<option' + ((s.courseStatus || '') === 'ไม่อนุมัติ' ? ' selected' : '') + '>ไม่อนุมัติ</option>' +
           '</select></div>' +
-          '<div><label>สถานะชำระเงิน</label><select id="bubbleStudentPaymentStatus">' +
-            '<option' + ((s.paymentStatus || 'ยังไม่ได้สมัครคอร์ส') === 'ยังไม่ได้สมัครคอร์ส' ? ' selected' : '') + '>ยังไม่ได้สมัครคอร์ส</option>' +
-            '<option' + ((s.paymentStatus || '') === 'รอชำระเงิน' ? ' selected' : '') + '>รอชำระเงิน</option>' +
-            '<option' + ((s.paymentStatus || '') === 'รอตรวจสลิป' ? ' selected' : '') + '>รอตรวจสลิป</option>' +
-            '<option' + ((s.paymentStatus || '') === 'ชำระแล้ว' ? ' selected' : '') + '>ชำระแล้ว</option>' +
-            '<option' + ((s.paymentStatus || '') === 'ค้างชำระ' ? ' selected' : '') + '>ค้างชำระ</option>' +
-            '<option' + ((s.paymentStatus || '') === 'สลิปไม่ผ่าน' ? ' selected' : '') + '>สลิปไม่ผ่าน</option>' +
-          '</select></div>' +
           '<div><label>สถานะการเรียน</label><select id="bubbleStudentLearningStatus"><option value="เรียนอยู่"' + ((s.learningStatus || s.status || 'เรียนอยู่') === 'เรียนอยู่' ? ' selected' : '') + '>เรียนอยู่</option><option value="พักเรียน"' + ((s.learningStatus || s.status) === 'พักเรียน' ? ' selected' : '') + '>พักเรียน</option><option value="ลาออก"' + ((s.learningStatus || s.status) === 'ลาออก' ? ' selected' : '') + '>ลาออก</option><option value="จบคอร์ส"' + ((s.learningStatus || s.status) === 'จบคอร์ส' ? ' selected' : '') + '>จบคอร์ส</option></select></div>' +
         '</div>' +
         '<div class="notice"><strong>ข้อมูลเรียนเดี่ยว 1:1</strong><p>เลือกวันประจำสัปดาห์ เวลา และครู แล้วค่อยส่งไปลงวันที่จริงในหน้าจัดตาราง</p></div>' +
@@ -10000,7 +10000,7 @@
             courseId: selectedCourse ? selectedCourse.id : null,
             courseAccess: selectedCourse ? selectedCourse.access : '-',
             courseStatus: selectedCourse ? bubbleSelectValue('bubbleStudentCourseStatus') : 'ยังไม่ได้สมัครคอร์ส',
-            paymentStatus: selectedCourse ? bubbleSelectValue('bubbleStudentPaymentStatus') : 'ยังไม่ได้สมัครคอร์ส',
+            paymentStatus: !selectedCourse ? 'ยังไม่ได้สมัครคอร์ส' : (s.paymentStatus || 'รอชำระเงิน'),
             learningStatus: bubbleSelectValue('bubbleStudentLearningStatus'),
             status: bubbleSelectValue('bubbleStudentLearningStatus'),
             learningType: learningType,
@@ -10129,7 +10129,6 @@
       if (getElement('adminStudentSchool')) getElement('adminStudentSchool').value = '';
       if (getElement('adminStudentPreferredLocation')) getElement('adminStudentPreferredLocation').value = 'IDEA CLUB ศูนย์ นครสวรรค์';
       if (getElement('adminStudentCourseStatus')) getElement('adminStudentCourseStatus').value = 'ยังไม่ได้สมัครคอร์ส';
-      if (getElement('adminStudentPaymentStatus')) getElement('adminStudentPaymentStatus').value = 'ยังไม่ได้สมัครคอร์ส';
       if (getElement('adminStudentLearningStatus')) getElement('adminStudentLearningStatus').value = 'เรียนอยู่';
       if (getElement('adminStudentLearningType')) getElement('adminStudentLearningType').value = 'group';
       if (getElement('adminStudentPrivateLessonDay')) getElement('adminStudentPrivateLessonDay').value = '';
