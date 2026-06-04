@@ -12990,6 +12990,7 @@ function getCourseOnlineDocs(course, includeInactive) {
 
 
       if (getElement('studentPaymentCourseName')) getElement('studentPaymentCourseName').textContent = selectedCourse ? selectedCourse.name : '-';
+      refreshStudentPaymentMonthSelect();
       const selectedPaymentMonth = getStudentSelectedPaymentMonth();
       const selectedPaymentAmount = currentStudent && selectedPaymentMonth && selectedPaymentMonth !== '-'
         ? getCurrentStudentAdjustedPaymentAmount(selectedPaymentMonth)
@@ -13803,6 +13804,23 @@ function getCourseOnlineDocs(course, includeInactive) {
       if (clearMessage !== false && getElement('lineGroupSaveResult')) getElement('lineGroupSaveResult').textContent = '';
     }
 
+    function refreshStudentPaymentMonthSelect() {
+      const studentSelect = getElement('studentPaymentMonth');
+      if (!studentSelect) return;
+      const monthOptions = getStudentPaymentMonthOptions();
+      const currentValue = studentSelect.value;
+      if (!monthOptions.length) {
+        studentSelect.innerHTML = '<option value="">ยังไม่มีรายการเรียกเก็บเงิน</option>';
+        studentSelect.value = '';
+      } else {
+        studentSelect.innerHTML = monthOptions.map(function(month) {
+          return '<option value="' + escapeHtml(month) + '">' + escapeHtml(month) + '</option>';
+        }).join('');
+        studentSelect.value = monthOptions.includes(currentValue) ? currentValue : monthOptions[0];
+      }
+      updateStudentSelectedPaymentMonth();
+    }
+
     function updateStudentSelectedPaymentMonth() {
       const month = getStudentSelectedPaymentMonth();
       const selectedPayment = currentStudent && month ? getStudentPaymentForSelectedMonth() : null;
@@ -13847,7 +13865,7 @@ function getCourseOnlineDocs(course, includeInactive) {
 
       if (!Array.isArray(paymentMonths) || paymentMonths.length === 0) {
         tbody.innerHTML = '<tr><td colspan="5">ยังไม่มีเดือนชำระเงิน ให้เพิ่มจากฟอร์มด้านบน</td></tr>';
-        if (studentSelect) studentSelect.innerHTML = '<option value="">ยังไม่มีเดือนชำระเงิน</option>';
+        refreshStudentPaymentMonthSelect();
         if (statusFilter) statusFilter.innerHTML = '<option value="ทั้งหมด">ทั้งหมด</option>';
         if (priceMonthSelect) priceMonthSelect.innerHTML = '<option value="">ยังไม่มีเดือนชำระเงิน</option>';
         renderReceiptMonthFilter();
@@ -13865,20 +13883,7 @@ function getCourseOnlineDocs(course, includeInactive) {
         return '<tr><td>' + (index + 1) + '</td><td>' + item.month + '</td><td>' + (priceCount ? 'ตั้งราคาแล้ว ' + priceCount + ' คอร์ส' : 'ใช้ราคาปกติจากคอร์ส') + '</td><td>' + visibleBadge + '</td><td><button class="btn btn-blue" type="button" onclick="' + actionCall('selectPaymentMonthForPricing', item.month) + '">เลือกเดือนนี้</button><button class="btn ' + toggleClass + '" type="button" onclick="' + actionCall('togglePaymentMonthStudentVisibility', item.id) + '">' + toggleLabel + '</button><button class="btn btn-red" type="button" onclick="' + actionCall('deletePaymentMonth', item.id) + '">ลบ</button></td></tr>';
       }).join('');
 
-      if (studentSelect) {
-        const studentMonths = getStudentPaymentMonthOptions();
-        const currentStudentMonth = studentSelect.value || (studentMonths[0] || '');
-        if (!studentMonths.length) {
-          studentSelect.innerHTML = '<option value="">ยังไม่มีเดือนชำระเงิน</option>';
-          studentSelect.value = '';
-        } else {
-          studentSelect.innerHTML = studentMonths.map(function(month) {
-            return '<option value="' + month + '">' + month + '</option>';
-          }).join('');
-          studentSelect.value = studentMonths.includes(currentStudentMonth) ? currentStudentMonth : (studentMonths[0] || '');
-        }
-        updateStudentSelectedPaymentMonth();
-      }
+      refreshStudentPaymentMonthSelect();
 
       if (dashboardMonthFilter) {
         const currentDashboardMonth = dashboardMonthFilter.value || (paymentMonths[0] ? paymentMonths[0].month : '');
