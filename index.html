@@ -3024,16 +3024,7 @@
                   </select>
                 </div>
                 <div>
-                  <label>วันเรียน</label>
-                  <div style="display:grid; grid-template-columns:repeat(2, minmax(120px, 1fr)); gap:8px; background:#f9fafb; padding:12px; border:1px solid #d1d5db; border-radius:12px;">
-                    <label style="font-weight:normal;"><input type="checkbox" class="course-day" value="จันทร์" style="width:auto;" /> จันทร์</label>
-                    <label style="font-weight:normal;"><input type="checkbox" class="course-day" value="อังคาร" style="width:auto;" /> อังคาร</label>
-                    <label style="font-weight:normal;"><input type="checkbox" class="course-day" value="พุธ" style="width:auto;" /> พุธ</label>
-                    <label style="font-weight:normal;"><input type="checkbox" class="course-day" value="พฤหัสบดี" style="width:auto;" /> พฤหัสบดี</label>
-                    <label style="font-weight:normal;"><input type="checkbox" class="course-day" value="ศุกร์" style="width:auto;" /> ศุกร์</label>
-                    <label style="font-weight:normal;"><input type="checkbox" class="course-day" value="เสาร์" style="width:auto;" /> เสาร์</label>
-                    <label style="font-weight:normal;"><input type="checkbox" class="course-day" value="อาทิตย์" style="width:auto;" /> อาทิตย์</label>
-                  </div>
+                  <p class="mini-muted" style="margin:4px 0 0;">วันและเวลาเรียนจะแสดงจากการตั้งค่าในส่วน <strong>เวลาเรียนของคอร์ส</strong> ด้านล่าง</p>
                 </div>
               </div>
 
@@ -3095,8 +3086,7 @@
                     <th class="sortable" onclick="sortData('courses','price')">ราคา</th>
                     <th class="sortable" onclick="sortData('courses','access')">สิทธิ์</th>
                     <th class="sortable" onclick="sortData('courses','location')">สถานที่เรียน</th>
-                    <th>วันเรียน</th>
-                    <th>เวลาเรียน</th>
+                    <th>วันเวลาเรียน</th>
                     <th>ฟังก์ชันที่เปิด</th>
                     <th class="sortable" onclick="sortData('courses','status')">สถานะ</th>
                     <th>จัดการ</th>
@@ -3799,9 +3789,12 @@
               </p>
               <div style="display:flex;gap:10px;flex-wrap:wrap;">
                 <button class="btn btn-blue" type="button" onclick="syncExamBankFromDrive()">🔄 Sync ข้อสอบจาก Google Drive</button>
-                <button class="btn btn-dark" type="button" onclick="seedExamBank()" title="เพิ่มข้อสอบตัวอย่างสำหรับทดสอบระบบ — idempotent">🌱 เพิ่มข้อสอบทดสอบ</button>
+                <button class="btn btn-dark" type="button" onclick="seedExamBank()" title="เพิ่มข้อสอบตัวอย่าง 3 ชุด (ป.4/ป.5/ป.6) — idempotent">🌱 เพิ่มข้อสอบทดสอบ</button>
+                <button class="btn btn-dark" type="button" onclick="seedLearningMaterials()" title="เพิ่ม learning materials ตัวอย่าง 6 รายการ — idempotent">📚 เพิ่ม Learning Materials</button>
               </div>
-              <p style="color:#6b7280;font-size:0.82em;margin-top:6px;">ปุ่ม "เพิ่มข้อสอบทดสอบ" จะเพิ่ม 3 ชุดข้อสอบตัวอย่าง (ป.4/ป.5/ป.6) เข้า examBank — ไม่ทับข้อมูลที่มีอยู่</p>
+              <p style="color:#6b7280;font-size:0.82em;margin-top:6px;">
+                ปุ่ม seed จะเพิ่มข้อมูลตัวอย่างเข้า Firestore โดยตรง — ปลอดภัย ไม่ทับข้อมูลที่มีอยู่แล้ว (idempotent)
+              </p>
               <p id="examSyncStatus" style="margin-top:8px; font-weight:bold;"></p>
             </div>
 
@@ -11537,7 +11530,7 @@
       const filtered = courses.filter(function(c) { return c.grade === grade && c.status === 'open' && isCourseInCurrentStudentCenter(c); });
       list.innerHTML = filtered.length ? filtered.map(function(c) {
         const scheduleSummary = formatCourseScheduleSummary(c);
-        return '<div class="card"><span class="tag">' + c.grade + ' · ' + getStudentCourseTag(c) + '</span><h3>' + c.name + '</h3><p>' + c.desc + '</p>' + renderCourseFeatureBadges(c) + '<p><strong>สถานที่เรียน:</strong> ' + c.location + '</p><p><strong>วันเรียน:</strong> ' + ((c.days || []).join(' / ') || '-') + '</p>' + (scheduleSummary !== '-' ? '<p><strong>เวลาเรียน:</strong> ' + scheduleSummary + '</p>' : '') + '<p class="price">' + formatPrice(getCourseMonthlyPrice(c)) + ' / เดือน</p>' + renderStudentCourseApplyState(c) + '</div>';
+        return '<div class="card"><span class="tag">' + c.grade + ' · ' + getStudentCourseTag(c) + '</span><h3>' + c.name + '</h3><p>' + c.desc + '</p>' + renderCourseFeatureBadges(c) + '<p><strong>สถานที่เรียน:</strong> ' + c.location + '</p><p><strong>วันเวลาเรียน:</strong> ' + (getCourseDisplaySchedule(c) || '-') + '</p>' + '<p class="price">' + formatPrice(getCourseMonthlyPrice(c)) + ' / เดือน</p>' + renderStudentCourseApplyState(c) + '</div>';
       }).join('') : '<div class="card"><h3>ยังไม่มีคอร์สเปิดรับสมัครตามข้อมูลที่ลงทะเบียนไว้</h3><p>ระดับชั้น ' + grade + ' ที่ ' + studentLocation + ' ยังไม่มีคอร์สเปิดรับสมัครในขณะนี้</p></div>';
     }
 
@@ -11724,16 +11717,27 @@
       return parts.length ? parts.join(' / ') : '-';
     }
 
+    function getCourseDisplaySchedule(course) {
+      if (!course) return '';
+      const summary = formatCourseScheduleSummary(course);
+      if (summary !== '-') return summary;
+      if (course.onlineClassDay) {
+        return 'Online ' + course.onlineClassDay + (course.onlineClassTime ? ' ' + course.onlineClassTime : '');
+      }
+      if (course.days && course.days.length) return course.days.join(' / ');
+      return '';
+    }
+
     function renderAdminCourses() {
       const tbody = getElement('adminCourseTableBody');
       if (!tbody) return;
       if (!Array.isArray(courses) || courses.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="10">ยังไม่มีคอร์สในระบบ ให้เพิ่มคอร์สใหม่จากฟอร์มด้านบน</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="9">ยังไม่มีคอร์สในระบบ ให้เพิ่มคอร์สใหม่จากฟอร์มด้านบน</td></tr>';
         return;
       }
       tbody.innerHTML = courses.map(function(c) {
         const statusText = c.status === 'open' ? '<span class="status-paid">เปิดรับสมัคร</span>' : '<span class="status-absent">ปิดรับสมัคร</span>';
-        return '<tr><td>' + c.grade + '</td><td>' + c.name + '</td><td>' + formatPrice(c.price) + '</td><td>' + getCourseAccessLabel(c) + '</td><td>' + c.location + '</td><td>' + ((c.days || []).join(' / ') || '-') + '</td><td>' + formatCourseScheduleSummary(c) + '</td><td>' + renderCourseFeatureSummary(c) + '</td><td>' + statusText + '</td><td><button class="btn btn-blue" type="button" onclick="' + actionCall('editCourse', c.id) + '">แก้ไข</button><button class="btn btn-red" type="button" onclick="' + actionCall('deleteCourse', c.id) + '">ลบ</button></td></tr>';
+        return '<tr><td>' + c.grade + '</td><td>' + c.name + '</td><td>' + formatPrice(c.price) + '</td><td>' + getCourseAccessLabel(c) + '</td><td>' + c.location + '</td><td>' + (getCourseDisplaySchedule(c) || '-') + '</td><td>' + renderCourseFeatureSummary(c) + '</td><td>' + statusText + '</td><td><button class="btn btn-blue" type="button" onclick="' + actionCall('editCourse', c.id) + '">แก้ไข</button><button class="btn btn-red" type="button" onclick="' + actionCall('deleteCourse', c.id) + '">ลบ</button></td></tr>';
       }).join('');
     }
 
@@ -12287,9 +12291,8 @@ function getCourseOnlineDocs(course, includeInactive) {
       const price = Number(getElement('adminCoursePrice').value || 0);
       const access = getElement('adminCourseAccess').value;
       const location = getElement('adminCourseLocation').value;
-      const days = getSelectedCourseDays();
       const scheduleDefaults = readCourseScheduleRows();
-      const mergedDays = mergeCourseDaysWithScheduleDays(days, scheduleDefaults);
+      const mergedDays = getCourseScheduleDays(scheduleDefaults);
       const status = getElement('adminCourseStatus').value;
       const features = getSelectedCourseFeatures('.course-feature');
       const desc = getElement('adminCourseDesc').value.trim();
@@ -12359,7 +12362,7 @@ function getCourseOnlineDocs(course, includeInactive) {
           '<div><label>สถานที่เรียน</label><select id="bubbleCourseLocation"><option' + (c.location === 'IDEA CLUB ศูนย์ นครสวรรค์' ? ' selected' : '') + '>IDEA CLUB ศูนย์ นครสวรรค์</option><option' + (c.location === 'IDEA CLUB ศูนย์ หนองฉาง' ? ' selected' : '') + '>IDEA CLUB ศูนย์ หนองฉาง</option></select></div>' +
           '<div><label>สถานะคอร์ส</label><select id="bubbleCourseStatus"><option value="open"' + (c.status === 'open' ? ' selected' : '') + '>เปิดรับสมัคร</option><option value="closed"' + (c.status === 'closed' ? ' selected' : '') + '>ปิดรับสมัคร</option></select></div>' +
         '</div>' +
-        '<label>วันเรียน</label><div style="display:grid; grid-template-columns:repeat(2, minmax(120px,1fr)); gap:8px; background:#f9fafb; padding:12px; border:1px solid #d1d5db; border-radius:12px; margin-bottom:14px;">' + dayCheckboxesHtml(c.days || []) + '</div>' +
+        '<p class="mini-muted" style="margin:0 0 14px;">วันและเวลาเรียนจะแสดงจากการตั้งค่าในส่วน <strong>เวลาเรียนของคอร์ส</strong> ด้านล่าง</p>' +
         '<div class="permission-panel"><h3 style="font-size:18px;">เวลาเรียนของคอร์ส</h3><p class="mini-muted">ตั้งเวลาเรียนเริ่มต้นเพื่อดึงไปใช้ในแผนสอนรายเดือน</p><div class="table-wrap" style="margin-bottom:12px;"><table><thead><tr><th>ประเภท</th><th>วัน</th><th>เวลาเริ่ม</th><th>เวลาจบ / เผยแพร่</th><th>จัดการ</th></tr></thead><tbody id="bubbleCourseScheduleTableBody"></tbody></table></div><button class="btn btn-blue" type="button" onclick="addCourseScheduleSlot(\'onsite\', \'bubble\')">เพิ่ม Onsite</button><button class="btn btn-blue" type="button" onclick="addCourseScheduleSlot(\'online\', \'bubble\')">เพิ่ม Online</button><button class="btn btn-dark" type="button" onclick="addCourseScheduleSlot(\'ondemand\', \'bubble\')">เพิ่ม On-demand</button></div>' +
         '<div class="permission-panel"><h3 style="font-size:18px;">เปิด / ปิดฟังก์ชันของคอร์สนี้</h3><p class="mini-muted">กำหนดเมนูที่นักเรียนจะเห็นสำหรับคอร์สนี้</p><div id="bubbleCourseFeatureList" class="course-feature-grid">' + courseFeatureCheckboxesHtml(normalizeCourseFeatures(c), 'bubble-course-feature') + '</div></div>' +
         '<label>รายละเอียดคอร์ส</label><textarea id="bubbleCourseDesc">' + (c.desc || '') + '</textarea>',
@@ -12372,7 +12375,6 @@ function getCourseOnlineDocs(course, includeInactive) {
             return;
           }
           const scheduleDefaults = readCourseScheduleRows('bubble');
-          const days = Array.from(document.querySelectorAll('.bubbleCourseDay:checked')).map(function(input) { return input.value; });
           Object.assign(c, {
             name: name,
             grade: bubbleSelectValue('bubbleCourseGrade'),
@@ -12380,7 +12382,7 @@ function getCourseOnlineDocs(course, includeInactive) {
             monthlyPrice: price,
             access: bubbleSelectValue('bubbleCourseAccess'),
             location: bubbleSelectValue('bubbleCourseLocation'),
-            days: mergeCourseDaysWithScheduleDays(days, scheduleDefaults),
+            days: getCourseScheduleDays(scheduleDefaults),
             scheduleDefaults: scheduleDefaults,
             status: bubbleSelectValue('bubbleCourseStatus'),
             features: getSelectedCourseFeatures('.bubble-course-feature'),
@@ -12427,7 +12429,6 @@ function getCourseOnlineDocs(course, includeInactive) {
       getElement('adminCoursePrice').value = '';
       getElement('adminCourseAccess').value = 'Online';
       getElement('adminCourseLocation').value = 'IDEA CLUB ศูนย์ นครสวรรค์';
-      setSelectedCourseDays([]);
       renderCourseScheduleRows(null);
       getElement('adminCourseStatus').value = 'open';
       setSelectedCourseFeatures(getDefaultCourseFeaturesByAccess('Online'), 'Online');
@@ -12887,7 +12888,7 @@ function getCourseOnlineDocs(course, includeInactive) {
         getElement('studentDashClassToday').className = 'status-badge ' + (isApprovedForHome && hasClassToday ? 'present' : 'parent');
       }
       if (getElement('studentDashClassDetail')) {
-        getElement('studentDashClassDetail').textContent = !selectedCourse ? 'สมัครคอร์สก่อนจึงจะเห็นห้องเรียน' : (!isApprovedForHome ? 'รอเจ้าหน้าที่ตรวจสอบการชำระเงิน' : ((selectedCourse.days || []).join(' / ') || 'ยังไม่ได้ตั้งวันเรียน'));
+        getElement('studentDashClassDetail').textContent = !selectedCourse ? 'สมัครคอร์สก่อนจึงจะเห็นห้องเรียน' : (!isApprovedForHome ? 'รอเจ้าหน้าที่ตรวจสอบการชำระเงิน' : (getCourseDisplaySchedule(selectedCourse) || 'ยังไม่ได้ตั้งวันเรียน'));
       }
 
       const latestScore = isApprovedForHome ? getLatestPublishedScoreInfo() : null;
@@ -12970,7 +12971,7 @@ function getCourseOnlineDocs(course, includeInactive) {
         !hasRegisteredCourse ? 'ยังไม่ได้สมัครคอร์ส' : (!isApproved ? 'รออนุมัติคอร์ส' : (hasClassToday ? 'มีเรียนวันนี้' : 'ไม่มีเรียนวันนี้'))
       );
       setStudentMobileText('studentMobileTodayClassDetail',
-        !selectedCourse ? 'สมัครคอร์สก่อนจึงจะเห็นห้องเรียน' : (!isApproved ? 'รอเจ้าหน้าที่ตรวจสอบการชำระเงิน' : ((selectedCourse.days || []).join(' / ') || 'ยังไม่ได้ตั้งวันเรียน'))
+        !selectedCourse ? 'สมัครคอร์สก่อนจึงจะเห็นห้องเรียน' : (!isApproved ? 'รอเจ้าหน้าที่ตรวจสอบการชำระเงิน' : (getCourseDisplaySchedule(selectedCourse) || 'ยังไม่ได้ตั้งวันเรียน'))
       );
       setStudentMobileTag('studentMobileTodayClassTag', today || 'วันนี้');
 
@@ -22678,7 +22679,7 @@ function receiptStatusText(status) {
       if (!course) return { ready: false, issues: ['ไม่พบข้อมูลคอร์ส'] };
       if (!course.price || Number(course.price) <= 0) issues.push('ยังไม่ได้ตั้งราคา');
       if (!course.location) issues.push('ยังไม่ได้ตั้งศูนย์ / สถานที่เรียน');
-      if (!course.days || !course.days.length) issues.push('ยังไม่ได้ตั้งวันเรียน');
+      if (!hasCourseScheduleDefaults(course) && (!course.days || !course.days.length)) issues.push('ยังไม่ได้ตั้งวันเรียน');
       if (!course.onlineLink && !course.roomId) issues.push('ยังไม่มีห้องเรียน Online');
       if (!getCourseLineGroup(course)) issues.push('ยังไม่มี LINE กลุ่มสำหรับการสื่อสาร');
       if (!paymentQrData && !(systemSettings && systemSettings.qrUrl)) issues.push('ยังไม่มี QR Code รับชำระเงิน');
@@ -23608,18 +23609,27 @@ function receiptStatusText(status) {
         if (!functionsApi) throw new Error('Cloud Functions ยังไม่พร้อม');
         const fn = functionsApi.httpsCallable('syncExamBankFromDrive');
         const result = await fn({ folderId: '16t5boPIY4736OkQLv3S7JWZ02QvQeqBW' });
-        const synced = (result.data && result.data.synced) || 0;
-        if (statusEl) { statusEl.style.color = '#16a34a'; statusEl.textContent = '✅ Sync สำเร็จ: ' + synced + ' ไฟล์จาก Drive'; }
+        const d = result.data || {};
+        // สร้าง summary message แบบครบถ้วน
+        let msg = '✅ Sync สำเร็จ: ' + (d.synced || 0) + ' ไฟล์';
+        if (d.skipped) msg += ' · ข้าม ' + d.skipped + ' (มี answerKey แล้ว)';
+        if (d.errors) msg += ' · ⚠️ error ' + d.errors + ' ไฟล์';
+        if (d.message) msg += ' — ' + d.message;
+        if (statusEl) { statusEl.style.color = d.errors ? '#d97706' : '#16a34a'; statusEl.textContent = msg; }
+        // แสดง errorDetails ใน console สำหรับ debug
+        if (d.errorDetails && d.errorDetails.length) console.warn('syncExamBankFromDrive errors:', d.errorDetails);
         await loadExamBank();
       } catch (error) {
-        console.warn('syncExamBankFromDrive stub:', error);
-        // Stub — แสดงคำแนะนำและยังคง load ข้อมูลที่มีอยู่
+        console.warn('syncExamBankFromDrive error:', error);
         if (statusEl) {
           statusEl.style.color = '#d97706';
-          statusEl.textContent = '⚠️ Cloud Function ยังไม่ deploy — Stub mode: ข้อมูลจะ Sync ได้เมื่อ deploy functions/syncExamBankFromDrive';
+          // แยก error "CF ยังไม่ deploy" กับ error จริง
+          const isCFNotReady = error.message && (error.message.includes('deploy') || error.message.includes('NOT_FOUND') || error.message.includes('ยังไม่พร้อม'));
+          statusEl.textContent = isCFNotReady
+            ? '⚠️ Cloud Function ยังไม่ deploy — รัน: firebase deploy --only functions:syncExamBankFromDrive'
+            : '❌ Sync ไม่สำเร็จ: ' + (error.message || 'ตรวจสอบ service account และสิทธิ์ Drive');
         }
-        // ยังโหลด examBank ที่อยู่ใน Firestore แล้ว (อาจเพิ่มด้วยมือ)
-        await loadExamBank();
+        await loadExamBank(); // โหลดข้อมูลที่มีอยู่แล้วต่อ
       }
     }
 
@@ -24340,16 +24350,32 @@ function receiptStatusText(status) {
       }
 
       if (materials.length) {
-        html += '<h4 style="margin-top:14px;">📚 สื่อการเรียนที่แนะนำ</h4><ul style="margin-left:16px;">';
-        materials.forEach(function(m) {
-          const link = m.url ? ' <a href="' + escapeHtml(m.url) + '" target="_blank" rel="noopener">เปิดสื่อ</a>' : '';
-          html += '<li><strong>' + escapeHtml(m.title || '-') + '</strong>' +
-            (m.description ? ' — ' + escapeHtml(m.description) : '') + link + '</li>';
-        });
-        html += '</ul>';
+        html += '<h4 style="margin-top:14px;margin-bottom:8px;">📚 สื่อการเรียนที่แนะนำ (' + materials.length + ' รายการ)</h4>';
+        html += materials.map(function(m) {
+          const typeLabel = m.type === 'video' ? '🎬 วิดีโอ' : m.type === 'worksheet' ? '📄 ใบงาน' : '📖 บทเรียน';
+          const gradeLabel = m.grade ? (' · ' + escapeHtml(m.grade)) : '';
+          const topicsLabel = (m.topics || []).length ? (' · ' + escapeHtml(m.topics.join(', '))) : '';
+          const linkBtn = m.url
+            ? '<a href="' + escapeHtml(m.url) + '" target="_blank" rel="noopener" class="btn btn-blue" style="font-size:0.82em;padding:4px 10px;">เปิดสื่อ</a>'
+            : '<span style="color:#9ca3af;font-size:0.82em;">ยังไม่มี URL</span>';
+          return '<div style="border:1px solid #e5e7eb;border-radius:8px;padding:10px 12px;margin-bottom:8px;background:#fff;">' +
+            '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;">' +
+              '<div>' +
+                '<div style="font-weight:bold;">' + escapeHtml(m.title || '-') + '</div>' +
+                '<div style="font-size:0.82em;color:#6b7280;margin-top:2px;">' +
+                  typeLabel + gradeLabel + topicsLabel +
+                '</div>' +
+                (m.description ? '<div style="font-size:0.85em;color:#374151;margin-top:4px;">' + escapeHtml(m.description) + '</div>' : '') +
+              '</div>' +
+              '<div style="flex-shrink:0;">' + linkBtn + '</div>' +
+            '</div>' +
+          '</div>';
+        }).join('');
       } else if (weakTopics.length) {
-        html += '<p style="color:#6b7280;margin-top:8px;font-size:0.9em;">ยังไม่มีสื่อในระบบสำหรับ weak topics เหล่านี้ — ' +
-          'Admin สามารถเพิ่มได้ใน collection <code>learningMaterials</code></p>';
+        html += '<div style="background:#fefce8;border:1px solid #fde68a;border-radius:8px;padding:10px 12px;margin-top:8px;">' +
+          '<p style="color:#92400e;font-size:0.9em;margin:0;">ยังไม่มีสื่อในระบบสำหรับ weak topics เหล่านี้<br>' +
+          'Admin สามารถเพิ่มได้ในปุ่ม <strong>"📚 เพิ่ม Learning Materials"</strong> ด้านบน หรือบันทึกเข้า collection <code>learningMaterials</code> โดยตรง</p>' +
+          '</div>';
       }
 
       area.innerHTML = html;
@@ -24530,6 +24556,89 @@ function receiptStatusText(status) {
         await loadExamBank();
       } catch (error) {
         console.error('seedExamBank error:', error);
+        if (statusEl) { statusEl.style.color = '#dc2626'; statusEl.textContent = '❌ Seed ไม่สำเร็จ: ' + (error.message || ''); }
+      }
+    }
+
+    /**
+     * seedLearningMaterials()
+     * เพิ่ม learning materials ตัวอย่างเข้า Firestore collection learningMaterials
+     * idempotent — ตรวจก่อน skip ถ้ามีอยู่แล้ว
+     */
+    async function seedLearningMaterials() {
+      if (!hasPermission('admin.exams')) { alert('ไม่มีสิทธิ์ admin.exams'); return; }
+      if (!firebaseReady || !db) { alert('Firebase ยังไม่พร้อม'); return; }
+
+      const statusEl = getElement('examSyncStatus');
+      if (statusEl) { statusEl.style.color = '#d97706'; statusEl.textContent = '⏳ กำลังเพิ่ม learning materials...'; }
+
+      const seeds = [
+        {
+          materialId: 'LM_MATH_P6_FRACTION',
+          title: 'สรุปเศษส่วน ป.6',
+          description: 'สรุปการบวก ลบ คูณ หาร เศษส่วน พร้อมแบบฝึกหัดและตัวอย่างโจทย์',
+          subject: 'คณิตศาสตร์', grade: 'ป.6', topics: ['เศษส่วน'],
+          type: 'lesson', url: '', status: 'active'
+        },
+        {
+          materialId: 'LM_MATH_P6_DECIMAL',
+          title: 'ทศนิยมและการคำนวณ ป.6',
+          description: 'ทศนิยม 1–3 ตำแหน่ง การบวก ลบ คูณ หาร พร้อมตัวอย่างโจทย์',
+          subject: 'คณิตศาสตร์', grade: 'ป.6', topics: ['ทศนิยม'],
+          type: 'lesson', url: '', status: 'active'
+        },
+        {
+          materialId: 'LM_SCI_P5_FORCE',
+          title: 'แรงและการเคลื่อนที่ ป.5',
+          description: 'แรงดึงดูด แรงเสียดทาน แรงลอยตัว พร้อมกิจกรรมทดลอง',
+          subject: 'วิทยาศาสตร์', grade: 'ป.5', topics: ['แรง', 'การเคลื่อนที่'],
+          type: 'lesson', url: '', status: 'active'
+        },
+        {
+          materialId: 'LM_SCI_P5_CIRCUIT',
+          title: 'วงจรไฟฟ้าอย่างง่าย ป.5',
+          description: 'วงจรอนุกรมและขนาน สัญลักษณ์ไฟฟ้า การต่อวงจร',
+          subject: 'วิทยาศาสตร์', grade: 'ป.5', topics: ['วงจรไฟฟ้า', 'ไฟฟ้า'],
+          type: 'lesson', url: '', status: 'active'
+        },
+        {
+          materialId: 'LM_ENG_P4_VOCAB',
+          title: 'Vocabulary ป.4 ชุดที่ 1',
+          description: 'คำศัพท์พื้นฐาน 100 คำ พร้อมรูปภาพและแบบฝึกหัด',
+          subject: 'ภาษาอังกฤษ', grade: 'ป.4', topics: ['Vocabulary'],
+          type: 'lesson', url: '', status: 'active'
+        },
+        {
+          materialId: 'LM_ENG_P4_GRAMMAR',
+          title: 'Grammar ป.4 — Present Simple & Past Simple',
+          description: 'อธิบาย Present Simple และ Past Simple พร้อมตัวอย่างและแบบฝึกหัด',
+          subject: 'ภาษาอังกฤษ', grade: 'ป.4', topics: ['Grammar', 'Present Simple', 'Past Simple'],
+          type: 'lesson', url: '', status: 'active'
+        }
+      ];
+
+      let savedCount = 0;
+      try {
+        await Promise.all(seeds.map(async function(seed) {
+          const docId = seed.materialId;
+          const existing = await db.collection('learningMaterials').doc(docId).get();
+          if (!existing.exists) {
+            await db.collection('learningMaterials').doc(docId).set(Object.assign({}, seed, {
+              firebaseDocId: docId,
+              createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+              updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+            }));
+            savedCount++;
+          }
+        }));
+
+        const msg = savedCount > 0
+          ? '✅ เพิ่ม learning materials ' + savedCount + ' รายการสำเร็จ'
+          : '⚠️ learning materials มีอยู่แล้วครบ (idempotent)';
+        if (statusEl) { statusEl.style.color = savedCount > 0 ? '#16a34a' : '#d97706'; statusEl.textContent = msg; }
+        safeRun(function() { addActivityLog('Seed learningMaterials', savedCount + ' รายการ'); });
+      } catch (error) {
+        console.error('seedLearningMaterials error:', error);
         if (statusEl) { statusEl.style.color = '#dc2626'; statusEl.textContent = '❌ Seed ไม่สำเร็จ: ' + (error.message || ''); }
       }
     }
