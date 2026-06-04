@@ -12731,14 +12731,16 @@ function getCourseOnlineDocs(course, includeInactive) {
       if (!currentStudent) return null;
       const selectedMonth = getStudentSelectedPaymentMonth();
       if (!selectedMonth) return null;
+      const matchMonth = function(p) {
+        const pMonth = String(p.paymentMonth || p.month || p.billingMonth || '').trim();
+        return pMonth === String(selectedMonth);
+      };
       const selectedPayment = payments.find(function(p) {
-        return isCurrentStudentMatchRecord(p) && String(p.month || '') === String(selectedMonth);
+        return isCurrentStudentMatchRecord(p) && matchMonth(p);
       });
       if (selectedPayment) return selectedPayment;
       const matched = payments.filter(function(p) {
-        const studentMatched = isCurrentStudentMatchRecord(p);
-        const monthMatched = !selectedMonth || p.month === selectedMonth;
-        return studentMatched && monthMatched;
+        return isCurrentStudentMatchRecord(p) && matchMonth(p);
       }).slice().sort(function(a, b) { return Number(b.id || 0) - Number(a.id || 0); });
       return matched[0] || null;
     }
@@ -12792,7 +12794,7 @@ function getCourseOnlineDocs(course, includeInactive) {
       const selectedMonth = getStudentSelectedPaymentMonth();
       if (!selectedMonth) return '-';
       const selectedMonthPayment = getCurrentStudentPaymentForSelectedMonth();
-      if (selectedMonthPayment && selectedMonthPayment.status) return selectedMonthPayment.status;
+      if (selectedMonthPayment) return getPaymentDisplayStatus(selectedMonthPayment);
       if (currentStudent && currentStudent.courseId) return 'รอชำระเงิน';
       if (currentStudent && currentStudent.paymentStatus) return currentStudent.paymentStatus;
       return '-';
@@ -13941,11 +13943,13 @@ function getCourseOnlineDocs(course, includeInactive) {
       if (getElement('studentPaymentAmount')) getElement('studentPaymentAmount').textContent = amount ? formatPrice(amount) : '-';
       if (getElement('studentPaymentStatus')) {
         getElement('studentPaymentStatus').textContent = statusText;
-        getElement('studentPaymentStatus').className = statusText === 'ชำระแล้ว' ? 'status-paid' : statusText === 'ค้างชำระ' || statusText === 'สลิปไม่ผ่าน' ? 'status-absent' : 'status-waiting';
+        const isWaiting = statusText === 'รอตรวจสลิป';
+        getElement('studentPaymentStatus').className = statusText === 'ชำระแล้ว' ? 'status-paid' : statusText === 'ค้างชำระ' || statusText === 'สลิปไม่ผ่าน' ? 'status-absent' : isWaiting ? 'status-parent' : 'status-waiting';
       }
       if (getElement('studentDashPaymentStatus')) {
         getElement('studentDashPaymentStatus').textContent = statusText;
-        getElement('studentDashPaymentStatus').className = 'status-badge ' + (statusText === 'ชำระแล้ว' ? 'present' : statusText === 'ค้างชำระ' || statusText === 'สลิปไม่ผ่าน' ? 'absent' : 'parent');
+        const isWaitingDash = statusText === 'รอตรวจสลิป';
+        getElement('studentDashPaymentStatus').className = 'status-badge ' + (statusText === 'ชำระแล้ว' ? 'present' : statusText === 'ค้างชำระ' || statusText === 'สลิปไม่ผ่าน' ? 'absent' : isWaitingDash ? 'waiting' : 'parent');
       }
       const discountDetail = getElement('studentPaymentDiscountDetail');
       if (discountDetail) {
