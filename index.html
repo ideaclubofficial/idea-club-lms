@@ -10143,39 +10143,36 @@
       const s = students.find(function(item) { return String(item.id) === String(id); });
       if (!s) return;
 
+      const defaultPwd = buildDefaultStudentPassword(s);
+
       openEditBubble('Reset รหัสผ่านนักเรียน',
         '<div class="notice">' +
-          '<p><strong>นักเรียน:</strong> ' + (s.name || '-') + '</p>' +
-          '<p><strong>Member ID:</strong> ' + (s.memberId || '-') + '</p>' +
-          '<p><strong>ID เข้าสู่ระบบ:</strong> ' + (s.memberId || s.studentId || '-') + '</p>' +
+          '<p><strong>นักเรียน:</strong> ' + escapeHtml(s.name || '-') + '</p>' +
+          '<p><strong>Member ID:</strong> ' + escapeHtml(s.memberId || '-') + '</p>' +
+          '<p><strong>รหัสผ่านเริ่มต้น:</strong> ' + escapeHtml(defaultPwd) + '</p>' +
         '</div>' +
-        '<label>รหัสผ่านใหม่</label><input id="bubbleStudentNewPassword" type="password" value="000000">' +
-        '<label>ยืนยันรหัสผ่านใหม่</label><input id="bubbleStudentConfirmPassword" type="password" value="000000">' +
-        '<div class="notice"><strong>หมายเหตุ</strong><p>ระบบ Web SDK ไม่สามารถเปลี่ยนรหัสผ่าน Firebase Auth ของผู้ใช้คนอื่นโดยตรงได้ จึงจะบันทึกคำขอ Reset ไว้ในข้อมูลนักเรียนก่อน หากต้องการ Reset Auth จริง ต้องต่อ Cloud Function / Admin SDK ภายหลัง</p></div>',
+        '<div class="notice" style="background:#eff6ff; color:#1e40af;">' +
+          '<p>กด "บันทึก" เพื่อรีเซ็ตรหัสผ่านของ ' + escapeHtml(s.name || '-') + ' กลับเป็นรหัสเริ่มต้น <strong>' + escapeHtml(defaultPwd) + '</strong></p>' +
+        '</div>',
         async function() {
-          const newPassword = bubbleValue('bubbleStudentNewPassword');
-          const confirmPassword = bubbleValue('bubbleStudentConfirmPassword');
-          if (!newPassword || newPassword.length < 6) {
-            getElement('editBubbleResult').textContent = 'รหัสผ่านใหม่ต้องมีอย่างน้อย 6 ตัวอักษร';
-            getElement('editBubbleResult').style.color = '#dc2626';
-            return;
-          }
-          if (newPassword !== confirmPassword) {
-            getElement('editBubbleResult').textContent = 'รหัสผ่านและยืนยันรหัสผ่านไม่ตรงกัน';
-            getElement('editBubbleResult').style.color = '#dc2626';
-            return;
-          }
-
           try {
-            s.resetPasswordRequested = true;
-            s.tempPassword = newPassword;
-            s.resetPasswordStatus = 'pending-admin-function';
+            s.defaultPassword = defaultPwd;
+            s.initialPassword = s.initialPassword || defaultPwd;
+            s.resetPasswordRequested = false;
+            s.resetPasswordStatus = 'reset-to-default';
             s.resetPasswordRequestedAtText = new Date().toLocaleString('th-TH');
             await setFirebaseDocument('students', s);
-            addActivityLog('Reset รหัสผ่านนักเรียน', (s.name || '-') + ' · ' + (s.memberId || '-'));
-            getElement('editBubbleResult').textContent = 'บันทึกคำขอ Reset รหัสผ่านเรียบร้อย รหัสชั่วคราว: ' + newPassword;
+            if (s.authUid && db) {
+              await db.collection('users').doc(s.authUid).set({
+                defaultPassword: defaultPwd,
+                updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+              }, { merge: true });
+            }
+            addActivityLog('Reset รหัสผ่านนักเรียน', (s.name || '-') + ' · ' + (s.memberId || '-') + ' · รหัสใหม่: ' + defaultPwd);
+            getElement('editBubbleResult').textContent = 'รีเซ็ตรหัสผ่านเรียบร้อย รหัสผ่านใหม่: ' + defaultPwd;
             getElement('editBubbleResult').style.color = '#16a34a';
-            renderAdminStudents();
+            closeEditBubble();
+            alert('รีเซ็ตรหัสผ่านเรียบร้อย\nรหัสผ่านใหม่: ' + defaultPwd);
           } catch (error) {
             getElement('editBubbleResult').textContent = 'Reset ไม่สำเร็จ: ' + (error.message || error.code || 'ไม่ทราบสาเหตุ');
             getElement('editBubbleResult').style.color = '#dc2626';
@@ -10726,7 +10723,7 @@
         'นักเรียน: ' + (s.name || '-'),
         'Member ID: ' + (s.memberId || '-'),
         'ID เข้าสู่ระบบ: ' + (s.memberId || s.studentId || '-'),
-        'รหัสผ่านเริ่มต้น: 000000'
+        'รหัสผ่านเริ่มต้น: ' + buildDefaultStudentPassword(s)
       ].join(String.fromCharCode(10));
 
       if (navigator.clipboard) {
