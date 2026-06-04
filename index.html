@@ -1658,6 +1658,7 @@
           </select>
           <p style="margin-top:12px;"><strong>เดือนที่เลือก:</strong> <span id="studentPaymentCurrentMonth">-</span></p>
           <p><strong>ยอดที่ต้องชำระ:</strong> <span id="studentPaymentAmount" class="price">-</span></p>
+          <p id="studentPaymentDiscountDetail" style="color:#6b7280; font-size:13px;" class="hidden"></p>
           <p><strong>สถานะ:</strong> <span id="studentPaymentStatus" class="status-waiting">-</span></p>
           <div id="studentOverdueBox" class="notice hidden">
             <strong>ค้างชำระ:</strong>
@@ -12460,29 +12461,24 @@ function getCourseOnlineDocs(course, includeInactive) {
 
     function getStudentVisiblePayments(student) {
       if (!student || !Array.isArray(payments)) return [];
-      const signupDate = getStudentSignupDate(student);
       return payments.filter(function(payment) {
         if (!isStudentPaymentRecord(student, payment)) return false;
-        if (!payment.month) return false;
-        return !isPaymentMonthBeforeSignup(payment.month, signupDate);
+        return !!payment.month;
       });
     }
 
     function getCurrentStudentRelevantPaymentMonthNames() {
       if (!currentStudent || !currentStudent.courseId) return [];
       const months = getStudentVisiblePayments(currentStudent).map(function(p) { return p.month; }).filter(function(month) { return month; });
-      if (currentStudent.registeredCourseMonth) months.push(String(currentStudent.registeredCourseMonth || '').trim());
-      months.push(getThaiMonthFromDate(new Date().toISOString().slice(0, 10)));
       return Array.from(new Set(months));
     }
 
     function getStudentPaymentMonthOptions() {
       if (!currentStudent || !currentStudent.courseId) return [];
-      const studentMonths = getStudentVisiblePayments(currentStudent).map(function(p) { return String(p.month || '').trim(); }).filter(function(month) { return month; });
-      const monthSet = new Set(studentMonths);
-      if (currentStudent.registeredCourseMonth) monthSet.add(String(currentStudent.registeredCourseMonth || '').trim());
-      monthSet.add(getThaiMonthFromDate(new Date().toISOString().slice(0, 10)));
-      return Array.from(monthSet);
+      const months = getStudentVisiblePayments(currentStudent)
+        .map(function(p) { return String(p.month || '').trim(); })
+        .filter(function(month, idx, arr) { return month && arr.indexOf(month) === idx; });
+      return months;
     }
 
     function getStudentSelectedPaymentMonth() {
@@ -12493,22 +12489,18 @@ function getCourseOnlineDocs(course, includeInactive) {
     }
 
     function shouldApplyHalfMonthDiscount(signupDate) {
-      if (!signupDate) return false;
-      return signupDate.getDate() > 15;
+      // Auto half-month disabled — Admin sets discounts manually per record
+      return false;
     }
 
     function calculateStudentMonthlyAmount(coursePrice, signupDate) {
       if (Number(coursePrice) <= 0) return 0;
-      return shouldApplyHalfMonthDiscount(signupDate) ? Math.ceil(Number(coursePrice) / 2) : Number(coursePrice);
+      return Number(coursePrice);
     }
 
     function buildStudentMonthlyPaymentRecord(student, course, month) {
       if (!student || !month) return null;
       const listAmount = getExpectedPaymentAmountForStudent(student, month);
-      const signupDate = getStudentSignupDate(student);
-      const finalAmount = calculateStudentMonthlyAmount(listAmount, signupDate);
-      const discount = Math.max(0, listAmount - finalAmount);
-      const isHalfMonth = shouldApplyHalfMonthDiscount(signupDate);
       const paymentId = createFirebaseDocId('payments');
       const nowText = new Date().toLocaleDateString('th-TH');
       return {
@@ -12529,13 +12521,15 @@ function getCourseOnlineDocs(course, includeInactive) {
         baseAmount: listAmount,
         expectedAmount: listAmount,
         originalAmount: listAmount,
-        discount: discount,
-        finalAmount: finalAmount,
-        amount: finalAmount,
-        totalAmount: finalAmount,
+        discount: 0,
+        finalAmount: listAmount,
+        amount: listAmount,
+        totalAmount: listAmount,
         lineItems: Array.isArray(student.lineItems) ? student.lineItems.slice() : [],
-        discountType: isHalfMonth ? 'ครึ่งเดือน' : '',
-        discountReason: isHalfMonth ? 'สมัครหลังวันที่ 15 ของเดือนแรก' : '',
+        discountType: 'none',
+        discountReason: '',
+        adjustedBy: '',
+        adjustedAtText: '',
         slipUrl: '',
         slipStatus: '',
         receiptStatus: '',
@@ -12594,6 +12588,15 @@ function getCourseOnlineDocs(course, includeInactive) {
       return getCurrentStudentPaymentForSelectedMonth();
     }
 
+    function getCurrentStudentAdjustedPaymentAmount(month) {
+      if (!currentStudent || !month) return 0;
+      const payment = payments.find(function(p) {
+        return isCurrentStudentMatchRecord(p) && String(p.month || '') === String(month);
+      });
+      if (payment) return getPaymentFinalAmount(payment);
+      return getExpectedPaymentAmountForStudent(currentStudent, month);
+    }
+
     function canStudentUploadSlipForMonth(month) {
       const selectedMonth = month || (getElement('studentPaymentMonth') && getElement('studentPaymentMonth').value ? getElement('studentPaymentMonth').value : '');
       if (!currentStudent || !selectedMonth) return true;
@@ -12628,7 +12631,7 @@ function getCourseOnlineDocs(course, includeInactive) {
 
     function getCurrentStudentPaymentStatusText() {
       const selectedMonth = getStudentSelectedPaymentMonth();
-      if (!selectedMonth || !isPaymentMonthVisibleByName(selectedMonth)) return '-';
+      if (!selectedMonth) return '-';
       const selectedMonthPayment = getCurrentStudentPaymentForSelectedMonth();
       if (selectedMonthPayment && selectedMonthPayment.status) return selectedMonthPayment.status;
       if (currentStudent && currentStudent.courseId) return 'รอชำระเงิน';
@@ -12796,7 +12799,7 @@ function getCourseOnlineDocs(course, includeInactive) {
       const hasClassToday = !!(selectedCourse && Array.isArray(selectedCourse.days) && selectedCourse.days.includes(today));
       const selectedMonth = getStudentMobileSelectedMonth();
       const paymentText = hasRegisteredCourse ? getCurrentStudentPaymentStatusText() : 'ยังไม่ได้สมัครคอร์ส';
-      const paymentAmount = currentStudent && selectedMonth ? getExpectedPaymentAmountForStudent(currentStudent, selectedMonth) : 0;
+      const paymentAmount = currentStudent && selectedMonth ? getCurrentStudentAdjustedPaymentAmount(selectedMonth) : 0;
       const latestScore = isApproved ? getLatestPublishedScoreInfo() : null;
 
       setStudentMobileText('studentMobileGreetingName', displayName);
@@ -13755,9 +13758,7 @@ function getCourseOnlineDocs(course, includeInactive) {
       const month = getStudentSelectedPaymentMonth();
       const selectedPayment = currentStudent && month ? getStudentPaymentForSelectedMonth() : null;
       const canShowMonth = !!(month && month !== '-' && selectedPayment);
-      const amount = canShowMonth
-        ? (currentStudent ? getCurrentStudentAdjustedPaymentAmount(month) : (getCurrentStudentCourse() ? getCourseMonthlyPrice(getCurrentStudentCourse()) : getPaymentMonthAmount(month)))
-        : 0;
+      const amount = canShowMonth ? getCurrentStudentAdjustedPaymentAmount(month) : 0;
       const statusText = canShowMonth ? getCurrentStudentPaymentStatusText() : '-';
       if (getElement('studentPaymentCurrentMonth')) getElement('studentPaymentCurrentMonth').textContent = month || '-';
       if (getElement('studentPaymentAmount')) getElement('studentPaymentAmount').textContent = amount ? formatPrice(amount) : '-';
@@ -13769,14 +13770,20 @@ function getCourseOnlineDocs(course, includeInactive) {
         getElement('studentDashPaymentStatus').textContent = statusText;
         getElement('studentDashPaymentStatus').className = 'status-badge ' + (statusText === 'ชำระแล้ว' ? 'present' : statusText === 'ค้างชำระ' || statusText === 'สลิปไม่ผ่าน' ? 'absent' : 'parent');
       }
-      if (currentStudent && month && month === getThaiMonthFromDate(new Date().toISOString().slice(0, 10)) && !selectedPayment && currentStudent.courseId) {
-        safeRun(async function() {
-          const payment = await ensureCurrentMonthPaymentForStudent(currentStudent);
-          if (payment) {
-            updateStudentSelectedPaymentMonth();
-            updateStudentCourseDisplay();
-          }
-        }, 'ensure-current-month-payment');
+      const discountDetail = getElement('studentPaymentDiscountDetail');
+      if (discountDetail) {
+        const p = selectedPayment;
+        const hasDiscount = p && Number(p.discount || 0) > 0 && p.discountType && p.discountType !== 'none' && p.discountType !== '';
+        if (hasDiscount) {
+          const orig = Number(p.originalAmount || p.baseAmount || p.amount || 0);
+          const disc = Number(p.discount || 0);
+          const reason = p.discountReason || (p.discountType === 'manualHalf' ? 'ครึ่งราคา' : 'ส่วนลดพิเศษ');
+          discountDetail.textContent = 'ยอดเต็ม ' + formatPrice(orig) + ' · ส่วนลด ' + formatPrice(disc) + ' · ' + reason;
+          discountDetail.classList.remove('hidden');
+        } else {
+          discountDetail.textContent = '';
+          discountDetail.classList.add('hidden');
+        }
       }
       updateStudentSlipUploadControls();
     }
@@ -14294,16 +14301,12 @@ function getCourseOnlineDocs(course, includeInactive) {
     }
 
     function getMonthlyPaymentAmountForStudent(student, month) {
-      const listedAmount = getExpectedPaymentAmountForStudent(student, month);
-      const signupDate = getStudentSignupDate(student);
-      return calculateStudentMonthlyAmount(listedAmount, signupDate);
+      return getExpectedPaymentAmountForStudent(student, month);
     }
 
     function getMonthlyPaymentTargetStudentsForMonth(month) {
       if (!month) return [];
-      return getMonthlyPaymentTargetStudents().filter(function(student) {
-        return !isPaymentMonthBeforeSignup(month, getStudentSignupDate(student));
-      });
+      return getMonthlyPaymentTargetStudents();
     }
 
     function isPaymentRecordUpdatable(payment) {
@@ -14331,12 +14334,23 @@ function getCourseOnlineDocs(course, includeInactive) {
             skipped++;
             continue;
           }
+          existing.originalAmount = listAmount;
           existing.baseAmount = listAmount;
           existing.expectedAmount = listAmount;
-          existing.discount = Math.max(0, listAmount - finalAmount);
-          existing.finalAmount = finalAmount;
-          existing.amount = finalAmount;
+          if (!existing.discountType || existing.discountType === 'none') {
+            existing.discount = 0;
+            existing.finalAmount = listAmount;
+            existing.amount = listAmount;
+            existing.totalAmount = listAmount;
+          } else if (existing.discountType === 'manualHalf') {
+            existing.finalAmount = Math.ceil(listAmount / 2);
+            existing.discount = Math.max(0, listAmount - existing.finalAmount);
+            existing.amount = existing.finalAmount;
+            existing.totalAmount = existing.finalAmount;
+          }
+          // manualCustom: preserve finalAmount, only update originalAmount
           existing.studentSelectedMonth = month;
+          existing.updatedAtText = new Date().toLocaleDateString('th-TH');
           existing.slipNote = existing.slipNote || 'ปรับยอดชำระเงินตามราคาที่เผยแพร่';
           try { await setFirebaseDocument('payments', existing); } catch (error) { console.error('update monthly payment firebase error:', error); }
           updated++;
@@ -15420,8 +15434,8 @@ function receiptStatusText(status) {
       if (!getElement('studentMobilePayment')) return;
       const selectedCourse = getCurrentStudentCourse();
       const selectedMonth = getStudentSelectedPaymentMonth();
-      const canShowMonth = !!(selectedMonth && selectedMonth !== '-' && isPaymentMonthVisibleByName(selectedMonth));
-      const amount = currentStudent && canShowMonth ? getExpectedPaymentAmountForStudent(currentStudent, selectedMonth) : 0;
+      const canShowMonth = !!(selectedMonth && selectedMonth !== '-' && getCurrentStudentPaymentForSelectedMonth());
+      const amount = currentStudent && canShowMonth ? getCurrentStudentAdjustedPaymentAmount(selectedMonth) : 0;
       const statusText = currentStudent && currentStudent.courseId ? getCurrentStudentPaymentStatusText() : '-';
       const courseText = selectedCourse ? selectedCourse.name : '-';
 
@@ -21948,35 +21962,82 @@ function receiptStatusText(status) {
       renderPaymentRecordPreview('สร้างรายการชำระเงินเดือน ' + targetMonth + ' เรียบร้อย: สร้างใหม่ ' + paymentCounts.created + ' รายการ, อัปเดต ' + paymentCounts.updated + ' รายการ');
     }
 
+    function adminUpdateBubbleDiscountFields() {
+      const type = bubbleValue('bubbleDiscountType') || 'none';
+      const originalAmount = Number(getElement('bubblePaymentOriginalAmount') ? getElement('bubblePaymentOriginalAmount').value : 0);
+      const customRow = getElement('bubbleDiscountCustomRow');
+      const finalInput = getElement('bubblePaymentFinalAmount');
+      if (type === 'none') {
+        if (customRow) customRow.style.display = 'none';
+        if (finalInput) finalInput.value = originalAmount;
+      } else if (type === 'manualHalf') {
+        if (customRow) customRow.style.display = 'none';
+        if (finalInput) finalInput.value = Math.ceil(originalAmount / 2);
+      } else {
+        if (customRow) customRow.style.display = '';
+      }
+    }
+
     function editPaymentAmountDiscount(button) {
       const row = button.closest('tr');
       if (!row) return;
       const paymentId = row.getAttribute('data-payment-id');
       const payment = payments.find(function(p) { return String(p.id) === String(paymentId); });
       if (!payment) return;
-      const base = getPaymentBaseAmount(payment);
-      const discount = getPaymentDiscountAmount(payment);
-      const finalAmount = getPaymentFinalAmount(payment);
-      openEditBubble('แก้ยอดชำระ / ส่วนลด',
+      const originalAmount = Number(payment.originalAmount || payment.baseAmount || getPaymentFinalAmount(payment));
+      const currentFinal = getPaymentFinalAmount(payment);
+      const currentDiscountType = payment.discountType || 'none';
+      const noneSelected = (!currentDiscountType || currentDiscountType === 'none') ? ' selected' : '';
+      const halfSelected = currentDiscountType === 'manualHalf' ? ' selected' : '';
+      const customSelected = currentDiscountType === 'manualCustom' ? ' selected' : '';
+      const customHidden = (currentDiscountType !== 'manualCustom') ? 'style="display:none"' : '';
+      openEditBubble('ปรับยอดชำระ / ส่วนลด',
         '<div class="form-row">' +
-          '<div><label>ราคาปกติจากคอร์ส</label><input id="bubblePaymentBaseAmount" type="number" value="' + base + '"></div>' +
-          '<div><label>ส่วนลด</label><input id="bubblePaymentDiscount" type="number" value="' + discount + '"></div>' +
-          '<div><label>ยอดที่ต้องชำระจริง</label><input id="bubblePaymentFinalAmount" type="number" value="' + finalAmount + '"></div>' +
+          '<div><label>ราคาเต็มจากคอร์ส</label><input id="bubblePaymentOriginalAmount" type="number" value="' + originalAmount + '" readonly style="background:#f3f4f6;"></div>' +
         '</div>' +
-        '<label>หมายเหตุ Admin</label><textarea id="bubblePaymentAmountNote">' + (payment.adminNote || '') + '</textarea>' +
-        '<div class="notice">ระบบจะเก็บทั้งราคาปกติ ส่วนลด และยอดชำระจริงไว้ในรายการนี้</div>',
+        '<label>ประเภทส่วนลด</label>' +
+        '<select id="bubbleDiscountType" onchange="adminUpdateBubbleDiscountFields()">' +
+          '<option value="none"' + noneSelected + '>ไม่มีส่วนลด</option>' +
+          '<option value="manualHalf"' + halfSelected + '>ครึ่งราคา</option>' +
+          '<option value="manualCustom"' + customSelected + '>กำหนดยอดเอง</option>' +
+        '</select>' +
+        '<div id="bubbleDiscountCustomRow" ' + customHidden + ' style="margin-top:8px;">' +
+          '<label>ยอดที่ต้องชำระจริง</label>' +
+          '<input id="bubblePaymentFinalAmount" type="number" value="' + currentFinal + '">' +
+        '</div>' +
+        '<label style="margin-top:8px;">เหตุผลส่วนลด</label>' +
+        '<input id="bubbleDiscountReason" type="text" placeholder="เช่น ส่วนลดพิเศษ" value="' + escapeHtml(payment.discountReason || '') + '">' +
+        '<label style="margin-top:8px;">หมายเหตุ Admin</label>' +
+        '<textarea id="bubblePaymentAmountNote">' + escapeHtml(payment.adminNote || '') + '</textarea>' +
+        '<div class="notice" style="margin-top:8px;">ระบบจะเก็บทั้งราคาเต็ม ส่วนลด และยอดชำระจริงไว้ในรายการนี้</div>',
         async function() {
-          const newBase = Number(bubbleValue('bubblePaymentBaseAmount') || 0);
-          const newDiscount = Number(bubbleValue('bubblePaymentDiscount') || 0);
-          const newFinal = Number(bubbleValue('bubblePaymentFinalAmount') || 0) || Math.max(0, newBase - newDiscount);
-          payment.baseAmount = newBase;
+          const discountType = bubbleValue('bubbleDiscountType') || 'none';
+          const origAmt = Number(getElement('bubblePaymentOriginalAmount') ? getElement('bubblePaymentOriginalAmount').value : originalAmount);
+          let newFinal;
+          if (discountType === 'none') {
+            newFinal = origAmt;
+          } else if (discountType === 'manualHalf') {
+            newFinal = Math.ceil(origAmt / 2);
+          } else {
+            newFinal = Number(bubbleValue('bubblePaymentFinalAmount') || 0) || origAmt;
+          }
+          const newDiscount = Math.max(0, origAmt - newFinal);
+          payment.originalAmount = origAmt;
+          payment.baseAmount = origAmt;
+          payment.expectedAmount = origAmt;
           payment.discount = newDiscount;
           payment.finalAmount = newFinal;
           payment.amount = newFinal;
+          payment.totalAmount = newFinal;
+          payment.discountType = discountType;
+          payment.discountReason = bubbleValue('bubbleDiscountReason') || '';
+          payment.adjustedBy = (adminUser && adminUser.name) || (firebaseUser && firebaseUser.email) || 'Admin';
+          payment.adjustedAtText = new Date().toLocaleDateString('th-TH');
+          payment.updatedAtText = new Date().toLocaleDateString('th-TH');
           payment.adminNote = bubbleValue('bubblePaymentAmountNote');
           try {
             await setFirebaseDocument('payments', payment);
-            addActivityLog('แก้ยอดชำระ/ส่วนลด', (payment.student || '-') + ' · ' + (payment.month || '-') + ' · ' + formatPrice(newFinal));
+            addActivityLog('ปรับยอดชำระ/ส่วนลด', (payment.student || '-') + ' · ' + (payment.month || '-') + ' · ' + discountType + ' · ' + formatPrice(newFinal));
           } catch (error) { console.error(error); }
           renderPaymentTable();
           renderAdminDashboard();
