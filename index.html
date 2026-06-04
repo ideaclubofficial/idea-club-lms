@@ -1312,23 +1312,20 @@
 
           <div class="register-field-group">
             <h3>ข้อมูลเข้าสู่ระบบ</h3>
-            <div class="form-row">
-              <div>
-                <label>รหัสผ่าน</label>
-                <input id="registerPassword" type="password" placeholder="อย่างน้อย 6 ตัวอักษร" />
-              </div>
-              <div>
-                <label>ยืนยันรหัสผ่าน</label>
-                <input id="registerPasswordConfirm" type="password" placeholder="กรอกรหัสผ่านอีกครั้ง" />
-              </div>
+            <div class="notice" style="margin-bottom:0;">
+              <p><strong>ระบบจะสร้างรหัสผ่านเริ่มต้นให้อัตโนมัติ</strong></p>
+              <p>รูปแบบ: <strong>ic + 4 ตัวท้ายของ Member ID</strong></p>
+              <p>ตัวอย่าง: Member ID <strong>0012345</strong> → รหัสผ่าน <strong>ic2345</strong></p>
             </div>
+            <input id="registerPassword" type="hidden" />
+            <input id="registerPasswordConfirm" type="hidden" />
           </div>
         </div>
 
         <div class="notice" style="margin-bottom:18px;">
           <strong>ข้อมูลสำหรับเข้าสู่ระบบ</strong>
           <p>• ระบบจะแสดง Member ID หลังสมัครสำเร็จ ใช้ Member ID สำหรับเข้าสู่ระบบครั้งถัดไป</p>
-          <p>• รหัสผ่านใช้ตามที่ตั้งไว้ในหน้านี้</p>
+          <p>• รหัสผ่านเริ่มต้น: ic + 4 ตัวท้ายของ Member ID (เช่น ic2345)</p>
           <p>• คอร์สและสิทธิ์เข้าเรียนจะเริ่มหลังสมัครคอร์ส</p>
         </div>
 
@@ -7601,24 +7598,10 @@
       const school = getElement('registerSchool') ? getElement('registerSchool').value.trim() : '';
       const registerGrade = getElement('registerGrade') ? getElement('registerGrade').value : 'ป.6';
       const registerLocation = getElement('registerLocation') ? getElement('registerLocation').value : '';
-      const password = getElement('registerPassword') ? getElement('registerPassword').value.trim() : '';
-      const passwordConfirm = getElement('registerPasswordConfirm') ? getElement('registerPasswordConfirm').value.trim() : '';
       const result = getElement('registerResult');
 
-      if (!parentName || !studentName || !nickname || !phone || !school || !lineId || !registerGrade || !registerLocation || !password || !passwordConfirm) {
+      if (!parentName || !studentName || !nickname || !phone || !school || !lineId || !registerGrade || !registerLocation) {
         result.textContent = 'กรุณากรอกข้อมูลทุกช่องให้ครบถ้วน หากไม่มีข้อมูลให้ใส่ "-" แทน';
-        result.style.color = '#dc2626';
-        return;
-      }
-
-      if (password.length < 6) {
-        result.textContent = 'รหัสผ่านต้องมีอย่างน้อย 6 ตัวอักษร';
-        result.style.color = '#dc2626';
-        return;
-      }
-
-      if (password !== passwordConfirm) {
-        result.textContent = 'รหัสผ่านและยืนยันรหัสผ่านไม่ตรงกัน';
         result.style.color = '#dc2626';
         return;
       }
@@ -7654,6 +7637,8 @@
         }
       }
 
+      const defaultPwd = buildDefaultStudentPassword({ memberId: autoMemberId });
+
       let authUid = null;
       const studentEmail = buildLocalEmailFromMemberId(autoMemberId).toLowerCase();
       if (PRODUCTION_MODE) {
@@ -7664,14 +7649,14 @@
         }
 
         try {
-          const credential = await auth.createUserWithEmailAndPassword(studentEmail, password);
+          const credential = await auth.createUserWithEmailAndPassword(studentEmail, defaultPwd);
           firebaseUser = credential.user;
           authUid = firebaseUser.uid;
         } catch (error) {
           console.error('register firebase auth error:', error);
           if (isEmailAlreadyInUseError(error)) {
             try {
-              authUid = await signInExistingAuthForRegistration(studentEmail, password);
+              authUid = await signInExistingAuthForRegistration(studentEmail, defaultPwd);
               const profileExists = await hasUserProfile(authUid);
               if (profileExists) {
                 result.textContent = 'เบอร์นี้มีบัญชีอยู่แล้ว กรุณาเข้าสู่ระบบ';
@@ -7704,6 +7689,8 @@
         authEmail: studentEmail,
         email: studentEmail,
         contactEmail: '',
+        defaultPassword: defaultPwd,
+        initialPassword: defaultPwd,
         memberId: autoMemberId,
         studentId: autoMemberId,
         name: studentName,
@@ -7770,7 +7757,7 @@
         currentStudent = students[0] || newStudent;
       }
 
-      result.textContent = 'สมัครสมาชิกเรียบร้อย Member ID ของคุณคือ ' + autoMemberId + ' กรุณาจดไว้สำหรับเข้าสู่ระบบครั้งถัดไป';
+      result.textContent = 'สมัครสมาชิกสำเร็จ | Member ID: ' + autoMemberId + ' | รหัสผ่านเริ่มต้น: ' + defaultPwd + ' | กรุณาจดข้อมูลนี้ไว้ใช้เข้าสู่ระบบ';
       result.style.color = '#16a34a';
       refreshProfileBox();
       studentLogin(autoMemberId);
