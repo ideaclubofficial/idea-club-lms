@@ -841,3 +841,158 @@ exports.uploadPaymentSlipToDriveAndOcr = onCall(async (request) => {
     }
   }
 });
+
+// ============================================================
+// ระบบข้อสอบ ป.4–ป.6
+// ============================================================
+
+/**
+ * parseExamFilename(name)
+ * พยายาม parse ชั้น / วิชา จากชื่อไฟล์
+ * รูปแบบที่รองรับ: "[ป.4] วิทย์ Monthly Test.pdf", "ป6_คณิต_2025-05.pdf"
+ */
+function parseExamFilename(name) {
+  const lower = (name || "").toLowerCase();
+  const gradePatterns = [
+    { pattern: /ป\.4|ป4\b|p4\b/, value: "ป.4" },
+    { pattern: /ป\.5|ป5\b|p5\b/, value: "ป.5" },
+    { pattern: /ป\.6|ป6\b|p6\b/, value: "ป.6" },
+  ];
+  const subjectPatterns = [
+    { pattern: /วิทยาศาสตร์|วิทย์|science/, value: "วิทยาศาสตร์" },
+    { pattern: /คณิตศาสตร์|คณิต|math/, value: "คณิตศาสตร์" },
+    { pattern: /ภาษาอังกฤษ|อังกฤษ|english/, value: "ภาษาอังกฤษ" },
+    { pattern: /ภาษาไทย|ไทย\b|thai/, value: "ภาษาไทย" },
+    { pattern: /สังคมศึกษา|สังคม|social/, value: "สังคมศึกษา" },
+  ];
+  let grade = "";
+  let subject = "";
+  for (const g of gradePatterns) {
+    if (g.pattern.test(lower)) { grade = g.value; break; }
+  }
+  for (const s of subjectPatterns) {
+    if (s.pattern.test(lower)) { subject = s.value; break; }
+  }
+  return { grade, subject, topics: [] };
+}
+
+/**
+ * syncExamBankFromDrive
+ * ดึงรายการไฟล์จาก Google Drive folder แล้ว upsert เข้า collection examBank
+ * - docId ใช้รูปแบบ "drive_<fileId>" เพื่อให้ idempotent (sync ซ้ำได้ปลอดภัย)
+ * - title / grade / subject / totalItems / answerKey ที่ Admin กรอกแล้วจะไม่ถูกทับ
+ * - ไฟล์ที่รองรับ: PDF, Google Docs, Slides, Forms, Sheets
+ *
+ * request.data: { folderId?: string }
+ */
+exports.syncExamBankFromDrive = onCall(async (request) => {
+  if (!request.auth || !request.auth.uid) {
+    throw new HttpsError("unauthenticated", "กรุณาเข้าสู่ระบบก่อน Sync ข้อสอบ");
+  }
+  if (!(await isAuthCleanupAdmin(request.auth.uid))) {
+    throw new HttpsError("permission-denied", "ต้องเป็น Admin จึงจะ Sync ข้อสอบจาก Drive ได้");
+  }
+
+  const EXAM_FOLDER_ID = "16t5boPIY4736OkQLv3S7JWZ02QvQeqBW";
+  const folderId = String(
+    (request.data && request.data.folderId) || EXAM_FOLDER_ID
+  ).trim();
+
+  if (!folderId) {
+    throw new HttpsError("invalid-argument", "ต้องระบุ folderId ของ Google Drive");
+  }
+
+  const drive = getDriveClient();
+
+  const allowedMimeTypes = [
+    "application/pdf",
+    "application/vnd.google-apps.document",
+    "application/vnd.google-apps.presentation",
+    "application/vnd.google-apps.form",
+    "application/vnd.google-apps.spreadsheet",
+  ];
+  const mimeQuery = allowedMimeTypes.map((m) => `mimeType = '${m}'`).join(" or ");
+
+  let files = [];
+  try {
+    const listRes = await drive.files.list({
+      q: `'${folderId}' in parents and trashed = false and (${mimeQuery})`,
+      fields: "files(id, name, mimeType, webViewLink, modifiedTime)",
+      pageSize: 100,
+      orderBy: "name",
+      supportsAllDrives: true,
+      includeItemsFromAllDrives: true,
+    });
+    files = listRes.data.files || [];
+  } catch (err) {
+    throw new HttpsError(
+      "internal",
+      "ดึงรายการไฟล์จาก Drive ไม่สำเร็จ: " + (err.message || String(err))
+    );
+  }
+
+  if (!files.length) {
+    return {
+      ok: true,
+      synced: 0,
+      files: [],
+      message: "ไม่พบไฟล์ข้อสอบ (PDF / Google Docs / Form / Slides) ใน folder นี้",
+    };
+  }
+
+  // upsert แต่ละไฟล์เข้า examBank
+  const syncedFiles = [];
+  await Promise.all(
+    files.map(async (file) => {
+      const docId = `drive_${file.id}`;
+      const ref = db.collection("examBank").doc(docId);
+      const existing = await ref.get();
+      const prev = existing.exists ? (existing.data() || {}) : {};
+      const { grade, subject, topics } = parseExamFilename(file.name || "");
+      const driveViewUrl =
+        file.webViewLink || `https://drive.google.com/file/d/${file.id}/view`;
+
+      const payload = {
+        testId: docId,
+        firebaseDocId: docId,
+        // คง title / grade / subject / topics ที่ Admin แก้ไขแล้ว
+        title: prev.title || file.name || docId,
+        grade: prev.grade || grade,
+        subject: prev.subject || subject,
+        topics: (prev.topics && prev.topics.length) ? prev.topics : topics,
+        // Admin ต้องกรอก totalItems / answerKey เองในฟอร์ม examBank
+        totalItems: prev.totalItems || 0,
+        answerKey: prev.answerKey || [],
+        sourceType: "google_drive",
+        driveFolderId: folderId,
+        driveFileId: file.id,
+        driveViewUrl,
+        driveMimeType: file.mimeType || "",
+        driveModifiedTime: file.modifiedTime || "",
+        status: prev.status || "active",
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      };
+      if (!existing.exists) {
+        payload.createdAt = admin.firestore.FieldValue.serverTimestamp();
+      }
+
+      await ref.set(payload, { merge: true });
+      syncedFiles.push({ id: docId, title: file.name, grade: payload.grade, subject: payload.subject });
+    })
+  );
+
+  await writeActivityLog({
+    functionName: "syncExamBankFromDrive",
+    type: "exam_bank_synced",
+    severity: "info",
+    uid: request.auth.uid,
+    folderId,
+    synced: syncedFiles.length,
+  });
+
+  return { ok: true, synced: syncedFiles.length, files: syncedFiles };
+});
+
+// ============================================================
+// end ระบบข้อสอบ ป.4–ป.6
+// ============================================================
