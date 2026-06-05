@@ -11761,14 +11761,28 @@
       renderOnlineDocTable();
     }
 
+    function getCourseOnlineScheduleDefaults(course) {
+      if (!course) return { day: '', time: '' };
+      const schedule = getCourseScheduleDefaults(course);
+      if (schedule.onlineSlots && schedule.onlineSlots.length) {
+        const slot = schedule.onlineSlots[0];
+        const dayText = getCourseScheduleDayText(slot.day);
+        const timeText = slot.startTime ? (slot.endTime ? slot.startTime + '–' + slot.endTime : slot.startTime) : '';
+        return { day: dayText, time: timeText };
+      }
+      if (course.days && course.days.length) return { day: course.days[0], time: '' };
+      return { day: '', time: '' };
+    }
+
     function loadOnlineClassForm() {
       const select = getElement('adminOnlineClassCourseSelect');
       if (!select) return;
       const c = courses.find(function(item) { return String(item.id) === String(select.value); });
       if (!c) return;
+      const onlineDefaults = getCourseOnlineScheduleDefaults(c);
       getElement('adminOnlineClassLink').value = c.onlineLink || '';
-      getElement('adminOnlineClassDay').value = c.onlineClassDay || ((c.days || []).join(' / ') || '');
-      getElement('adminOnlineClassTime').value = c.onlineClassTime || '';
+      getElement('adminOnlineClassDay').value = c.onlineClassDay || onlineDefaults.day;
+      getElement('adminOnlineClassTime').value = c.onlineClassTime || onlineDefaults.time;
       getElement('adminOnlineClassRoomId').value = c.roomId || '';
       getElement('adminOnlineClassPassword').value = c.roomPassword || '';
       if (getElement('onlineDocCourseSelect')) getElement('onlineDocCourseSelect').value = String(c.id);
@@ -11796,6 +11810,8 @@
       }
       renderOnlineClassTable();
       renderOnlineDocTable();
+      renderAdminCourses();
+      renderStudentCourses();
       updateStudentCourseDisplay();
     }
 
