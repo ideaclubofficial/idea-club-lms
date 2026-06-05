@@ -1124,3 +1124,94 @@ exports.syncExamBankFromDrive = onCall(async (request) => {
 // ============================================================
 // end ระบบข้อสอบ ป.4–ป.6
 // ============================================================
+
+// ============================================================
+// Reset Student Password to Default
+// ============================================================
+exports.resetStudentPasswordToDefault = onCall(async (request) => {
+  if (!request.auth || !request.auth.uid) {
+    throw new HttpsError("unauthenticated", "กรุณาเข้าสู่ระบบก่อนใช้งาน");
+  }
+
+  const callerUid = request.auth.uid;
+  const isAdmin = await isAuthCleanupAdmin(callerUid);
+  if (!isAdmin) {
+    throw new HttpsError("permission-denied", "สิทธิ์ไม่เพียงพอ — เฉพาะ Admin เท่านั้น");
+  }
+
+  const { uid, memberId, defaultPassword: requestPassword } = request.data || {};
+  const safeUid = String(uid || "").trim();
+  const safeMemberId = String(memberId || "").trim();
+
+  if (!safeUid && !safeMemberId) {
+    throw new HttpsError("invalid-argument", "ต้องระบุ uid หรือ memberId");
+  }
+
+  // Find the user doc in Firestore
+  let userDocRef = null;
+  let userDocData = null;
+
+  if (safeUid) {
+    const snap = await db.collection("users").doc(safeUid).get();
+    if (snap.exists) {
+      userDocRef = snap.ref;
+      userDocData = snap.data() || {};
+    }
+  }
+
+  if (!userDocRef && safeMemberId) {
+    const snap = await db.collection("users")
+      .where("memberId", "==", safeMemberId)
+      .limit(1)
+      .get();
+    if (!snap.empty) {
+      userDocRef = snap.docs[0].ref;
+      userDocData = snap.docs[0].data() || {};
+    }
+  }
+
+  if (!userDocRef || !userDocData) {
+    throw new HttpsError("not-found", "ไม่พบข้อมูลนักเรียนใน Firestore");
+  }
+
+  // Resolve the auth UID to update password in Firebase Auth
+  const authUid = userDocData.authUid || userDocData.uid || userDocRef.id;
+  if (!authUid) {
+    throw new HttpsError("not-found", "ไม่พบ authUid ของนักเรียน");
+  }
+
+  // Resolve defaultPassword: prefer request payload, then Firestore fields
+  const passwordFields = ["defaultPassword", "passwordDefault", "initialPassword", "loginPassword", "password", "plainPassword"];
+  let resolvedPassword = String(requestPassword || "").trim();
+  if (!resolvedPassword) {
+    for (const field of passwordFields) {
+      const val = String(userDocData[field] || "").trim();
+      if (val) { resolvedPassword = val; break; }
+    }
+  }
+
+  if (!resolvedPassword) {
+    throw new HttpsError("failed-precondition", "ไม่พบ defaultPassword ของนักเรียนคนนี้");
+  }
+
+  // Update Firebase Auth password
+  await admin.auth().updateUser(authUid, { password: resolvedPassword });
+
+  // Record reset in Firestore
+  await userDocRef.set({
+    passwordResetAt: admin.firestore.FieldValue.serverTimestamp(),
+    passwordResetBy: callerUid,
+    passwordResetToDefault: true,
+  }, { merge: true });
+
+  await writeActivityLog({
+    functionName: "resetStudentPasswordToDefault",
+    type: "password_reset",
+    severity: "info",
+    uid: callerUid,
+    targetUid: authUid,
+    targetMemberId: safeMemberId || (userDocData.memberId || ""),
+  });
+
+  return { ok: true };
+});

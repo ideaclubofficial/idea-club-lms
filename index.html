@@ -5164,10 +5164,11 @@
                       <th>ระดับชั้น</th>
                       <th>รหัสผ่าน Default</th>
                       <th>พิมพ์บัตรแล้ว</th>
+                      <th>จัดการ</th>
                     </tr>
                   </thead>
                   <tbody id="idCardStudentTableBody">
-                    <tr><td colspan="6" style="text-align:center; color:#6b7280;">กรุณากดปุ่ม "โหลดนักเรียน"</td></tr>
+                    <tr><td colspan="7" style="text-align:center; color:#6b7280;">กรุณากดปุ่ม "โหลดนักเรียน"</td></tr>
                   </tbody>
                 </table>
               </div>
@@ -25060,23 +25061,34 @@ function receiptStatusText(status) {
       }
     }
 
+    function getStudentIdCardPassword(student) {
+      if (!student) return '-';
+      const fields = ['defaultPassword', 'passwordDefault', 'initialPassword', 'loginPassword', 'password', 'plainPassword'];
+      for (var i = 0; i < fields.length; i++) {
+        var val = String(student[fields[i]] || '').trim();
+        if (val) return val;
+      }
+      return '-';
+    }
+
     function renderIdCardStudentList() {
       const tbody = getElement('idCardStudentTableBody');
       if (!tbody) return;
       if (!idCardStudents.length) {
-        tbody.innerHTML = '<tr><td colspan="6" style="text-align:center; color:#6b7280;">ไม่พบนักเรียน</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="7" style="text-align:center; color:#6b7280;">ไม่พบนักเรียน</td></tr>';
         return;
       }
-      tbody.innerHTML = idCardStudents.map(function(s) {
+      tbody.innerHTML = idCardStudents.map(function(s, idx) {
         const memberId = escapeHtml(s.memberId || s.studentId || '-');
         const name = escapeHtml(s.name || s.displayName || '-');
         const nickname = escapeHtml(s.nickname || '-');
         const grade = escapeHtml(s.grade || s.gradeLevel || '-');
-        const pw = escapeHtml(s.defaultPassword || '-');
+        const pw = escapeHtml(getStudentIdCardPassword(s));
         const printed = s.idCardPrinted
           ? '<span class="status-paid">✓ พิมพ์แล้ว</span>'
           : '<span style="color:#9ca3af;">-</span>';
-        return '<tr><td>' + memberId + '</td><td>' + name + '</td><td>' + nickname + '</td><td>' + grade + '</td><td>' + pw + '</td><td>' + printed + '</td></tr>';
+        const resetBtn = '<button class="btn btn-dark" type="button" style="font-size:12px; padding:4px 10px;" onclick="resetStudentPassword(' + jsArg(idx) + ')">รีเซ็ตรหัส</button>';
+        return '<tr><td>' + memberId + '</td><td>' + name + '</td><td>' + nickname + '</td><td>' + grade + '</td><td>' + pw + '</td><td>' + printed + '</td><td>' + resetBtn + '</td></tr>';
       }).join('');
     }
 
@@ -25121,7 +25133,7 @@ function receiptStatusText(status) {
       const nickname = escapeHtml(student.nickname || '-');
       const grade = escapeHtml(student.grade || student.gradeLevel || '-');
       const memberId = escapeHtml(student.memberId || student.studentId || '-');
-      const password = escapeHtml(student.defaultPassword || '000000');
+      const password = escapeHtml(getStudentIdCardPassword(student));
       const logoHtml = logoUrl
         ? '<img class="id-card-logo-img" src="' + logoUrl + '" crossorigin="anonymous" />'
         : '<div class="id-card-logo-fallback">IC</div>';
@@ -25150,8 +25162,7 @@ function receiptStatusText(status) {
             qrHtml +
           '</div>' +
           '<div class="id-card-footer">' +
-            '<span>ID: ' + memberId + '</span>' +
-            '<span>PW: ' + password + '</span>' +
+            '<span>ID: ' + memberId + ' | PW: ' + password + '</span>' +
           '</div>' +
         '</div>' +
       '</div>';
@@ -25288,6 +25299,34 @@ function receiptStatusText(status) {
         if (markBtn) markBtn.style.display = 'none';
       } catch (e) {
         if (resultEl) { resultEl.textContent = 'บันทึกไม่สำเร็จ: ' + (e.message || ''); resultEl.style.color = '#dc2626'; }
+      }
+    }
+
+    async function resetStudentPassword(idx) {
+      const student = idCardStudents[idx];
+      if (!student) return;
+      const name = student.name || student.displayName || student.memberId || '-';
+      const defaultPassword = getStudentIdCardPassword(student);
+      if (defaultPassword === '-') {
+        alert('ไม่พบรหัสผ่าน default ของ ' + name + ' กรุณาตรวจสอบข้อมูลนักเรียน');
+        return;
+      }
+      if (!confirm('ต้องการรีเซ็ตรหัสผ่านของ ' + name + ' (' + (student.memberId || '-') + ') กลับเป็น "' + defaultPassword + '" ใช่ไหม?')) return;
+      if (!firebaseReady || !functionsApi) {
+        alert('ระบบยังไม่พร้อม กรุณารีเฟรชหน้าแล้วลองใหม่');
+        return;
+      }
+      try {
+        const callable = functionsApi.httpsCallable('resetStudentPasswordToDefault');
+        await callable({
+          uid: student.authUid || student.uid || '',
+          memberId: student.memberId || student.studentId || '',
+          defaultPassword: defaultPassword
+        });
+        alert('รีเซ็ตรหัสผ่านเรียบร้อย\n' + name + ' → ' + defaultPassword);
+        await loadStudentsForIdCards();
+      } catch (e) {
+        alert('รีเซ็ตรหัสผ่านไม่สำเร็จ: ' + (e.message || e.code || ''));
       }
     }
 
