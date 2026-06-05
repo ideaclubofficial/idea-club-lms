@@ -10388,36 +10388,41 @@
       const s = students.find(function(item) { return String(item.id) === String(id); });
       if (!s) return;
 
-      const defaultPwd = buildDefaultStudentPassword(s);
+      const memberId = String(s.memberId || s.studentId || '').trim();
+      if (!memberId) {
+        alert('ไม่พบ Member ID สำหรับ reset password');
+        return;
+      }
+
+      const newPassword = buildDefaultStudentPassword(s);
 
       openEditBubble('Reset รหัสผ่านนักเรียน',
         '<div class="notice">' +
           '<p><strong>นักเรียน:</strong> ' + escapeHtml(s.name || '-') + '</p>' +
-          '<p><strong>Member ID:</strong> ' + escapeHtml(s.memberId || '-') + '</p>' +
-          '<p><strong>รหัสผ่านเริ่มต้น:</strong> ' + escapeHtml(defaultPwd) + '</p>' +
+          '<p><strong>Member ID:</strong> ' + escapeHtml(memberId) + '</p>' +
+          '<p><strong>รหัสผ่านใหม่:</strong> <strong style="color:#1a3a8f; font-size:15px;">' + escapeHtml(newPassword) + '</strong></p>' +
         '</div>' +
         '<div class="notice" style="background:#eff6ff; color:#1e40af;">' +
-          '<p>กด "บันทึก" เพื่อรีเซ็ตรหัสผ่านของ ' + escapeHtml(s.name || '-') + ' กลับเป็นรหัสเริ่มต้น <strong>' + escapeHtml(defaultPwd) + '</strong></p>' +
+          '<p>กด "บันทึก" เพื่อรีเซ็ตรหัสผ่านของ ' + escapeHtml(s.name || '-') + ' กลับเป็น <strong>' + escapeHtml(newPassword) + '</strong> (ic + 4 ตัวท้าย Member ID)</p>' +
         '</div>',
         async function() {
           try {
-            s.defaultPassword = defaultPwd;
-            s.initialPassword = s.initialPassword || defaultPwd;
+            if (!functionsApi) throw new Error('Firebase Functions ยังไม่พร้อม กรุณารีเฟรชหน้า');
+            const callable = functionsApi.httpsCallable('resetStudentPasswordToDefault');
+            await callable({
+              uid: s.authUid || s.uid || '',
+              memberId: memberId,
+              defaultPassword: newPassword
+            });
             s.resetPasswordRequested = false;
             s.resetPasswordStatus = 'reset-to-default';
             s.resetPasswordRequestedAtText = new Date().toLocaleString('th-TH');
             await setFirebaseDocument('students', s);
-            if (s.authUid && db) {
-              await db.collection('users').doc(s.authUid).set({
-                defaultPassword: defaultPwd,
-                updatedAt: firebase.firestore.FieldValue.serverTimestamp()
-              }, { merge: true });
-            }
-            addActivityLog('Reset รหัสผ่านนักเรียน', (s.name || '-') + ' · ' + (s.memberId || '-') + ' · รหัสใหม่: ' + defaultPwd);
-            getElement('editBubbleResult').textContent = 'รีเซ็ตรหัสผ่านเรียบร้อย รหัสผ่านใหม่: ' + defaultPwd;
+            addActivityLog('Reset รหัสผ่านนักเรียน', (s.name || '-') + ' · ' + memberId + ' · รหัสใหม่: ' + newPassword);
+            getElement('editBubbleResult').textContent = 'รีเซ็ตรหัสผ่านสำเร็จ รหัสใหม่คือ: ' + newPassword;
             getElement('editBubbleResult').style.color = '#16a34a';
             closeEditBubble();
-            alert('รีเซ็ตรหัสผ่านเรียบร้อย\nรหัสผ่านใหม่: ' + defaultPwd);
+            alert('รีเซ็ตรหัสผ่านสำเร็จ รหัสใหม่คือ: ' + newPassword);
           } catch (error) {
             getElement('editBubbleResult').textContent = 'Reset ไม่สำเร็จ: ' + (error.message || error.code || 'ไม่ทราบสาเหตุ');
             getElement('editBubbleResult').style.color = '#dc2626';
