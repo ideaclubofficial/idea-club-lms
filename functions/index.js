@@ -848,8 +848,9 @@ exports.uploadPaymentSlipToDriveAndOcr = onCall(async (request) => {
 
 /**
  * parseExamFilename(name)
- * พยายาม parse ชั้น / วิชา จากชื่อไฟล์
- * รูปแบบที่รองรับ: "[ป.4] วิทย์ Monthly Test.pdf", "ป6_คณิต_2025-05.pdf"
+ * Parse grade / subject / topics จากชื่อไฟล์
+ * รองรับรูปแบบ: "[ป.4] วิทย์ Monthly Test.pdf"  |  "ป6_คณิต_เศษส่วน-ทศนิยม.pdf"
+ * Topics: ถ้าชื่อไฟล์มีส่วนที่ตาม _ หรือ - หลังวิชา ให้ split เป็น topics
  */
 function parseExamFilename(name) {
   const lower = (name || "").toLowerCase();
@@ -873,17 +874,47 @@ function parseExamFilename(name) {
   for (const s of subjectPatterns) {
     if (s.pattern.test(lower)) { subject = s.value; break; }
   }
-  return { grade, subject, topics: [] };
+  // พยายาม parse topics จากส่วนท้ายชื่อไฟล์ เช่น "_เศษส่วน-ทศนิยม.pdf"
+  const withoutExt = (name || "").replace(/\.[^.]+$/, "");
+  const topicSection = withoutExt.split("_").slice(2).join("_"); // หลัง _ ที่ 2
+  const topics = topicSection
+    ? topicSection.split(/[-_,]/).map((t) => t.trim()).filter((t) => t && !/^\d{4}$/.test(t))
+    : [];
+  return { grade, subject, topics };
+}
+
+/**
+ * downloadDriveFileAsText(drive, fileId)
+ * ดาวน์โหลด content ของไฟล์จาก Drive เป็น string
+ * ใช้กับไฟล์ .json ที่ uploaded ตรงๆ (ไม่ใช่ Google Docs native)
+ */
+async function downloadDriveFileAsText(drive, fileId) {
+  const response = await drive.files.get(
+    { fileId, alt: "media" },
+    { responseType: "stream" }
+  );
+  return new Promise((resolve, reject) => {
+    let content = "";
+    response.data.on("data", (chunk) => { content += chunk.toString("utf8"); });
+    response.data.on("end", () => resolve(content));
+    response.data.on("error", reject);
+  });
 }
 
 /**
  * syncExamBankFromDrive
- * ดึงรายการไฟล์จาก Google Drive folder แล้ว upsert เข้า collection examBank
- * - docId ใช้รูปแบบ "drive_<fileId>" เพื่อให้ idempotent (sync ซ้ำได้ปลอดภัย)
- * - title / grade / subject / totalItems / answerKey ที่ Admin กรอกแล้วจะไม่ถูกทับ
- * - ไฟล์ที่รองรับ: PDF, Google Docs, Slides, Forms, Sheets
+ * อ่านไฟล์จาก Google Drive folder แล้ว upsert เข้า collection examBank
+ *
+ * รองรับ 2 แบบ:
+ *   แบบที่ 1 — JSON metadata file (.json)
+ *     ไฟล์ที่มีเนื้อหา JSON ตรงตาม examBank schema จะถูก parse เต็มรูปแบบ
+ *     รวมถึง answerKey, topics, testId ที่กำหนดเอง
+ *   แบบที่ 2 — ไฟล์ข้อสอบจริง (PDF/Docs/Slides/Forms)
+ *     Parse metadata จากชื่อไฟล์, set status="draft", needsAnswerKey=true
+ *     Admin ต้องกรอก answerKey ผ่านฟอร์ม examBank ก่อน activate
  *
  * request.data: { folderId?: string }
+ * return: { ok, synced, skipped, errors, errorDetails, folderId }
  */
 exports.syncExamBankFromDrive = onCall(async (request) => {
   if (!request.auth || !request.auth.uid) {
@@ -904,20 +935,23 @@ exports.syncExamBankFromDrive = onCall(async (request) => {
 
   const drive = getDriveClient();
 
-  const allowedMimeTypes = [
+  // ดึงไฟล์ทุกประเภทรวมทั้ง JSON metadata
+  const examMimeTypes = [
+    "application/json",
+    "text/plain",                                       // .json อาจถูก detect เป็น text/plain
     "application/pdf",
     "application/vnd.google-apps.document",
     "application/vnd.google-apps.presentation",
     "application/vnd.google-apps.form",
     "application/vnd.google-apps.spreadsheet",
   ];
-  const mimeQuery = allowedMimeTypes.map((m) => `mimeType = '${m}'`).join(" or ");
+  const mimeQuery = examMimeTypes.map((m) => `mimeType = '${m}'`).join(" or ");
 
   let files = [];
   try {
     const listRes = await drive.files.list({
       q: `'${folderId}' in parents and trashed = false and (${mimeQuery})`,
-      fields: "files(id, name, mimeType, webViewLink, modifiedTime)",
+      fields: "files(id, name, mimeType, webViewLink, modifiedTime, size)",
       pageSize: 100,
       orderBy: "name",
       supportsAllDrives: true,
@@ -934,63 +968,157 @@ exports.syncExamBankFromDrive = onCall(async (request) => {
   if (!files.length) {
     return {
       ok: true,
-      synced: 0,
+      synced: 0, skipped: 0, errors: 0, errorDetails: [],
       files: [],
-      message: "ไม่พบไฟล์ข้อสอบ (PDF / Google Docs / Form / Slides) ใน folder นี้",
+      message: "ไม่พบไฟล์ใน folder นี้ — อัปโหลดไฟล์ข้อสอบ (.json หรือ .pdf) แล้วลองใหม่",
     };
   }
 
-  // upsert แต่ละไฟล์เข้า examBank
+  let synced = 0, skipped = 0;
+  const errorDetails = [];
   const syncedFiles = [];
+
   await Promise.all(
     files.map(async (file) => {
-      const docId = `drive_${file.id}`;
-      const ref = db.collection("examBank").doc(docId);
-      const existing = await ref.get();
-      const prev = existing.exists ? (existing.data() || {}) : {};
-      const { grade, subject, topics } = parseExamFilename(file.name || "");
-      const driveViewUrl =
-        file.webViewLink || `https://drive.google.com/file/d/${file.id}/view`;
+      try {
+        const isJsonFile = file.name.toLowerCase().endsWith(".json")
+          || file.mimeType === "application/json"
+          || (file.mimeType === "text/plain" && file.name.toLowerCase().endsWith(".json"));
 
-      const payload = {
-        testId: docId,
-        firebaseDocId: docId,
-        // คง title / grade / subject / topics ที่ Admin แก้ไขแล้ว
-        title: prev.title || file.name || docId,
-        grade: prev.grade || grade,
-        subject: prev.subject || subject,
-        topics: (prev.topics && prev.topics.length) ? prev.topics : topics,
-        // Admin ต้องกรอก totalItems / answerKey เองในฟอร์ม examBank
-        totalItems: prev.totalItems || 0,
-        answerKey: prev.answerKey || [],
-        sourceType: "google_drive",
-        driveFolderId: folderId,
-        driveFileId: file.id,
-        driveViewUrl,
-        driveMimeType: file.mimeType || "",
-        driveModifiedTime: file.modifiedTime || "",
-        status: prev.status || "active",
-        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-      };
-      if (!existing.exists) {
-        payload.createdAt = admin.firestore.FieldValue.serverTimestamp();
+        // --- แบบที่ 1: JSON metadata file ---
+        if (isJsonFile) {
+          // ข้าม JSON ที่ใหญ่เกิน 512 KB เพื่อความปลอดภัย
+          const fileSizeBytes = Number(file.size || 0);
+          if (fileSizeBytes > 512 * 1024) {
+            skipped++;
+            return;
+          }
+
+          let examData = null;
+          try {
+            const raw = await downloadDriveFileAsText(drive, file.id);
+            examData = JSON.parse(raw);
+          } catch (parseErr) {
+            console.warn("JSON parse failed:", file.name, parseErr.message);
+            errorDetails.push({ file: file.name, error: "JSON parse error: " + parseErr.message });
+            // ยัง continue ด้วย fallback mode ด้านล่าง
+          }
+
+          if (examData && typeof examData === "object") {
+            // ใช้ testId จาก JSON หรือ derive จาก filename (ตัดนามสกุล)
+            const testId = String(examData.testId || file.name.replace(/\.json$/i, "")).trim();
+            const docId = testId || `drive_${file.id}`;
+            const ref = db.collection("examBank").doc(docId);
+            const existing = await ref.get();
+            const prev = existing.exists ? (existing.data() || {}) : {};
+
+            const answerKey = Array.isArray(examData.answerKey) && examData.answerKey.length
+              ? examData.answerKey
+              : (prev.answerKey || []);
+
+            const payload = {
+              testId: docId,
+              firebaseDocId: docId,
+              title: examData.title || prev.title || file.name,
+              grade: examData.grade || prev.grade || "",
+              subject: examData.subject || prev.subject || "",
+              topics: (Array.isArray(examData.topics) && examData.topics.length)
+                ? examData.topics
+                : (prev.topics && prev.topics.length ? prev.topics : []),
+              totalItems: Number(examData.totalItems)
+                || answerKey.length
+                || prev.totalItems
+                || 0,
+              answerKey,
+              needsAnswerKey: answerKey.length === 0,
+              sourceType: "google_drive",
+              driveFolderId: folderId,
+              driveFileId: file.id,
+              driveViewUrl: file.webViewLink || `https://drive.google.com/file/d/${file.id}/view`,
+              driveMimeType: file.mimeType || "",
+              driveModifiedTime: file.modifiedTime || "",
+              status: examData.status || prev.status || (answerKey.length ? "active" : "draft"),
+              updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+            };
+            if (!existing.exists) payload.createdAt = admin.firestore.FieldValue.serverTimestamp();
+
+            await ref.set(payload, { merge: true });
+            synced++;
+            syncedFiles.push({ id: docId, title: payload.title, grade: payload.grade, subject: payload.subject, source: "json" });
+            return;
+          }
+          // JSON parse ล้มเหลว — fall through to filename mode
+        }
+
+        // --- แบบที่ 2: PDF / Docs / อื่นๆ — parse จากชื่อไฟล์ ---
+        const docId = `drive_${file.id}`;
+        const ref = db.collection("examBank").doc(docId);
+        const existing = await ref.get();
+        const prev = existing.exists ? (existing.data() || {}) : {};
+
+        // ถ้ามีอยู่แล้วและมี answerKey แล้ว ให้ skip เพื่อไม่ทับ metadata ที่ admin กรอกไว้
+        if (existing.exists && prev.answerKey && prev.answerKey.length > 0) {
+          skipped++;
+          return;
+        }
+
+        const { grade, subject, topics } = parseExamFilename(file.name || "");
+        const driveViewUrl = file.webViewLink || `https://drive.google.com/file/d/${file.id}/view`;
+
+        const payload = {
+          testId: docId,
+          firebaseDocId: docId,
+          title: prev.title || file.name || docId,
+          grade: prev.grade || grade,
+          subject: prev.subject || subject,
+          topics: (prev.topics && prev.topics.length) ? prev.topics : topics,
+          totalItems: prev.totalItems || 0,
+          answerKey: prev.answerKey || [],
+          needsAnswerKey: true,   // Admin ต้องกรอก answerKey ในฟอร์ม examBank ก่อน activate
+          sourceType: "google_drive",
+          driveFolderId: folderId,
+          driveFileId: file.id,
+          driveViewUrl,
+          driveMimeType: file.mimeType || "",
+          driveModifiedTime: file.modifiedTime || "",
+          status: prev.status || "draft",  // draft เพราะยังไม่มี answerKey
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        };
+        if (!existing.exists) payload.createdAt = admin.firestore.FieldValue.serverTimestamp();
+
+        await ref.set(payload, { merge: true });
+        synced++;
+        syncedFiles.push({
+          id: docId, title: payload.title, grade: payload.grade,
+          subject: payload.subject, source: "filename", needsAnswerKey: true,
+        });
+      } catch (err) {
+        console.error("syncExamBankFromDrive file error:", file.name, err);
+        errorDetails.push({ file: file.name, error: err.message || String(err) });
       }
-
-      await ref.set(payload, { merge: true });
-      syncedFiles.push({ id: docId, title: file.name, grade: payload.grade, subject: payload.subject });
     })
   );
 
   await writeActivityLog({
     functionName: "syncExamBankFromDrive",
     type: "exam_bank_synced",
-    severity: "info",
+    severity: errorDetails.length ? "warn" : "info",
     uid: request.auth.uid,
     folderId,
-    synced: syncedFiles.length,
+    synced,
+    skipped,
+    errors: errorDetails.length,
   });
 
-  return { ok: true, synced: syncedFiles.length, files: syncedFiles };
+  return {
+    ok: true,
+    synced,
+    skipped,
+    errors: errorDetails.length,
+    errorDetails,
+    folderId,
+    files: syncedFiles,
+  };
 });
 
 // ============================================================
