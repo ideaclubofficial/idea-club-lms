@@ -119,6 +119,18 @@ const dynamicOrLegacyIds = new Set([
   // Profile grade is created only in older/member flows and guarded at runtime.
   "profileGrade",
 
+  // Self-registration form fields are guarded at runtime (getElement(id) ? ... : '').
+  // The form may be injected dynamically or conditionally shown.
+  "registerGrade",
+  "registerLineId",
+  "registerLocation",
+  "registerNickname",
+  "registerParentName",
+  "registerPhone",
+  "registerResult",
+  "registerSchool",
+  "registerStudentName",
+
   // LINE slip UI and old manual slip preview are retained as guarded legacy code.
   "studentLineGroupBox",
   "studentLineGroupButton",
