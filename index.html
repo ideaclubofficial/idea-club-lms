@@ -2631,7 +2631,7 @@
                 </div>
                 <div>
                   <label>ระดับชั้น</label>
-                  <select id="adminStudentGrade" onchange="updateMemberIdPreview()">
+                  <select id="adminStudentGrade" onchange="onAdminStudentGradeChange()">
                     <option>ป.4</option>
                     <option>ป.5</option>
                     <option>ป.6</option>
@@ -9928,6 +9928,11 @@
         result.style.color = '#dc2626';
         return;
       }
+      if (selectedCourse && grade && selectedCourse.grade && selectedCourse.grade !== grade) {
+        result.textContent = 'คอร์สที่เลือกไม่ตรงกับชั้นเรียน (คอร์สนี้สำหรับ ' + selectedCourse.grade + ') กรุณาเลือกคอร์สใหม่';
+        result.style.color = '#dc2626';
+        return;
+      }
 
       try {
         if (editingId) {
@@ -10194,7 +10199,7 @@
         '<div class="form-row">' +
           '<div><label>ชื่อนักเรียน</label><input id="bubbleStudentName" type="text" value="' + (s.name || '') + '"></div>' +
           '<div><label>ชื่อเล่น</label><input id="bubbleStudentNickname" type="text" value="' + (s.nickname || '') + '"></div>' +
-          '<div><label>ระดับชั้น</label><select id="bubbleStudentGrade">' + gradeOptionsHtml(s.grade) + '</select></div>' +
+          '<div><label>ระดับชั้น</label><select id="bubbleStudentGrade" onchange="onBubbleStudentGradeChange()">' + gradeOptionsHtml(s.grade) + '</select></div>' +
         '</div>' +
         '<div class="form-row">' +
           '<div><label>ชื่อผู้ปกครอง</label><input id="bubbleStudentParentName" type="text" value="' + (s.parentName || '') + '"></div>' +
@@ -10207,8 +10212,8 @@
           '</select></div>' +
         '</div>' +
         '<div class="form-row">' +
-          '<div><label>คอร์สที่ลงเรียน</label><select id="bubbleStudentCourseId">' + studentCourseOptionsHtml(s.courseId || s.course, s.preferredLocation || '') + '</select>' +
-          (function() { var sc = courses.find(function(c) { return String(c.id) === String(s.courseId || ''); }); var mismatch = sc && s.preferredLocation && sc.location && sc.location !== s.preferredLocation; return '<span id="bubbleStudentCourseCenterWarning"' + (mismatch ? '' : ' class="hidden"') + ' style="color:#dc2626;font-size:0.85em">' + (mismatch ? ' คอร์สเดิมไม่ตรงกับศูนย์ที่เลือก' : '') + '</span>'; })() +
+          '<div><label>คอร์สที่ลงเรียน</label><select id="bubbleStudentCourseId">' + studentCourseOptionsHtml(s.courseId || s.course, s.preferredLocation || '', s.grade || '') + '</select>' +
+          (function() { var sc = courses.find(function(c) { return String(c.id) === String(s.courseId || ''); }); var centerMismatch = sc && s.preferredLocation && sc.location && sc.location !== s.preferredLocation; var gradeMismatch = sc && s.grade && sc.grade && sc.grade !== s.grade; var mismatch = centerMismatch || gradeMismatch; return '<span id="bubbleStudentCourseCenterWarning"' + (mismatch ? '' : ' class="hidden"') + ' style="color:#dc2626;font-size:0.85em">' + (mismatch ? ' คอร์สเดิมไม่ตรงกับชั้น/ศูนย์ที่เลือก กรุณาเลือกคอร์สใหม่' : '') + '</span>'; })() +
           '</div>' +
           '<div><label>สถานะคอร์ส</label><select id="bubbleStudentCourseStatus">' +
             '<option' + ((s.courseStatus || 'ยังไม่ได้สมัครคอร์ส') === 'ยังไม่ได้สมัครคอร์ส' ? ' selected' : '') + '>ยังไม่ได้สมัครคอร์ส</option>' +
@@ -10251,6 +10256,12 @@
           const bubbleCenter = bubbleSelectValue('bubbleStudentPreferredLocation');
           if (selectedCourse && bubbleCenter && selectedCourse.location && selectedCourse.location !== bubbleCenter) {
             getElement('editBubbleResult').textContent = 'คอร์สที่เลือกไม่ตรงกับศูนย์ กรุณาเลือกคอร์สใหม่';
+            getElement('editBubbleResult').style.color = '#dc2626';
+            return;
+          }
+          const bubbleGrade = bubbleSelectValue('bubbleStudentGrade');
+          if (selectedCourse && bubbleGrade && selectedCourse.grade && selectedCourse.grade !== bubbleGrade) {
+            getElement('editBubbleResult').textContent = 'คอร์สที่เลือกไม่ตรงกับชั้นเรียน (คอร์สนี้สำหรับ ' + selectedCourse.grade + ') กรุณาเลือกคอร์สใหม่';
             getElement('editBubbleResult').style.color = '#dc2626';
             return;
           }
@@ -10999,43 +11010,80 @@
       });
     }
 
-    function studentCourseOptionsHtml(selectedValue, center) {
-      const selectedText = String(selectedValue || '');
-      const filteredCourses = center ? getCoursesForCenter(center) : courses;
-      const options = ['<option value="">ยังไม่ได้สมัครคอร์ส</option>'];
-      filteredCourses.forEach(function(c) {
-        const selected = String(c.id) === selectedText || c.name === selectedText ? ' selected' : '';
-        options.push('<option value="' + c.id + '"' + selected + '>' + c.grade + ' · ' + c.name + '</option>');
+    function getCoursesForGradeAndCenter(grade, center) {
+      return courses.filter(function(c) {
+        const courseGrade = String(c.grade || '').trim();
+        const courseCenter = String(c.location || '').trim();
+        const gradeOk = !grade || courseGrade === grade || courseGrade.includes(grade) || grade.includes(courseGrade);
+        const centerOk = !center || courseCenter === center;
+        return gradeOk && centerOk;
       });
+    }
+
+    function studentCourseOptionsHtml(selectedValue, center, grade) {
+      const selectedText = String(selectedValue || '');
+      const filteredCourses = (grade || center) ? getCoursesForGradeAndCenter(grade || '', center || '') : courses;
+      const options = ['<option value="">ยังไม่ได้สมัครคอร์ส</option>'];
+      if (grade && center && filteredCourses.length === 0) {
+        options.push('<option value="" disabled>ไม่พบคอร์สที่ตรงกับชั้นและศูนย์นี้</option>');
+      } else {
+        filteredCourses.forEach(function(c) {
+          const selected = String(c.id) === selectedText || c.name === selectedText ? ' selected' : '';
+          options.push('<option value="' + c.id + '"' + selected + '>' + c.grade + ' · ' + c.name + '</option>');
+        });
+      }
       return options.join('');
     }
 
-    function onAdminStudentCenterChange() {
-      const center = getElement('adminStudentPreferredLocation').value;
+    function updateAdminStudentCourseDropdown(center, grade) {
       const courseSelect = getElement('adminStudentCourse');
       if (!courseSelect) return;
       const prev = courseSelect.value;
-      const valid = getCoursesForCenter(center).some(function(c) { return String(c.id) === prev; });
-      courseSelect.innerHTML = studentCourseOptionsHtml(valid ? prev : '', center);
+      const valid = getCoursesForGradeAndCenter(grade || '', center || '').some(function(c) { return String(c.id) === prev; });
+      courseSelect.innerHTML = studentCourseOptionsHtml(valid ? prev : '', center, grade);
       const w = getElement('adminStudentCourseCenterWarning');
       if (w) {
-        if (!valid && prev) { w.textContent = 'คอร์สเดิมไม่ตรงกับศูนย์ที่เลือก'; w.classList.remove('hidden'); }
+        if (!valid && prev) { w.textContent = 'คอร์สเดิมไม่ตรงกับชั้น/ศูนย์ที่เลือก กรุณาเลือกคอร์สใหม่'; w.classList.remove('hidden'); }
+        else { w.textContent = ''; w.classList.add('hidden'); }
+      }
+    }
+
+    function onAdminStudentCenterChange() {
+      const center = getElement('adminStudentPreferredLocation') ? getElement('adminStudentPreferredLocation').value : '';
+      const grade = getElement('adminStudentGrade') ? getElement('adminStudentGrade').value : '';
+      updateAdminStudentCourseDropdown(center, grade);
+    }
+
+    function onAdminStudentGradeChange() {
+      updateMemberIdPreview();
+      const center = getElement('adminStudentPreferredLocation') ? getElement('adminStudentPreferredLocation').value : '';
+      const grade = getElement('adminStudentGrade') ? getElement('adminStudentGrade').value : '';
+      updateAdminStudentCourseDropdown(center, grade);
+    }
+
+    function updateBubbleStudentCourseDropdown(center, grade) {
+      const courseSelect = getElement('bubbleStudentCourseId');
+      if (!courseSelect) return;
+      const prev = courseSelect.value;
+      const valid = getCoursesForGradeAndCenter(grade || '', center || '').some(function(c) { return String(c.id) === prev; });
+      courseSelect.innerHTML = studentCourseOptionsHtml(valid ? prev : '', center, grade);
+      const w = getElement('bubbleStudentCourseCenterWarning');
+      if (w) {
+        if (!valid && prev) { w.textContent = 'คอร์สเดิมไม่ตรงกับชั้น/ศูนย์ที่เลือก กรุณาเลือกคอร์สใหม่'; w.classList.remove('hidden'); }
         else { w.textContent = ''; w.classList.add('hidden'); }
       }
     }
 
     function onBubbleStudentCenterChange() {
       const center = bubbleSelectValue('bubbleStudentPreferredLocation');
-      const courseSelect = getElement('bubbleStudentCourseId');
-      if (!courseSelect) return;
-      const prev = courseSelect.value;
-      const valid = getCoursesForCenter(center).some(function(c) { return String(c.id) === prev; });
-      courseSelect.innerHTML = studentCourseOptionsHtml(valid ? prev : '', center);
-      const w = getElement('bubbleStudentCourseCenterWarning');
-      if (w) {
-        if (!valid && prev) { w.textContent = 'คอร์สเดิมไม่ตรงกับศูนย์ที่เลือก'; w.classList.remove('hidden'); }
-        else { w.textContent = ''; w.classList.add('hidden'); }
-      }
+      const grade = bubbleSelectValue('bubbleStudentGrade');
+      updateBubbleStudentCourseDropdown(center, grade);
+    }
+
+    function onBubbleStudentGradeChange() {
+      const center = bubbleSelectValue('bubbleStudentPreferredLocation');
+      const grade = bubbleSelectValue('bubbleStudentGrade');
+      updateBubbleStudentCourseDropdown(center, grade);
     }
 
     function privateLessonDayOptionsHtml(selectedValue) {
@@ -11096,8 +11144,9 @@
       const select = getElement('adminStudentCourse');
       if (!select) return;
       const center = getElement('adminStudentPreferredLocation') ? getElement('adminStudentPreferredLocation').value : '';
+      const grade = getElement('adminStudentGrade') ? getElement('adminStudentGrade').value : '';
       const current = select.value || '';
-      select.innerHTML = studentCourseOptionsHtml(current, center);
+      select.innerHTML = studentCourseOptionsHtml(current, center, grade);
       if (Array.from(select.options).some(function(option) { return option.value === current; })) {
         select.value = current;
       }
