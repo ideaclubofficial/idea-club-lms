@@ -4296,25 +4296,45 @@
                   </div>
                   <div style="flex:1;">
                     <label>URL รูปภาพประกอบ (ถ้ามี)</label>
-                    <input type="url" id="onlineExamQuestionImageUrl" placeholder="https://...">
+                    <input type="url" id="onlineExamQuestionImageUrl"
+                      placeholder="วางลิงก์ Google Drive หรือ URL รูปภาพโดยตรง"
+                      onblur="this.value=parseDriveImageUrl(this.value)"
+                      onpaste="setTimeout(()=>{this.value=parseDriveImageUrl(this.value)},50)">
+                    <p style="font-size:10px;color:#9ca3af;margin:2px 0 0;">รองรับลิงก์ Google Drive — ระบบแปลง URL ให้อัตโนมัติ</p>
                   </div>
                 </div>
                 <div class="form-row" style="margin-top:8px;">
                   <div>
                     <label>ตัวเลือก ก.</label>
                     <input type="text" id="onlineExamChoice0" placeholder="ตัวเลือก ก">
+                    <input type="url" id="onlineExamChoiceImage0" placeholder="ลิงก์รูป ก. (Google Drive หรือ URL)"
+                      style="margin-top:4px;font-size:11px;"
+                      onblur="this.value=parseDriveImageUrl(this.value)"
+                      onpaste="setTimeout(()=>{this.value=parseDriveImageUrl(this.value)},50)">
                   </div>
                   <div>
                     <label>ตัวเลือก ข.</label>
                     <input type="text" id="onlineExamChoice1" placeholder="ตัวเลือก ข">
+                    <input type="url" id="onlineExamChoiceImage1" placeholder="ลิงก์รูป ข. (Google Drive หรือ URL)"
+                      style="margin-top:4px;font-size:11px;"
+                      onblur="this.value=parseDriveImageUrl(this.value)"
+                      onpaste="setTimeout(()=>{this.value=parseDriveImageUrl(this.value)},50)">
                   </div>
                   <div>
                     <label>ตัวเลือก ค.</label>
                     <input type="text" id="onlineExamChoice2" placeholder="ตัวเลือก ค">
+                    <input type="url" id="onlineExamChoiceImage2" placeholder="ลิงก์รูป ค. (Google Drive หรือ URL)"
+                      style="margin-top:4px;font-size:11px;"
+                      onblur="this.value=parseDriveImageUrl(this.value)"
+                      onpaste="setTimeout(()=>{this.value=parseDriveImageUrl(this.value)},50)">
                   </div>
                   <div>
                     <label>ตัวเลือก ง.</label>
                     <input type="text" id="onlineExamChoice3" placeholder="ตัวเลือก ง">
+                    <input type="url" id="onlineExamChoiceImage3" placeholder="ลิงก์รูป ง. (Google Drive หรือ URL)"
+                      style="margin-top:4px;font-size:11px;"
+                      onblur="this.value=parseDriveImageUrl(this.value)"
+                      onpaste="setTimeout(()=>{this.value=parseDriveImageUrl(this.value)},50)">
                   </div>
                 </div>
                 <div class="form-row" style="margin-top:8px;">
@@ -5841,6 +5861,18 @@
 
     function actionCall(functionName, id) {
       return functionName + "('" + jsArg(id) + "')";
+    }
+
+    function parseDriveImageUrl(url) {
+      if (!url) return '';
+      url = url.trim();
+      if (url.includes('lh3.googleusercontent.com')) return url;
+      if (!url.includes('drive.google.com') && !url.includes('docs.google.com')) return url;
+      const fileMatch = url.match(/\/file\/d\/([a-zA-Z0-9_-]+)/);
+      if (fileMatch) return 'https://drive.google.com/uc?export=view&id=' + fileMatch[1];
+      const idMatch = url.match(/[?&]id=([a-zA-Z0-9_-]+)/);
+      if (idMatch) return 'https://drive.google.com/uc?export=view&id=' + idMatch[1];
+      return url;
     }
 
     async function uploadFileToFirebaseStorage(path, fileOrDataUrl) {
@@ -25475,7 +25507,13 @@ function receiptStatusText(status) {
 
       const correctIndex = parseInt((getElement('onlineExamCorrectIndex') || {}).value || '0', 10);
       const score = parseInt((getElement('onlineExamQuestionScore') || {}).value || '1', 10) || 1;
-      const imageUrl = ((getElement('onlineExamQuestionImageUrl') || {}).value || '').trim();
+      const imageUrl = parseDriveImageUrl(((getElement('onlineExamQuestionImageUrl') || {}).value || '').trim());
+      const choiceImages = [
+        parseDriveImageUrl(((getElement('onlineExamChoiceImage0') || {}).value || '').trim()) || null,
+        parseDriveImageUrl(((getElement('onlineExamChoiceImage1') || {}).value || '').trim()) || null,
+        parseDriveImageUrl(((getElement('onlineExamChoiceImage2') || {}).value || '').trim()) || null,
+        parseDriveImageUrl(((getElement('onlineExamChoiceImage3') || {}).value || '').trim()) || null
+      ];
       const editingQId = (getElement('onlineExamEditingQuestionId') || {}).value || '';
       const resultEl = getElement('onlineExamQuestionSaveResult');
 
@@ -25488,11 +25526,11 @@ function receiptStatusText(status) {
         if (editingQId) {
           const idx = questions.findIndex(function(q) { return q.questionId === editingQId; });
           if (idx >= 0) {
-            questions[idx] = Object.assign(questions[idx], { text, choices, correctIndex, score, imageUrl: imageUrl || null });
+            questions[idx] = Object.assign(questions[idx], { text, choices, choiceImages, correctIndex, score, imageUrl: imageUrl || null });
           }
         } else {
           const newQId = 'q_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7);
-          questions.push({ questionId: newQId, text, choices, correctIndex, score, imageUrl: imageUrl || null });
+          questions.push({ questionId: newQId, text, choices, choiceImages, correctIndex, score, imageUrl: imageUrl || null });
         }
 
         const totalScore = questions.reduce(function(sum, q) { return sum + (q.score || 1); }, 0);
@@ -25552,6 +25590,10 @@ function receiptStatusText(status) {
       setValue('onlineExamChoice1', (q.choices || [])[1] || '');
       setValue('onlineExamChoice2', (q.choices || [])[2] || '');
       setValue('onlineExamChoice3', (q.choices || [])[3] || '');
+      setValue('onlineExamChoiceImage0', (q.choiceImages || [])[0] || '');
+      setValue('onlineExamChoiceImage1', (q.choiceImages || [])[1] || '');
+      setValue('onlineExamChoiceImage2', (q.choiceImages || [])[2] || '');
+      setValue('onlineExamChoiceImage3', (q.choiceImages || [])[3] || '');
       setValue('onlineExamCorrectIndex', q.correctIndex || 0);
       setValue('onlineExamQuestionScore', q.score || 1);
       const cancelBtn = getElement('onlineExamQuestionCancelBtn');
@@ -25570,6 +25612,10 @@ function receiptStatusText(status) {
       setValue('onlineExamChoice1', '');
       setValue('onlineExamChoice2', '');
       setValue('onlineExamChoice3', '');
+      setValue('onlineExamChoiceImage0', '');
+      setValue('onlineExamChoiceImage1', '');
+      setValue('onlineExamChoiceImage2', '');
+      setValue('onlineExamChoiceImage3', '');
       setValue('onlineExamCorrectIndex', 0);
       setValue('onlineExamQuestionScore', 1);
       const cancelBtn = getElement('onlineExamQuestionCancelBtn');
@@ -25934,13 +25980,17 @@ function receiptStatusText(status) {
       feed.innerHTML = questions.map(function(q, idx) {
         const choicesHtml = (q.choices || []).map(function(ch, ci) {
           const selected = onlineExamStudentAnswers[q.questionId] === ci;
+          const ciImg = (q.choiceImages || [])[ci];
+          const ciImgHtml = ciImg
+            ? '<img src="' + escapeHtml(ciImg) + '" onerror="this.style.display=\'none\'" style="display:block;max-height:120px;max-width:100%;border-radius:8px;margin-top:6px;object-fit:contain;" alt="รูปตัวเลือก ' + alphabet[ci] + '">'
+            : '';
           return '<label onclick="onOnlineExamChoiceSelected(\'' + q.questionId + '\',' + ci + ',' + idx + ')" ' +
-            'style="display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:10px;cursor:pointer;border:' +
+            'style="display:flex;align-items:flex-start;gap:10px;padding:10px 12px;border-radius:10px;cursor:pointer;border:' +
             (selected ? '2px solid #4f46e5;background:#eef2ff;' : '1.5px solid #e2e8f0;background:#fff;') +
             'transition:border .1s,background .1s;" id="onlineExamLabel_' + q.questionId + '_' + ci + '">' +
-            '<input type="radio" name="oeq_' + q.questionId + '" ' + (selected ? 'checked' : '') + ' style="width:16px;height:16px;accent-color:#4f46e5;">' +
-            '<span style="font-size:12px;font-weight:700;color:#6b7280;min-width:18px;">' + alphabet[ci] + '</span>' +
-            '<span style="font-size:13px;color:#1e293b;">' + escapeHtml(ch) + '</span>' +
+            '<input type="radio" name="oeq_' + q.questionId + '" ' + (selected ? 'checked' : '') + ' style="width:16px;height:16px;accent-color:#4f46e5;margin-top:2px;">' +
+            '<div><span style="font-size:12px;font-weight:700;color:#6b7280;min-width:18px;">' + alphabet[ci] + '</span>' +
+            ' <span style="font-size:13px;color:#1e293b;">' + escapeHtml(ch) + '</span>' + ciImgHtml + '</div>' +
           '</label>';
         }).join('');
 
