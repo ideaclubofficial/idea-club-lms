@@ -7439,6 +7439,22 @@
           });
 
           const preMatchedTeacher = findTeacherByLoginId(rawUsername, username, displayLoginId);
+
+          // Guard: if input looks like a parent phone and multiple students share it,
+          // refuse to auto-select — require Member ID login instead
+          const loginDigits = rawUsername.replace(/[^0-9]/g, '');
+          const looksLikePhone = loginDigits.length >= 9 && loginDigits.length <= 11 && !rawUsername.includes('@');
+          if (looksLikePhone && !preMatchedTeacher && Array.isArray(students)) {
+            const phoneHolders = students.filter(function(s) {
+              return String(s.phone || '').replace(/[^0-9]/g, '') === loginDigits;
+            });
+            if (phoneHolders.length > 1) {
+              result.textContent = 'เบอร์นี้มีนักเรียนหลายคน กรุณาเข้าสู่ระบบด้วย Member ID';
+              result.style.color = '#dc2626';
+              return;
+            }
+          }
+
           const preMatchedStudent = findStudentByLoginId(rawUsername, username, displayLoginId);
           
           console.log('teacher-login-match', {
@@ -7830,14 +7846,13 @@
         return;
       }
 
-      const existedStudent = students.find(function(s) {
-        const oldPhone = String(s.phone || '').replace(/[^0-9]/g, '');
-        return oldPhone === cleanPhone;
-      });
-      if (existedStudent) {
-        result.textContent = 'เบอร์นี้มีอยู่ในระบบแล้ว กรุณาเข้าสู่ระบบหรือให้เจ้าหน้าที่ตรวจสอบ';
-        result.style.color = '#dc2626';
-        return;
+      // Phone is contact-only — siblings can share parent phone; block by memberId not phone
+      const siblingCount = Array.isArray(students) ? students.filter(function(s) {
+        return String(s.phone || '').replace(/[^0-9]/g, '') === cleanPhone;
+      }).length : 0;
+      if (siblingCount > 0) {
+        result.textContent = 'เบอร์นี้มีนักเรียนในระบบแล้ว ' + siblingCount + ' คน ระบบจะแยกด้วย Member ID ที่สร้างใหม่';
+        result.style.color = '#d97706';
       }
 
       if (PRODUCTION_MODE && (!firebaseReady || !auth || !db)) {
@@ -9661,7 +9676,7 @@
             '<p><strong>ชื่อเล่น:</strong> ' + (student.nickname || '-') + '</p>' +
             '<p><strong>ระดับชั้น:</strong> ' + (student.grade || '-') + '</p>' +
             '<p><strong>ชื่อผู้ปกครอง:</strong> ' + (student.parentName || '-') + '</p>' +
-            '<p><strong>เบอร์ผู้ปกครอง / เข้าสู่ระบบ:</strong> ' + (student.phone || '-') + '</p>' +
+            '<p><strong>เบอร์ผู้ปกครอง / เบอร์ติดต่อ:</strong> ' + (student.phone || '-') + '</p>' +
             '<p><strong>LINE ID:</strong> ' + (student.lineId || '-') + '</p>' +
             '<p><strong>โรงเรียน:</strong> ' + (student.school || '-') + '</p>' +
             '<p><strong>ศูนย์:</strong> ' + (student.preferredLocation || '-') + '</p>' +
@@ -9996,10 +10011,15 @@
             ? 'แก้ไขข้อมูลนักเรียนเรียบร้อยแล้ว หมายเหตุ: เบอร์นี้เป็นข้อมูลติดต่อ ผู้เรียนยังใช้ Member ID เข้าสู่ระบบ'
             : 'แก้ไขข้อมูลนักเรียนเรียบร้อย และบันทึกลง Firebase แล้ว';
         } else {
-          const existedStudent = students.find(function(item) {
-            return String(item.phone || '').replace(/[^0-9]/g, '') === String(phone || '').replace(/[^0-9]/g, '');
-          });
-          if (existedStudent) throw new Error('เบอร์นี้มีข้อมูลนักเรียนในระบบแล้ว ถ้าต้องการเปลี่ยนข้อมูลให้กด “แก้ไข” จากตารางรายชื่อ');
+          // Phone is contact-only — siblings can share a parent phone; no duplicate block
+          const cleanPhoneNew = String(phone || '').replace(/[^0-9]/g, '');
+          const siblingCountNew = students.filter(function(item) {
+            return String(item.phone || '').replace(/[^0-9]/g, '') === cleanPhoneNew;
+          }).length;
+          if (siblingCountNew > 0) {
+            result.textContent = 'เบอร์นี้มีนักเรียนอยู่แล้ว ' + siblingCountNew + ' คน ระบบจะแยกด้วย Member ID — กำลังบันทึก...';
+            result.style.color = '#d97706';
+          }
 
           const finalGrade = selectedCourse ? selectedCourse.grade : grade;
           const autoMemberId = await reserveNextMemberId(finalGrade);
@@ -10760,8 +10780,9 @@
     async function addStudentFromMember(memberId, name, grade, phone) {
       const cleanPhone = String(phone || '').replace(/[^0-9]/g, '');
       const studentEmail = buildLocalEmailFromMemberId(memberId);
+      // Match by memberId only — phone is contact info and may be shared by siblings
       let existing = students.find(function(s) {
-        return s.memberId === memberId || String(s.phone || '').replace(/[^0-9]/g, '') === cleanPhone;
+        return s.memberId === memberId;
       });
 
       let authUid = existing ? existing.authUid : null;
@@ -12805,7 +12826,13 @@ function getCourseOnlineDocs(course, includeInactive) {
       if (targetMemberId && recordMemberId && targetMemberId === recordMemberId) return true;
       if (targetAuthUid && recordAuthUid && targetAuthUid === recordAuthUid) return true;
       if (targetAuthUid && recordStudentAuthUid && targetAuthUid === recordStudentAuthUid) return true;
-      if (targetPhone && recordPhone && targetPhone === recordPhone) return true;
+      // Phone is contact-only: only match if unambiguous (no siblings share the phone)
+      if (targetPhone && recordPhone && targetPhone === recordPhone) {
+        const phoneOwnerCount = Array.isArray(students) ? students.filter(function(s) {
+          return String(s.phone || '').replace(/[^0-9]/g, '') === targetPhone;
+        }).length : 1;
+        if (phoneOwnerCount <= 1) return true;
+      }
       if (targetName && recordName && targetName === recordName) return true;
       return false;
     }
