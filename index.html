@@ -2647,7 +2647,6 @@
           <div class="sidebar-group-title"><span class="menu-icon">💳</span>การเงิน</div>
           <a data-menu-label="รอบชำระเงิน" onclick="showAdminTab('admin-payment-round')"><span class="menu-icon">💳</span>รอบชำระเงิน</a>
           <a data-menu-label="ตรวจสลิป / รายการชำระเงิน" onclick="showAdminTab('admin-payment')"><span class="menu-icon">💳</span>ตรวจสลิป / รายการชำระเงิน</a>
-          <a data-menu-label="ระบบการเงิน Admin" onclick="showAdminTab('admin-payment-v2')"><span class="menu-icon">💳</span>ระบบการเงิน Admin</a>
           <a data-menu-label="สรุปเรียนเดี่ยว" onclick="showAdminTab('admin-private-lesson-billing')"><span class="menu-icon">🕒</span>สรุปเรียนเดี่ยว</a>
           <a data-menu-label="ใบเสร็จ" onclick="showAdminTab('admin-receipts')"><span class="menu-icon">🧾</span>ใบเสร็จ</a>
           <div class="sidebar-group-title"><span class="menu-icon">📊</span>แบบทดสอบ</div>
@@ -3618,13 +3617,6 @@
             <div id="paymentTablePagination" class="test-actions" style="margin-top:10px;"></div>
 
             <br />
-          </section>
-
-          <section id="admin-payment-v2" class="admin-section admin-tab hidden">
-            <h2>ระบบการเงิน (Admin)</h2>
-            <div id="apv2-summary-cards"></div>
-            <div id="apv2-filters"></div>
-            <div id="apv2-payment-table"></div>
           </section>
 
           <section id="admin-private-lesson-billing" class="admin-tab hidden">
@@ -6015,7 +6007,6 @@
       'admin-video': 'admin.ondemand',
       'admin-payment-round': 'admin.finance',
       'admin-payment': 'admin.finance',
-      'admin-payment-v2': 'admin.finance',
       'admin-private-lesson-billing': 'admin.finance',
       'admin-receipts': 'admin.receipts',
       'admin-monthly-test': 'admin.exams',
@@ -6324,7 +6315,7 @@
     }
 
     function findFirstAllowedAdminTab() {
-      const order = ['admin-dashboard','admin-profile','admin-students','admin-id-cards','admin-private-students','admin-courses','admin-online-class','admin-video','admin-payment-round','admin-payment','admin-payment-v2','admin-private-lesson-billing','admin-receipts','admin-exam-processor','admin-online-exam','admin-monthly-planner','admin-teachers','admin-announcements','admin-settings','admin-activity-log'];
+      const order = ['admin-dashboard','admin-profile','admin-students','admin-id-cards','admin-private-students','admin-courses','admin-online-class','admin-video','admin-payment-round','admin-payment','admin-private-lesson-billing','admin-receipts','admin-exam-processor','admin-online-exam','admin-monthly-planner','admin-teachers','admin-announcements','admin-settings','admin-activity-log'];
       return order.find(function(tabId) { return canOpenAdminTab(tabId); }) || 'admin-dashboard';
     }
 
@@ -9504,9 +9495,6 @@
         safeRun(renderPaymentTable, 'payment-table');
         safeRun(updatePaymentSummary, 'payment-summary');
       }
-      if (tabId === 'admin-payment-v2') {
-        safeRun(renderAdminPaymentV2, 'admin-payment-v2');
-      }
       if (tabId === 'admin-private-lesson-billing') {
         safeRun(renderPrivateLessonBillingPreview, 'private-lesson-billing-preview');
       }
@@ -11570,11 +11558,6 @@
       return monthlyCoursePrice || coursePrice || fallbackMonthAmount || 0;
     }
 
-    function getStudentPaymentCourseName(student) {
-      if (!student) return '';
-      return student.courseName || student.course || student.selectedCourseName || '';
-    }
-
     function getPaymentFinalAmount(payment) {
       if (!payment) return 0;
       if (payment.finalAmount !== undefined && payment.finalAmount !== null) return Number(payment.finalAmount || 0) || 0;
@@ -11633,77 +11616,6 @@
       const courseText = payment.course || payment.courseName || '-';
       if (!privateCount) return courseText;
       return escapeHtml(courseText) + '<br><span class="tag">เรียนเดี่ยว ' + privateCount + ' ครั้ง</span>';
-    }
-
-    function getAdminPaymentRows() {
-      return (payments || []).map(function(payment) {
-        return {
-          id: payment.id || payment.firebaseDocId || '',
-          studentId: payment.studentId || '',
-          studentName: payment.student || payment.studentName || '-',
-          courseId: payment.courseId || '',
-          courseName: payment.courseName || payment.course || '-',
-          month: payment.month || payment.studentSelectedMonth || '-',
-          amount: getPaymentFinalAmount(payment),
-          status: payment.status || payment.paymentStatus || '-',
-          slipUrl: payment.driveFileUrl || payment.slipUrl || '',
-          createdAtText: payment.createdAtText || ''
-        };
-      });
-    }
-
-    function renderAdminPaymentV2() {
-      var summaryBox = document.getElementById('apv2-summary-cards');
-      var filtersBox = document.getElementById('apv2-filters');
-      var tableBox = document.getElementById('apv2-payment-table');
-      if (!summaryBox || !filtersBox || !tableBox) return;
-
-      var rows = getAdminPaymentRows();
-      var total = rows.length;
-      var paid = rows.filter(function(r){ return r.status === 'ชำระแล้ว'; }).length;
-      var pending = rows.filter(function(r){ return r.status !== 'ชำระแล้ว'; }).length;
-      var totalAmount = rows.reduce(function(sum, r){ return sum + (Number(r.amount) || 0); }, 0);
-
-      summaryBox.innerHTML = ''
-        + '<div class="dashboard-grid apv2-cards">'
-        + '<div class="stat apv2-card"><h4>รายการทั้งหมด</h4><p>' + total + '</p></div>'
-        + '<div class="stat apv2-card"><h4>ชำระแล้ว</h4><p>' + paid + '</p></div>'
-        + '<div class="stat apv2-card"><h4>ค้างชำระ</h4><p>' + pending + '</p></div>'
-        + '<div class="stat apv2-card"><h4>รวม</h4><p>฿' + totalAmount.toLocaleString('th-TH') + '</p></div>'
-        + '</div>';
-
-      filtersBox.innerHTML = '';
-      var tableRows = rows.map(function(r) {
-        var slipBtn = r.slipUrl
-          ? '<a href="' + escapeHtml(normalizeExternalUrl(r.slipUrl)) + '" target="_blank" rel="noopener">ดูสลิป</a>'
-          : '-';
-        var confirmBtn = r.status !== 'ชำระแล้ว'
-          ? '<button class="btn btn-green" type="button" onclick="' + actionCall('adminConfirmPaymentV2', r.id) + '">✅ รับเงิน</button>'
-          : '<span class="status-paid">✔ รับแล้ว</span>';
-        var receiptBtn = r.status === 'ชำระแล้ว'
-          ? '<button class="btn btn-blue" type="button" onclick="' + actionCall('openAdminPaymentReceiptV2', r.id) + '">🧾 ใบเสร็จ</button>'
-          : '-';
-        return '<tr>'
-          + '<td>' + escapeHtml(r.studentName) + '</td>'
-          + '<td>' + escapeHtml(r.courseName) + '</td>'
-          + '<td>' + escapeHtml(r.month) + '</td>'
-          + '<td>฿' + Number(r.amount || 0).toLocaleString('th-TH') + '</td>'
-          + '<td>' + escapeHtml(r.status) + '</td>'
-          + '<td>' + slipBtn + '</td>'
-          + '<td>' + confirmBtn + '</td>'
-          + '<td>' + receiptBtn + '</td>'
-          + '</tr>';
-      }).join('');
-
-      tableBox.innerHTML = ''
-        + '<div class="table-wrap"><table class="apv2-table">'
-        + '<thead><tr>'
-        + '<th>นักเรียน</th><th>คอร์ส</th><th>เดือน</th>'
-        + '<th>ยอด</th><th>สถานะ</th><th>สลิป</th>'
-        + '<th>รับเงิน</th><th>ใบเสร็จ</th>'
-        + '</tr></thead>'
-        + '<tbody>' + (tableRows || '<tr><td colspan="8">ยังไม่มีรายการชำระเงิน</td></tr>') + '</tbody>'
-        + '</table></div>';
     }
 
     function updateManualPaymentSuggestedAmount() {
@@ -15289,77 +15201,6 @@ function getCourseOnlineDocs(course, includeInactive) {
         return;
       }
       downloadHtmlAsPdf('ใบสมัคร ' + (currentStudent.memberId || currentStudent.name || 'IDEA CLUB'), applicationFormHtml(currentStudent, false), 'application-' + (currentStudent.memberId || currentStudent.name || 'student') + '.pdf');
-    }
-
-    function getReceiptForPaymentV2(payment) {
-      if (!payment) return null;
-      const paymentId = String(payment.id || payment.firebaseDocId || '');
-      const receiptMonth = getPaymentMonthForReceiptData({
-        paymentId: paymentId,
-        month: payment.month || payment.studentSelectedMonth || '-'
-      });
-      return (receipts || []).find(function(receipt) {
-        const samePayment = paymentId && String(receipt.paymentId || '') === paymentId;
-        const sameInfo = (receipt.student === (payment.student || payment.studentName)) &&
-          (receipt.course === (payment.course || payment.courseName)) &&
-          getReceiptMonth(receipt) === receiptMonth;
-        return samePayment || sameInfo;
-      }) || null;
-    }
-
-    async function createReceiptFromPayment(payment, options) {
-      if (!payment) return null;
-      return createReceipt({
-        paymentId: payment.id || payment.firebaseDocId || '',
-        studentId: payment.studentId || '',
-        authUid: payment.authUid || payment.studentAuthUid || '',
-        courseId: payment.courseId || '',
-        phone: payment.phone || payment.studentPhone || '',
-        student: payment.student || payment.studentName || '-',
-        course: payment.course || payment.courseName || '-',
-        month: payment.month || payment.studentSelectedMonth || '-',
-        amount: String(getPaymentFinalAmount(payment)),
-        lineItems: Array.isArray(payment.lineItems) ? payment.lineItems : [],
-        slip: payment.slipUrl || payment.driveFileUrl ? 'มีสลิป' : (payment.slipSource || '-'),
-        slipNote: payment.slipNote || '',
-        sentAt: payment.createdAtText || '-',
-        status: payment.status || payment.paymentStatus || '-'
-      }, options || {});
-    }
-
-    async function adminConfirmPaymentV2(paymentId) {
-      var payment = (payments || []).find(function(p) {
-        return String(p.id || p.firebaseDocId || '') === String(paymentId);
-      });
-      if (!payment) return alert('ไม่พบข้อมูลการชำระเงิน');
-
-      payment.status = 'ชำระแล้ว';
-      payment.paymentStatus = 'ชำระแล้ว';
-      payment.approvedDate = new Date().toLocaleDateString('th-TH');
-      payment.approvedAtText = new Date().toLocaleString('th-TH');
-
-      await setFirebaseDocument('payments', payment);
-
-      await createReceiptFromPayment(payment, {
-        publish: true,
-        silent: true
-      });
-
-      renderAdminPaymentV2();
-      renderPaymentTable();
-      updatePaymentSummary();
-    }
-
-    function openAdminPaymentReceiptV2(paymentId) {
-      var payment = (payments || []).find(function(p) {
-        return String(p.id || p.firebaseDocId || '') === String(paymentId);
-      });
-      var receipt = getReceiptForPaymentV2(payment);
-      if (!receipt) {
-        alert('ยังไม่พบใบเสร็จของรายการนี้');
-        return;
-      }
-      openReceiptDetail(receipt.id || receipt.firebaseDocId, 'admin');
     }
 
     function createReceiptFromPaymentRow(button) {
@@ -23814,7 +23655,7 @@ function receiptStatusText(status) {
       allLinks.forEach(function(link) { link.classList.remove('role-hidden'); });
       if (level === 'Super Admin' || level === 'admin' || level === 'Admin') return;
       const allowed = {
-        'Finance Admin': ['ภาพรวม','รอบชำระเงิน','ตรวจสลิป / รายการชำระเงิน','ระบบการเงิน Admin','สรุปเรียนเดี่ยว','ใบเสร็จ','การเงิน / ตรวจสลิป / ใบเสร็จ','ประวัติการแก้ไข','ตั้งค่าระบบ','ออก'],
+        'Finance Admin': ['ภาพรวม','การเงิน / ตรวจสลิป / ใบเสร็จ','ประวัติการแก้ไข','ตั้งค่าระบบ','ออก'],
         'Teacher Admin': ['ภาพรวม','ครูผู้สอน / สิทธิ์','ห้องเรียน Online','คลิป On-demand','นักเรียน / สมาชิก','ประวัติการแก้ไข','ออก'],
         'Staff': ['ภาพรวม','นักเรียน / สมาชิก','รายการรออนุมัติคอร์ส','ประกาศหน้า Student','ประวัติการแก้ไข','ออก']
       }[level] || null;
@@ -23845,7 +23686,6 @@ function receiptStatusText(status) {
       if (tabId === 'admin-dashboard') { renderNewMemberNotificationBox(); renderAdminDataQualityBox(); }
       if (tabId === 'admin-courses') { injectCourseReadinessTools(); renderAllCourseReadiness(); }
       if (tabId === 'admin-payment') { injectOverdueDayFilter(); injectPaymentOwnerDiagnosticPanel(); }
-      if (tabId === 'admin-payment-v2') { safeRun(renderAdminPaymentV2, 'admin-payment-v2-final'); }
       if (tabId === 'admin-settings') { injectBackupButton(); injectAuthCleanupPanel(); injectHardWipePanel(); injectAdminRoleSettings(); }
       applyAdminRoleVisibility();
     };
