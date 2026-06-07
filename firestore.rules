@@ -338,15 +338,24 @@ service cloud.firestore {
 
     // ระบบข้อสอบออนไลน์ Interactive
     match /onlineExamCourses/{docId} {
-      allow read: if signedIn();
+      // Admin/staff read all; student read only published+active courses (client-side filter handles old docs)
+      allow read: if hasAdminPermission('admin.onlineExams')
+                   || (signedIn() && !isStudentUser())
+                   || (isStudentUser() && (
+                        resource.data.publishStatus == 'published'
+                        || resource.data.status == 'active'
+                      ) && resource.data.isActive != false);
       allow write: if hasAdminPermission('admin.onlineExams');
     }
 
     match /onlineExamResults/{docId} {
+      // Admin read/write all; student read only their own results; student create only their own; student cannot update or delete
       allow read: if hasAdminPermission('admin.onlineExams')
                    || (isStudentUser() && resource.data.studentUid == request.auth.uid);
       allow create: if isStudentUser()
-                     && request.resource.data.studentUid == request.auth.uid;
+                     && request.resource.data.studentUid == request.auth.uid
+                     && request.resource.data.resultStatus == 'submitted'
+                     && request.resource.data.allowRetake == false;
       allow update, delete: if hasAdminPermission('admin.onlineExams');
     }
 
