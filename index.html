@@ -10306,6 +10306,17 @@
           '<div><label>ราคาเหมา</label><input id="bubbleStudentPrivateFixedPrice" type="number" min="0" value="' + (s.privateFixedPrice || 0) + '"></div>' +
         '</div>' +
         '<div class="form-row"><div><label>หมายเหตุเรียนเดี่ยว</label><textarea id="bubbleStudentPrivateLessonNote">' + escapeHtml(s.privateLessonNote || '') + '</textarea></div></div>' +
+        '<div class="form-row">' +
+          '<div>' +
+            '<label>เดือนเริ่มเรียกเก็บเงิน <span style="color:#6b7280;font-size:0.85em">(เว้นว่าง = เรียกเก็บทุกรอบ)</span></label>' +
+            '<input id="bubbleBillingStartMonth" type="hidden" value="' + (s.billingStartMonth || '') + '">' +
+            '<div class="form-row">' +
+              '<div><select id="bubbleBillingStartMonthMonthSelect" onchange="syncThaiMonthYearPicker(\'bubbleBillingStartMonth\', \'text\')"></select></div>' +
+              '<div><select id="bubbleBillingStartMonthYearSelect" onchange="syncThaiMonthYearPicker(\'bubbleBillingStartMonth\', \'text\')"></select></div>' +
+              '<div><button class="btn btn-dark" type="button" onclick="clearBillingStartMonthPicker()">ล้าง</button></div>' +
+            '</div>' +
+          '</div>' +
+        '</div>' +
         '<div class="notice"><strong>หมายเหตุ</strong><p>เบอร์ผู้ปกครองเป็นข้อมูลติดต่อ นักเรียนใช้ Member ID เข้าสู่ระบบ</p></div>',
         async function() {
           const name = bubbleValue('bubbleStudentName');
@@ -10350,6 +10361,10 @@
             paymentStatus: !selectedCourse ? 'ยังไม่ได้สมัครคอร์ส' : (s.paymentStatus || 'รอชำระเงิน'),
             learningStatus: bubbleSelectValue('bubbleStudentLearningStatus'),
             status: bubbleSelectValue('bubbleStudentLearningStatus'),
+            billingStartMonth: (function() {
+              syncThaiMonthYearPicker('bubbleBillingStartMonth', 'text');
+              return bubbleValue('bubbleBillingStartMonth') || '';
+            })(),
             learningType: learningType,
             privateLessonEnabled: isLearningTypePrivateEnabled(learningType),
             privateLessonDay: bubbleSelectValue('bubbleStudentPrivateLessonDay'),
@@ -10395,7 +10410,30 @@
           }
         }
       );
+      setTimeout(function() {
+        if (s.billingStartMonth) {
+          setThaiMonthYearPickerValue('bubbleBillingStartMonth', s.billingStartMonth || '', 'text');
+        } else {
+          clearBillingStartMonthPicker();
+        }
+      }, 0);
       updateBubblePrivateLessonFields();
+    }
+
+    function clearBillingStartMonthPicker() {
+      const hidden = getElement('bubbleBillingStartMonth');
+      const monthSelect = getElement('bubbleBillingStartMonthMonthSelect');
+      const yearSelect = getElement('bubbleBillingStartMonthYearSelect');
+      setThaiMonthYearPickerValue('bubbleBillingStartMonth', '', 'text');
+      if (monthSelect && !Array.from(monthSelect.options).some(function(option) { return option.value === ''; })) {
+        monthSelect.insertAdjacentHTML('afterbegin', '<option value="">ไม่กำหนด</option>');
+      }
+      if (yearSelect && !Array.from(yearSelect.options).some(function(option) { return option.value === ''; })) {
+        yearSelect.insertAdjacentHTML('afterbegin', '<option value="">ไม่กำหนด</option>');
+      }
+      if (monthSelect) monthSelect.value = '';
+      if (yearSelect) yearSelect.value = '';
+      if (hidden) hidden.value = '';
     }
 
     
@@ -12910,6 +12948,14 @@ function getCourseOnlineDocs(course, includeInactive) {
       return { month: monthIndex + 1, year: year };
     }
 
+    function compareThaiMonthYear(a, b) {
+      const pa = parseThaiMonthYear(a);
+      const pb = parseThaiMonthYear(b);
+      if (!pa || !pb) return 0;
+      if (pa.year !== pb.year) return pa.year - pb.year;
+      return pa.month - pb.month;
+    }
+
     function getStudentSignupDate(student) {
       if (!student) return null;
       const signupDate = parseRecordDate(student.registeredAt || student.registeredAtText || student.createdAt || student.createdAtText);
@@ -14949,7 +14995,10 @@ function getCourseOnlineDocs(course, includeInactive) {
 
     function getMonthlyPaymentTargetStudentsForMonth(month) {
       if (!month) return [];
-      return getMonthlyPaymentTargetStudents();
+      return getMonthlyPaymentTargetStudents().filter(function(s) {
+        if (!s.billingStartMonth) return true;
+        return compareThaiMonthYear(s.billingStartMonth, month) <= 0;
+      });
     }
 
     function isPaymentRecordUpdatable(payment) {
@@ -15028,11 +15077,18 @@ function getCourseOnlineDocs(course, includeInactive) {
       if (!month) {
         summaryBox.innerHTML = '<div class="stat"><h4>เดือนที่เลือก</h4><p>-</p></div><div class="stat"><h4>นักเรียนที่ต้องเรียกเก็บ</h4><p>0 คน</p></div><div class="stat"><h4>ยอดรวม</h4><p>0 บาท</p></div>';
         tbody.innerHTML = '<tr><td colspan="6">ยังไม่มีเดือนชำระเงิน ให้เพิ่มรอบเดือนก่อน</td></tr>';
+        const excludedContainer = getElement('paymentRecordExcludedSection');
+        if (excludedContainer) excludedContainer.innerHTML = '';
         if (result) result.textContent = message || '';
         return;
       }
 
+      const allEligibleStudents = getMonthlyPaymentTargetStudents();
       const targetStudents = getMonthlyPaymentTargetStudentsForMonth(month);
+      const targetIds = new Set(targetStudents.map(function(s) { return String(s.id); }));
+      const excludedStudents = allEligibleStudents.filter(function(s) {
+        return !targetIds.has(String(s.id));
+      });
       const rows = targetStudents.map(function(student) {
         const amount = getMonthlyPaymentAmountForStudent(student, month);
         const payment = findPaymentForStudentMonth(student, month);
@@ -15050,6 +15106,7 @@ function getCourseOnlineDocs(course, includeInactive) {
         '<div class="stat"><h4>เดือนที่เลือก</h4><p>' + escapeHtml(month) + '</p></div>' +
         '<div class="stat"><h4>นักเรียนที่ต้องเรียกเก็บ</h4><p>' + rows.length + ' คน</p></div>' +
         '<div class="stat"><h4>ยอดรวมที่ต้องเรียกเก็บ</h4><p>' + formatPrice(totalAmount) + '</p></div>' +
+        '<div class="stat"><h4>ยังไม่เรียกเก็บรอบนี้</h4><p>' + excludedStudents.length + ' คน</p></div>' +
         '<div class="stat"><h4>สร้างแล้ว</h4><p>' + createdRows.length + ' รายการ</p></div>' +
         '<div class="stat"><h4>ยังไม่ได้สร้าง</h4><p>' + pendingRows.length + ' รายการ</p></div>';
 
@@ -15071,6 +15128,33 @@ function getCourseOnlineDocs(course, includeInactive) {
           '<td>' + (payment ? '<span class="' + paymentStatusClass + '">' + escapeHtml(paymentStatus) + '</span>' : '-') + '</td>' +
         '</tr>';
       }).join('') : '<tr><td colspan="6">ยังไม่มีนักเรียนที่เข้าเงื่อนไขสำหรับสร้างรายการเรียกเก็บ</td></tr>';
+
+      const excludedContainer = getElement('paymentRecordExcludedSection') || (function() {
+        const div = document.createElement('div');
+        div.id = 'paymentRecordExcludedSection';
+        tbody.closest('.table-wrap').parentNode.appendChild(div);
+        return div;
+      })();
+      if (excludedStudents.length > 0) {
+        excludedContainer.innerHTML =
+          '<h4 style="margin-top:24px; color:#6b7280;">นักเรียนที่ยังไม่เรียกเก็บรอบนี้ (' + excludedStudents.length + ' คน)</h4>' +
+          '<div class="table-wrap">' +
+            '<table>' +
+              '<thead><tr><th>นักเรียน</th><th>คอร์ส</th><th>เดือนเริ่มเรียกเก็บ</th></tr></thead>' +
+              '<tbody>' +
+                excludedStudents.map(function(s) {
+                  return '<tr style="opacity:0.55;">' +
+                    '<td>' + escapeHtml(s.name || '') + '</td>' +
+                    '<td>' + escapeHtml(s.course || '-') + '</td>' +
+                    '<td>' + escapeHtml(s.billingStartMonth || '-') + '</td>' +
+                    '</tr>';
+                }).join('') +
+              '</tbody>' +
+            '</table>' +
+          '</div>';
+      } else {
+        excludedContainer.innerHTML = '';
+      }
 
       if (result) {
         result.textContent = message || '';
