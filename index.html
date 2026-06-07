@@ -1475,6 +1475,30 @@
       text-decoration: underline;
     }
 
+    .login-card .login-remember-row {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      margin: 0;
+      color: #4b5563;
+      font-size: 14px;
+      font-weight: 500;
+      line-height: 1.5;
+    }
+
+    .login-card .login-remember-row input[type="checkbox"] {
+      appearance: auto;
+      -webkit-appearance: checkbox;
+      width: 16px !important;
+      min-width: 16px !important;
+      height: 16px !important;
+      margin: 0;
+      padding: 0;
+      border-radius: 3px;
+      flex: 0 0 16px !important;
+      accent-color: #0f4cbd;
+    }
+
     .login-help-details {
       margin-top: 20px;
       font-size: 13px;
@@ -1635,7 +1659,7 @@
           </div>
           <label class="login-remember-row">
             <input type="checkbox" id="rememberLogin" />
-            จดจำการเข้าสู่ระบบในเครื่องนี้
+            จดจำ Member ID และรหัสผ่านในเครื่องนี้
           </label>
         </div>
         <div style="margin-top:24px;display:flex;flex-direction:column;gap:10px;">
@@ -7526,6 +7550,18 @@
       input.type = input.type === 'password' ? 'text' : 'password';
     }
 
+    function restoreRememberedLogin() {
+      const rememberInput = getElement('rememberLogin');
+      const usernameInput = getElement('loginUsername');
+      const passwordInput = getElement('loginPassword');
+      if (!rememberInput || !usernameInput || !passwordInput) return;
+      if (localStorage.getItem('ideaClubRememberLogin') === 'true') {
+        rememberInput.checked = true;
+        usernameInput.value = localStorage.getItem('ideaClubLoginUsername') || '';
+        passwordInput.value = localStorage.getItem('ideaClubLoginPassword') || '';
+      }
+    }
+
     function getFriendlyLoginError(error) {
       const code = String((error && (error.code || error.message)) || '');
       if (code.includes('student-member-id-only')) return 'นักเรียนต้องเข้าสู่ระบบด้วย Member ID เท่านั้น';
@@ -7573,9 +7609,11 @@
       if (remember) {
         localStorage.setItem('ideaClubRememberLogin', 'true');
         localStorage.setItem('ideaClubLoginUsername', rawUsername);
+        localStorage.setItem('ideaClubLoginPassword', password);
       } else {
         localStorage.removeItem('ideaClubRememberLogin');
         localStorage.removeItem('ideaClubLoginUsername');
+        localStorage.removeItem('ideaClubLoginPassword');
       }
 
       if (PRODUCTION_MODE) {
@@ -8212,6 +8250,7 @@
       getElement('studentLoginResult').textContent = '';
       getElement('registerResult').textContent = '';
       if (!getElement('rememberLogin').checked) getElement('loginUsername').value = '';
+      restoreRememberedLogin();
       window.scrollTo({ top: 0, behavior: 'smooth' });
     }
 
@@ -27534,10 +27573,7 @@ function receiptStatusText(status) {
       if (getElement('memberYearBE')) getElement('memberYearBE').value = currentBEYear;
 
       safeRun(function() {
-        if (localStorage.getItem('ideaClubRememberLogin') === 'true') {
-          getElement('rememberLogin').checked = true;
-          getElement('loginUsername').value = localStorage.getItem('ideaClubLoginUsername') || '';
-        }
+        restoreRememberedLogin();
       }, 'remember-login');
 
       safeRun(function() {
