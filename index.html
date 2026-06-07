@@ -1327,6 +1327,89 @@
     .form-select {
       border-radius: 0.375rem !important;
     }
+
+    /* ── CHANGE A: Finance sub-tab nav ── */
+    .finance-sub-nav {
+      display: flex;
+      gap: 4px;
+      margin-bottom: 22px;
+      border-bottom: 2px solid #e5e7eb;
+      padding-bottom: 0;
+      flex-wrap: wrap;
+    }
+    .finance-sub-nav a {
+      padding: 7px 16px;
+      border-radius: 6px 6px 0 0;
+      cursor: pointer;
+      color: #6b7280;
+      font-weight: 600;
+      font-size: 14px;
+      text-decoration: none;
+      border: 1.5px solid transparent;
+      border-bottom: none;
+      margin-bottom: -2px;
+      transition: color 0.15s, background 0.15s;
+      user-select: none;
+    }
+    .finance-sub-nav a:hover { color: #0f4cbd; background: #f0f4ff; }
+    .finance-sub-nav a.active {
+      color: #0f4cbd;
+      background: #fff;
+      border-color: #e5e7eb;
+      border-bottom-color: #fff;
+    }
+
+    /* ── CHANGE D: Compact payment action buttons ── */
+    .payment-actions-wrap { display: flex; flex-direction: column; gap: 5px; min-width: 120px; }
+    .payment-action-primary { display: flex; gap: 4px; flex-wrap: wrap; }
+    .payment-action-secondary { display: flex; gap: 4px; flex-wrap: wrap; }
+    .payment-action-secondary .btn { font-size: 11px; padding: 3px 8px; min-height: 28px; }
+
+    /* ── CHANGE E: Payment round stepper ── */
+    .payment-step {
+      display: flex;
+      align-items: flex-start;
+      gap: 16px;
+      margin-bottom: 28px;
+    }
+    .payment-step-badge {
+      flex-shrink: 0;
+      width: 32px;
+      height: 32px;
+      border-radius: 50%;
+      background: #0f4cbd;
+      color: #fff;
+      font-weight: 800;
+      font-size: 15px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin-top: 2px;
+    }
+    .payment-step-body { flex: 1; }
+    .payment-step-title { font-size: 17px; font-weight: 800; color: #0f4cbd; margin-bottom: 10px; }
+
+    /* ── CHANGE F: Student pending payment banner ── */
+    .student-pending-banner {
+      background: linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%);
+      border: 1.5px solid #93c5fd;
+      border-radius: 12px;
+      padding: 16px 20px;
+      margin-bottom: 18px;
+      display: flex;
+      align-items: center;
+      gap: 14px;
+    }
+    .student-pending-banner-icon { font-size: 28px; flex-shrink: 0; }
+    .student-pending-banner-text h4 { margin: 0 0 4px; color: #1d4ed8; font-size: 15px; }
+    .student-pending-banner-text p { margin: 0; color: #1e40af; font-size: 22px; font-weight: 800; }
+    .student-pending-banner-text small { color: #3b82f6; font-size: 13px; }
+    .student-pending-banner.paid { background: linear-gradient(135deg, #f0fdf4,#dcfce7); border-color: #86efac; }
+    .student-pending-banner.paid h4 { color: #15803d; }
+    .student-pending-banner.paid p { color: #16a34a; }
+    .student-pending-banner.overdue { background: linear-gradient(135deg, #fff7ed,#fed7aa); border-color: #fb923c; }
+    .student-pending-banner.overdue h4 { color: #c2410c; }
+    .student-pending-banner.overdue p { color: #ea580c; }
   </style>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
@@ -1763,6 +1846,14 @@
       <div id="studentPaymentContent" class="hidden">
       <h2 class="section-title">ชำระเงิน</h2>
       <p class="section-subtitle">เลือกเดือน สแกน QR Code แล้วอัปโหลดสลิป</p>
+      <div id="studentPendingPaymentBanner" class="student-pending-banner hidden">
+        <div class="student-pending-banner-icon">💳</div>
+        <div class="student-pending-banner-text">
+          <h4 id="studentPendingBannerLabel">ยอดที่ต้องชำระ</h4>
+          <p id="studentPendingBannerAmount">-</p>
+          <small id="studentPendingBannerMonth"></small>
+        </div>
+      </div>
       <div class="student-payment-steps">
         <h3>ขั้นตอนการชำระเงิน</h3>
         <ol>
@@ -3423,116 +3514,131 @@
           </section>
 
                     <section id="admin-payment-round" class="admin-tab hidden">
+            <nav class="finance-sub-nav">
+              <a onclick="showAdminTab('admin-payment')">💳 ตรวจสลิป</a>
+              <a class="active">📅 รอบชำระเงิน</a>
+              <a onclick="showAdminTab('admin-receipts')">🧾 ใบเสร็จ</a>
+            </nav>
             <div class="form-box">
               <h3>ตั้งค่ารอบชำระเงิน</h3>
-              <p style="margin-bottom:18px; color:#6b7280;">เลือกเดือน ตั้งราคาเฉพาะที่ต่างจากราคาคอร์ส แล้วบันทึกให้นักเรียนเห็นยอดได้ทันที</p>
+              <p style="margin-bottom:24px; color:#6b7280;">ทำตาม 3 ขั้นตอน: เลือกเดือน → ตั้งราคา → ตรวจ Preview แล้วบันทึก</p>
 
-              <div class="notice" style="margin-bottom:18px;">
-                <strong>วิธีใช้งาน</strong>
-                <p>เลือกเดือนแล้วกดเตรียมรอบ ระบบจะสร้างเดือนให้ถ้ายังไม่มี และเติมราคาปกติของคอร์สให้ทันที</p>
-                <p>แก้เฉพาะคอร์สที่เดือนนี้มีราคาต่าง จากนั้นบันทึกและเปิดแสดงยอดให้นักเรียน ไม่ต้องสร้างรายการชำระเงินล่วงหน้า</p>
-              </div>
-
-              <h3 style="color:#0f4cbd; margin-bottom:10px;">เลือกรอบชำระเงิน</h3>
-              <div class="form-row">
-                <div>
-                  <label>ชื่อเดือน / รอบบิล</label>
-                  <input id="newPaymentMonth" type="hidden" />
+              <!-- Step 1 -->
+              <div class="payment-step">
+                <div class="payment-step-badge">1</div>
+                <div class="payment-step-body">
+                  <div class="payment-step-title">เลือกรอบชำระเงิน</div>
                   <div class="form-row">
                     <div>
-                      <select id="newPaymentMonthMonthSelect" onchange="syncThaiMonthYearPicker('newPaymentMonth', 'text')"></select>
+                      <label>ชื่อเดือน / รอบบิล</label>
+                      <input id="newPaymentMonth" type="hidden" />
+                      <div class="form-row">
+                        <div>
+                          <select id="newPaymentMonthMonthSelect" onchange="syncThaiMonthYearPicker('newPaymentMonth', 'text')"></select>
+                        </div>
+                        <div>
+                          <select id="newPaymentMonthYearSelect" onchange="syncThaiMonthYearPicker('newPaymentMonth', 'text')"></select>
+                        </div>
+                      </div>
                     </div>
+                    <input id="newPaymentAmount" type="hidden" value="0" />
+                  </div>
+                  <button class="btn btn-green" type="button" onclick="preparePaymentRound()">เตรียมรอบชำระเงิน</button>
+                  <p id="paymentMonthResult" style="margin-top:14px; font-weight:bold;"></p>
+                  <details style="margin-top:18px;">
+                    <summary style="cursor:pointer; font-weight:700; color:#6b7280;">จัดการเดือนที่มีอยู่ทั้งหมด</summary>
+                    <div class="table-wrap" style="margin-top:12px;">
+                      <table>
+                        <thead>
+                          <tr>
+                            <th>ลำดับ</th>
+                            <th>เดือน</th>
+                            <th>ราคาคอร์สที่ตั้งไว้</th>
+                            <th>แสดงให้นักเรียน</th>
+                            <th>จัดการ</th>
+                          </tr>
+                        </thead>
+                        <tbody id="paymentMonthTableBody"></tbody>
+                      </table>
+                    </div>
+                  </details>
+                </div>
+              </div>
+
+              <!-- Step 2 -->
+              <div class="payment-step">
+                <div class="payment-step-badge">2</div>
+                <div class="payment-step-body">
+                  <div class="payment-step-title">ตั้งราคาคอร์สของเดือนนี้</div>
+                  <div class="form-row">
                     <div>
-                      <select id="newPaymentMonthYearSelect" onchange="syncThaiMonthYearPicker('newPaymentMonth', 'text')"></select>
+                      <label>เดือนที่กำลังตั้งราคา</label>
+                      <select id="paymentPriceMonthSelect" onchange="renderPaymentCoursePriceSettings(); renderPaymentRecordPreview()"></select>
                     </div>
                   </div>
-                </div>
-                <input id="newPaymentAmount" type="hidden" value="0" />
-              </div>
-              <button class="btn btn-green" type="button" onclick="preparePaymentRound()">เตรียมรอบชำระเงิน</button>
-              <p id="paymentMonthResult" style="margin-top:14px; font-weight:bold;"></p>
-
-              <details style="margin-top:18px;">
-                <summary style="cursor:pointer; font-weight:800; color:#0f4cbd;">จัดการเดือนที่มีอยู่</summary>
-                <div class="table-wrap" style="margin-top:12px;">
-                  <table>
-                    <thead>
-                      <tr>
-                        <th>ลำดับ</th>
-                        <th>เดือน</th>
-                        <th>ราคาคอร์สที่ตั้งไว้</th>
-                        <th>แสดงให้นักเรียน</th>
-                        <th>จัดการ</th>
-                      </tr>
-                    </thead>
-                    <tbody id="paymentMonthTableBody"></tbody>
-                  </table>
-                </div>
-              </details>
-
-              <br />
-
-              <h3 style="color:#0f4cbd; margin-bottom:10px;">ตั้งราคาคอร์สของเดือนนี้</h3>
-              <div class="form-row">
-                <div>
-                  <label>เดือนที่กำลังตั้งราคา</label>
-                  <select id="paymentPriceMonthSelect" onchange="renderPaymentCoursePriceSettings(); renderPaymentRecordPreview()"></select>
+                  <div class="test-actions">
+                    <button class="btn btn-blue" type="button" onclick="useDefaultCoursePricesForSelectedMonth()">ใช้ราคาปกติของคอร์สทั้งหมด</button>
+                    <button class="btn btn-dark" type="button" onclick="copyPricesFromPreviousMonth()">คัดลอกราคาจากเดือนก่อน</button>
+                  </div>
+                  <p id="paymentCoursePriceResult" style="margin-top:10px; font-weight:bold;"></p>
+                  <div class="table-wrap" style="margin-top:14px;">
+                    <table>
+                      <thead>
+                        <tr>
+                          <th>คอร์ส</th>
+                          <th>ราคาปกติ</th>
+                          <th>ราคาที่เก็บเดือนนี้</th>
+                          <th>จัดการ</th>
+                        </tr>
+                      </thead>
+                      <tbody id="paymentCoursePriceTableBody"></tbody>
+                    </table>
+                  </div>
                 </div>
               </div>
 
-              <div class="test-actions">
-                <button class="btn btn-blue" type="button" onclick="useDefaultCoursePricesForSelectedMonth()">ใช้ราคาปกติของคอร์สทั้งหมด</button>
-                <button class="btn btn-dark" type="button" onclick="copyPricesFromPreviousMonth()">คัดลอกราคาจากเดือนก่อน</button>
-                <button class="btn btn-green" type="button" onclick="saveAllPaymentCoursePrices()">บันทึกยอดและสร้างรายการเรียกเก็บ</button>
+              <!-- Step 3 -->
+              <div class="payment-step">
+                <div class="payment-step-badge">3</div>
+                <div class="payment-step-body">
+                  <div class="payment-step-title">Preview ยอด แล้วบันทึก</div>
+                  <p style="color:#6b7280; margin-bottom:12px;">ตรวจยอดที่นักเรียนจะเห็น เมื่อถูกต้องให้กดบันทึก</p>
+                  <div id="paymentRecordPreviewSummary" class="dashboard-grid"></div>
+                  <div class="table-wrap" style="margin-top:14px;">
+                    <table>
+                      <thead>
+                        <tr>
+                          <th>นักเรียน</th>
+                          <th>คอร์ส</th>
+                          <th>ราคาที่ต้องจ่าย</th>
+                          <th>สถานะรายการ</th>
+                          <th>สถานะชำระเงิน</th>
+                        </tr>
+                      </thead>
+                      <tbody id="paymentRecordPreviewTableBody"></tbody>
+                    </table>
+                  </div>
+                  <div class="test-actions" style="margin-top:16px;">
+                    <button class="btn btn-green" style="font-size:15px; padding:10px 22px;" type="button" onclick="saveAllPaymentCoursePrices()">บันทึกยอดและสร้างรายการเรียกเก็บ</button>
+                  </div>
+                  <p style="color:#6b7280; margin-top:8px; font-size:13px;">เมื่อกดปุ่มนี้ ระบบจะบันทึกราคาและสร้างรายการเรียกเก็บให้นักเรียนทันที</p>
+                  <p id="paymentRecordPreviewResult" style="margin-top:10px; font-weight:bold;"></p>
+                  <details style="margin-top:14px;">
+                    <summary style="cursor:pointer; font-weight:700; color:#9ca3af;">เครื่องมือซ่อมข้อมูล</summary>
+                    <p style="color:#6b7280; margin:10px 0;">ปกติไม่ต้องใช้ ใช้เฉพาะกรณีต้องซ่อมข้อมูล</p>
+                    <button class="btn btn-dark" type="button" onclick="createMonthlyPaymentRecords()">สร้าง payment records ล่วงหน้าของเดือนนี้</button>
+                  </details>
+                </div>
               </div>
-              <p style="color:#6b7280; margin-top:8px; margin-bottom:0;">เมื่อกดปุ่มนี้ ระบบจะบันทึกราคาและสร้างรายการเรียกเก็บให้นักเรียนทันที</p>
-              <p id="paymentCoursePriceResult" style="margin-top:14px; font-weight:bold;"></p>
-
-              <br />
-
-              <div class="table-wrap">
-                <table>
-                  <thead>
-                    <tr>
-                      <th>คอร์ส</th>
-                      <th>ราคาปกติ</th>
-                      <th>ราคาที่เก็บเดือนนี้</th>
-                      <th>จัดการ</th>
-                    </tr>
-                  </thead>
-                  <tbody id="paymentCoursePriceTableBody"></tbody>
-                </table>
-              </div>
-
-              <br />
-
-              <h3 style="color:#0f4cbd; margin-bottom:10px;">Preview ยอดของเดือนนี้</h3>
-              <p style="color:#6b7280; margin-bottom:10px;">ตรวจยอดที่นักเรียนจะเห็นทันทีหลังบันทึก ยอดและรายการเรียกเก็บจะถูกสร้างพร้อมกันเมื่อกดปุ่มบันทึกด้านบน</p>
-              <div id="paymentRecordPreviewSummary" class="dashboard-grid"></div>
-              <div class="table-wrap" style="margin-top:14px;">
-                <table>
-                  <thead>
-                    <tr>
-                      <th>นักเรียน</th>
-                      <th>คอร์ส</th>
-                      <th>ราคาที่ต้องจ่าย</th>
-                      <th>สถานะรายการ</th>
-                      <th>สถานะชำระเงิน</th>
-                    </tr>
-                  </thead>
-                  <tbody id="paymentRecordPreviewTableBody"></tbody>
-                </table>
-              </div>
-              <details style="margin-top:14px;">
-                <summary style="cursor:pointer; font-weight:800; color:#0f4cbd;">เครื่องมือซ่อมข้อมูล: สร้าง payment records</summary>
-                <p style="color:#6b7280; margin:10px 0;">ปกติไม่ต้องใช้ ใช้เฉพาะกรณีต้องซ่อมข้อมูล</p>
-                <button class="btn btn-dark" type="button" onclick="createMonthlyPaymentRecords()">สร้าง payment records ล่วงหน้าของเดือนนี้</button>
-              </details>
-              <p id="paymentRecordPreviewResult" style="margin-top:14px; font-weight:bold;"></p>
             </div>
           </section>
 
           <section id="admin-payment" class="admin-tab hidden">
+            <nav class="finance-sub-nav">
+              <a class="active">💳 ตรวจสลิป</a>
+              <a onclick="showAdminTab('admin-payment-round')">📅 รอบชำระเงิน</a>
+              <a onclick="showAdminTab('admin-receipts')">🧾 ใบเสร็จ</a>
+            </nav>
             <div class="form-box">
               <h3>Dashboard การเงิน</h3>
               <p style="margin-bottom:18px; color:#6b7280;">สรุปรายการที่ต้องตรวจสอบและยอดชำระของเดือนที่เลือก</p>
@@ -3702,6 +3808,11 @@
           </section>
 
           <section id="admin-receipts" class="admin-tab hidden">
+            <nav class="finance-sub-nav">
+              <a onclick="showAdminTab('admin-payment')">💳 ตรวจสลิป</a>
+              <a onclick="showAdminTab('admin-payment-round')">📅 รอบชำระเงิน</a>
+              <a class="active">🧾 ใบเสร็จ</a>
+            </nav>
             <div class="form-box">
               <h3>ใบเสร็จ</h3>
               <p style="margin-bottom:18px; color:#6b7280;">ตรวจสอบใบเสร็จ แล้วกดแสดงให้ผู้ปกครอง</p>
@@ -13665,14 +13776,27 @@ function getCourseOnlineDocs(course, includeInactive) {
       }).join('') : '<p>วันนี้ยังไม่มีคอร์สที่ระบุวันเรียนไว้</p>';
     }
 
-    function paymentActionButtons(status) {
+    function paymentActionButtons(status, paymentId) {
       const isPaid = status === 'ชำระแล้ว';
-      return '<button class="btn btn-green" type="button" onclick="approvePayment(this)">' + (isPaid ? 'อนุมัติแล้ว' : 'อนุมัติ') + '</button>' +
+      const rowIdScript = 'openSlipReviewModal(this.closest(\'[data-payment-id]\').dataset.paymentId)';
+      const p = paymentId ? (payments || []).find(function(px) { return String(px.id || '') === String(paymentId) || String(px.firebaseDocId || '') === String(paymentId); }) : null;
+      const ocrBtn = p && paymentHasOcrData(p) ? '<button class="btn btn-blue" type="button" onclick="' + actionCall('viewPaymentOcrDetail', paymentId) + '">OCR</button>' : '';
+      return '<div class="payment-actions-wrap">' +
+        '<div class="payment-action-primary">' +
+        '<button class="btn btn-blue" type="button" onclick="' + rowIdScript + '">ตรวจสลิป</button>' +
+        '<button class="btn btn-green" type="button" onclick="approvePayment(this)">' + (isPaid ? '✓ อนุมัติ' : 'อนุมัติ') + '</button>' +
         '<button class="btn btn-red" type="button" onclick="rejectPayment(this)">ไม่ผ่าน</button>' +
+        '</div>' +
+        '<div class="payment-action-secondary">' +
         '<button class="btn btn-red" type="button" onclick="setPaymentOverdue(this)">ค้างชำระ</button>' +
         '<button class="btn ' + (isPaid ? 'btn-green' : 'btn-dark') + '" type="button" onclick="createReceiptFromPaymentRow(this)">ใบเสร็จ</button>' +
         '<button class="btn btn-blue" type="button" onclick="showPaymentDetail(this)">ดูข้อมูล</button>' +
-        '<button class="btn btn-red" type="button" onclick="deletePaymentRecord(this)">ลบข้อมูล</button>';
+        ocrBtn +
+        '<button class="btn btn-blue" type="button" onclick="editPaymentAmountDiscount(this)">แก้ยอด</button>' +
+        '<button class="btn btn-dark" type="button" onclick="editPaymentAdminNote(this)">หมายเหตุ</button>' +
+        '<button class="btn btn-red" type="button" onclick="deletePaymentRecord(this)">ลบ</button>' +
+        '</div>' +
+        '</div>';
     }
 
     async function updatePaymentRowStatus(row, status) {
@@ -13714,11 +13838,77 @@ function getCourseOnlineDocs(course, includeInactive) {
         row.children[5].innerHTML = '<span class="status-waiting">รอตรวจสลิป</span>';
         await syncStudentPaymentStatusFromRow(row, 'รอตรวจสลิป');
       }
-      row.children[6].innerHTML = paymentActionButtons(status);
+      row.children[6].innerHTML = paymentActionButtons(status, paymentId);
       addActivityLog('เปลี่ยนสถานะชำระเงิน', (row.children[0] ? row.children[0].innerText : '-') + ' · ' + (row.children[2] ? row.children[2].innerText : '-') + ' · ' + status);
       updatePaymentSummary();
       renderAdminReceipts();
       renderStudentReceipts();
+    }
+
+    function openSlipReviewModal(paymentId) {
+      const payment = (payments || []).find(function(p) {
+        return String(p.id || '') === String(paymentId) || String(p.firebaseDocId || '') === String(paymentId);
+      });
+      if (!payment) { alert('ไม่พบรายการชำระเงิน'); return; }
+      const slipUrl = getPaymentSlipUrl(payment);
+      const statusText = getPaymentDisplayStatus(payment);
+      const statusClass = statusText === 'ชำระแล้ว' ? 'status-paid' : (statusText === 'ค้างชำระ' || statusText === 'สลิปไม่ผ่าน') ? 'status-absent' : 'status-waiting';
+      const slipHtml = slipUrl
+        ? '<a href="' + escapeHtml(slipUrl) + '" target="_blank" rel="noopener"><img src="' + escapeHtml(slipUrl) + '" onerror="this.parentNode.innerHTML=\'<div style=&quot;padding:24px;color:#9ca3af;text-align:center;&quot;>โหลดรูปไม่สำเร็จ — <a href=&quot;' + escapeHtml(slipUrl) + '&quot; target=&quot;_blank&quot;>เปิดลิงก์</a></div>\'" style="max-width:100%;max-height:440px;border-radius:8px;border:1px solid #e5e7eb;display:block;object-fit:contain;" alt="สลิป" /></a>'
+        : '<div style="padding:40px;text-align:center;color:#9ca3af;background:#f8fafc;border-radius:8px;border:1.5px dashed #e2e8f0;">ยังไม่มีสลิป</div>';
+      const ocrNote = payment.ocrCheckNote ? '<div class="receipt-line"><strong>OCR</strong><span class="mini-muted">' + escapeHtml(payment.ocrCheckNote) + '</span></div>' : '';
+      const adminNote = payment.adminNote ? '<div class="receipt-line"><strong>หมายเหตุ</strong><span>' + escapeHtml(payment.adminNote) + '</span></div>' : '';
+      openViewBubble('ตรวจสลิปการชำระเงิน',
+        '<div style="display:flex;gap:20px;flex-wrap:wrap;align-items:flex-start;">' +
+        '<div style="flex:1 1 220px;">' + slipHtml + '</div>' +
+        '<div style="flex:1 1 180px;">' +
+        '<div class="receipt-line"><strong>นักเรียน</strong><span>' + escapeHtml(payment.student || '-') + '</span></div>' +
+        '<div class="receipt-line"><strong>คอร์ส</strong><span>' + escapeHtml(payment.course || '-') + '</span></div>' +
+        '<div class="receipt-line"><strong>เดือน</strong><span>' + escapeHtml(payment.month || '-') + '</span></div>' +
+        '<div class="receipt-line"><strong>ยอด</strong><span style="font-weight:800;">' + escapeHtml(renderPaymentAmountText(payment)) + '</span></div>' +
+        '<div class="receipt-line"><strong>สถานะ</strong><span class="' + statusClass + '">' + escapeHtml(statusText) + '</span></div>' +
+        adminNote + ocrNote +
+        '</div></div>' +
+        '<div class="test-actions" style="margin-top:18px;">' +
+        '<button id="slipModalApproveBtn" class="btn btn-green" type="button" onclick="approvePaymentByIdFromModal(\'' + jsArg(String(paymentId)) + '\')">✓ อนุมัติ</button>' +
+        '<button id="slipModalRejectBtn" class="btn btn-red" type="button" onclick="rejectPaymentByIdFromModal(\'' + jsArg(String(paymentId)) + '\')">✗ ไม่ผ่าน</button>' +
+        (slipUrl ? '<a class="btn btn-blue" href="' + escapeHtml(slipUrl) + '" target="_blank" rel="noopener">เปิดสลิปเต็ม</a>' : '') +
+        '<button class="btn btn-dark" type="button" onclick="closeEditBubble()">ปิด</button>' +
+        '</div>'
+      );
+    }
+
+    async function approvePaymentByIdFromModal(paymentId) {
+      const btn = getElement('slipModalApproveBtn');
+      if (btn) { btn.disabled = true; btn.textContent = 'กำลังอนุมัติ...'; }
+      await approvePaymentAndIssueReceipt(paymentId);
+      getElement('editBubbleOverlay').classList.add('hidden');
+      renderPaymentTable();
+    }
+
+    async function rejectPaymentByIdFromModal(paymentId) {
+      const btn = getElement('slipModalRejectBtn');
+      if (btn) { btn.disabled = true; btn.textContent = 'กำลังดำเนินการ...'; }
+      const payment = (payments || []).find(function(p) {
+        return String(p.id || '') === String(paymentId) || String(p.firebaseDocId || '') === String(paymentId);
+      });
+      if (!payment) { if (btn) { btn.disabled = false; btn.textContent = '✗ ไม่ผ่าน'; } return; }
+      payment.status = 'สลิปไม่ผ่าน';
+      payment.paymentStatus = 'สลิปไม่ผ่าน';
+      payment.slipStatus = 'rejected';
+      await setFirebaseDocument('payments', payment);
+      addActivityLog('สลิปไม่ผ่าน', (payment.student || '-') + ' · ' + (payment.month || '-'));
+      const student = (students || []).find(function(s) {
+        return (payment.studentId && String(s.id || '') === String(payment.studentId)) ||
+               (payment.authUid && s.authUid === payment.authUid);
+      });
+      if (student) {
+        student.paymentStatus = 'สลิปไม่ผ่าน';
+        await setFirebaseDocument('students', student);
+      }
+      getElement('editBubbleOverlay').classList.add('hidden');
+      renderPaymentTable();
+      updatePaymentSummary();
     }
 
     async function approvePaymentAndIssueReceipt(paymentId) {
@@ -14167,9 +14357,53 @@ function getCourseOnlineDocs(course, includeInactive) {
         studentSelect.innerHTML = monthOptions.map(function(month) {
           return '<option value="' + escapeHtml(month) + '">' + escapeHtml(month) + '</option>';
         }).join('');
-        studentSelect.value = monthOptions.includes(currentValue) ? currentValue : monthOptions[0];
+        var priorityMonth = currentValue && monthOptions.includes(currentValue) ? currentValue : (function() {
+          var urgentStatuses = ['สลิปไม่ผ่าน', 'ค้างชำระ', 'รอชำระเงิน', 'รอตรวจสลิป'];
+          var visiblePayments = getStudentVisiblePayments(currentStudent);
+          for (var si = 0; si < urgentStatuses.length; si++) {
+            var found = visiblePayments.find(function(p) { return getPaymentDisplayStatus(p) === urgentStatuses[si]; });
+            if (found && (found.paymentMonth || found.month)) return found.paymentMonth || found.month;
+          }
+          return monthOptions[0];
+        })();
+        studentSelect.value = monthOptions.includes(priorityMonth) ? priorityMonth : monthOptions[0];
       }
       updateStudentSelectedPaymentMonth();
+      updateStudentPendingPaymentBanner();
+    }
+
+    function updateStudentPendingPaymentBanner() {
+      var banner = getElement('studentPendingPaymentBanner');
+      if (!banner) return;
+      if (!currentStudent || !currentStudent.courseId) { banner.classList.add('hidden'); return; }
+      var month = getStudentSelectedPaymentMonth();
+      if (!month) { banner.classList.add('hidden'); return; }
+      var payment = getStudentPaymentForSelectedMonth();
+      var statusText = payment ? getPaymentDisplayStatus(payment) : (currentStudent.courseId ? 'รอชำระเงิน' : '-');
+      var amount = getCurrentStudentAdjustedPaymentAmount(month);
+      var label = getElement('studentPendingBannerLabel');
+      var amountEl = getElement('studentPendingBannerAmount');
+      var monthEl = getElement('studentPendingBannerMonth');
+      banner.classList.remove('hidden', 'paid', 'overdue');
+      if (statusText === 'ชำระแล้ว') {
+        banner.classList.add('paid');
+        if (label) label.textContent = 'ชำระเงินเรียบร้อยแล้ว';
+        if (amountEl) amountEl.textContent = amount ? formatPrice(amount) : '-';
+        if (monthEl) monthEl.textContent = 'เดือน ' + month;
+      } else if (statusText === 'ค้างชำระ' || statusText === 'สลิปไม่ผ่าน') {
+        banner.classList.add('overdue');
+        if (label) label.textContent = statusText === 'สลิปไม่ผ่าน' ? 'สลิปไม่ผ่าน — กรุณาส่งสลิปใหม่' : 'ค้างชำระ — กรุณาชำระด่วน';
+        if (amountEl) amountEl.textContent = amount ? formatPrice(amount) : '-';
+        if (monthEl) monthEl.textContent = 'เดือน ' + month;
+      } else if (statusText === 'รอตรวจสลิป') {
+        if (label) label.textContent = 'รอเจ้าหน้าที่ตรวจสลิป';
+        if (amountEl) amountEl.textContent = amount ? formatPrice(amount) : '-';
+        if (monthEl) monthEl.textContent = 'เดือน ' + month + ' · ส่งสลิปแล้ว';
+      } else {
+        if (label) label.textContent = 'ยอดที่ต้องชำระ';
+        if (amountEl) amountEl.textContent = amount ? formatPrice(amount) : '-';
+        if (monthEl) monthEl.textContent = 'เดือน ' + month;
+      }
     }
 
     function updateStudentSelectedPaymentMonth() {
@@ -14206,6 +14440,7 @@ function getCourseOnlineDocs(course, includeInactive) {
         }
       }
       updateStudentSlipUploadControls();
+      if (typeof updateStudentPendingPaymentBanner === 'function') updateStudentPendingPaymentBanner();
     }
 
     function renderPaymentMonths() {
@@ -14943,11 +15178,10 @@ function getCourseOnlineDocs(course, includeInactive) {
       const ptItems = filtered.slice(ptStart, ptStart + LIST_PAGE_SIZE);
       tbody.innerHTML = ptItems.length ? ptItems.map(function(p) {
         const slipCell = formatPaymentSlipReviewCell(p);
-        const ocrButton = paymentHasOcrData(p) ? '<button class="btn btn-blue" type="button" onclick="' + actionCall('viewPaymentOcrDetail', p.firebaseDocId || p.id) + '">ดู OCR</button>' : '';
+        const pid = p.id || p.firebaseDocId || '';
         const statusText = getPaymentDisplayStatus(p);
         const statusClass = statusText === 'ชำระแล้ว' ? 'status-paid' : statusText === 'ค้างชำระ' || statusText === 'สลิปไม่ผ่าน' || statusText === 'ไม่ผ่าน' ? 'status-absent' : 'status-waiting';
-        const noteText = p.adminNote ? '<br><span class="mini-muted">หมายเหตุ Admin: ' + p.adminNote + '</span>' : '';
-        return '<tr data-payment-id="' + p.id + '"><td>' + (p.student || '-') + '</td><td>' + renderPaymentCourseText(p) + '</td><td>' + (p.month || '-') + '</td><td>' + renderPaymentAmountText(p) + '</td><td>' + slipCell + '<br><span class="mini-muted">เดือนที่นักเรียนแจ้ง: ' + (p.studentSelectedMonth || p.month || '-') + '</span><br><span class="mini-muted">แจ้งเมื่อ: ' + (p.createdAtText || '-') + '</span>' + noteText + '</td><td><span class="' + statusClass + '">' + statusText + '</span></td><td>' + paymentActionButtons(p.status || p.paymentStatus || 'รอชำระเงิน') + ocrButton + '<button class="btn btn-blue" type="button" onclick="editPaymentAmountDiscount(this)">แก้ยอด/ส่วนลด</button><button class="btn btn-dark" type="button" onclick="editPaymentAdminNote(this)">หมายเหตุ</button></td></tr>';
+        return '<tr data-payment-id="' + p.id + '"><td>' + (p.student || '-') + '</td><td>' + renderPaymentCourseText(p) + '</td><td>' + (p.month || '-') + '</td><td>' + renderPaymentAmountText(p) + '</td><td>' + slipCell + '</td><td><span class="' + statusClass + '">' + statusText + '</span></td><td>' + paymentActionButtons(p.status || p.paymentStatus || 'รอชำระเงิน', pid) + '</td></tr>';
       }).join('') : '<tr><td colspan="7">ยังไม่มีรายการชำระเงินตามเงื่อนไขที่เลือก</td></tr>';
       renderTablePagination('paymentTablePagination', paymentCurrentPage, ptTotalPages, filtered.length, 'changePaymentPage');
       updatePaymentSummary();
