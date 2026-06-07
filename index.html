@@ -4205,6 +4205,11 @@
                   style="padding:8px 16px;font-size:12px;font-weight:700;border:none;background:none;cursor:pointer;border-bottom:2px solid #4f46e5;color:#4f46e5;margin-bottom:-2px;">
                   📋 ตรวจคะแนนรายคน
                 </button>
+                <button id="onlineExamAdminTabBtnAnalysis"
+                  onclick="switchOnlineExamAdminTab('analysis')"
+                  style="padding:8px 16px;font-size:12px;font-weight:700;border:none;background:none;cursor:pointer;border-bottom:2px solid transparent;color:#6b7280;margin-bottom:-2px;">
+                  📊 วิเคราะห์รายข้อ
+                </button>
                 <button id="onlineExamAdminTabBtnManage"
                   onclick="switchOnlineExamAdminTab('manage')"
                   style="padding:8px 16px;font-size:12px;font-weight:700;border:none;background:none;cursor:pointer;border-bottom:2px solid transparent;color:#6b7280;margin-bottom:-2px;">
@@ -4256,13 +4261,25 @@
               </div>
               <div id="onlineExamGradingReport" class="form-box" style="display:none;padding:0;overflow:hidden;">
               </div>
-              <!-- Result detail modal -->
-              <div id="onlineExamDetailModal" style="display:none;position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.55);overflow-y:auto;padding:20px;">
-                <div style="background:#fff;border-radius:16px;max-width:720px;margin:0 auto;padding:24px 20px;position:relative;">
-                  <button onclick="closeOnlineExamDetailModal()" style="position:absolute;top:12px;right:14px;background:none;border:none;font-size:20px;cursor:pointer;color:#6b7280;line-height:1;">✕</button>
-                  <div id="onlineExamDetailModalContent"></div>
+            </div>
+
+            <!-- Inner Tab: วิเคราะห์รายข้อ -->
+            <div id="onlineExamTab-analysis" style="display:none;">
+              <div class="form-box">
+                <h3>วิเคราะห์ผลสอบรายข้อ</h3>
+                <div class="form-row">
+                  <div>
+                    <label>คอร์สวิชา</label>
+                    <select id="onlineExamAnalysisCourseSelect" style="width:100%;">
+                      <option value="">-- เลือกคอร์ส --</option>
+                    </select>
+                  </div>
+                  <div style="align-self:flex-end;">
+                    <button class="btn btn-blue" onclick="onlineExamRenderQuestionAnalysis()">📊 วิเคราะห์</button>
+                  </div>
                 </div>
               </div>
+              <div id="onlineExamAnalysisContent" class="form-box" style="display:none;padding:12px 16px;"></div>
             </div>
 
             <!-- Inner Tab: จัดการ -->
@@ -4324,6 +4341,20 @@
                     <select id="onlineExamCourseShowAnswer">
                       <option value="1">แสดงเฉลยรายข้อ</option>
                       <option value="0">แสดงเฉพาะคะแนน</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label>สุ่มลำดับคำถาม</label>
+                    <select id="onlineExamCourseShuffleQ">
+                      <option value="0">ไม่สุ่ม (เรียงตามลำดับ)</option>
+                      <option value="1">สุ่มทุกครั้งที่สอบ</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label>สุ่มลำดับตัวเลือก</label>
+                    <select id="onlineExamCourseShuffleC">
+                      <option value="0">ไม่สุ่ม (เรียงตามลำดับ)</option>
+                      <option value="1">สุ่มทุกครั้งที่สอบ</option>
                     </select>
                   </div>
                 </div>
@@ -4457,6 +4488,13 @@
 
             </div>
           </section>
+          <!-- Result detail / choice distribution modal — outside tabs so it works from any tab -->
+          <div id="onlineExamDetailModal" style="display:none;position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.55);overflow-y:auto;padding:20px;">
+            <div style="background:#fff;border-radius:16px;max-width:720px;margin:0 auto;padding:24px 20px;position:relative;">
+              <button onclick="closeOnlineExamDetailModal()" style="position:absolute;top:12px;right:14px;background:none;border:none;font-size:20px;cursor:pointer;color:#6b7280;line-height:1;">✕</button>
+              <div id="onlineExamDetailModalContent"></div>
+            </div>
+          </div>
           <!-- end admin-online-exam -->
 
           <section id="admin-monthly-planner" class="admin-tab hidden">
@@ -7027,6 +7065,11 @@
     let onlineExamGradeAllResults = [];
     let onlineExamGradePage = 1;
     const ONLINE_EXAM_GRADE_PAGE_SIZE = 20;
+    let onlineExamQuestionOrder = [];    // questionIds in display order (shuffled or natural)
+    let onlineExamChoiceOrder = {};      // {questionId: [origIdx0, origIdx1, origIdx2, origIdx3]}
+    let onlineExamAutosaveHandle = null; // autosave interval handle
+    let onlineExamSaveDraftTimeout = null; // debounce for per-answer save
+    let onlineExamAnalysisData = [];     // per-question stats for analysis tab
     const monthlyPlanSessions = [];
     const holidays = [];
 
@@ -25417,24 +25460,35 @@ function receiptStatusText(status) {
 
     function switchOnlineExamAdminTab(tab) {
       const gradeView = getElement('onlineExamTab-grade');
+      const analysisView = getElement('onlineExamTab-analysis');
       const manageView = getElement('onlineExamTab-manage');
       const btnGrade = getElement('onlineExamAdminTabBtnGrade');
+      const btnAnalysis = getElement('onlineExamAdminTabBtnAnalysis');
       const btnManage = getElement('onlineExamAdminTabBtnManage');
       if (!gradeView || !manageView) return;
 
       const activeStyle = 'padding:8px 16px;font-size:12px;font-weight:700;border:none;background:none;cursor:pointer;border-bottom:2px solid #4f46e5;color:#4f46e5;margin-bottom:-2px;';
       const inactiveStyle = 'padding:8px 16px;font-size:12px;font-weight:700;border:none;background:none;cursor:pointer;border-bottom:2px solid transparent;color:#6b7280;margin-bottom:-2px;';
 
+      gradeView.style.display = 'none';
+      if (analysisView) analysisView.style.display = 'none';
+      manageView.style.display = 'none';
+      if (btnGrade) btnGrade.style.cssText = inactiveStyle;
+      if (btnAnalysis) btnAnalysis.style.cssText = inactiveStyle;
+      if (btnManage) btnManage.style.cssText = inactiveStyle;
+
       if (tab === 'grade') {
         gradeView.style.display = '';
-        manageView.style.display = 'none';
         if (btnGrade) btnGrade.style.cssText = activeStyle;
-        if (btnManage) btnManage.style.cssText = inactiveStyle;
         safeRun(renderOnlineExamGradingSelectors, 'online-exam-grading-selectors');
+      } else if (tab === 'analysis') {
+        if (analysisView) analysisView.style.display = '';
+        if (btnAnalysis) btnAnalysis.style.cssText = activeStyle;
+        safeRun(populateOnlineExamCourseSelects, 'online-exam-analysis-selects');
+        const ac = getElement('onlineExamAnalysisContent');
+        if (ac) ac.style.display = 'none';
       } else {
-        gradeView.style.display = 'none';
         manageView.style.display = '';
-        if (btnGrade) btnGrade.style.cssText = inactiveStyle;
         if (btnManage) btnManage.style.cssText = activeStyle;
         safeRun(renderOnlineExamAdminManage, 'online-exam-admin-manage');
       }
@@ -25469,6 +25523,8 @@ function receiptStatusText(status) {
       const publishStatus = (getElement('onlineExamCoursePublishStatus') || {}).value || 'draft';
       const showScoreAfterSubmit = (getElement('onlineExamCourseShowScore') || {}).value !== '0';
       const showAnswerAfterPublished = (getElement('onlineExamCourseShowAnswer') || {}).value !== '0';
+      const shuffleQuestions = (getElement('onlineExamCourseShuffleQ') || {}).value === '1';
+      const shuffleChoices = (getElement('onlineExamCourseShuffleC') || {}).value === '1';
       const isActive = status === 'active';
       const editingId = (getElement('onlineExamEditingCourseId') || {}).value || '';
       const resultEl = getElement('onlineExamCourseSaveResult');
@@ -25479,7 +25535,7 @@ function receiptStatusText(status) {
       try {
         const now = firebase.firestore.FieldValue.serverTimestamp();
         const uid = firebaseUser ? firebaseUser.uid : '';
-        const extraFields = { publishStatus, isActive, showScoreAfterSubmit, showAnswerAfterPublished };
+        const extraFields = { publishStatus, isActive, showScoreAfterSubmit, showAnswerAfterPublished, shuffleQuestions, shuffleChoices };
 
         if (editingId) {
           await db.collection('onlineExamCourses').doc(editingId).set(
@@ -25542,6 +25598,8 @@ function receiptStatusText(status) {
       setValue('onlineExamCoursePublishStatus', course.publishStatus || 'draft');
       setValue('onlineExamCourseShowScore', course.showScoreAfterSubmit === false ? '0' : '1');
       setValue('onlineExamCourseShowAnswer', course.showAnswerAfterPublished === false ? '0' : '1');
+      setValue('onlineExamCourseShuffleQ', course.shuffleQuestions ? '1' : '0');
+      setValue('onlineExamCourseShuffleC', course.shuffleChoices ? '1' : '0');
       const cancelBtn = getElement('onlineExamCourseCancelBtn');
       if (cancelBtn) cancelBtn.style.display = '';
       const saveBtn = getElement('onlineExamCourseSaveBtn');
@@ -25559,6 +25617,8 @@ function receiptStatusText(status) {
       setValue('onlineExamCoursePublishStatus', 'draft');
       setValue('onlineExamCourseShowScore', '1');
       setValue('onlineExamCourseShowAnswer', '1');
+      setValue('onlineExamCourseShuffleQ', '0');
+      setValue('onlineExamCourseShuffleC', '0');
       const cancelBtn = getElement('onlineExamCourseCancelBtn');
       if (cancelBtn) cancelBtn.style.display = 'none';
       const saveBtn = getElement('onlineExamCourseSaveBtn');
@@ -25733,6 +25793,8 @@ function receiptStatusText(status) {
               '<span style="font-size:10px;padding:1px 8px;border-radius:99px;' + (active ? 'background:#dbeafe;color:#1d4ed8;">' + 'Active' : 'background:#fee2e2;color:#991b1b;">Inactive') + '</span>' +
               (c.showScoreAfterSubmit === false ? '<span style="font-size:10px;padding:1px 8px;border-radius:99px;background:#fef3c7;color:#92400e;">🔒 ซ่อนคะแนน</span>' : '') +
               (c.showAnswerAfterPublished === false ? '<span style="font-size:10px;padding:1px 8px;border-radius:99px;background:#fef3c7;color:#92400e;">🔒 ซ่อนเฉลย</span>' : '') +
+              (c.shuffleQuestions ? '<span style="font-size:10px;padding:1px 8px;border-radius:99px;background:#ede9fe;color:#5b21b6;">🔀 สุ่มข้อ</span>' : '') +
+              (c.shuffleChoices ? '<span style="font-size:10px;padding:1px 8px;border-radius:99px;background:#ede9fe;color:#5b21b6;">🔀 สุ่มตัวเลือก</span>' : '') +
             '</div>' +
           '</div>' +
           '<div style="display:flex;gap:6px;flex-shrink:0;">' +
@@ -25744,7 +25806,7 @@ function receiptStatusText(status) {
     }
 
     function populateOnlineExamCourseSelects() {
-      const selects = ['onlineExamQuestionCourseSelect', 'onlineExamGradeCourseSelect'];
+      const selects = ['onlineExamQuestionCourseSelect', 'onlineExamGradeCourseSelect', 'onlineExamAnalysisCourseSelect'];
       selects.forEach(function(id) {
         const el = getElement(id);
         if (!el) return;
@@ -25752,6 +25814,7 @@ function receiptStatusText(status) {
         el.innerHTML = id === 'onlineExamGradeCourseSelect'
           ? '<option value="">-- ทุกคอร์ส --</option>'
           : '<option value="">-- เลือกคอร์ส --</option>';
+        if (id === 'onlineExamAnalysisCourseSelect') el.innerHTML = '<option value="">-- เลือกคอร์ส --</option>';
         onlineExamCourseCache.forEach(function(c) {
           const opt = document.createElement('option');
           opt.value = c.firebaseDocId;
@@ -26038,9 +26101,12 @@ function receiptStatusText(status) {
         const sc = answers[q.questionId];
         const isCorrect = sc === q.correctIndex;
         if (isCorrect) correct++;
+        const qImgHtml = q.imageUrl
+          ? '<br><img src="' + escapeHtml(q.imageUrl) + '" onerror="this.style.display=\'none\'" style="max-height:70px;max-width:160px;border-radius:6px;margin-top:4px;object-fit:contain;">'
+          : '';
         return '<tr style="font-size:12px;">' +
           '<td style="padding:6px 10px;border-bottom:1px solid #f1f5f9;">' + (i+1) + '</td>' +
-          '<td style="padding:6px 10px;border-bottom:1px solid #f1f5f9;max-width:200px;">' + escapeHtml(q.text || '') + '</td>' +
+          '<td style="padding:6px 10px;border-bottom:1px solid #f1f5f9;max-width:200px;">' + escapeHtml(q.text || '') + qImgHtml + '</td>' +
           '<td style="padding:6px 10px;border-bottom:1px solid #f1f5f9;color:' + (isCorrect ? '#16a34a' : '#dc2626') + ';">' +
             (sc !== undefined ? alphabet[sc] + ' ' + escapeHtml((q.choices || [])[sc] || '') : '— ไม่ได้ตอบ') + '</td>' +
           '<td style="padding:6px 10px;border-bottom:1px solid #f1f5f9;color:#16a34a;">' + alphabet[q.correctIndex] + ' ' + escapeHtml((q.choices || [])[q.correctIndex] || '') + '</td>' +
@@ -26350,7 +26416,7 @@ function receiptStatusText(status) {
       if (!(course.questions || []).length) { alert('คอร์สนี้ยังไม่มีข้อสอบ'); return; }
       if (!firebaseUser) { alert('กรุณาเข้าสู่ระบบก่อน'); return; }
 
-      // Check for existing result (duplicate prevention)
+      // Duplicate prevention: check for existing submitted result
       try {
         const existSnap = await db.collection('onlineExamResults')
           .where('courseId', '==', courseId)
@@ -26373,25 +26439,26 @@ function receiptStatusText(status) {
         console.error('startOnlineExam duplicate check error', e);
       }
 
-      // Check localStorage for in-progress exam
-      const lsKey = 'oeExam_' + firebaseUser.uid + '_' + courseId;
-      var lsDraft = null;
-      try { lsDraft = JSON.parse(localStorage.getItem(lsKey) || 'null'); } catch(e) {}
-
-      if (lsDraft && lsDraft.deadlineAt && lsDraft.deadlineAt > Date.now()) {
+      // Try to load existing in-progress draft (Firestore first, localStorage fallback)
+      const existingDraft = await onlineExamLoadDraft(courseId);
+      if (existingDraft) {
         if (confirm('พบการสอบที่ค้างอยู่ ต้องการทำต่อจากที่หยุดไหม?\n(OK = ทำต่อ, Cancel = เริ่มใหม่)')) {
           onlineExamActiveCourseId = courseId;
-          onlineExamStudentAnswers = lsDraft.answers || {};
-          onlineExamStartedAt = new Date(lsDraft.startedAt);
-          onlineExamTimeRemaining = Math.max(0, Math.round((lsDraft.deadlineAt - Date.now()) / 1000));
+          onlineExamStudentAnswers = existingDraft.answers || {};
+          onlineExamQuestionOrder = existingDraft.questionOrder || [];
+          onlineExamChoiceOrder = existingDraft.choiceOrder || {};
+          onlineExamStartedAt = new Date(existingDraft.startedAtMs || Date.now());
+          onlineExamTimeRemaining = Math.max(0, Math.round(((existingDraft.deadlineAtMs || Date.now()) - Date.now()) / 1000));
+          onlineExamStartAutosave(courseId);
           switchToOnlineExamPhase(course);
           return;
         } else {
-          try { localStorage.removeItem(lsKey); } catch(e) {}
+          onlineExamDeleteDraft(courseId);
         }
       }
 
-      // Start fresh
+      // Start fresh exam
+      const questions = course.questions || [];
       const durationSecs = (course.durationMinutes || 15) * 60;
       const nowMs = Date.now();
       onlineExamActiveCourseId = courseId;
@@ -26399,12 +26466,24 @@ function receiptStatusText(status) {
       onlineExamStartedAt = new Date(nowMs);
       onlineExamTimeRemaining = durationSecs;
 
-      try {
-        localStorage.setItem(lsKey, JSON.stringify({
-          courseId: courseId, startedAt: nowMs,
-          deadlineAt: nowMs + durationSecs * 1000, answers: {}
-        }));
-      } catch(e) {}
+      // Generate shuffle orders (stored once; consistent for this exam session)
+      if (course.shuffleQuestions) {
+        onlineExamQuestionOrder = onlineExamShuffleArray(questions.map(function(q) { return q.questionId; }));
+      } else {
+        onlineExamQuestionOrder = questions.map(function(q) { return q.questionId; });
+      }
+      if (course.shuffleChoices) {
+        onlineExamChoiceOrder = {};
+        questions.forEach(function(q) {
+          onlineExamChoiceOrder[q.questionId] = onlineExamShuffleArray([0, 1, 2, 3]);
+        });
+      } else {
+        onlineExamChoiceOrder = {};
+      }
+
+      // Save initial draft and start autosave
+      onlineExamStartAutosave(courseId);
+      onlineExamSaveDraft();
 
       switchToOnlineExamPhase(course);
     }
@@ -26427,21 +26506,34 @@ function receiptStatusText(status) {
       const feed = getElement('onlineExamQuestionFeed');
       if (!feed) return;
       const alphabet = ['ก.', 'ข.', 'ค.', 'ง.'];
-      const questions = course.questions || [];
+      const allQuestions = course.questions || [];
 
-      feed.innerHTML = questions.map(function(q, idx) {
-        const choicesHtml = (q.choices || []).map(function(ch, ci) {
-          const selected = onlineExamStudentAnswers[q.questionId] === ci;
-          const ciImg = (q.choiceImages || [])[ci];
+      // Determine display order of questions
+      const displayQuestions = onlineExamQuestionOrder.length
+        ? onlineExamQuestionOrder.map(function(qid) {
+            return allQuestions.find(function(q) { return q.questionId === qid; });
+          }).filter(Boolean)
+        : allQuestions;
+
+      feed.innerHTML = displayQuestions.map(function(q, idx) {
+        // Determine choice display order (original indices in display order)
+        const choiceDisplayOrder = onlineExamChoiceOrder[q.questionId] || [0, 1, 2, 3];
+        const storedAnswer = onlineExamStudentAnswers[q.questionId]; // original index
+
+        const choicesHtml = [0, 1, 2, 3].map(function(di) {
+          const origIdx = choiceDisplayOrder[di];
+          const ch = (q.choices || [])[origIdx] || '';
+          const ciImg = (q.choiceImages || [])[origIdx];
+          const selected = storedAnswer === origIdx;
           const ciImgHtml = ciImg
-            ? '<img src="' + escapeHtml(ciImg) + '" onerror="this.style.display=\'none\'" style="display:block;max-height:120px;max-width:100%;border-radius:8px;margin-top:6px;object-fit:contain;" alt="รูปตัวเลือก ' + alphabet[ci] + '">'
+            ? '<img src="' + escapeHtml(ciImg) + '" onerror="this.style.display=\'none\'" style="display:block;max-height:120px;max-width:100%;border-radius:8px;margin-top:6px;object-fit:contain;" alt="รูปตัวเลือก ' + alphabet[di] + '">'
             : '';
-          return '<label onclick="onOnlineExamChoiceSelected(\'' + q.questionId + '\',' + ci + ',' + idx + ')" ' +
+          return '<label onclick="onOnlineExamChoiceSelected(\'' + q.questionId + '\',' + di + ',' + idx + ')" ' +
             'style="display:flex;align-items:flex-start;gap:10px;padding:10px 12px;border-radius:10px;cursor:pointer;border:' +
             (selected ? '2px solid #4f46e5;background:#eef2ff;' : '1.5px solid #e2e8f0;background:#fff;') +
-            'transition:border .1s,background .1s;" id="onlineExamLabel_' + q.questionId + '_' + ci + '">' +
+            'transition:border .1s,background .1s;" id="onlineExamLabel_' + q.questionId + '_' + di + '">' +
             '<input type="radio" name="oeq_' + q.questionId + '" ' + (selected ? 'checked' : '') + ' style="width:16px;height:16px;accent-color:#4f46e5;margin-top:2px;">' +
-            '<div><span style="font-size:12px;font-weight:700;color:#6b7280;min-width:18px;">' + alphabet[ci] + '</span>' +
+            '<div><span style="font-size:12px;font-weight:700;color:#6b7280;min-width:18px;">' + alphabet[di] + '</span>' +
             ' <span style="font-size:13px;color:#1e293b;">' + escapeHtml(ch) + '</span>' + ciImgHtml + '</div>' +
           '</label>';
         }).join('');
@@ -26459,36 +26551,29 @@ function receiptStatusText(status) {
       }).join('');
     }
 
-    function onOnlineExamChoiceSelected(questionId, choiceIndex, qIndex) {
-      onlineExamStudentAnswers[questionId] = choiceIndex;
+    function onOnlineExamChoiceSelected(questionId, displayChoiceIdx, qIndex) {
+      // Map display position to original choice index
+      const origIdx = onlineExamChoiceOrder[questionId]
+        ? onlineExamChoiceOrder[questionId][displayChoiceIdx]
+        : displayChoiceIdx;
+      onlineExamStudentAnswers[questionId] = origIdx;
 
-      // Persist answers to localStorage
-      if (firebaseUser && onlineExamActiveCourseId) {
-        try {
-          const lsKey = 'oeExam_' + firebaseUser.uid + '_' + onlineExamActiveCourseId;
-          const draft = JSON.parse(localStorage.getItem(lsKey) || '{}');
-          draft.answers = onlineExamStudentAnswers;
-          localStorage.setItem(lsKey, JSON.stringify(draft));
-        } catch(e) {}
+      // Debounced autosave (Firestore + localStorage)
+      onlineExamSaveDraftSoon();
+
+      // Update visual highlight for all 4 display positions
+      for (var di = 0; di < 4; di++) {
+        const lbl = getElement('onlineExamLabel_' + questionId + '_' + di);
+        if (!lbl) continue;
+        if (di === displayChoiceIdx) {
+          lbl.style.cssText = 'display:flex;align-items:flex-start;gap:10px;padding:10px 12px;border-radius:10px;cursor:pointer;border:2px solid #4f46e5;background:#eef2ff;transition:border .1s,background .1s;';
+        } else {
+          lbl.style.cssText = 'display:flex;align-items:flex-start;gap:10px;padding:10px 12px;border-radius:10px;cursor:pointer;border:1.5px solid #e2e8f0;background:#fff;transition:border .1s,background .1s;';
+        }
       }
 
       const course = onlineExamCourseCache.find(function(c) { return c.firebaseDocId === onlineExamActiveCourseId; });
-      if (!course) return;
-
-      const q = (course.questions || [])[qIndex];
-      if (q) {
-        (q.choices || []).forEach(function(_, ci) {
-          const lbl = getElement('onlineExamLabel_' + questionId + '_' + ci);
-          if (!lbl) return;
-          if (ci === choiceIndex) {
-            lbl.style.cssText = 'display:flex;align-items:flex-start;gap:10px;padding:10px 12px;border-radius:10px;cursor:pointer;border:2px solid #4f46e5;background:#eef2ff;transition:border .1s,background .1s;';
-          } else {
-            lbl.style.cssText = 'display:flex;align-items:flex-start;gap:10px;padding:10px 12px;border-radius:10px;cursor:pointer;border:1.5px solid #e2e8f0;background:#fff;transition:border .1s,background .1s;';
-          }
-        });
-      }
-
-      updateOnlineExamNavigator(course);
+      if (course) updateOnlineExamNavigator(course);
     }
 
     function updateOnlineExamNavigator(course) {
@@ -26496,12 +26581,17 @@ function receiptStatusText(status) {
       const answeredEl = getElement('onlineExamAnsweredCount');
       const totalEl = getElement('onlineExamTotalCount');
       if (!nav || !course) return;
-      const questions = course.questions || [];
+      const allQuestions = course.questions || [];
+      const displayQuestions = onlineExamQuestionOrder.length
+        ? onlineExamQuestionOrder.map(function(qid) {
+            return allQuestions.find(function(q) { return q.questionId === qid; });
+          }).filter(Boolean)
+        : allQuestions;
       const answered = Object.keys(onlineExamStudentAnswers).length;
       if (answeredEl) answeredEl.textContent = answered;
-      if (totalEl) totalEl.textContent = questions.length;
+      if (totalEl) totalEl.textContent = displayQuestions.length;
 
-      nav.innerHTML = questions.map(function(q, idx) {
+      nav.innerHTML = displayQuestions.map(function(q, idx) {
         const isAnswered = onlineExamStudentAnswers[q.questionId] !== undefined;
         return '<button onclick="document.getElementById(\'onlineExamQNode_' + idx + '\')&&document.getElementById(\'onlineExamQNode_' + idx + '\').scrollIntoView({behavior:\'smooth\',block:\'center\'})" ' +
           'style="padding:0;width:100%;aspect-ratio:1;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer;border:' +
@@ -26583,6 +26673,8 @@ function receiptStatusText(status) {
         courseId: onlineExamActiveCourseId,
         courseTitle: course.title || '',
         answers: onlineExamStudentAnswers,
+        questionOrder: onlineExamQuestionOrder,
+        choiceOrder: onlineExamChoiceOrder,
         scoreEarned: scoreEarned,
         scoreTotal: scoreTotal,
         scorePercent: scorePercent,
@@ -26609,8 +26701,9 @@ function receiptStatusText(status) {
         return;
       }
 
-      // Clear localStorage
-      try { localStorage.removeItem('oeExam_' + firebaseUser.uid + '_' + onlineExamActiveCourseId); } catch(e) {}
+      // Stop autosave and delete draft (Firestore + localStorage)
+      onlineExamStopAutosave();
+      onlineExamDeleteDraft(onlineExamActiveCourseId);
 
       // Show Phase 3
       const examView = getElement('onlineExamActiveExam');
@@ -26667,11 +26760,11 @@ function receiptStatusText(status) {
 
     function backToOnlineExamCourseGrid() {
       if (onlineExamTimerHandle) { clearInterval(onlineExamTimerHandle); onlineExamTimerHandle = null; }
-      // Clear any leftover localStorage draft
-      if (firebaseUser && onlineExamActiveCourseId) {
-        try { localStorage.removeItem('oeExam_' + firebaseUser.uid + '_' + onlineExamActiveCourseId); } catch(e) {}
-      }
+      onlineExamStopAutosave();
+      if (onlineExamActiveCourseId) onlineExamDeleteDraft(onlineExamActiveCourseId);
       onlineExamStudentAnswers = {};
+      onlineExamQuestionOrder = [];
+      onlineExamChoiceOrder = {};
       onlineExamActiveCourseId = '';
 
       const grid = getElement('onlineExamCourseGrid');
@@ -26688,6 +26781,255 @@ function receiptStatusText(status) {
     function setInnerText(id, val) {
       const el = getElement(id);
       if (el) el.textContent = val;
+    }
+
+    // ---- Shuffle Utility ----
+
+    function onlineExamShuffleArray(arr) {
+      const a = arr.slice();
+      for (var i = a.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        const tmp = a[i]; a[i] = a[j]; a[j] = tmp;
+      }
+      return a;
+    }
+
+    // ---- Draft Autosave ----
+
+    function onlineExamSaveDraftSoon() {
+      if (onlineExamSaveDraftTimeout) clearTimeout(onlineExamSaveDraftTimeout);
+      onlineExamSaveDraftTimeout = setTimeout(function() {
+        onlineExamSaveDraftTimeout = null;
+        onlineExamSaveDraft();
+      }, 1000);
+    }
+
+    function onlineExamSaveDraft() {
+      if (!firebaseUser || !onlineExamActiveCourseId) return;
+      const courseId = onlineExamActiveCourseId;
+      const course = onlineExamCourseCache.find(function(c) { return c.firebaseDocId === courseId; });
+      const startedAtMs = onlineExamStartedAt ? onlineExamStartedAt.getTime() : Date.now();
+      const durationMs = ((course ? course.durationMinutes : 15) || 15) * 60 * 1000;
+      const deadlineAtMs = startedAtMs + durationMs;
+
+      const draftData = {
+        studentUid: firebaseUser.uid,
+        studentName: currentStudent ? (currentStudent.name || '') : '',
+        courseId: courseId,
+        examId: courseId,
+        answers: onlineExamStudentAnswers,
+        questionOrder: onlineExamQuestionOrder,
+        choiceOrder: onlineExamChoiceOrder,
+        startedAtMs: startedAtMs,
+        deadlineAtMs: deadlineAtMs,
+        updatedAtMs: Date.now(),
+        status: 'in_progress'
+      };
+
+      // localStorage (synchronous, fast fallback)
+      try {
+        const lsKey = 'oeExam_' + firebaseUser.uid + '_' + courseId;
+        localStorage.setItem(lsKey, JSON.stringify({
+          courseId: courseId,
+          startedAt: startedAtMs,
+          deadlineAt: deadlineAtMs,
+          answers: onlineExamStudentAnswers,
+          questionOrder: onlineExamQuestionOrder,
+          choiceOrder: onlineExamChoiceOrder
+        }));
+      } catch(e) {}
+
+      // Firestore (async, best-effort)
+      if (db) {
+        const draftId = firebaseUser.uid + '_' + courseId;
+        db.collection('onlineExamDrafts').doc(draftId).set(draftData).catch(function() {});
+      }
+    }
+
+    async function onlineExamLoadDraft(courseId) {
+      if (!firebaseUser) return null;
+      const draftId = firebaseUser.uid + '_' + courseId;
+
+      // Try Firestore first
+      if (db) {
+        try {
+          const snap = await db.collection('onlineExamDrafts').doc(draftId).get();
+          if (snap.exists) {
+            const data = snap.data();
+            if (data.status === 'in_progress' && data.deadlineAtMs && data.deadlineAtMs > Date.now()) {
+              return data;
+            }
+          }
+        } catch(e) {}
+      }
+
+      // Fallback to localStorage
+      try {
+        const lsKey = 'oeExam_' + firebaseUser.uid + '_' + courseId;
+        const ls = JSON.parse(localStorage.getItem(lsKey) || 'null');
+        if (ls && ls.deadlineAt && ls.deadlineAt > Date.now()) {
+          return {
+            answers: ls.answers || {},
+            questionOrder: ls.questionOrder || [],
+            choiceOrder: ls.choiceOrder || {},
+            startedAtMs: ls.startedAt || Date.now(),
+            deadlineAtMs: ls.deadlineAt
+          };
+        }
+      } catch(e) {}
+
+      return null;
+    }
+
+    function onlineExamDeleteDraft(courseId) {
+      if (!firebaseUser || !courseId) return;
+      try { localStorage.removeItem('oeExam_' + firebaseUser.uid + '_' + courseId); } catch(e) {}
+      if (db) {
+        const draftId = firebaseUser.uid + '_' + courseId;
+        db.collection('onlineExamDrafts').doc(draftId).delete().catch(function() {});
+      }
+    }
+
+    function onlineExamStartAutosave(courseId) {
+      onlineExamStopAutosave();
+      onlineExamAutosaveHandle = setInterval(function() {
+        if (onlineExamActiveCourseId === courseId) {
+          onlineExamSaveDraft();
+        } else {
+          onlineExamStopAutosave();
+        }
+      }, 10000);
+    }
+
+    function onlineExamStopAutosave() {
+      if (onlineExamAutosaveHandle) { clearInterval(onlineExamAutosaveHandle); onlineExamAutosaveHandle = null; }
+      if (onlineExamSaveDraftTimeout) { clearTimeout(onlineExamSaveDraftTimeout); onlineExamSaveDraftTimeout = null; }
+    }
+
+    // ---- Item Analysis ----
+
+    async function onlineExamRenderQuestionAnalysis() {
+      const courseId = (getElement('onlineExamAnalysisCourseSelect') || {}).value || '';
+      if (!courseId) { alert('กรุณาเลือกคอร์สก่อน'); return; }
+      const course = onlineExamCourseCache.find(function(c) { return c.firebaseDocId === courseId; });
+      if (!course) return;
+      const resultEl = getElement('onlineExamAnalysisContent');
+      if (!resultEl) return;
+      resultEl.style.display = '';
+      resultEl.innerHTML = '<p style="color:#6b7280;font-size:13px;">⏳ กำลังโหลดข้อมูล...</p>';
+
+      try {
+        const snap = await db.collection('onlineExamResults')
+          .where('courseId', '==', courseId)
+          .get()
+          .catch(function() { return { docs: [] }; });
+
+        const results = snap.docs
+          .map(function(d) { return d.data(); })
+          .filter(function(r) { return !r.deleted; });
+
+        if (!results.length) {
+          resultEl.innerHTML = '<p style="color:#9ca3af;font-size:13px;">ยังไม่มีผลสอบสำหรับคอร์สนี้</p>';
+          return;
+        }
+
+        const questions = course.questions || [];
+        const totalResults = results.length;
+        const alphabet = ['ก.', 'ข.', 'ค.', 'ง.'];
+
+        onlineExamAnalysisData = questions.map(function(q, i) {
+          const counts = [0, 1, 2, 3].map(function(ci) {
+            return results.filter(function(r) { return (r.answers || {})[q.questionId] === ci; }).length;
+          });
+          const correct = counts[q.correctIndex] || 0;
+          const unanswered = results.filter(function(r) { return (r.answers || {})[q.questionId] === undefined; }).length;
+          return { questionIndex: i, question: q, counts: counts, correct: correct, unanswered: unanswered, total: totalResults };
+        });
+
+        const rows = onlineExamAnalysisData.map(function(item) {
+          const wrong = item.total - item.correct - item.unanswered;
+          const pct = Math.round(item.correct / Math.max(item.total, 1) * 100);
+          const difficulty = pct >= 75 ? 'ง่าย' : pct >= 40 ? 'ปานกลาง' : 'ยาก';
+          const diffColor = pct >= 75 ? '#16a34a' : pct >= 40 ? '#d97706' : '#dc2626';
+          const shortText = (item.question.text || '').substring(0, 60) + ((item.question.text || '').length > 60 ? '…' : '');
+          return '<tr style="font-size:12px;">' +
+            '<td style="padding:6px 10px;border-bottom:1px solid #f1f5f9;text-align:center;">' + (item.questionIndex + 1) + '</td>' +
+            '<td style="padding:6px 10px;border-bottom:1px solid #f1f5f9;max-width:220px;">' + escapeHtml(shortText) + '</td>' +
+            '<td style="padding:6px 10px;border-bottom:1px solid #f1f5f9;text-align:center;">' + item.total + '</td>' +
+            '<td style="padding:6px 10px;border-bottom:1px solid #f1f5f9;text-align:center;color:#16a34a;font-weight:600;">' + item.correct + '</td>' +
+            '<td style="padding:6px 10px;border-bottom:1px solid #f1f5f9;text-align:center;color:#dc2626;">' + wrong + '</td>' +
+            '<td style="padding:6px 10px;border-bottom:1px solid #f1f5f9;text-align:center;color:#9ca3af;">' + item.unanswered + '</td>' +
+            '<td style="padding:6px 10px;border-bottom:1px solid #f1f5f9;text-align:center;font-weight:700;color:' + diffColor + ';">' + pct + '%</td>' +
+            '<td style="padding:6px 10px;border-bottom:1px solid #f1f5f9;text-align:center;"><span style="font-size:11px;font-weight:700;color:' + diffColor + ';">' + difficulty + '</span></td>' +
+            '<td style="padding:6px 10px;border-bottom:1px solid #f1f5f9;text-align:center;">' +
+              '<button class="btn btn-blue" style="font-size:10px;padding:3px 8px;" onclick="onlineExamShowChoiceDistribution(' + item.questionIndex + ')">ดูตัวเลือก</button>' +
+            '</td>' +
+          '</tr>';
+        }).join('');
+
+        resultEl.innerHTML =
+          '<p style="font-size:12px;color:#6b7280;margin-bottom:10px;">คอร์ส: <strong>' + escapeHtml(course.title || '') + '</strong> · ผลสอบทั้งหมด ' + totalResults + ' รายการ</p>' +
+          '<div style="overflow-x:auto;"><table style="width:100%;border-collapse:collapse;min-width:600px;">' +
+          '<thead><tr style="background:#f1f5f9;font-size:11px;font-weight:700;">' +
+            '<th style="padding:6px 10px;text-align:center;">ข้อ</th>' +
+            '<th style="padding:6px 10px;text-align:left;">คำถาม</th>' +
+            '<th style="padding:6px 10px;text-align:center;">คนทำ</th>' +
+            '<th style="padding:6px 10px;text-align:center;color:#16a34a;">ถูก</th>' +
+            '<th style="padding:6px 10px;text-align:center;color:#dc2626;">ผิด</th>' +
+            '<th style="padding:6px 10px;text-align:center;color:#9ca3af;">ไม่ตอบ</th>' +
+            '<th style="padding:6px 10px;text-align:center;">%ถูก</th>' +
+            '<th style="padding:6px 10px;text-align:center;">ระดับ</th>' +
+            '<th style="padding:6px 10px;text-align:center;"></th>' +
+          '</tr></thead><tbody>' + rows + '</tbody></table></div>';
+      } catch(e) {
+        resultEl.innerHTML = '<p style="color:#dc2626;font-size:12px;">โหลดไม่สำเร็จ: ' + escapeHtml((e.message || '')) + '</p>';
+      }
+    }
+
+    function onlineExamShowChoiceDistribution(questionIndex) {
+      const item = onlineExamAnalysisData[questionIndex];
+      if (!item) return;
+      const modal = getElement('onlineExamDetailModal');
+      const content = getElement('onlineExamDetailModalContent');
+      if (!modal || !content) return;
+      const alphabet = ['ก.', 'ข.', 'ค.', 'ง.'];
+
+      const rows = (item.question.choices || []).map(function(ch, ci) {
+        const count = item.counts[ci] || 0;
+        const pct = Math.round(count / Math.max(item.total, 1) * 100);
+        const isCorrect = ci === item.question.correctIndex;
+        return '<tr>' +
+          '<td style="padding:8px 12px;border-bottom:1px solid #f1f5f9;">' +
+            '<span style="color:' + (isCorrect ? '#16a34a' : '#1e293b') + ';font-weight:' + (isCorrect ? '700' : '400') + ';">' +
+            escapeHtml(alphabet[ci] + ' ' + ch) + '</span>' +
+            (isCorrect ? ' <span style="font-size:11px;color:#16a34a;background:#d1fae5;padding:1px 6px;border-radius:99px;">✓ เฉลย</span>' : '') +
+          '</td>' +
+          '<td style="padding:8px 12px;border-bottom:1px solid #f1f5f9;text-align:center;font-weight:600;min-width:80px;">' + count + ' (' + pct + '%)</td>' +
+          '<td style="padding:8px 12px;border-bottom:1px solid #f1f5f9;min-width:120px;">' +
+            '<div style="background:#e2e8f0;border-radius:4px;overflow:hidden;height:10px;">' +
+              '<div style="width:' + pct + '%;background:' + (isCorrect ? '#34d399' : '#93c5fd') + ';height:100%;transition:width .3s;"></div>' +
+            '</div>' +
+          '</td>' +
+        '</tr>';
+      }).join('');
+
+      const qImgHtml = item.question.imageUrl
+        ? '<img src="' + escapeHtml(item.question.imageUrl) + '" onerror="this.style.display=\'none\'" style="max-height:100px;max-width:100%;border-radius:8px;margin:6px 0;object-fit:contain;">'
+        : '';
+
+      content.innerHTML =
+        '<h3 style="font-size:14px;margin-bottom:6px;">📊 กระจายคำตอบ — ข้อ ' + (item.questionIndex + 1) + '</h3>' +
+        '<p style="font-size:12px;color:#374151;margin-bottom:4px;">' + escapeHtml(item.question.text || '') + '</p>' +
+        qImgHtml +
+        '<div style="overflow-x:auto;margin-top:10px;"><table style="width:100%;border-collapse:collapse;font-size:12px;">' +
+        '<thead><tr style="background:#f1f5f9;font-weight:700;">' +
+          '<th style="padding:6px 12px;text-align:left;">ตัวเลือก</th>' +
+          '<th style="padding:6px 12px;text-align:center;">จำนวน</th>' +
+          '<th style="padding:6px 12px;min-width:120px;">สัดส่วน</th>' +
+        '</tr></thead><tbody>' + rows + '</tbody></table></div>' +
+        '<p style="font-size:11px;color:#9ca3af;margin-top:8px;">ผู้สอบทั้งหมด ' + item.total + ' คน · ไม่ตอบ ' + item.unanswered + ' คน</p>';
+
+      modal.style.display = '';
     }
 
     // ============================================================

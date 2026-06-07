@@ -359,6 +359,15 @@ service cloud.firestore {
       allow update, delete: if hasAdminPermission('admin.onlineExams');
     }
 
+    match /onlineExamDrafts/{docId} {
+      // Student read/write/delete their own draft only; admin read all
+      allow read: if hasAdminPermission('admin.onlineExams')
+                   || (isStudentUser() && resource.data.studentUid == request.auth.uid);
+      allow create, update: if isStudentUser()
+                              && request.resource.data.studentUid == request.auth.uid;
+      allow delete: if isStudentUser() && resource.data.studentUid == request.auth.uid;
+    }
+
     match /authCleanupQueue/{docId} {
       allow read, write: if isAdmin();
     }
