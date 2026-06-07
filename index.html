@@ -2646,7 +2646,7 @@
           <a data-menu-label="ใบเสร็จ" onclick="showAdminTab('admin-receipts')"><span class="menu-icon">🧾</span>ใบเสร็จ</a>
           <div class="sidebar-group-title"><span class="menu-icon">📊</span>แบบทดสอบ</div>
 
-          <a data-menu-label="ระบบข้อสอบ ป.4–ป.6" onclick="showAdminTab('admin-exam-processor')"><span class="menu-icon">📝</span>ระบบข้อสอบ ป.4–ป.6</a>
+          <a data-menu-label="ระบบวิเคราะห์คะแนน" onclick="showAdminTab('admin-exam-processor')"><span class="menu-icon">📝</span>ระบบวิเคราะห์คะแนน</a>
           <a data-menu-label="ข้อสอบออนไลน์ Interactive" onclick="showAdminTab('admin-online-exam')"><span class="menu-icon">🖥️</span>ข้อสอบออนไลน์ Interactive</a>
           <a data-menu-label="แผนสอนรายเดือน" onclick="showAdminTab('admin-monthly-planner')"><span class="menu-icon">🗓️</span>แผนสอนรายเดือน</a>
           <div class="sidebar-group-title"><span class="menu-icon">📅</span>ครูผู้สอน</div>
@@ -3963,7 +3963,7 @@
           </section>
 
           <!-- ========================================================
-               ระบบข้อสอบ ป.4–ป.6  (admin-exam-processor)
+               ระบบวิเคราะห์คะแนน  (admin-exam-processor)
                Collections: examBank / examResults / learningMaterials
                ======================================================== -->
           <section id="admin-exam-processor" class="admin-tab hidden">
@@ -5498,6 +5498,7 @@
                 <table>
                   <thead>
                     <tr>
+                      <th style="width:34px; text-align:center;"><input type="checkbox" id="idCardSelectAll" onchange="idCardToggleSelectAll(this.checked)" title="เลือกทั้งหมด" /></th>
                       <th>Member ID</th>
                       <th>ชื่อนักเรียน</th>
                       <th>ชื่อเล่น</th>
@@ -5507,7 +5508,7 @@
                     </tr>
                   </thead>
                   <tbody id="idCardStudentTableBody">
-                    <tr><td colspan="6" style="text-align:center; color:#6b7280;">กรุณากดปุ่ม "โหลดนักเรียน"</td></tr>
+                    <tr><td colspan="7" style="text-align:center; color:#6b7280;">กรุณากดปุ่ม "โหลดนักเรียน"</td></tr>
                   </tbody>
                 </table>
               </div>
@@ -5524,6 +5525,7 @@
                 <button id="idCardExportBtn" class="btn btn-green" type="button" onclick="exportIdCardPdf()">Export PDF</button>
                 <button id="idCardMarkPrintedBtn" class="btn btn-blue" type="button" onclick="markIdCardsPrinted()" style="display:none;">บันทึกว่าพิมพ์แล้ว</button>
               </div>
+              <p id="idCardTargetInfo" style="margin-top:8px; font-size:13px; color:#6b7280; min-height:18px;"></p>
               <p id="idCardExportResult" style="margin-top:12px; font-weight:bold;"></p>
             </div>
 
@@ -7312,7 +7314,7 @@
       { tabId: 'admin-payment', permission: 'admin.finance', label: 'การเงิน' },
       { tabId: 'admin-receipts', permission: 'admin.receipts', label: 'ใบเสร็จ' },
 
-      { tabId: 'admin-exam-processor', permission: 'admin.exams', label: 'ระบบข้อสอบ ป.4–ป.6' },
+      { tabId: 'admin-exam-processor', permission: 'admin.exams', label: 'ระบบวิเคราะห์คะแนน' },
       { tabId: 'admin-online-exam', permission: 'admin.onlineExams', label: 'ข้อสอบออนไลน์ Interactive' },
       { tabId: 'admin-monthly-planner', permission: 'admin.monthlyPlanner', label: 'แผนสอนรายเดือน' },
       { tabId: 'admin-announcements', permission: 'admin.announcements', label: 'ประกาศ' },
@@ -17377,6 +17379,18 @@ function receiptStatusText(status) {
       return (monthNames[monthIndex] || 'ไม่ระบุเดือน') + ' ' + year;
     }
 
+    function getThaiMonthYearFromText(text) {
+      const monthNames = ['มกราคม','กุมภาพันธ์','มีนาคม','เมษายน','พฤษภาคม','มิถุนายน','กรกฎาคม','สิงหาคม','กันยายน','ตุลาคม','พฤศจิกายน','ธันวาคม'];
+      if (!text) return getThaiMonthFromDate(new Date().toISOString().slice(0, 10));
+      for (var i = 0; i < monthNames.length; i++) {
+        if (text.includes(monthNames[i])) {
+          var yearMatch = text.match(/\b(25\d{2})\b/);
+          if (yearMatch) return monthNames[i] + ' ' + yearMatch[1];
+        }
+      }
+      return getThaiMonthFromDate(new Date().toISOString().slice(0, 10));
+    }
+
     function getThaiCalendarMonthNames() {
       return ['มกราคม', 'กุมภาพันธ์', 'มีนาคม', 'เมษายน', 'พฤษภาคม', 'มิถุนายน', 'กรกฎาคม', 'สิงหาคม', 'กันยายน', 'ตุลาคม', 'พฤศจิกายน', 'ธันวาคม'];
     }
@@ -17588,8 +17602,10 @@ function receiptStatusText(status) {
         return item.month === selectedMonth && item.grade === selectedGrade && item.status === 'published';
       });
 
-      const subjectNames = ['วิทยาศาสตร์', 'คณิตศาสตร์', 'ภาษาอังกฤษ'];
       const hasPublishedScore = !!studentRecord;
+      const subjectSet = {};
+      gradeRecords.forEach(function(rec) { Object.keys(rec.scores || {}).forEach(function(k) { subjectSet[k] = true; }); });
+      const subjectNames = Object.keys(subjectSet).length ? Object.keys(subjectSet) : ['วิทยาศาสตร์', 'คณิตศาสตร์', 'ภาษาอังกฤษ'];
       const subjects = hasPublishedScore ? subjectNames.map(function(subject) {
         const stat = calculateSubjectStats(gradeRecords, subject);
         return {
@@ -17670,7 +17686,13 @@ function receiptStatusText(status) {
       const gradeRecords = record ? adminScoreRecords.filter(function(item) {
         return item.month === record.month && item.grade === record.grade && item.status === 'published';
       }) : [];
-      return ['วิทยาศาสตร์', 'คณิตศาสตร์', 'ภาษาอังกฤษ'].map(function(subject) {
+      const subjectSet = {};
+      gradeRecords.forEach(function(rec) {
+        Object.keys(rec.scores || {}).forEach(function(k) { subjectSet[k] = true; });
+      });
+      var subjects = Object.keys(subjectSet);
+      if (!subjects.length) subjects = ['วิทยาศาสตร์', 'คณิตศาสตร์', 'ภาษาอังกฤษ'];
+      return subjects.map(function(subject) {
         const stat = calculateSubjectStats(gradeRecords, subject);
         return {
           subject: subject,
@@ -17795,7 +17817,9 @@ function receiptStatusText(status) {
       const tbody = getElement('adminScoreStatsTableBody');
       if (!tbody) return;
       const records = getSelectedAdminScoreRecords();
-      const subjects = ['วิทยาศาสตร์', 'คณิตศาสตร์', 'ภาษาอังกฤษ'];
+      const subjectSet = {};
+      records.forEach(function(rec) { Object.keys(rec.scores || {}).forEach(function(k) { subjectSet[k] = true; }); });
+      const subjects = Object.keys(subjectSet).length ? Object.keys(subjectSet) : ['วิทยาศาสตร์', 'คณิตศาสตร์', 'ภาษาอังกฤษ'];
       const status = records.some(function(record) { return record.status === 'published'; }) ? 'published' : 'draft';
       tbody.innerHTML = records.length ? subjects.map(function(subject) {
         const stat = calculateSubjectStats(records, subject);
@@ -24342,7 +24366,7 @@ function receiptStatusText(status) {
 
 
     // ============================================================
-    // ระบบข้อสอบ ป.4–ป.6
+    // ระบบวิเคราะห์คะแนน
     // Collections: examBank / examResults / learningMaterials
     // ============================================================
 
@@ -25439,7 +25463,7 @@ function receiptStatusText(status) {
     }
 
     // ============================================================
-    // end ระบบข้อสอบ ป.4–ป.6
+    // end ระบบวิเคราะห์คะแนน
     // ============================================================
 
     // ============================================================
@@ -26047,9 +26071,55 @@ function receiptStatusText(status) {
         );
         addActivityLog('ประกาศผลข้อสอบ Interactive', resultDocId);
         const r = onlineExamGradeAllResults.find(function(x) { return x._docId === resultDocId; });
-        if (r) r.resultStatus = 'published';
+        if (r) {
+          r.resultStatus = 'published';
+          await syncOnlineExamScoreToRecords(r);
+        }
         renderOnlineExamGradingPage(onlineExamGradePage);
       } catch(e) { alert('ประกาศผลไม่สำเร็จ: ' + (e.message || e)); }
+    }
+
+    async function syncOnlineExamScoreToRecords(r) {
+      const subject = (r.courseTitle || '').trim();
+      const grade = (r.grade || '').trim();
+      if (!subject || !grade) return;
+      const month = getThaiMonthYearFromText(r.submittedAtText);
+      const score50val = r.score50 !== undefined ? r.score50 : onlineExamGetScore50Value(r.correctCount, r.totalQ);
+
+      var record = adminScoreRecords.find(function(rec) {
+        if (rec.grade !== grade || rec.month !== month) return false;
+        if (rec.authUid && r.studentUid && rec.authUid === r.studentUid) return true;
+        if (rec.studentId && r.studentId && String(rec.studentId) === String(r.studentId)) return true;
+        if (rec.student && r.studentName && rec.student === r.studentName) return true;
+        return false;
+      });
+
+      if (!record) {
+        const newId = createFirebaseDocId('adminScoreRecords');
+        record = {
+          id: newId,
+          firebaseDocId: newId,
+          month: month,
+          grade: grade,
+          studentId: r.studentId || '',
+          authUid: r.studentUid || '',
+          student: r.studentName || '-',
+          nickname: '-',
+          scores: {},
+          status: 'published'
+        };
+        adminScoreRecords.push(record);
+      }
+
+      record.scores = record.scores || {};
+      record.scores[subject] = score50val;
+      record.status = 'published';
+
+      try {
+        await setFirebaseDocument('adminScoreRecords', record);
+      } catch(e) {
+        console.warn('syncOnlineExamScoreToRecords error:', e);
+      }
     }
 
     async function hideOnlineExamResult(resultDocId) {
@@ -27014,6 +27084,8 @@ function receiptStatusText(status) {
     // ============================================================
 
     let idCardStudents = [];
+    let idCardSelectedUids = new Set();
+    let idCardLastExported = [];
     let idCardSettings = null;
     let idCardLogoUrl = '';
     let idCardInitialized = false;
@@ -27144,8 +27216,11 @@ function receiptStatusText(status) {
           return String(a.memberId || a.studentId || '').localeCompare(String(b.memberId || b.studentId || ''));
         });
         idCardStudents = students;
+        idCardSelectedUids.clear();
+        idCardLastExported = [];
         if (statusEl) { statusEl.textContent = 'พบนักเรียน ' + students.length + ' คน'; statusEl.style.color = '#16a34a'; }
         renderIdCardStudentList();
+        updateIdCardTargetInfo();
         const markBtn = getElement('idCardMarkPrintedBtn');
         if (markBtn) markBtn.style.display = 'none';
       } catch (e) {
@@ -27171,10 +27246,13 @@ function receiptStatusText(status) {
       const tbody = getElement('idCardStudentTableBody');
       if (!tbody) return;
       if (!idCardStudents.length) {
-        tbody.innerHTML = '<tr><td colspan="6" style="text-align:center; color:#6b7280;">ไม่พบนักเรียน</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="7" style="text-align:center; color:#6b7280;">ไม่พบนักเรียน</td></tr>';
+        updateIdCardSelectAllState();
+        updateIdCardTargetInfo();
         return;
       }
-      tbody.innerHTML = idCardStudents.map(function(s, idx) {
+      tbody.innerHTML = idCardStudents.map(function(s) {
+        const uid = s.uid || '';
         const memberId = escapeHtml(s.memberId || s.studentId || '-');
         const name = escapeHtml(s.name || s.displayName || '-');
         const nickname = escapeHtml(s.nickname || '-');
@@ -27183,8 +27261,61 @@ function receiptStatusText(status) {
         const printed = s.idCardPrinted
           ? '<span class="status-paid">✓ พิมพ์แล้ว</span>'
           : '<span style="color:#9ca3af;">-</span>';
-        return '<tr><td>' + memberId + '</td><td>' + name + '</td><td>' + nickname + '</td><td>' + grade + '</td><td>' + pw + '</td><td>' + printed + '</td></tr>';
+        const checked = idCardSelectedUids.has(uid) ? ' checked' : '';
+        return '<tr>' +
+          '<td style="text-align:center;"><input type="checkbox" class="idCardSelectChk" data-uid="' + escapeHtml(uid) + '" onchange="idCardToggleSelect(this)"' + checked + ' /></td>' +
+          '<td>' + memberId + '</td><td>' + name + '</td><td>' + nickname + '</td><td>' + grade + '</td><td>' + pw + '</td><td>' + printed + '</td>' +
+          '</tr>';
       }).join('');
+      updateIdCardSelectAllState();
+      updateIdCardTargetInfo();
+    }
+
+    function idCardToggleSelect(chk) {
+      const uid = chk.dataset.uid;
+      if (chk.checked) { idCardSelectedUids.add(uid); }
+      else { idCardSelectedUids.delete(uid); }
+      updateIdCardSelectAllState();
+      updateIdCardTargetInfo();
+    }
+
+    function idCardToggleSelectAll(checked) {
+      if (checked) {
+        idCardStudents.forEach(function(s) { if (s.uid) idCardSelectedUids.add(s.uid); });
+      } else {
+        idCardSelectedUids.clear();
+      }
+      renderIdCardStudentList();
+    }
+
+    function updateIdCardSelectAllState() {
+      const allChk = getElement('idCardSelectAll');
+      if (!allChk) return;
+      if (!idCardStudents.length) { allChk.checked = false; allChk.indeterminate = false; return; }
+      const selectedCount = idCardStudents.filter(function(s) { return idCardSelectedUids.has(s.uid || ''); }).length;
+      if (selectedCount === 0) { allChk.checked = false; allChk.indeterminate = false; }
+      else if (selectedCount === idCardStudents.length) { allChk.checked = true; allChk.indeterminate = false; }
+      else { allChk.checked = false; allChk.indeterminate = true; }
+    }
+
+    function updateIdCardTargetInfo() {
+      const el = getElement('idCardTargetInfo');
+      if (!el) return;
+      const selectedCount = idCardStudents.filter(function(s) { return idCardSelectedUids.has(s.uid || ''); }).length;
+      if (selectedCount === 0) {
+        el.textContent = idCardStudents.length
+          ? 'ไม่มีการเลือก — จะใช้นักเรียนตาม filter ทั้งหมด (' + idCardStudents.length + ' คน)'
+          : '';
+        el.style.color = '#6b7280';
+      } else {
+        el.textContent = 'เลือกแล้ว ' + selectedCount + ' คน — Preview/Export จะใช้เฉพาะคนที่เลือก';
+        el.style.color = '#2563eb';
+      }
+    }
+
+    function getIdCardTargetStudents() {
+      if (idCardSelectedUids.size === 0) return idCardStudents.slice();
+      return idCardStudents.filter(function(s) { return idCardSelectedUids.has(s.uid || ''); });
     }
 
     function generateQrDataUrl(text) {
@@ -27264,21 +27395,21 @@ function receiptStatusText(status) {
     }
 
     async function buildIdCardPageHtml(chunk, logoUrl) {
-      const padded = chunk.slice(0, 10);
-      while (padded.length < 10) padded.push(null);
-      const qrUrls = await Promise.all(padded.map(function(s) {
+      const cards = chunk.slice(0, 10);
+      const qrUrls = await Promise.all(cards.map(function(s) {
         if (!s) return Promise.resolve('');
         const memberId = s.memberId || s.studentId || '';
         return generateQrDataUrl(ID_CARD_QR_BASE + encodeURIComponent(memberId));
       }));
-      const cells = padded.map(function(s, i) {
+      const cells = cards.map(function(s, i) {
         return buildIdCardCellHtml(s, qrUrls[i] || '', logoUrl || '');
       }).join('');
       return '<div class="id-card-page"><div class="id-card-grid">' + cells + '</div></div>';
     }
 
     async function previewIdCards() {
-      if (!idCardStudents.length) {
+      const target = getIdCardTargetStudents();
+      if (!target.length) {
         const statusEl = getElement('idCardLoadStatus');
         if (statusEl) { statusEl.textContent = 'กรุณากดโหลดนักเรียนก่อน'; statusEl.style.color = '#dc2626'; }
         return;
@@ -27289,7 +27420,7 @@ function receiptStatusText(status) {
       if (previewArea) previewArea.style.display = 'block';
       try {
         const logoUrl = (getElement('idCardLogoManualUrl') && getElement('idCardLogoManualUrl').value.trim()) || idCardLogoUrl;
-        const chunk = idCardStudents.slice(0, 10);
+        const chunk = target.slice(0, 10);
         const html = await buildIdCardPageHtml(chunk, logoUrl);
         if (previewContent) {
           previewContent.innerHTML = html;
@@ -27308,7 +27439,8 @@ function receiptStatusText(status) {
     }
 
     async function exportIdCardPdf() {
-      if (!idCardStudents.length) {
+      const target = getIdCardTargetStudents();
+      if (!target.length) {
         const statusEl = getElement('idCardLoadStatus');
         if (statusEl) { statusEl.textContent = 'กรุณากดโหลดนักเรียนก่อน'; statusEl.style.color = '#dc2626'; }
         return;
@@ -27327,7 +27459,7 @@ function receiptStatusText(status) {
         const logoUrl = (getElement('idCardLogoManualUrl') && getElement('idCardLogoManualUrl').value.trim()) || idCardLogoUrl;
         const pdf = new JsPdfClass({ unit: 'mm', format: 'a4', orientation: 'portrait' });
         const chunks = [];
-        for (var i = 0; i < idCardStudents.length; i += 10) chunks.push(idCardStudents.slice(i, i + 10));
+        for (var i = 0; i < target.length; i += 10) chunks.push(target.slice(i, i + 10));
         for (var pageIdx = 0; pageIdx < chunks.length; pageIdx++) {
           if (resultEl) { resultEl.textContent = 'กำลังสร้าง PDF หน้าที่ ' + (pageIdx + 1) + '/' + chunks.length + '...'; }
           const html = await buildIdCardPageHtml(chunks[pageIdx].slice(), logoUrl);
@@ -27360,9 +27492,10 @@ function receiptStatusText(status) {
           const imgData = canvas.toDataURL('image/jpeg', 0.95);
           pdf.addImage(imgData, 'JPEG', 0, 0, 210, 297);
         }
+        idCardLastExported = target.slice();
         const dateStr = new Date().toLocaleDateString('th-TH').replace(/\//g, '-');
         pdf.save('IDEACLUB-IDCards-' + dateStr + '.pdf');
-        if (resultEl) { resultEl.textContent = 'Export PDF เรียบร้อย (' + idCardStudents.length + ' ใบ, ' + chunks.length + ' หน้า)'; resultEl.style.color = '#16a34a'; }
+        if (resultEl) { resultEl.textContent = 'Export PDF เรียบร้อย (' + target.length + ' ใบ, ' + chunks.length + ' หน้า)'; resultEl.style.color = '#16a34a'; }
         const markBtn = getElement('idCardMarkPrintedBtn');
         if (markBtn) markBtn.style.display = '';
       } catch (e) {
@@ -27374,22 +27507,24 @@ function receiptStatusText(status) {
     }
 
     async function markIdCardsPrinted() {
-      if (!idCardStudents.length) return;
-      if (!confirm('ต้องการบันทึกว่าพิมพ์บัตรแล้ว ' + idCardStudents.length + ' คน ใช่ไหม?')) return;
+      const toMark = idCardLastExported.length ? idCardLastExported : getIdCardTargetStudents();
+      if (!toMark.length) return;
+      if (!confirm('ต้องการบันทึกว่าพิมพ์บัตรแล้ว ' + toMark.length + ' คน ใช่ไหม?')) return;
       const resultEl = getElement('idCardExportResult');
       if (resultEl) { resultEl.textContent = 'กำลังบันทึก...'; resultEl.style.color = '#d97706'; }
       try {
         const batch = db.batch();
         const now = firebase.firestore.FieldValue.serverTimestamp();
-        idCardStudents.forEach(function(s) {
+        toMark.forEach(function(s) {
           const uid = s.uid || s.authUid;
           if (!uid) return;
           batch.update(db.collection('users').doc(uid), { idCardPrinted: true, idCardPrintedAt: now });
         });
         await batch.commit();
-        idCardStudents.forEach(function(s) { s.idCardPrinted = true; });
+        toMark.forEach(function(s) { s.idCardPrinted = true; });
+        idCardLastExported = [];
         renderIdCardStudentList();
-        if (resultEl) { resultEl.textContent = 'บันทึกสถานะพิมพ์บัตรเรียบร้อย ' + idCardStudents.length + ' คน'; resultEl.style.color = '#16a34a'; }
+        if (resultEl) { resultEl.textContent = 'บันทึกสถานะพิมพ์บัตรเรียบร้อย ' + toMark.length + ' คน'; resultEl.style.color = '#16a34a'; }
         const markBtn = getElement('idCardMarkPrintedBtn');
         if (markBtn) markBtn.style.display = 'none';
       } catch (e) {
