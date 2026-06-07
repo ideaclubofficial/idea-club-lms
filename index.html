@@ -3611,6 +3611,7 @@
                           <th>นักเรียน</th>
                           <th>คอร์ส</th>
                           <th>ราคาที่ต้องจ่าย</th>
+                          <th>ยอดพิเศษรายคน</th>
                           <th>สถานะรายการ</th>
                           <th>สถานะชำระเงิน</th>
                         </tr>
@@ -11700,6 +11701,8 @@
     }
 
     function getExpectedPaymentAmountForStudent(student, month) {
+      const studentOverride = (student && month) ? getStudentMonthPriceOverride(month, student.id) : 0;
+      if (studentOverride > 0) return studentOverride;
       const course = getCourseByStudentOrName(student, student ? student.course : '');
       const monthlyCoursePrice = course ? getMonthCoursePrice(month, course.id) : 0;
       const coursePrice = getCourseMonthlyPrice(course);
@@ -14595,6 +14598,22 @@ function getCourseOnlineDocs(course, includeInactive) {
       renderPaymentRecordPreview();
     }
 
+    async function saveStudentMonthPriceOverride(monthStr, studentId, amount) {
+      const item = getPaymentMonthItem(monthStr);
+      if (!item) return;
+      if (!item.studentPrices) item.studentPrices = {};
+      const numAmt = Number(amount) || 0;
+      if (numAmt > 0) {
+        item.studentPrices[String(studentId)] = numAmt;
+      } else {
+        delete item.studentPrices[String(studentId)];
+      }
+      try {
+        await setFirebaseDocument('paymentMonths', item);
+        renderPaymentRecordPreview(numAmt > 0 ? 'บันทึกยอดพิเศษแล้ว' : 'ล้างยอดพิเศษแล้ว ใช้ราคาปกติ');
+      } catch(e) { console.error('saveStudentMonthPriceOverride error:', e); }
+    }
+
     async function saveAllPaymentCoursePrices() {
       const month = getElement('paymentPriceMonthSelect') ? getElement('paymentPriceMonthSelect').value : '';
       const result = getElement('paymentCoursePriceResult');
@@ -14894,6 +14913,12 @@ function getCourseOnlineDocs(course, includeInactive) {
       return Number(item.coursePrices[String(courseId)] || 0) || 0;
     }
 
+    function getStudentMonthPriceOverride(monthStr, studentId) {
+      const item = getPaymentMonthItem(monthStr);
+      if (!item || !item.studentPrices || !studentId) return 0;
+      return Number(item.studentPrices[String(studentId)] || 0) || 0;
+    }
+
     function getPaymentCoursePriceCount(item) {
       if (!item || !item.coursePrices) return 0;
       return Object.keys(item.coursePrices).filter(function(key) { return Number(item.coursePrices[key] || 0) > 0; }).length;
@@ -15002,7 +15027,7 @@ function getCourseOnlineDocs(course, includeInactive) {
       const month = getSelectedPaymentRecordMonth();
       if (!month) {
         summaryBox.innerHTML = '<div class="stat"><h4>เดือนที่เลือก</h4><p>-</p></div><div class="stat"><h4>นักเรียนที่ต้องเรียกเก็บ</h4><p>0 คน</p></div><div class="stat"><h4>ยอดรวม</h4><p>0 บาท</p></div>';
-        tbody.innerHTML = '<tr><td colspan="5">ยังไม่มีเดือนชำระเงิน ให้เพิ่มรอบเดือนก่อน</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="6">ยังไม่มีเดือนชำระเงิน ให้เพิ่มรอบเดือนก่อน</td></tr>';
         if (result) result.textContent = message || '';
         return;
       }
@@ -15034,14 +15059,18 @@ function getCourseOnlineDocs(course, includeInactive) {
         const paymentStatus = payment ? (payment.status || payment.paymentStatus || 'รอชำระเงิน') : '-';
         const recordStatus = payment ? '<span class="status-paid">สร้างแล้ว</span>' : '<span class="status-waiting">ยังไม่ได้สร้าง</span>';
         const paymentStatusClass = paymentStatus === 'ชำระแล้ว' ? 'status-paid' : paymentStatus === 'ค้างชำระ' || paymentStatus === 'สลิปไม่ผ่าน' ? 'status-absent' : 'status-waiting';
+        const override = getStudentMonthPriceOverride(month, student.id);
+        const inputStyle = 'width:90px;border:1px solid ' + (override > 0 ? '#3b82f6;color:#1d4ed8;font-weight:700' : '#d1d5db;color:#6b7280') + ';border-radius:6px;padding:3px 6px;font-size:13px;';
+        const overrideTd = '<td><input type="number" min="0" style="' + inputStyle + '" placeholder="ปกติ" value="' + (override > 0 ? override : '') + '" onblur="saveStudentMonthPriceOverride(' + jsArg(month) + ',' + jsArg(student.id) + ',this.value)" onkeydown="if(event.key===\'Enter\')this.blur()"></td>';
         return '<tr>' +
           '<td><strong>' + escapeHtml(student.name || '-') + '</strong><br><span class="mini-muted">' + escapeHtml(student.memberId || student.phone || '-') + '</span></td>' +
           '<td>' + escapeHtml(student.course || '-') + '</td>' +
           '<td><strong>' + formatPrice(row.amount) + '</strong></td>' +
+          overrideTd +
           '<td>' + recordStatus + '</td>' +
           '<td>' + (payment ? '<span class="' + paymentStatusClass + '">' + escapeHtml(paymentStatus) + '</span>' : '-') + '</td>' +
         '</tr>';
-      }).join('') : '<tr><td colspan="5">ยังไม่มีนักเรียนที่เข้าเงื่อนไขสำหรับสร้างรายการเรียกเก็บ</td></tr>';
+      }).join('') : '<tr><td colspan="6">ยังไม่มีนักเรียนที่เข้าเงื่อนไขสำหรับสร้างรายการเรียกเก็บ</td></tr>';
 
       if (result) {
         result.textContent = message || '';
