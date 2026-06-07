@@ -2144,7 +2144,7 @@
             <!-- Score card: showScoreAfterSubmit = true -->
             <div id="onlineExamResultScoreCard" class="student-mobile-card" style="display:none;">
               <div style="display:flex;justify-content:space-between;padding:10px 0;border-bottom:1px solid #e2e8f0;font-size:13px;">
-                <span style="color:#6b7280;">คะแนนที่ได้</span>
+                <span style="color:#6b7280;">คะแนน/50</span>
                 <strong id="onlineExamResultScore">--</strong>
               </div>
               <div style="display:flex;justify-content:space-between;padding:10px 0;border-bottom:1px solid #e2e8f0;font-size:13px;">
@@ -4334,13 +4334,6 @@
                     <select id="onlineExamCourseShowScore">
                       <option value="1">แสดงคะแนนทันที</option>
                       <option value="0">รอประกาศผล (ซ่อนคะแนน)</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label>แสดงเฉลยหลังประกาศผล</label>
-                    <select id="onlineExamCourseShowAnswer">
-                      <option value="1">แสดงเฉลยรายข้อ</option>
-                      <option value="0">แสดงเฉพาะคะแนน</option>
                     </select>
                   </div>
                   <div>
@@ -25522,7 +25515,6 @@ function receiptStatusText(status) {
       const status = (getElement('onlineExamCourseStatus') || {}).value || 'active';
       const publishStatus = (getElement('onlineExamCoursePublishStatus') || {}).value || 'draft';
       const showScoreAfterSubmit = (getElement('onlineExamCourseShowScore') || {}).value !== '0';
-      const showAnswerAfterPublished = (getElement('onlineExamCourseShowAnswer') || {}).value !== '0';
       const shuffleQuestions = (getElement('onlineExamCourseShuffleQ') || {}).value === '1';
       const shuffleChoices = (getElement('onlineExamCourseShuffleC') || {}).value === '1';
       const isActive = status === 'active';
@@ -25535,7 +25527,7 @@ function receiptStatusText(status) {
       try {
         const now = firebase.firestore.FieldValue.serverTimestamp();
         const uid = firebaseUser ? firebaseUser.uid : '';
-        const extraFields = { publishStatus, isActive, showScoreAfterSubmit, showAnswerAfterPublished, shuffleQuestions, shuffleChoices };
+        const extraFields = { publishStatus, isActive, showScoreAfterSubmit, shuffleQuestions, shuffleChoices };
 
         if (editingId) {
           await db.collection('onlineExamCourses').doc(editingId).set(
@@ -25597,7 +25589,6 @@ function receiptStatusText(status) {
       setValue('onlineExamCourseStatus', course.status || 'active');
       setValue('onlineExamCoursePublishStatus', course.publishStatus || 'draft');
       setValue('onlineExamCourseShowScore', course.showScoreAfterSubmit === false ? '0' : '1');
-      setValue('onlineExamCourseShowAnswer', course.showAnswerAfterPublished === false ? '0' : '1');
       setValue('onlineExamCourseShuffleQ', course.shuffleQuestions ? '1' : '0');
       setValue('onlineExamCourseShuffleC', course.shuffleChoices ? '1' : '0');
       const cancelBtn = getElement('onlineExamCourseCancelBtn');
@@ -25616,7 +25607,6 @@ function receiptStatusText(status) {
       setValue('onlineExamCourseStatus', 'active');
       setValue('onlineExamCoursePublishStatus', 'draft');
       setValue('onlineExamCourseShowScore', '1');
-      setValue('onlineExamCourseShowAnswer', '1');
       setValue('onlineExamCourseShuffleQ', '0');
       setValue('onlineExamCourseShuffleC', '0');
       const cancelBtn = getElement('onlineExamCourseCancelBtn');
@@ -25792,7 +25782,6 @@ function receiptStatusText(status) {
               '<span style="font-size:10px;padding:1px 8px;border-radius:99px;' + (pStatus === 'published' ? 'background:#d1fae5;color:#065f46;">' + '✅ Published' : 'background:#f3f4f6;color:#6b7280;">📋 Draft') + '</span>' +
               '<span style="font-size:10px;padding:1px 8px;border-radius:99px;' + (active ? 'background:#dbeafe;color:#1d4ed8;">' + 'Active' : 'background:#fee2e2;color:#991b1b;">Inactive') + '</span>' +
               (c.showScoreAfterSubmit === false ? '<span style="font-size:10px;padding:1px 8px;border-radius:99px;background:#fef3c7;color:#92400e;">🔒 ซ่อนคะแนน</span>' : '') +
-              (c.showAnswerAfterPublished === false ? '<span style="font-size:10px;padding:1px 8px;border-radius:99px;background:#fef3c7;color:#92400e;">🔒 ซ่อนเฉลย</span>' : '') +
               (c.shuffleQuestions ? '<span style="font-size:10px;padding:1px 8px;border-radius:99px;background:#ede9fe;color:#5b21b6;">🔀 สุ่มข้อ</span>' : '') +
               (c.shuffleChoices ? '<span style="font-size:10px;padding:1px 8px;border-radius:99px;background:#ede9fe;color:#5b21b6;">🔀 สุ่มตัวเลือก</span>' : '') +
             '</div>' +
@@ -26007,7 +25996,7 @@ function receiptStatusText(status) {
           '<td style="padding:8px 10px;text-align:center;">' + totalQ + '</td>' +
           '<td style="padding:8px 10px;text-align:center;">' + answered + '</td>' +
           '<td style="padding:8px 10px;text-align:center;color:#16a34a;font-weight:700;">' + correctCnt + '</td>' +
-          '<td style="padding:8px 10px;text-align:center;font-weight:700;">' + (r.scoreEarned !== undefined ? r.scoreEarned + '/' + (r.scoreTotal || totalQ) + '<br><span style="font-weight:400;color:#6b7280;">(' + (r.scorePercent || 0) + '%)</span>' : '-') + '</td>' +
+          '<td style="padding:8px 10px;text-align:center;font-weight:700;">' + (r.correctCount !== undefined ? (r.scoreText || onlineExamFormatScore50(r.correctCount, r.totalQ || correctCnt)) + '<br><span style="font-weight:400;color:#6b7280;">(' + (r.scorePercent || 0) + '%)</span>' : '-') + '</td>' +
           '<td style="padding:8px 10px;text-align:center;">' + (usedMin !== '-' ? usedMin + ' น.' : '-') + '</td>' +
           '<td style="padding:8px 10px;">' + (r.submittedAtText || '') + '</td>' +
           '<td style="padding:8px 10px;text-align:center;">' + getOnlineExamResultStatusBadge(rStatus) + '</td>' +
@@ -26039,7 +26028,7 @@ function receiptStatusText(status) {
             '<th style="padding:8px 10px;text-align:center;white-space:nowrap;">จำนวน</th>' +
             '<th style="padding:8px 10px;text-align:center;white-space:nowrap;">ตอบ</th>' +
             '<th style="padding:8px 10px;text-align:center;white-space:nowrap;">ถูก</th>' +
-            '<th style="padding:8px 10px;text-align:center;white-space:nowrap;">คะแนน</th>' +
+            '<th style="padding:8px 10px;text-align:center;white-space:nowrap;">คะแนน/50</th>' +
             '<th style="padding:8px 10px;text-align:center;white-space:nowrap;">เวลา</th>' +
             '<th style="padding:8px 10px;text-align:left;white-space:nowrap;">วันที่สอบ</th>' +
             '<th style="padding:8px 10px;text-align:center;white-space:nowrap;">สถานะ</th>' +
@@ -26118,7 +26107,7 @@ function receiptStatusText(status) {
       content.innerHTML =
         '<h3 style="font-size:15px;margin-bottom:4px;">' + escapeHtml(r.studentName || '') + '</h3>' +
         '<p style="font-size:12px;color:#6b7280;margin-bottom:4px;">' + escapeHtml(r.courseTitle || '') + ' · ' + (r.submittedAtText || '') + '</p>' +
-        '<p style="font-size:12px;margin-bottom:12px;">คะแนน: <strong>' + (r.scoreEarned || 0) + '/' + (r.scoreTotal || 0) + ' (' + (r.scorePercent || 0) + '%)</strong> · เวลา: ' + (usedMin !== '-' ? usedMin + ' นาที' : '-') + '</p>' +
+        '<p style="font-size:12px;margin-bottom:12px;">คะแนน/50: <strong>' + (r.scoreText || onlineExamFormatScore50(r.correctCount, r.totalQ)) + '</strong> <span style="color:#6b7280;">(' + (r.scorePercent || 0) + '%)</span> · เวลา: ' + (usedMin !== '-' ? usedMin + ' นาที' : '-') + '</p>' +
         (questions.length
           ? '<div style="overflow-x:auto;"><table style="width:100%;border-collapse:collapse;">' +
               '<thead><tr style="background:#f1f5f9;font-size:11px;font-weight:700;">' +
@@ -26334,7 +26323,7 @@ function receiptStatusText(status) {
         var statusHtml, scoreHtml;
         if (rStatus === 'published') {
           statusHtml = '<span style="font-size:10px;background:#d1fae5;color:#065f46;padding:1px 7px;border-radius:99px;">ประกาศผลแล้ว</span>';
-          scoreHtml = r.scoreEarned !== undefined ? '<strong style="font-size:12px;color:#4f46e5;">' + r.scoreEarned + '/' + r.scoreTotal + ' (' + r.scorePercent + '%)</strong>' : '';
+          scoreHtml = r.correctCount !== undefined ? '<strong style="font-size:12px;color:#4f46e5;">' + (r.scoreText || onlineExamFormatScore50(r.correctCount, r.totalQ)) + '</strong>' : '';
         } else if (rStatus === 'hidden') {
           statusHtml = '<span style="font-size:10px;background:#fee2e2;color:#991b1b;padding:1px 7px;border-radius:99px;">ซ่อนผล</span>';
           scoreHtml = '<span style="font-size:11px;color:#9ca3af;">ไม่เผยแพร่</span>';
@@ -26381,29 +26370,14 @@ function receiptStatusText(status) {
         if (pendingEl) pendingEl.style.display = 'none';
         if (pendingBackEl) pendingBackEl.style.display = 'none';
         if (scoreCardEl) scoreCardEl.style.display = '';
-        setValue('onlineExamResultScore', (r.scoreEarned || 0) + ' / ' + (r.scoreTotal || 0));
+        setValue('onlineExamResultScore', r.scoreText || onlineExamFormatScore50(r.correctCount, r.totalQ));
         setValue('onlineExamResultPercent', (r.scorePercent || 0) + '%');
         const statusEl = getElement('onlineExamResultStatus');
         if (statusEl) { statusEl.textContent = r.status === 'passed' ? '✅ ผ่าน' : '❌ ไม่ผ่าน'; statusEl.style.color = r.status === 'passed' ? '#16a34a' : '#dc2626'; }
         const used = r.usedSeconds || r.timeTakenSeconds || 0;
         setValue('onlineExamResultTime', used ? Math.ceil(used / 60) + ' นาที' : '-');
         const breakdownEl = getElement('onlineExamResultBreakdown');
-        if (breakdownEl) {
-          if (course.showAnswerAfterPublished !== false && r.answers) {
-            const alphabet = ['ก.', 'ข.', 'ค.', 'ง.'];
-            breakdownEl.innerHTML = '<table style="width:100%;border-collapse:collapse;font-size:12px;">' +
-              '<thead><tr style="background:#f1f5f9;font-weight:700;"><th style="padding:5px 8px;">ข้อ</th><th style="padding:5px 8px;">คำตอบ</th><th style="padding:5px 8px;">เฉลย</th><th style="padding:5px 8px;">ผล</th></tr></thead><tbody>' +
-              (course.questions || []).map(function(q, i) {
-                const sc = r.answers[q.questionId];
-                return '<tr><td style="padding:5px 8px;border-bottom:1px solid #f1f5f9;">' + (i+1) + '</td>' +
-                  '<td style="padding:5px 8px;border-bottom:1px solid #f1f5f9;">' + (sc !== undefined ? alphabet[sc] : '—') + '</td>' +
-                  '<td style="padding:5px 8px;border-bottom:1px solid #f1f5f9;color:#16a34a;">' + alphabet[q.correctIndex] + '</td>' +
-                  '<td style="padding:5px 8px;border-bottom:1px solid #f1f5f9;text-align:center;">' + (sc === q.correctIndex ? '✅' : '❌') + '</td></tr>';
-              }).join('') + '</tbody></table>';
-          } else {
-            breakdownEl.innerHTML = '<p style="font-size:12px;color:#9ca3af;text-align:center;padding:8px;">เฉลยไม่เผยแพร่สำหรับชุดข้อสอบนี้</p>';
-          }
-        }
+        if (breakdownEl) breakdownEl.innerHTML = '';
       } catch(e) {
         console.error('viewStudentExamResult error', e);
         alert('เกิดข้อผิดพลาด: ' + (e.message || e));
@@ -26680,6 +26654,9 @@ function receiptStatusText(status) {
         scorePercent: scorePercent,
         correctCount: correctCount,
         totalQ: questions.length,
+        scoreFull: 50,
+        score50: onlineExamGetScore50Value(correctCount, questions.length),
+        scoreText: onlineExamFormatScore50(correctCount, questions.length),
         status: passStatus,
         resultStatus: 'submitted',
         usedSeconds: usedSeconds,
@@ -26694,7 +26671,7 @@ function receiptStatusText(status) {
 
       try {
         await db.collection('onlineExamResults').doc(resultId).set(payload);
-        addActivityLog('ส่งข้อสอบ Interactive', (course.title || '') + ' — ' + (currentStudent ? currentStudent.name : '') + ' คะแนน ' + scoreEarned + '/' + scoreTotal);
+        addActivityLog('ส่งข้อสอบ Interactive', (course.title || '') + ' — ' + (currentStudent ? currentStudent.name : '') + ' คะแนน ' + onlineExamFormatScore50(correctCount, questions.length));
       } catch (e) {
         console.error('submitOnlineExamResult write error', e);
         alert('บันทึกผลสอบไม่สำเร็จ: ' + (e.message || e));
@@ -26721,7 +26698,7 @@ function receiptStatusText(status) {
         if (pendingBackEl) pendingBackEl.style.display = 'none';
         if (scoreCardEl) scoreCardEl.style.display = '';
 
-        setValue('onlineExamResultScore', scoreEarned + ' / ' + scoreTotal);
+        setValue('onlineExamResultScore', onlineExamFormatScore50(correctCount, questions.length));
         setValue('onlineExamResultPercent', scorePercent + '%');
         const statusEl = getElement('onlineExamResultStatus');
         if (statusEl) {
@@ -26729,26 +26706,8 @@ function receiptStatusText(status) {
           statusEl.style.color = passStatus === 'passed' ? '#16a34a' : '#dc2626';
         }
         setValue('onlineExamResultTime', Math.ceil(usedSeconds / 60) + ' นาที');
-
         const breakdownEl = getElement('onlineExamResultBreakdown');
-        if (breakdownEl) {
-          if (course.showAnswerAfterPublished !== false) {
-            const alphabet = ['ก.', 'ข.', 'ค.', 'ง.'];
-            breakdownEl.innerHTML = '<table style="width:100%;border-collapse:collapse;font-size:12px;">' +
-              '<thead><tr style="background:#f1f5f9;font-weight:700;">' +
-                '<th style="padding:5px 8px;">ข้อ</th><th style="padding:5px 8px;">คำตอบ</th><th style="padding:5px 8px;">เฉลย</th><th style="padding:5px 8px;">ผล</th>' +
-              '</tr></thead><tbody>' +
-              questions.map(function(q, i) {
-                const sc = onlineExamStudentAnswers[q.questionId];
-                return '<tr><td style="padding:5px 8px;border-bottom:1px solid #f1f5f9;">' + (i+1) + '</td>' +
-                  '<td style="padding:5px 8px;border-bottom:1px solid #f1f5f9;">' + (sc !== undefined ? alphabet[sc] : '—') + '</td>' +
-                  '<td style="padding:5px 8px;border-bottom:1px solid #f1f5f9;color:#16a34a;">' + alphabet[q.correctIndex] + '</td>' +
-                  '<td style="padding:5px 8px;border-bottom:1px solid #f1f5f9;text-align:center;">' + (sc === q.correctIndex ? '✅' : '❌') + '</td></tr>';
-              }).join('') + '</tbody></table>';
-          } else {
-            breakdownEl.innerHTML = '<p style="font-size:12px;color:#9ca3af;text-align:center;padding:8px;">เฉลยจะแสดงหลังประกาศผล</p>';
-          }
-        }
+        if (breakdownEl) breakdownEl.innerHTML = '';
       } else {
         if (scoreCardEl) scoreCardEl.style.display = 'none';
         if (pendingEl) pendingEl.style.display = '';
@@ -26781,6 +26740,20 @@ function receiptStatusText(status) {
     function setInnerText(id, val) {
       const el = getElement(id);
       if (el) el.textContent = val;
+    }
+
+    // ---- Score /50 Helpers ----
+
+    function onlineExamGetScore50Value(correctCount, totalQuestions) {
+      const total = Number(totalQuestions || 0) || 0;
+      const correct = Number(correctCount || 0) || 0;
+      if (!total) return 0;
+      return Math.round((correct / total) * 50 * 10) / 10;
+    }
+
+    function onlineExamFormatScore50(correctCount, totalQuestions) {
+      const score = onlineExamGetScore50Value(correctCount, totalQuestions);
+      return score.toFixed(1).replace(/\.0$/, '') + '/50';
     }
 
     // ---- Shuffle Utility ----
