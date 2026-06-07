@@ -781,6 +781,9 @@
       .profile-panel .btn {
         width: 100%;
         min-height: 48px;
+      }
+
+      .profile-panel .btn {
         border-radius: 14px;
       }
 
@@ -1322,7 +1325,7 @@
     select,
     .form-control,
     .form-select {
-      border-radius: 0.375rem;
+      border-radius: 0.375rem !important;
     }
   </style>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
@@ -6673,7 +6676,7 @@
 
     function getTableSortState(type) {
       if (!sortState[type] || typeof sortState[type] !== 'object') {
-        sortState[type] = { key: 'id', direction: 'asc' };
+        sortState[type] = { key: type === 'students' ? 'memberId' : 'id', direction: 'asc' };
       }
       return sortState[type];
     }
@@ -8569,6 +8572,10 @@
         const text = [s.name, s.nickname, s.phone, s.memberId, s.grade, s.course].join(' ').toLowerCase();
         const keywordMatched = !keyword || text.indexOf(keyword) !== -1;
         return courseMatchedByTeacher && courseMatched && keywordMatched;
+      }).sort(function(a, b) {
+        var idA = String(a.memberId || a.memberID || a.id || '');
+        var idB = String(b.memberId || b.memberID || b.id || '');
+        return idA.localeCompare(idB, undefined, { numeric: true });
       });
       const tsTotalPages = Math.max(1, Math.ceil(filtered.length / LIST_PAGE_SIZE));
       if (teacherStudentsCurrentPage > tsTotalPages) teacherStudentsCurrentPage = tsTotalPages;
@@ -8662,7 +8669,11 @@
 
       const pendingBox = getElement('teacherMobilePendingApprovals');
       if (pendingBox) {
-        const pending = students.filter(function(s) { return s.courseStatus === 'รออนุมัติคอร์ส'; });
+        const pending = students.filter(function(s) { return s.courseStatus === 'รออนุมัติคอร์ส'; }).sort(function(a, b) {
+          var idA = String(a.memberId || a.memberID || a.id || '');
+          var idB = String(b.memberId || b.memberID || b.id || '');
+          return idA.localeCompare(idB, undefined, { numeric: true });
+        });
         pendingBox.innerHTML = pending.length
           ? pending.map(renderTeacherMobileApprovalCard).join('')
           : '<div class="teacher-mobile-approval-card"><strong>ไม่มีรายการรออนุมัติ</strong><p class="teacher-mobile-muted">รายการจะขึ้นเมื่อมีนักเรียนสมัครคอร์สใหม่</p></div>';
@@ -8670,7 +8681,11 @@
 
       const listBox = getElement('teacherMobileStudentList');
       if (listBox) {
-        const filtered = getTeacherFilteredStudentsForMobile();
+        const filtered = getTeacherFilteredStudentsForMobile().sort(function(a, b) {
+          var idA = String(a.memberId || a.memberID || a.id || '');
+          var idB = String(b.memberId || b.memberID || b.id || '');
+          return idA.localeCompare(idB, undefined, { numeric: true });
+        });
         listBox.innerHTML = filtered.length
           ? filtered.map(renderTeacherMobileStudentCard).join('')
           : '<div class="teacher-mobile-student-card"><strong>ไม่พบนักเรียน</strong><p class="teacher-mobile-muted">ลองเปลี่ยนคำค้นหาหรือคอร์สที่เลือก</p></div>';
@@ -10107,7 +10122,11 @@
     function renderPendingCourseApprovalList() {
       const box = getElement('pendingCourseApprovalList');
       if (!box) return;
-      const pending = students.filter(function(s) { return s.courseStatus === 'รออนุมัติคอร์ส'; });
+      const pending = students.filter(function(s) { return s.courseStatus === 'รออนุมัติคอร์ส'; }).sort(function(a, b) {
+        var idA = String(a.memberId || a.memberID || a.id || '');
+        var idB = String(b.memberId || b.memberID || b.id || '');
+        return idA.localeCompare(idB, undefined, { numeric: true });
+      });
       if (!pending.length) {
         box.innerHTML = '<div class="notice">ไม่มีรายการรออนุมัติคอร์สในขณะนี้</div>';
         safeRun(renderTeacherMobileStudents, 'teacher-mobile-students-pending-empty');
@@ -11136,6 +11155,10 @@
           (locationFilter === 'ทั้งหมด' || String(student.preferredLocation || '') === String(locationFilter)) &&
           (dayFilter === 'ทั้งหมด' || String(student.privateLessonDay || '') === String(dayFilter)) &&
           (billingFilter === 'ทั้งหมด' || getPrivateStudentBillingType(student) === billingFilter);
+      }).sort(function(a, b) {
+        var idA = String(a.memberId || a.memberID || a.id || '');
+        var idB = String(b.memberId || b.memberID || b.id || '');
+        return idA.localeCompare(idB, undefined, { numeric: true });
       });
       const psTotalPages = Math.max(1, Math.ceil(list.length / LIST_PAGE_SIZE));
       if (privateStudentsCurrentPage > psTotalPages) privateStudentsCurrentPage = psTotalPages;
@@ -11176,6 +11199,10 @@
       const options = ['<option value="">เลือกนักเรียนจากระบบ</option>'];
       students.filter(function(student) {
         return student && student.deleted !== true && student.status !== 'inactive' && student.status !== 'archived';
+      }).sort(function(a, b) {
+        var idA = String(a.memberId || a.memberID || a.id || '');
+        var idB = String(b.memberId || b.memberID || b.id || '');
+        return idA.localeCompare(idB, undefined, { numeric: true });
       }).forEach(function(student) {
         const id = student.id || student.firebaseDocId || '';
         options.push('<option value="' + escapeHtml(id) + '">' + escapeHtml((student.name || '-') + ' · ' + (student.memberId || student.phone || '-') + ' · ' + (student.grade || '-')) + '</option>');
@@ -17516,6 +17543,10 @@ function receiptStatusText(status) {
       const current = select.value;
       const activeStudents = students.filter(function(student) {
         return student && student.deleted !== true && student.status !== 'inactive' && student.status !== 'archived';
+      }).sort(function(a, b) {
+        var idA = String(a.memberId || a.memberID || a.id || '');
+        var idB = String(b.memberId || b.memberID || b.id || '');
+        return idA.localeCompare(idB, undefined, { numeric: true });
       });
       select.innerHTML = '<option value="">' + (activeStudents.length ? 'เลือกนักเรียน' : 'ยังไม่มีนักเรียนในระบบ') + '</option>' + activeStudents.map(function(student) {
         const id = getStudentPrivateLessonReferenceId(student);
@@ -18973,7 +19004,11 @@ function receiptStatusText(status) {
       const currentTeacher = teacherSelect ? teacherSelect.value : '';
       const activeCourses = getSimpleScheduleActiveCourses();
       const activeTeachers = getSimpleScheduleActiveTeachers();
-      const availableStudents = getSimpleScheduleAvailableStudents();
+      const availableStudents = getSimpleScheduleAvailableStudents().sort(function(a, b) {
+        var idA = String(a.memberId || a.memberID || a.id || '');
+        var idB = String(b.memberId || b.memberID || b.id || '');
+        return idA.localeCompare(idB, undefined, { numeric: true });
+      });
 
       if (courseSelect) {
         courseSelect.innerHTML = '<option value="">เลือกคอร์ส</option>' + activeCourses.map(function(course) {
@@ -22410,7 +22445,11 @@ function receiptStatusText(status) {
       const select = getElement('manualPaymentStudent');
       if (!select) return;
       const current = select.value;
-      select.innerHTML = students.map(function(s) { return '<option value="' + s.id + '">' + (s.name || '-') + ' · ' + (s.grade || '-') + ' · ' + (s.course || '-') + '</option>'; }).join('');
+      select.innerHTML = students.slice().sort(function(a, b) {
+        var idA = String(a.memberId || a.memberID || a.id || '');
+        var idB = String(b.memberId || b.memberID || b.id || '');
+        return idA.localeCompare(idB, undefined, { numeric: true });
+      }).map(function(s) { return '<option value="' + s.id + '">' + (s.name || '-') + ' · ' + (s.grade || '-') + ' · ' + (s.course || '-') + '</option>'; }).join('');
       if (current) select.value = current;
       updateManualPaymentSuggestedAmount();
     }
