@@ -7,6 +7,11 @@
   <link id="dynamicFavicon" rel="icon" href="assets/favicon.png" />
   <link id="dynamicAppleTouchIcon" rel="apple-touch-icon" href="assets/favicon.png" />
   <link rel="stylesheet" href="assets/styles.css" />
+  <!-- TutorFlow: Tailwind (preflight off เพื่อไม่ override styles เดิม) + Lucide icons -->
+  <script>window.tailwindConfig = { corePlugins: { preflight: false } };</script>
+  <script src="https://cdn.tailwindcss.com?plugins=forms"></script>
+  <script>tailwind.config = { corePlugins: { preflight: false } };</script>
+  <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
   <style>
     .menu-icon {
       display: inline-flex;
@@ -4491,783 +4496,253 @@
           <!-- end admin-online-exam -->
 
           <section id="admin-monthly-planner" class="admin-tab hidden">
-            <div class="form-box">
-              <h3>สรุปตารางรายเดือน</h3>
-              <p style="margin-bottom:18px; color:#6b7280;">ดูภาพรวมคอร์ส คาบเรียน และปัญหาที่ต้องจัดการในเดือนที่เลือก</p>
-              <div class="form-row">
-                <div>
-                  <label>เดือน</label>
-                  <select id="monthlyPlannerSummaryMonthFilter" onchange="renderMonthlyPlannerDashboardSummary()">
-                    <option value="ทั้งหมด">ทั้งหมด</option>
-                  </select>
-                </div>
-                <div>
-                  <label>ศูนย์</label>
-                  <select id="monthlyPlannerSummaryCenterFilter" onchange="renderMonthlyPlannerDashboardSummary()">
-                    <option value="ทั้งหมด">ทั้งหมด</option>
-                  </select>
-                </div>
-                <div>
-                  <label>คอร์ส</label>
-                  <select id="monthlyPlannerSummaryCourseFilter" onchange="renderMonthlyPlannerDashboardSummary()">
-                    <option value="ทั้งหมด">ทั้งหมด</option>
-                  </select>
-                </div>
-              </div>
-              <div id="monthlyPlannerDashboardSummaryCards" class="dashboard-grid"></div>
-              <div id="monthlyPlannerDashboardSummaryNote" class="notice" style="margin-top:14px;"></div>
-              <div id="monthlyPlannerQuickFixToolbar" class="planner-quick-fix-toolbar"></div>
-              <div id="monthlyPlannerQuickFixResult" class="planner-quick-fix-result"></div>
-            </div>
+            <!-- ===== TutorFlow Enterprise (embedded) ===== -->
+            <style>
+              #admin-monthly-planner { font-family: 'Sarabun', sans-serif; }
+              .tf-no-scroll::-webkit-scrollbar { display:none; }
+              .tf-no-scroll { -ms-overflow-style:none; scrollbar-width:none; }
+              .tf-fade { animation: tfFadeIn .25s ease-out forwards; }
+              @keyframes tfFadeIn { from{opacity:0;transform:translateY(4px)} to{opacity:1;transform:translateY(0)} }
+            </style>
 
-            <br />
-
-            <div class="form-box">
-              <div class="planner-tab-nav">
-                <button type="button" class="planner-tab-button active" data-planner-tab-button="plannerTabSimple" onclick="switchMonthlyPlannerTab('plannerTabSimple')">
-                  <span class="planner-tab-title">Simple Schedule</span>
-                  <span class="planner-tab-desc">กรอกคาบเองและดู Grid แบบง่าย</span>
+            <!-- Role Switcher -->
+            <div class="flex justify-end mb-5">
+              <div class="inline-flex items-center bg-slate-100 p-1.5 rounded-xl border border-slate-200">
+                <button id="role-admin-btn" onclick="tfSwitchRole('admin')"
+                  class="flex items-center justify-center gap-2 px-5 py-2 rounded-lg text-xs font-bold transition-all bg-white text-indigo-700 shadow-sm border-0 cursor-pointer">
+                  <i data-lucide="shield-alert" class="w-4 h-4"></i> แอดมิน / ผู้บริหาร
                 </button>
-                <button type="button" class="planner-tab-button" data-planner-tab-button="plannerTab1" onclick="switchMonthlyPlannerTab('plannerTab1')">
-                  <span class="planner-tab-title">สร้างตาราง</span>
-                  <span class="planner-tab-desc">ตั้ง pattern และสร้างตารางทั้งเดือน</span>
-                </button>
-                <button type="button" class="planner-tab-button" data-planner-tab-button="plannerTab2" onclick="switchMonthlyPlannerTab('plannerTab2')">
-                  <span class="planner-tab-title">ดู / แก้ตาราง</span>
-                  <span class="planner-tab-desc">ดูคาบ ย้ายวัน สร้างชดเชย และจัดการวันหยุด</span>
-                </button>
-                <button type="button" class="planner-tab-button" data-planner-tab-button="plannerTab3" onclick="switchMonthlyPlannerTab('plannerTab3')">
-                  <span class="planner-tab-title">ตั้งค่าครูและวิชา</span>
-                  <span class="planner-tab-desc">กำหนดครูแนะนำและสมดุลวิชา</span>
+                <button id="role-tutor-btn" onclick="tfSwitchRole('tutor')"
+                  class="flex items-center justify-center gap-2 px-5 py-2 rounded-lg text-xs font-bold transition-all text-slate-600 hover:text-slate-900 border-0 cursor-pointer bg-transparent">
+                  <i data-lucide="user-cog" class="w-4 h-4"></i> พอร์ทัลคุณครู
                 </button>
               </div>
             </div>
-            <div id="plannerTabSimple" data-planner-tab>
-              <div class="simple-schedule-layout">
-                <div class="form-box">
-                  <h3>กรอกตารางแบบง่าย</h3>
-                  <p style="margin-bottom:18px; color:#6b7280;">กรอกคาบเรียนเอง แล้วบันทึกลง monthlyPlanSessions เดิม</p>
-                  <input id="simpleScheduleEditingId" type="hidden" value="" />
-                  <div class="form-row">
-                    <div>
-                      <label>เดือน</label>
-                      <input id="simpleScheduleMonth" type="hidden" />
-                      <div class="form-row">
-                        <div><select id="simpleScheduleMonthMonthSelect" onchange="syncThaiMonthYearPicker('simpleScheduleMonth', 'text')"></select></div>
-                        <div><select id="simpleScheduleMonthYearSelect" onchange="syncThaiMonthYearPicker('simpleScheduleMonth', 'text')"></select></div>
+
+            <!-- ======= ADMIN VIEW ======= -->
+            <div id="admin-view-root" class="space-y-8">
+              <!-- Stats Row -->
+              <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <div class="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex items-center space-x-3">
+                  <div class="p-2.5 bg-blue-50 text-blue-600 rounded-lg"><i data-lucide="map-pin" class="w-5 h-5"></i></div>
+                  <div><p class="text-xs text-slate-400 font-medium">คอร์ส Onsite</p><h3 class="text-xl font-bold text-slate-800" id="tf-stat-onsite">0</h3></div>
+                </div>
+                <div class="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex items-center space-x-3">
+                  <div class="p-2.5 bg-purple-50 text-purple-600 rounded-lg"><i data-lucide="video" class="w-5 h-5"></i></div>
+                  <div><p class="text-xs text-slate-400 font-medium">คอร์ส Online</p><h3 class="text-xl font-bold text-slate-800" id="tf-stat-online">0</h3></div>
+                </div>
+                <div class="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex items-center space-x-3">
+                  <div class="p-2.5 bg-amber-50 text-amber-600 rounded-lg"><i data-lucide="play-circle" class="w-5 h-5"></i></div>
+                  <div><p class="text-xs text-slate-400 font-medium">Ondemand</p><h3 class="text-xl font-bold text-slate-800" id="tf-stat-ondemand">0</h3></div>
+                </div>
+                <div class="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex items-center space-x-3">
+                  <div class="p-2.5 bg-rose-50 text-rose-600 rounded-lg"><i data-lucide="user-check" class="w-5 h-5"></i></div>
+                  <div><p class="text-xs text-slate-400 font-medium">สอนเดี่ยว (Private)</p><h3 class="text-xl font-bold text-slate-800" id="tf-stat-private">0</h3></div>
+                </div>
+              </div>
+
+              <div class="grid grid-cols-1 lg:grid-cols-4 gap-6">
+                <!-- Left Panel -->
+                <div class="lg:col-span-1 space-y-5">
+                  <div class="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm space-y-3">
+                    <h2 class="font-bold text-slate-900 text-base flex items-center gap-2">
+                      <i data-lucide="sliders" class="w-5 h-5 text-indigo-600"></i> แผงควบคุม
+                    </h2>
+                    <button onclick="tfOpenScheduleModal()" class="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold rounded-xl transition-all shadow-md text-sm border-0 cursor-pointer">
+                      <i data-lucide="plus-circle" class="w-4 h-4"></i> จัดตารางสอนใหม่
+                    </button>
+                  </div>
+
+                  <!-- Course List -->
+                  <div class="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
+                    <h2 class="font-bold text-slate-900 text-sm flex items-center gap-2 mb-3">
+                      <i data-lucide="book-open" class="w-4 h-4 text-indigo-600"></i> คอร์สเรียน
+                    </h2>
+                    <div id="tf-course-list" class="space-y-2 max-h-52 overflow-y-auto tf-no-scroll"></div>
+                  </div>
+
+                  <!-- Tutor List -->
+                  <div class="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
+                    <h2 class="font-bold text-slate-900 text-sm flex items-center gap-2 mb-3">
+                      <i data-lucide="award" class="w-4 h-4 text-indigo-600"></i> ผู้สอน
+                    </h2>
+                    <div id="tf-tutor-list" class="space-y-2 max-h-64 overflow-y-auto tf-no-scroll"></div>
+                  </div>
+                </div>
+
+                <!-- Right Panel -->
+                <div class="lg:col-span-3 space-y-5">
+                  <!-- Filters -->
+                  <div class="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm space-y-4">
+                    <div class="flex flex-col md:flex-row gap-4 items-start md:items-center justify-between">
+                      <div class="flex flex-wrap items-center gap-2">
+                        <span class="text-xs font-bold text-slate-400 uppercase tracking-wider">สาขา:</span>
+                        <button onclick="tfFilterByCenter('all')" id="tf-btn-center-all"
+                          class="px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all border border-indigo-600 bg-indigo-50 text-indigo-700 shadow-sm cursor-pointer">ทั้งหมด</button>
+                        <button onclick="tfFilterByCenter('nongchang')" id="tf-btn-center-nc"
+                          class="px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all border border-slate-200 bg-slate-50 text-slate-700 hover:bg-slate-100 cursor-pointer">🏬 หนองฉาง</button>
+                        <button onclick="tfFilterByCenter('nakhonsawan')" id="tf-btn-center-ns"
+                          class="px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all border border-slate-200 bg-slate-50 text-slate-700 hover:bg-slate-100 cursor-pointer">🏫 นครสวรรค์</button>
+                      </div>
+                      <div class="bg-slate-100 p-1 rounded-xl flex items-center border border-slate-200">
+                        <button id="tf-btn-view-grid" onclick="tfSwitchView('grid')"
+                          class="px-4 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 bg-white text-indigo-700 shadow-sm cursor-pointer border-0">
+                          <i data-lucide="calendar" class="w-3.5 h-3.5"></i> ปฏิทินรายเดือน
+                        </button>
+                        <button id="tf-btn-view-list" onclick="tfSwitchView('list')"
+                          class="px-4 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 text-slate-600 hover:text-slate-900 cursor-pointer border-0 bg-transparent">
+                          <i data-lucide="list-todo" class="w-3.5 h-3.5"></i> รายการตามวัน
+                        </button>
                       </div>
                     </div>
-                    <div>
-                      <label>วันที่</label>
-                      <input id="simpleScheduleDate" type="date" onchange="updateSimpleScheduleConflictWarning()" />
-                    </div>
-                  </div>
-                  <div class="form-row">
-                    <div>
-                      <label>เวลาเริ่ม</label>
-                      <input id="simpleScheduleTimeStart" type="time" onchange="updateSimpleScheduleConflictWarning()" />
-                    </div>
-                    <div>
-                      <label>เวลาจบ</label>
-                      <input id="simpleScheduleTimeEnd" type="time" onchange="updateSimpleScheduleConflictWarning()" />
-                    </div>
-                    <div>
-                      <label>ประเภทคาบ</label>
-                      <select id="simpleScheduleType" onchange="updateSimpleScheduleTypeFields(); updateSimpleScheduleConflictWarning()">
-                        <option value="onsite">Onsite</option>
-                        <option value="online">Online</option>
-                        <option value="ondemand">On-demand</option>
-                        <option value="oneOnOne">สอนเดี่ยว 1:1</option>
-                        <option value="makeup">Makeup</option>
+                    <div class="h-px bg-slate-100"></div>
+                    <div class="flex flex-wrap items-center gap-3">
+                      <span class="text-xs font-bold text-slate-400 uppercase tracking-wider">กรองละเอียด:</span>
+                      <select id="tf-filter-format" onchange="tfRenderSchedule()" class="bg-slate-50 border border-slate-200 text-slate-700 text-xs rounded-xl p-2.5 font-medium cursor-pointer">
+                        <option value="all">ทุกรูปแบบ</option>
+                        <option value="onsite">Onsite เท่านั้น</option>
+                        <option value="online">Online เท่านั้น</option>
+                        <option value="ondemand">Ondemand เท่านั้น</option>
+                        <option value="oneOnOne">สอนเดี่ยว (1:1)</option>
                       </select>
-                    </div>
-                  </div>
-                  <div class="form-row">
-                    <div>
-                      <label>คอร์ส</label>
-                      <select id="simpleScheduleCourse" onchange="updateSimpleScheduleConflictWarning()"></select>
-                    </div>
-                    <div id="simpleScheduleStudentRow" class="hidden">
-                      <label>นักเรียน 1:1</label>
-                      <select id="simpleScheduleStudent" onchange="updateSimpleScheduleConflictWarning()"></select>
-                      <p class="mini-muted">เลือกจากนักเรียนที่มีอยู่ในระบบเท่านั้น</p>
-                    </div>
-                  </div>
-                  <div class="form-row">
-                    <div>
-                      <label>วิชา</label>
-                      <select id="simpleScheduleSubject">
-                        <option value="">เลือกวิชา</option>
-                        <option>คณิตศาสตร์</option>
-                        <option>วิทยาศาสตร์</option>
-                        <option>ภาษาอังกฤษ</option>
-                        <option>ภาษาไทย</option>
-                        <option>สังคมศึกษา</option>
-                        <option>อื่นๆ</option>
+                      <select id="tf-filter-tutor" onchange="tfRenderSchedule()" class="bg-slate-50 border border-slate-200 text-slate-700 text-xs rounded-xl p-2.5 font-medium cursor-pointer">
+                        <option value="all">ผู้สอนทุกคน</option>
                       </select>
+                      <button onclick="tfResetFilters()" class="text-xs text-rose-600 hover:text-rose-800 font-bold flex items-center gap-1 ml-auto cursor-pointer bg-transparent border-0">
+                        <i data-lucide="refresh-cw" class="w-3.5 h-3.5"></i> ล้างตัวกรอง
+                      </button>
                     </div>
+                  </div>
+
+                  <!-- Calendar -->
+                  <div class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+                    <div class="p-5 border-b border-slate-100 flex items-center justify-between bg-indigo-50/40">
+                      <div class="flex items-center space-x-3">
+                        <button onclick="tfChangeMonth(-1)" class="p-2 bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 rounded-xl transition-all shadow-sm cursor-pointer">
+                          <i data-lucide="chevron-left" class="w-4 h-4"></i>
+                        </button>
+                        <h3 id="tf-calendar-title" class="text-lg font-bold text-slate-900 min-w-[160px] text-center">—</h3>
+                        <button onclick="tfChangeMonth(1)" class="p-2 bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 rounded-xl transition-all shadow-sm cursor-pointer">
+                          <i data-lucide="chevron-right" class="w-4 h-4"></i>
+                        </button>
+                      </div>
+                      <button onclick="tfGoToCurrentMonth()" class="px-3.5 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-xl transition-all shadow-sm cursor-pointer border-0">
+                        เดือนปัจจุบัน
+                      </button>
+                    </div>
+                    <div class="p-5">
+                      <!-- Grid View -->
+                      <div id="tf-grid-view">
+                        <div class="grid grid-cols-7 gap-1 text-center font-bold text-xs text-slate-400 uppercase tracking-widest mb-2">
+                          <div class="py-2 text-rose-500">อา</div><div class="py-2">จ</div><div class="py-2">อ</div>
+                          <div class="py-2">พ</div><div class="py-2">พฤ</div><div class="py-2">ศ</div>
+                          <div class="py-2 text-indigo-600">ส</div>
+                        </div>
+                        <div id="tf-calendar-grid" class="grid grid-cols-7 gap-1.5 min-h-96"></div>
+                      </div>
+                      <!-- List View -->
+                      <div id="tf-list-view" class="hidden space-y-3"></div>
+                    </div>
+                  </div>
+
+                  <!-- Day Detail Panel -->
+                  <div id="tf-day-detail" class="bg-slate-900 text-white rounded-2xl p-5 shadow-lg hidden tf-fade">
+                    <div class="flex justify-between items-center mb-4 border-b border-slate-800 pb-3">
+                      <div>
+                        <h4 class="font-bold text-base flex items-center gap-2">
+                          <i data-lucide="clock" class="w-5 h-5 text-indigo-400"></i> ตารางการสอนรายวัน
+                        </h4>
+                        <p class="text-xs text-slate-400 mt-1" id="tf-day-date-label">—</p>
+                      </div>
+                      <button onclick="tfCloseDayDetail()" class="text-slate-400 hover:text-white bg-slate-800 hover:bg-slate-700 p-1.5 rounded-lg transition-colors cursor-pointer border-0">
+                        <i data-lucide="x" class="w-4 h-4"></i>
+                      </button>
+                    </div>
+                    <div id="tf-day-detail-content" class="space-y-3 max-h-72 overflow-y-auto tf-no-scroll"></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- ======= TUTOR PORTAL VIEW ======= -->
+            <div id="tutor-view-root" class="hidden space-y-8">
+              <div class="bg-gradient-to-r from-indigo-500 to-indigo-700 rounded-3xl p-6 text-white shadow-md flex flex-col md:flex-row justify-between items-center gap-6">
+                <div class="space-y-1.5">
+                  <h2 class="text-xl font-extrabold flex items-center gap-2">
+                    <i data-lucide="user-check" class="w-6 h-6 text-indigo-200"></i> พอร์ทัลตารางสอนคุณครู
+                  </h2>
+                  <p class="text-indigo-100 text-xs">เลือกชื่อครูเพื่อดูตารางสอนส่วนตัว สถิติ และส่งบันทึกผลการสอน</p>
+                </div>
+                <div class="flex items-center space-x-3 w-full md:w-72 shrink-0">
+                  <select id="tf-portal-select" onchange="tfPortalLogin()" class="w-full bg-white text-slate-800 font-bold text-sm rounded-xl p-3 focus:outline-none focus:ring-4 focus:ring-indigo-300"></select>
+                </div>
+              </div>
+
+              <div id="tf-portal-dashboard" class="hidden space-y-8">
+                <!-- Portal Stats -->
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-5">
+                  <div class="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm flex items-center space-x-4">
+                    <div class="p-3 bg-indigo-50 text-indigo-600 rounded-xl"><i data-lucide="calendar" class="w-6 h-6"></i></div>
                     <div>
-                      <label>ครู</label>
-                      <select id="simpleScheduleTeacher" onchange="updateSimpleScheduleConflictWarning()"></select>
+                      <p class="text-xs text-slate-400 font-bold uppercase tracking-wider">คาบสอนเดือนนี้</p>
+                      <h4 id="tf-portal-stat-total" class="text-2xl font-black text-slate-800">0 คลาส</h4>
                     </div>
                   </div>
-                  <div class="form-row">
+                  <div class="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm flex items-center space-x-4">
+                    <div class="p-3 bg-emerald-50 text-emerald-600 rounded-xl"><i data-lucide="check-circle" class="w-6 h-6"></i></div>
                     <div>
-                      <label>สถานที่ / รูปแบบเรียน</label>
-                      <input id="simpleScheduleLocation" type="text" placeholder="เช่น IDEA CLUB ศูนย์ หนองฉาง / Online" />
+                      <p class="text-xs text-slate-400 font-bold uppercase tracking-wider">สอนสำเร็จแล้ว</p>
+                      <h4 id="tf-portal-stat-done" class="text-2xl font-black text-emerald-600">0 คลาส</h4>
                     </div>
+                  </div>
+                  <div class="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm flex items-center space-x-4">
+                    <div class="p-3 bg-purple-50 text-purple-600 rounded-xl"><i data-lucide="clock" class="w-6 h-6"></i></div>
                     <div>
-                      <label>ห้องเรียน</label>
-                      <input id="simpleScheduleRoomName" type="text" placeholder="เช่น ห้อง 1 / Zoom" />
-                    </div>
-                  </div>
-                  <label>หมายเหตุ</label>
-                  <textarea id="simpleScheduleNote" placeholder="รายละเอียดเพิ่มเติม"></textarea>
-                  <div id="simpleScheduleConflictWarning" style="margin-top:14px;"></div>
-                  <button class="btn btn-green" type="button" onclick="saveSimpleScheduleSession()">บันทึกคาบ</button>
-                  <button class="btn btn-dark" type="button" onclick="clearSimpleScheduleForm()">ล้างฟอร์ม</button>
-                  <p id="simpleScheduleSaveResult" style="margin-top:14px; font-weight:bold;"></p>
-                </div>
-
-                <div class="form-box">
-                  <h3>Simple Grid View</h3>
-                  <p style="margin-bottom:18px; color:#6b7280;">แถวเป็นวันที่ คอลัมน์เป็นครู แสดงคาบจาก monthlyPlanSessions</p>
-                  <div class="form-row">
-                    <div>
-                      <label>เดือน</label>
-                      <select id="simpleScheduleGridMonthFilter" onchange="renderSimpleScheduleGrid()">
-                        <option value="ทั้งหมด">ทั้งหมด</option>
-                      </select>
-                    </div>
-                    <div>
-                      <label>ศูนย์ / สถานที่</label>
-                      <select id="simpleScheduleGridLocationFilter" onchange="renderSimpleScheduleGrid()">
-                        <option value="ทั้งหมด">ทั้งหมด</option>
-                      </select>
-                    </div>
-                    <div>
-                      <label>ครู</label>
-                      <select id="simpleScheduleGridTeacherFilter" onchange="renderSimpleScheduleGrid()">
-                        <option value="ทั้งหมด">ทั้งหมด</option>
-                      </select>
-                    </div>
-                  </div>
-                  <div class="form-row">
-                    <div>
-                      <label>คอร์ส</label>
-                      <select id="simpleScheduleGridCourseFilter" onchange="renderSimpleScheduleGrid()">
-                        <option value="ทั้งหมด">ทั้งหมด</option>
-                      </select>
-                    </div>
-                    <div>
-                      <label>ประเภทคาบ</label>
-                      <select id="simpleScheduleGridTypeFilter" onchange="renderSimpleScheduleGrid()">
-                        <option value="ทั้งหมด">ทั้งหมด</option>
-                      </select>
-                    </div>
-                    <div></div>
-                  </div>
-                  <div class="simple-schedule-grid-wrap">
-                    <table class="simple-schedule-grid-table">
-                      <thead>
-                        <tr id="simpleScheduleGridTeacherHeaders">
-                          <th>วันที่</th>
-                        </tr>
-                      </thead>
-                      <tbody id="simpleScheduleGridBody"></tbody>
-                    </table>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <div id="plannerTab1" data-planner-tab class="hidden">
-              <div class="form-box">
-                <h3>สร้างตารางอัตโนมัติ</h3>
-                <p style="margin-bottom:18px; color:#6b7280;">บันทึก pattern คอร์ส แล้วสร้าง session ทั้งเดือนจาก Onsite / Online / On-demand</p>
-                <input id="editingMonthlyPlanId" type="hidden" value="" />
-
-              <div class="form-row">
-                <div>
-                  <label>เดือน</label>
-                  <input id="monthlyPlanGeneratorMonthKey" type="hidden" />
-                  <div class="form-row">
-                    <div>
-                      <select id="monthlyPlanGeneratorMonthKeyMonthSelect" onchange="syncThaiMonthYearPicker('monthlyPlanGeneratorMonthKey', 'key'); handleMonthlyPlanGeneratorSelectionChange()"></select>
-                    </div>
-                    <div>
-                      <select id="monthlyPlanGeneratorMonthKeyYearSelect" onchange="syncThaiMonthYearPicker('monthlyPlanGeneratorMonthKey', 'key'); handleMonthlyPlanGeneratorSelectionChange()"></select>
+                      <p class="text-xs text-slate-400 font-bold uppercase tracking-wider">ชั่วโมงสอนสะสม</p>
+                      <h4 id="tf-portal-stat-hours" class="text-2xl font-black text-purple-600">0 ชม.</h4>
                     </div>
                   </div>
                 </div>
-                <div>
-                  <label>ศูนย์</label>
-                  <select id="monthlyPlanGeneratorCenter" onchange="handleMonthlyPlanGeneratorSelectionChange()">
-                    <option>IDEA CLUB ศูนย์ หนองฉาง</option>
-                    <option>IDEA CLUB ศูนย์ นครสวรรค์</option>
-                  </select>
-                </div>
-                <div>
-                  <label>คอร์ส</label>
-                  <select id="monthlyPlanGeneratorCourse" onchange="handleMonthlyPlanGeneratorSelectionChange()"></select>
-                </div>
-              </div>
 
-              <div class="notice" style="margin-bottom:14px;">
-                <strong>ตาราง Onsite สำหรับคำนวณสมดุล</strong><br />
-                <span class="mini-muted">Online / On-demand ใช้ลงคาบแยกและแสดงในภาพรวมตาราง แต่ไม่ถูกนำไปคำนวณสมดุลวิชา</span>
-              </div>
-              <div class="table-wrap" style="margin-bottom:14px;">
-                <table>
-                  <thead>
-                    <tr>
-                      <th>ประเภท</th>
-                      <th>วัน</th>
-                      <th>เวลาเริ่ม</th>
-                      <th>เวลาจบ / เผยแพร่</th>
-                      <th>จัดการ</th>
-                    </tr>
-                  </thead>
-                  <tbody id="monthlyPlanSlotTableBody"></tbody>
-                </table>
-              </div>
-              <button class="btn btn-blue" type="button" onclick="addMonthlyPlanSlotRow('onsite')">เพิ่ม Onsite</button>
-              <button class="btn btn-blue" type="button" onclick="addMonthlyPlanSlotRow('online')">เพิ่ม Online</button>
-              <button class="btn btn-dark" type="button" onclick="addMonthlyPlanSlotRow('ondemand')">เพิ่ม On-demand</button>
-              <button class="btn btn-dark" type="button" onclick="applyCourseScheduleDefaultsToMonthlyPlanDraft(true)">ดึงเวลาเรียนจากคอร์ส</button>
-
-              <button class="btn btn-green" type="button" onclick="saveMonthlyPlanPattern()">บันทึก Pattern</button>
-              <button class="btn btn-blue" type="button" onclick="previewMonthlyPlanSessions()">สร้าง Preview ตาราง</button>
-              <p id="monthlyPlanGeneratorResult" style="margin-top:14px; font-weight:bold;"></p>
-              <div id="monthlyPlanSummaryBox" class="status-display" style="margin-top:14px;">เลือกเดือนและคอร์สเพื่อดูสรุปจำนวน session</div>
-            </div>
-
-            <br />
-
-            <div class="form-box" style="border:2px dashed #cbd5e1; padding:18px;">
-              <h3>วิชาและครูหลัก</h3>
-              <p style="margin-bottom:18px; color:#6b7280;">ตั้งค่า subject weights และครูหลัก/สำรองสำหรับคอร์สที่เลือก</p>
-              <div id="courseTeachingSettingsSummary" class="status-display" style="margin-bottom:14px;">เลือกรายการคอร์สเพื่อเริ่มตั้งค่า</div>
-              <div class="table-wrap">
-                <table>
-                  <thead>
-                    <tr>
-                      <th>วิชา</th>
-                      <th>น้ำหนัก</th>
-                      <th>รูปแบบ</th>
-                      <th>ครูหลัก</th>
-                      <th>ครูสำรอง</th>
-                      <th>จัดการ</th>
-                    </tr>
-                  </thead>
-                  <tbody id="courseTeachingSettingsTableBody"></tbody>
-                </table>
-              </div>
-              <button class="btn btn-blue" type="button" onclick="addCourseTeachingSettingRow()">เพิ่มวิชา</button>
-              <button class="btn btn-green" type="button" onclick="saveCourseTeachingSettingsForSelectedCourse()">บันทึกการตั้งค่าครู</button>
-            </div>
-
-            <br />
-
-            <div class="form-box">
-              <h3>Preview ตาราง</h3>
-              <p style="margin-bottom:18px; color:#6b7280;">สร้าง preview ตารางจาก pattern และการตั้งค่าครู โดยยังไม่บันทึกลง Firestore</p>
-              <button class="btn btn-blue" type="button" onclick="previewMonthlyPlanSessions()">สร้าง Preview ตาราง</button>
-              <button class="btn btn-dark" type="button" onclick="clearMonthlyPlanPreview()">ล้าง Preview</button>
-              <p id="monthlyPlanPreviewResult" style="margin-top:14px; font-weight:bold;"></p>
-              <div class="table-wrap" style="margin-top:14px; max-height:340px; overflow:auto;">
-                <table>
-                  <thead>
-                    <tr>
-                      <th>วันที่</th>
-                      <th>Type</th>
-                      <th>วิชา</th>
-                      <th>ครู</th>
-                      <th>เวลา</th>
-                      <th>Status</th>
-                      <th>ปัญหา</th>
-                    </tr>
-                  </thead>
-                  <tbody id="monthlyPlanPreviewTableBody"></tbody>
-                </table>
-              </div>
-              <button class="btn btn-green" type="button" onclick="saveMonthlyPlanPreview()">บันทึกตารางนี้</button>
-            </div>
-
-            </div>
-
-            <br />
-
-            <div id="plannerTab3" class="hidden">
-              <div class="form-box">
-                <h3>ครูแนะนำตามวิชา</h3>
-              <p style="margin-bottom:18px; color:#6b7280;">ตั้งค่ากฎแนะนำครูตามระดับชั้นและวิชา เพื่อให้ระบบแนะนำครูในการแก้ไข session</p>
-              <input id="editingTeacherPreferenceRuleId" type="hidden" value="" />
-              <div class="form-row">
-                <div>
-                  <label>ระดับชั้น</label>
-                  <select id="teacherPreferenceGrade">
-                    <option value="">เลือกระดับชั้น</option>
-                    <option>ป.1</option>
-                    <option>ป.2</option>
-                    <option>ป.3</option>
-                    <option>ป.4</option>
-                    <option>ป.5</option>
-                    <option>ป.6</option>
-                    <option>ม.1</option>
-                    <option>ม.2</option>
-                    <option>ม.3</option>
-                    <option>ม.4</option>
-                    <option>ม.5</option>
-                    <option>ม.6</option>
-                  </select>
-                </div>
-                <div>
-                  <label>วิชา</label>
-                  <select id="teacherPreferenceSubject">
-                    <option value="">เลือกวิชา</option>
-                    <option>วิทยาศาสตร์</option>
-                    <option>คณิตศาสตร์</option>
-                    <option>ภาษาอังกฤษ</option>
-                    <option>ภาษาไทย</option>
-                    <option>สังคมศึกษา</option>
-                    <option>อื่นๆ</option>
-                  </select>
-                </div>
-                <div>
-                  <label>ครูหลัก</label>
-                  <select id="teacherPreferencePrimaryTeacher"></select>
-                </div>
-                <div>
-                  <label>ครูสำรอง</label>
-                  <select id="teacherPreferenceBackupTeacher"></select>
-                </div>
-              </div>
-              <button class="btn btn-green" type="button" onclick="saveTeacherPreferenceRule()">บันทึกกฎครูแนะนำ</button>
-              <button class="btn btn-dark" type="button" onclick="clearTeacherPreferenceRuleForm()">ล้างฟอร์ม</button>
-              <p id="teacherPreferenceRuleResult" style="margin-top:14px; font-weight:bold;"></p>
-              <div class="table-wrap" style="margin-top:14px;">
-                <table>
-                  <thead>
-                    <tr><th>ระดับชั้น</th><th>วิชา</th><th>ครูหลัก</th><th>ครูสำรอง</th><th>จัดการ</th></tr>
-                  </thead>
-                  <tbody id="teacherPreferenceRuleTableBody"></tbody>
-                </table>
-              </div>
-            </div>
-
-            <br />
-
-            <div class="form-box">
-              <h3>สมดุลวิชา</h3>
-              <p style="margin-bottom:18px; color:#6b7280;">กำหนดจำนวนครั้งของแต่ละวิชาในเดือนนี้ ระบบจะกันไม่ให้ใส่รวมเกินจำนวนคาบจริง</p>
-
-              <div class="form-row">
-                <div>
-                  <label>เลือกเดือน</label>
-                  <select id="monthlySubjectBalanceMonth" onchange="loadMonthlySubjectBalanceForm()"></select>
-                </div>
-                <div>
-                  <label>เลือกศูนย์</label>
-                  <select id="monthlySubjectBalanceCenter" onchange="renderMonthlySubjectBalanceControls()"></select>
-                </div>
-                <div>
-                  <label>เลือกคอร์ส</label>
-                  <select id="monthlySubjectBalanceCourse" onchange="loadMonthlySubjectBalanceForm()"></select>
-                </div>
-                <div>
-                  <label>จำนวนคาบในเดือนนี้</label>
-                  <div id="monthlySubjectBalanceTargetTotal" class="status-display">เลือกเดือนและคอร์สก่อน</div>
-                  <input id="monthlySubjectBalanceMode" type="hidden" value="target" />
-                </div>
-              </div>
-
-              <div class="table-wrap">
-                <table>
-                  <thead>
-                    <tr>
-                      <th>วิชา</th>
-                      <th>จำนวนครั้งในเดือนนี้</th>
-                      <th>จัดการ</th>
-                    </tr>
-                  </thead>
-                  <tbody id="monthlySubjectWeightsTableBody"></tbody>
-                </table>
-              </div>
-
-              <button class="btn btn-blue" type="button" onclick="addMonthlySubjectWeightRow()">เพิ่มวิชา</button>
-              <button class="btn btn-green" type="button" onclick="saveMonthlySubjectWeights()">บันทึกจำนวนครั้ง</button>
-              <button class="btn btn-dark" type="button" onclick="renderMonthlySubjectBalance()">คำนวณสมดุล</button>
-              <p id="monthlySubjectBalanceResult" style="margin-top:14px; font-weight:bold;"></p>
-              <div id="monthlySubjectBalanceSummary" style="margin-top:14px;"></div>
-            </div>
-            </div>
-            <br />
-            <div id="plannerTab2" class="hidden">
-            <div class="form-box">
-              <h3>วันหยุด / งดเรียน</h3>
-              <p style="margin-bottom:18px; color:#6b7280;">เพิ่มวันหยุด แล้วนำไปใช้กับตารางเรียนที่ตรงเงื่อนไขแบบ soft update</p>
-              <input id="editingHolidayId" type="hidden" value="" />
-              <div class="form-row">
-                <div>
-                  <label>ชื่อวันหยุด</label>
-                  <input id="holidayName" type="text" placeholder="เช่น วันหยุดนักขัตฤกษ์" />
-                </div>
-                <div>
-                  <label>วันที่</label>
-                  <input id="holidayDate" type="date" />
-                </div>
-                <div>
-                  <label>ศูนย์</label>
-                  <select id="holidayCenter">
-                    <option>ทั้งหมด</option>
-                    <option>IDEA CLUB ศูนย์ หนองฉาง</option>
-                    <option>IDEA CLUB ศูนย์ นครสวรรค์</option>
-                  </select>
-                </div>
-              </div>
-              <div class="form-row">
-                <div>
-                  <label>ใช้กับ</label>
-                  <select id="holidayAppliesTo" onchange="renderHolidayCourseSelect()">
-                    <option value="all">ทุกคอร์ส</option>
-                    <option value="selectedCourses">เลือกคอร์ส</option>
-                  </select>
-                </div>
-                <div>
-                  <label>เลือกคอร์ส</label>
-                  <select id="holidayCourseIds" multiple size="5"></select>
-                </div>
-              </div>
-              <label>หมายเหตุ</label>
-              <textarea id="holidayNote" placeholder="หมายเหตุวันหยุด"></textarea>
-              <button class="btn btn-green" type="button" onclick="saveHolidayRecord()">บันทึกวันหยุด</button>
-              <button class="btn btn-blue" type="button" onclick="applySelectedHolidayFromForm()">Apply วันหยุดกับตาราง</button>
-              <button class="btn btn-dark" type="button" onclick="clearHolidayForm()">ล้างฟอร์ม</button>
-              <p id="holidaySaveResult" style="margin-top:14px; font-weight:bold;"></p>
-              <div class="table-wrap" style="margin-top:14px;">
-                <table>
-                  <thead>
-                    <tr>
-                      <th>Date</th>
-                      <th>Name</th>
-                      <th>Center</th>
-                      <th>Applies To</th>
-                      <th>Note</th>
-                      <th>Status</th>
-                      <th>Action</th>
-                    </tr>
-                  </thead>
-                  <tbody id="holidayTableBody"></tbody>
-                </table>
-              </div>
-            </div>
-
-            <br />
-
-            <div class="form-box">
-              <h3>ตรวจครูชนเวลา</h3>
-              <p style="margin-bottom:18px; color:#6b7280;">ตรวจ warning ตารางครูที่ชนกันในเดือนเดียวกัน ข้ามศูนย์ คอร์ส และประเภทการเรียน</p>
-              <div class="form-row">
-                <div>
-                  <label>เดือน</label>
-                  <select id="monthlyTeacherConflictMonth" onchange="renderMonthlyTeacherConflicts()"></select>
-                </div>
-                <div>
-                  <label>ครู</label>
-                  <select id="monthlyTeacherConflictTeacher" onchange="renderMonthlyTeacherConflicts()"></select>
-                </div>
-              </div>
-              <div id="monthlyTeacherConflictList" class="status-display">ยังไม่ได้เลือกข้อมูลสำหรับตรวจ</div>
-            </div>
-
-            <br />
-
-            <div class="form-box">
-              <h3>แผนสอนรายเดือน</h3>
-              <p style="margin-bottom:18px; color:#6b7280;">วางแผนคาบเรียนตามเดือน คอร์ส ครู และหัวข้อที่จะสอน</p>
-              <input id="editingMonthlyPlanSessionId" type="hidden" value="" />
-
-              <input id="monthlyPlanManualAdded" type="hidden" value="false" />
-              <div class="form-row">
-                <div>
-                  <label>เดือนแผนสอน</label>
-                  <input id="monthlyPlanMonth" type="hidden" />
-                  <div class="form-row">
-                    <div>
-                      <select id="monthlyPlanMonthMonthSelect" onchange="syncThaiMonthYearPicker('monthlyPlanMonth', 'text')"></select>
+                <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                  <!-- Personal Calendar -->
+                  <div class="lg:col-span-2">
+                    <div class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+                      <div class="p-4 border-b border-slate-100 flex justify-between items-center bg-indigo-50/20">
+                        <h3 id="tf-portal-cal-title" class="font-bold text-slate-900 text-sm flex items-center gap-2">
+                          <i data-lucide="calendar-check" class="w-4 h-4 text-indigo-600"></i> ปฏิทินส่วนตัว
+                        </h3>
+                        <span class="text-xs bg-indigo-600 text-white px-2.5 py-1 rounded-full font-bold">ปฏิทินส่วนตัว</span>
+                      </div>
+                      <div class="p-4">
+                        <div class="grid grid-cols-7 gap-1 text-center font-bold text-xs text-slate-400 uppercase mb-2">
+                          <div class="py-2 text-rose-500">อา</div><div class="py-2">จ</div><div class="py-2">อ</div>
+                          <div class="py-2">พ</div><div class="py-2">พฤ</div><div class="py-2">ศ</div>
+                          <div class="py-2 text-indigo-600">ส</div>
+                        </div>
+                        <div id="tf-portal-grid" class="grid grid-cols-7 gap-1.5 min-h-72"></div>
+                      </div>
                     </div>
-                    <div>
-                      <select id="monthlyPlanMonthYearSelect" onchange="syncThaiMonthYearPicker('monthlyPlanMonth', 'text')"></select>
+                  </div>
+
+                  <!-- Session Detail + Report -->
+                  <div class="lg:col-span-1">
+                    <div class="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm space-y-4">
+                      <h3 class="font-bold text-slate-900 text-sm flex items-center gap-2 pb-2 border-b border-slate-100">
+                        <i data-lucide="clipboard-list" class="w-4 h-4 text-indigo-600"></i> รายละเอียดคาบ & บันทึกผล
+                      </h3>
+                      <div id="tf-portal-session-info">
+                        <div class="p-4 bg-slate-50 rounded-xl border border-slate-200 text-center py-8 text-slate-400">
+                          <i data-lucide="pointer" class="w-8 h-8 mx-auto mb-2 text-slate-300"></i>
+                          <p class="text-xs">คลิกเลือกคาบเรียนบนปฏิทินเพื่อดูรายละเอียดและส่งบันทึกผลการสอน</p>
+                        </div>
+                      </div>
                     </div>
                   </div>
                 </div>
-                <div>
-                  <label>วันที่เรียน</label>
-                  <input id="monthlyPlanDate" type="date" onchange="updateMonthlyPlanConflictPreview()" />
-                </div>
-                <div>
-                  <label>ประเภท</label>
-                  <select id="monthlyPlanType" onchange="updateMonthlyPlanTypeFields(); syncMonthlyPlanCourseSlotOptions(); updateMonthlyPlanConflictPreview()">
-                    <option value="onsite">onsite</option>
-                    <option value="online">online</option>
-                    <option value="ondemand">ondemand</option>
-                    <option value="makeup">makeup</option>
-                    <option value="oneOnOne">สอนเดี่ยว 1:1</option>
-                  </select>
-                </div>
-              </div>
-
-              <div class="form-row">
-                <div>
-                  <label>เวลาเริ่ม</label>
-                  <input id="monthlyPlanTimeStart" type="time" onchange="updateMonthlyPlanConflictPreview()" />
-                </div>
-                <div>
-                  <label>เวลาจบ</label>
-                  <input id="monthlyPlanTimeEnd" type="time" onchange="updateMonthlyPlanConflictPreview()" />
-                </div>
-                <div id="monthlyPlanPublishTimeRow" class="hidden">
-                  <label>เวลาเผยแพร่</label>
-                  <input id="monthlyPlanPublishTime" type="time" onchange="updateMonthlyPlanConflictPreview()" />
-                </div>
-              </div>
-
-              <div class="form-row">
-                <div>
-                  <label>คอร์ส</label>
-                  <select id="monthlyPlanCourse" onchange="updateMonthlyPlanTeacherOptions(); syncMonthlyPlanCourseSlotOptions(); updateMonthlyPlanConflictPreview()"></select>
-                </div>
-                <div id="monthlyPlanCourseSlotRow" class="hidden">
-                  <label>เวลาเรียนจากคอร์ส</label>
-                  <select id="monthlyPlanCourseSlot" onchange="applySelectedMonthlyPlanCourseSlot(); updateMonthlyPlanConflictPreview()"></select>
-                  <p class="mini-muted">เลือก slot เพื่อเติมเวลาเรียนตามข้อมูลที่ตั้งไว้ในคอร์ส</p>
-                </div>
-                <div id="monthlyPlanStudentRow" class="hidden">
-                  <label>นักเรียน 1:1</label>
-                  <select id="monthlyPlanStudent" onchange="updateMonthlyPlanConflictPreview()"></select>
-                  <p class="mini-muted">คาบเรียนเดี่ยว 1:1 ต้องเลือกจากนักเรียนที่มีอยู่ในระบบเท่านั้น หากยังไม่มีรายชื่อ ให้เพิ่มนักเรียนก่อน</p>
-                </div>
-                <div>
-                  <label>ครูผู้สอน</label>
-                  <select id="monthlyPlanTeacher" onchange="updateMonthlyPlanConflictPreview()"></select>
-                </div>
-                <div>
-                  <label>สถานะ</label>
-                  <select id="monthlyPlanStatus">
-                    <option value="draft">ร่าง</option>
-                    <option value="confirmed">ยืนยัน</option>
-                    <option value="planned">วางแผนแล้ว</option>
-                    <option value="done">สอนแล้ว</option>
-                    <option value="holiday">วันหยุด</option>
-                    <option value="cancelled">ยกเลิก</option>
-                  </select>
-                </div>
-              </div>
-
-              <div class="form-row">
-                <div>
-                  <label>ศูนย์</label>
-                  <input id="monthlyPlanCenter" type="text" placeholder="เช่น IDEA CLUB ศูนย์ นครสวรรค์" />
-                </div>
-              </div>
-
-              <div class="form-row">
-                <div>
-                  <label>วิชา</label>
-                  <select id="monthlyPlanSubject" onchange="updateMonthlyPlanTeacherOptions(); updateMonthlyPlanConflictPreview()">
-                    <option value="">ยังไม่กำหนด</option>
-                    <option>คณิตศาสตร์</option>
-                    <option>วิทยาศาสตร์</option>
-                    <option>ภาษาอังกฤษ</option>
-                    <option>ภาษาไทย</option>
-                    <option>สังคมศึกษา</option>
-                  </select>
-                </div>
-                <div>
-                  <label>หัวข้อสอน</label>
-                  <input id="monthlyPlanTopic" type="text" placeholder="เช่น ตะลุยโจทย์เรื่องแรงและการเคลื่อนที่" />
-                </div>
-              </div>
-              <br /><br />
-
-              <div class="form-row">
-                <div>
-                  <label>เป้าหมายคาบเรียน</label>
-                  <textarea id="monthlyPlanObjective" placeholder="สิ่งที่นักเรียนควรทำได้หลังจบคาบ"></textarea>
-                </div>
-                <div>
-                  <label>สื่อ / เอกสารที่ใช้</label>
-                  <textarea id="monthlyPlanMaterials" placeholder="หนังสือ ชีท แบบฝึก หรือสื่อประกอบ"></textarea>
-                </div>
-              </div>
-
-              <div class="form-row">
-                <div>
-                  <label>การบ้าน / สิ่งที่ต้องติดตาม</label>
-                  <textarea id="monthlyPlanHomework" placeholder="งานที่มอบหมายหรือจุดที่ต้องตามต่อ"></textarea>
-                </div>
-                <div>
-                  <label>หมายเหตุภายใน</label>
-                  <textarea id="monthlyPlanNote" placeholder="หมายเหตุสำหรับทีมครู"></textarea>
-                </div>
-              </div>
-
-              <button class="btn btn-blue" type="button" onclick="openManualMonthlyPlanSessionForm()">เพิ่มคาบเอง</button>
-              <button class="btn btn-blue" type="button" onclick="openOneOnOneMonthlyPlanSessionForm()">เพิ่มคาบสอนเดี่ยว 1:1</button>
-              <button class="btn btn-green" type="button" onclick="saveMonthlyPlanSession()">บันทึกแผนสอน</button>
-              <button class="btn btn-dark" type="button" onclick="clearMonthlyPlanForm()">ล้างฟอร์ม</button>
-              <div id="monthlyPlanConflictWarning" style="margin-top:14px;"></div>
-              <p id="monthlyPlanSaveResult" style="margin-top:14px; font-weight:bold;"></p>
-            </div>
-
-            <br />
-
-            <div class="form-box monthly-planner-desktop-filters">
-              <h3>รายการแผนสอน</h3>
-              <div id="monthlyPlannerIssueFilterBanner"></div>
-              <div class="form-row">
-                <div>
-                  <label>กรองตามเดือน</label>
-                  <select id="monthlyPlanMonthFilter" onchange="renderMonthlyPlanSessions()">
-                    <option value="ทั้งหมด">ทั้งหมด</option>
-                  </select>
-                </div>
-                <div>
-                  <label>กรองตามศูนย์</label>
-                  <select id="monthlyPlanCenterFilter" onchange="renderMonthlyPlanSessions()">
-                    <option value="ทั้งหมด">ทั้งหมด</option>
-                  </select>
-                </div>
-                <div>
-                  <label>กรองตามคอร์ส</label>
-                  <select id="monthlyPlanCourseFilter" onchange="renderMonthlyPlanSessions()">
-                    <option value="ทั้งหมด">ทั้งหมด</option>
-                  </select>
-                </div>
-              </div>
-              <div class="form-row">
-                <div>
-                  <label>กรองตามครู</label>
-                  <select id="monthlyPlanTeacherFilter" onchange="renderMonthlyPlanSessions()">
-                    <option value="ทั้งหมด">ทั้งหมด</option>
-                  </select>
-                </div>
-                <div>
-                  <label>กรองตามประเภท</label>
-                  <select id="monthlyPlanTypeFilter" onchange="renderMonthlyPlanSessions()">
-                    <option value="ทั้งหมด">ทั้งหมด</option>
-                    <option value="onsite">onsite</option>
-                    <option value="online">online</option>
-                    <option value="ondemand">ondemand</option>
-                    <option value="makeup">makeup</option>
-                    <option value="oneOnOne">สอนเดี่ยว 1:1</option>
-                    <option value="holiday">งดเรียน</option>
-                    <option value="cancelled">ยกเลิก</option>
-                  </select>
-                </div>
-                <div></div>
-              </div>
-              <div class="form-row">
-                <div>
-                  <label>กรองตามสถานะ</label>
-                  <select id="monthlyPlanStatusFilter" onchange="renderMonthlyPlanSessions()">
-                    <option value="active">ยังไม่ยกเลิก</option>
-                    <option value="ทั้งหมด">ทั้งหมด</option>
-                    <option value="planned">วางแผนแล้ว</option>
-                    <option value="done">สอนแล้ว</option>
-                    <option value="cancelled">ยกเลิก</option>
-                  </select>
-                </div>
               </div>
             </div>
-
-            <br />
-
-            <div id="monthlyPlannerMobileTimeline" class="monthly-planner-mobile-timeline">
-              <div class="monthly-planner-mobile-filter-card">
-                <h3>Timeline รายวัน</h3>
-                <p class="monthly-planner-mobile-muted">ดูคาบเรียนตามวันที่จากตัวกรองเดียวกับตารางรายเดือน</p>
-                <div id="monthlyPlannerMobileIssueBanner"></div>
-                <div class="monthly-planner-mobile-filter-grid">
-                  <div>
-                    <label>เดือน</label>
-                    <select id="monthlyPlannerMobileMonthFilter" onchange="syncMonthlyPlannerMobileTimelineFilters()">
-                      <option value="ทั้งหมด">ทั้งหมด</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label>ศูนย์</label>
-                    <select id="monthlyPlannerMobileCenterFilter" onchange="syncMonthlyPlannerMobileTimelineFilters()">
-                      <option value="ทั้งหมด">ทั้งหมด</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label>คอร์ส</label>
-                    <select id="monthlyPlannerMobileCourseFilter" onchange="syncMonthlyPlannerMobileTimelineFilters()">
-                      <option value="ทั้งหมด">ทั้งหมด</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label>ครู</label>
-                    <select id="monthlyPlannerMobileTeacherFilter" onchange="syncMonthlyPlannerMobileTimelineFilters()">
-                      <option value="ทั้งหมด">ทั้งหมด</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label>ประเภท</label>
-                    <select id="monthlyPlannerMobileTypeFilter" onchange="syncMonthlyPlannerMobileTimelineFilters()">
-                      <option value="ทั้งหมด">ทั้งหมด</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label>สถานะ</label>
-                    <select id="monthlyPlannerMobileStatusFilter" onchange="syncMonthlyPlannerMobileTimelineFilters()">
-                      <option value="active">ยังไม่ยกเลิก</option>
-                    </select>
-                  </div>
-                </div>
-              </div>
-              <div id="monthlyPlannerMobileTimelineList"></div>
-            </div>
-
-            <br />
-
-            <div class="form-box monthly-planner-desktop-grid">
-              <h3>ตารางรวมรายเดือน</h3>
-              <p style="margin-bottom:18px; color:#6b7280;">ดูภาพรวมตารางสอนรายเดือนแบบ Excel ตามเดือน ศูนย์ คอร์ส ครู และประเภท</p>
-              <div class="monthly-plan-grid-wrap" style="overflow-x:auto; width:100%;">
-                <table class="monthly-plan-grid-table">
-                  <thead>
-                    <tr id="monthlyPlanGridCourseHeaders">
-                      <th style="min-width:140px;">วันที่</th>
-                    </tr>
-                  </thead>
-                  <tbody id="monthlyPlanGridBody"></tbody>
-                </table>
-              </div>
-            </div>
-
-            <br />
-
-            <div class="table-wrap monthly-planner-desktop-table">
-              <table>
-                <thead>
-                  <tr>
-                    <th>เดือน</th>
-                    <th>วัน / เวลา</th>
-                    <th>คอร์ส</th>
-                    <th>ครู</th>
-                    <th>หัวข้อ</th>
-                    <th>สถานะ</th>
-                    <th>อัปเดตล่าสุด</th>
-                    <th>จัดการ</th>
-                  </tr>
-                </thead>
-                <tbody id="monthlyPlanTableBody"></tbody>
-              </table>
-            </div>
-            </div>
+            <!-- ===== End TutorFlow ===== -->
           </section>
 
           <section id="admin-announcements" class="admin-tab hidden">
@@ -10045,16 +9520,7 @@
         safeRun(renderOnlineExamAdminManage, 'online-exam-admin-manage');
       }
       if (tabId === 'admin-monthly-planner') {
-        safeRun(initializeThaiMonthYearPickers, 'month-year-pickers-monthly-planner');
-        safeRun(renderSimpleScheduleSelectOptions, 'simple-schedule-select-options');
-        safeRun(renderSimpleScheduleGrid, 'simple-schedule-grid');
-        safeRun(renderMonthlyPlanOptions, 'monthly-plan-options');
-        safeRun(renderMonthlyPlanGeneratorDefaults, 'monthly-plan-generator-defaults');
-        safeRun(renderHolidayTools, 'holiday-tools');
-        safeRun(renderMonthlySubjectBalanceControls, 'monthly-subject-balance-controls');
-        safeRun(renderMonthlyTeacherConflictControls, 'monthly-teacher-conflict-controls');
-        safeRun(renderMonthlyPlanSessions, 'monthly-plan-sessions');
-        safeRun(renderMonthlyPlannerDashboardSummary, 'monthly-planner-dashboard-summary');
+        safeRun(tfInit, 'tutorflow-init');
       }
     }
 
@@ -27601,6 +27067,807 @@ function receiptStatusText(status) {
     }
 
     document.addEventListener('DOMContentLoaded', initPage);
+
+    // ============================================================
+    // TutorFlow Enterprise — Firebase-adapted scheduling system
+    // Data bridge: monthlyPlanSessions ↔ TutorFlow schedule format
+    // ============================================================
+
+    // --- TF State ---
+    let tfCurrentRole = 'admin';
+    let tfActiveTutorId = '';
+    let tfCurrentView = 'grid';
+    let tfCenterFilter = 'all';
+    let tfCalDate = new Date();
+    let tfSelectedSessionId = '';
+    let tfPortalSelectedSessionId = '';
+    let tfConfirmCallback = null;
+    let tfToastTimer = null;
+
+    const TF_MONTH_NAMES = ['มกราคม','กุมภาพันธ์','มีนาคม','เมษายน','พฤษภาคม','มิถุนายน','กรกฎาคม','สิงหาคม','กันยายน','ตุลาคม','พฤศจิกายน','ธันวาคม'];
+    const TF_FORMAT_LABELS = { onsite:'🏫 Onsite', online:'💻 Online', ondemand:'🎥 Ondemand', oneOnOne:'👥 สอนเดี่ยว 1:1' };
+    const TF_FORMAT_COLORS = { onsite:'bg-blue-100 text-blue-800', online:'bg-purple-100 text-purple-800', ondemand:'bg-amber-100 text-amber-800', oneOnOne:'bg-rose-100 text-rose-800' };
+
+    // --- Data bridge: map Firebase session fields to TF schedule fields ---
+    function tfSessionToSched(s) {
+      return {
+        id: s.id || s.firebaseDocId || '',
+        courseId: s.courseId || '',
+        tutorId: s.teacherId || '',
+        format: s.type || 'onsite',
+        center: s.center || '',
+        date: s.date || s.sessionDate || '',
+        start: s.timeStart || s.sessionTime || '',
+        end: s.timeEnd || '',
+        location: s.location || s.roomName || '',
+        notes: s.notes || '',
+        completed: s.status === 'done' || s.status === 'completed',
+        report: s.teacherReport || s.report || '',
+        status: s.status || 'draft'
+      };
+    }
+
+    // --- Data bridge: map TF schedule back to Firebase session ---
+    function tfSchedToSession(sch, existing) {
+      const courseObj = (courses || []).find(function(c) { return (c.id || c.firebaseDocId || '') === sch.courseId; });
+      const teacherObj = (teachers || []).find(function(t) { return (t.id || t.firebaseDocId || '') === sch.tutorId; });
+      const base = Object.assign({}, existing || {});
+      base.id = sch.id;
+      base.firebaseDocId = sch.id;
+      base.courseId = sch.courseId;
+      base.courseName = courseObj ? (courseObj.name || courseObj.title || '') : (existing ? existing.courseName : '');
+      base.teacherId = sch.tutorId;
+      base.teacherName = teacherObj ? (teacherObj.name || teacherObj.displayName || '') : (existing ? existing.teacherName : '');
+      base.type = sch.format;
+      base.center = sch.center;
+      base.date = sch.date;
+      base.sessionDate = sch.date;
+      base.month = sch.date ? sch.date.slice(0, 7) : '';
+      base.timeStart = sch.start;
+      base.timeEnd = sch.end;
+      base.sessionTime = sch.start;
+      base.location = sch.location;
+      base.notes = sch.notes;
+      base.status = sch.completed ? 'done' : (existing ? (existing.status || 'draft') : 'draft');
+      base.teacherReport = sch.report || '';
+      return base;
+    }
+
+    // --- Get active schedules filtered for current month ---
+    function tfGetMonthSchedules() {
+      const y = tfCalDate.getFullYear();
+      const m = tfCalDate.getMonth();
+      const monthKey = y + '-' + String(m + 1).padStart(2, '0');
+      return (monthlyPlanSessions || []).filter(function(s) {
+        const d = s.date || s.sessionDate || '';
+        return d.startsWith(monthKey) && s.deleted !== true && s.status !== 'cancelled';
+      }).map(tfSessionToSched);
+    }
+
+    // --- Active teachers as tutors ---
+    function tfGetTutors() {
+      return (teachers || []).filter(function(t) { return t && !t.deleted && t.status !== 'inactive' && t.status !== 'archived'; });
+    }
+
+    // --- Active courses ---
+    function tfGetCourses() {
+      return (courses || []).filter(function(c) { return c && !c.deleted && c.status !== 'closed' && c.status !== 'archived'; });
+    }
+
+    // --- TF helper: get element ---
+    function tfEl(id) { return document.getElementById(id); }
+
+    // --- Toast ---
+    function tfToast(msg, type) {
+      const el = tfEl('tf-toast');
+      const icon = tfEl('tf-toast-icon');
+      const msgEl = tfEl('tf-toast-message');
+      if (!el) return;
+      const colors = { success: 'text-emerald-400', error: 'text-rose-400', info: 'text-indigo-400' };
+      const icons = { success: 'check-circle', error: 'alert-circle', info: 'info' };
+      if (icon) icon.innerHTML = '<i data-lucide="' + (icons[type] || 'info') + '" class="w-5 h-5"></i>';
+      if (msgEl) msgEl.textContent = msg;
+      if (icon) icon.className = colors[type] || 'text-indigo-400';
+      el.classList.remove('hidden');
+      if (typeof lucide !== 'undefined') lucide.createIcons();
+      clearTimeout(tfToastTimer);
+      tfToastTimer = setTimeout(function() { el.classList.add('hidden'); }, 3000);
+    }
+
+    // --- Confirm dialog ---
+    function tfConfirm(title, msg, onOk) {
+      const modal = tfEl('tf-confirm-modal');
+      if (!modal) { if (onOk && confirm(msg)) onOk(); return; }
+      tfEl('tf-confirm-title').textContent = title;
+      tfEl('tf-confirm-message').textContent = msg;
+      modal.classList.remove('hidden');
+      tfConfirmCallback = onOk;
+      tfEl('tf-confirm-ok').onclick = function() {
+        modal.classList.add('hidden');
+        if (tfConfirmCallback) tfConfirmCallback();
+      };
+      tfEl('tf-confirm-cancel').onclick = function() { modal.classList.add('hidden'); };
+    }
+
+    // --- Switch role (admin / tutor portal) ---
+    function tfSwitchRole(role) {
+      tfCurrentRole = role;
+      const adminView = tfEl('admin-view-root');
+      const tutorView = tfEl('tutor-view-root');
+      const adminBtn = tfEl('role-admin-btn');
+      const tutorBtn = tfEl('role-tutor-btn');
+      const activeClass = 'bg-white text-indigo-700 shadow-sm';
+      const inactiveClass = 'text-slate-600 bg-transparent';
+      if (role === 'admin') {
+        if (adminView) { adminView.style.display = ''; adminView.classList.remove('hidden'); }
+        if (tutorView) { tutorView.classList.add('hidden'); }
+        if (adminBtn) adminBtn.className = adminBtn.className.replace(inactiveClass, activeClass);
+        if (tutorBtn) tutorBtn.className = tutorBtn.className.replace(activeClass, inactiveClass);
+        tfRenderSchedule();
+      } else {
+        if (tutorView) { tutorView.classList.remove('hidden'); }
+        if (adminView) { adminView.classList.add('hidden'); }
+        if (tutorBtn) tutorBtn.className = tutorBtn.className.replace(inactiveClass, activeClass);
+        if (adminBtn) adminBtn.className = adminBtn.className.replace(activeClass, inactiveClass);
+        tfPopulatePortalSelect();
+        if (!tfActiveTutorId) {
+          const tuts = tfGetTutors();
+          if (tuts.length) { tfActiveTutorId = tuts[0].id || tuts[0].firebaseDocId || ''; }
+        }
+        if (tfEl('tf-portal-select') && tfActiveTutorId) tfEl('tf-portal-select').value = tfActiveTutorId;
+        tfPortalLogin();
+      }
+      if (typeof lucide !== 'undefined') lucide.createIcons();
+    }
+
+    // --- Update stats cards ---
+    function tfUpdateStats() {
+      const scheds = tfGetMonthSchedules();
+      const count = function(fmt) { return scheds.filter(function(s) { return s.format === fmt; }).length; };
+      const set = function(id, v) { const e = tfEl(id); if (e) e.textContent = v; };
+      set('tf-stat-onsite', count('onsite'));
+      set('tf-stat-online', count('online'));
+      set('tf-stat-ondemand', count('ondemand'));
+      set('tf-stat-private', count('oneOnOne'));
+    }
+
+    // --- Render course list (left panel) ---
+    function tfRenderCourseList() {
+      const box = tfEl('tf-course-list');
+      if (!box) return;
+      const coursesArr = tfGetCourses();
+      if (!coursesArr.length) { box.innerHTML = '<p class="text-xs text-slate-400 text-center py-4">ยังไม่มีคอร์สเรียน</p>'; return; }
+      box.innerHTML = coursesArr.map(function(c) {
+        const id = c.id || c.firebaseDocId || '';
+        const name = c.name || c.title || id;
+        const grade = c.grade || c.level || '';
+        return '<div class="flex items-center gap-2 p-2 bg-slate-50 rounded-lg border border-slate-200">' +
+          '<div class="w-2 h-2 rounded-full bg-indigo-400 flex-shrink-0"></div>' +
+          '<div class="min-w-0"><p class="text-xs font-semibold text-slate-800 truncate">' + escapeHtml(name) + '</p>' +
+          (grade ? '<p class="text-xs text-slate-400">' + escapeHtml(grade) + '</p>' : '') + '</div></div>';
+      }).join('');
+    }
+
+    // --- Render tutor list (left panel) ---
+    function tfRenderTutorList() {
+      const box = tfEl('tf-tutor-list');
+      if (!box) return;
+      const tutorsArr = tfGetTutors();
+      if (!tutorsArr.length) { box.innerHTML = '<p class="text-xs text-slate-400 text-center py-4">ยังไม่มีผู้สอน</p>'; return; }
+      box.innerHTML = tutorsArr.map(function(t) {
+        const name = t.name || t.displayName || t.email || '—';
+        const fmts = [];
+        if (t.canOnsite !== false) fmts.push('OS');
+        if (t.canOnline !== false) fmts.push('OL');
+        if (t.canOndemand !== false) fmts.push('OD');
+        if (t.canOneOnOne || t.canPrivate) fmts.push('1:1');
+        return '<div class="flex items-center gap-2 p-2 bg-slate-50 rounded-lg border border-slate-200">' +
+          '<div class="w-7 h-7 rounded-full bg-indigo-100 text-indigo-600 flex items-center justify-center text-xs font-black flex-shrink-0">' +
+          escapeHtml((name[0] || '?').toUpperCase()) + '</div>' +
+          '<div class="min-w-0"><p class="text-xs font-semibold text-slate-800 truncate">' + escapeHtml(name) + '</p>' +
+          '<p class="text-xs text-slate-400">' + fmts.join(' · ') + '</p></div></div>';
+      }).join('');
+    }
+
+    // --- Populate filter dropdowns ---
+    function tfPopulateFilters() {
+      const tutorSel = tfEl('tf-filter-tutor');
+      if (tutorSel) {
+        const prev = tutorSel.value;
+        tutorSel.innerHTML = '<option value="all">ผู้สอนทุกคน</option>' +
+          tfGetTutors().map(function(t) {
+            const id = t.id || t.firebaseDocId || '';
+            return '<option value="' + escapeHtml(id) + '">' + escapeHtml(t.name || t.displayName || id) + '</option>';
+          }).join('');
+        if (prev) tutorSel.value = prev;
+      }
+    }
+
+    // --- Filter by center ---
+    function tfFilterByCenter(center) {
+      tfCenterFilter = center;
+      const btns = { all: 'tf-btn-center-all', nongchang: 'tf-btn-center-nc', nakhonsawan: 'tf-btn-center-ns' };
+      Object.keys(btns).forEach(function(k) {
+        const btn = tfEl(btns[k]);
+        if (!btn) return;
+        if (k === center) {
+          btn.className = btn.className.replace('bg-slate-50 text-slate-700 border-slate-200', 'bg-indigo-50 text-indigo-700 border-indigo-600 shadow-sm');
+        } else {
+          btn.className = btn.className.replace('bg-indigo-50 text-indigo-700 border-indigo-600 shadow-sm', 'bg-slate-50 text-slate-700 border-slate-200');
+        }
+      });
+      tfRenderSchedule();
+    }
+
+    // --- Switch view (grid / list) ---
+    function tfSwitchView(view) {
+      tfCurrentView = view;
+      const gridView = tfEl('tf-grid-view');
+      const listView = tfEl('tf-list-view');
+      const gridBtn = tfEl('tf-btn-view-grid');
+      const listBtn = tfEl('tf-btn-view-list');
+      if (gridView) gridView.style.display = view === 'grid' ? '' : 'none';
+      if (listView) { if (view === 'list') listView.classList.remove('hidden'); else listView.classList.add('hidden'); }
+      const activeStyle = 'bg-white text-indigo-700 shadow-sm';
+      const inactiveStyle = 'text-slate-600 hover:text-slate-900 bg-transparent';
+      if (gridBtn) gridBtn.className = gridBtn.className.replace(view === 'grid' ? inactiveStyle : activeStyle, view === 'grid' ? activeStyle : inactiveStyle);
+      if (listBtn) listBtn.className = listBtn.className.replace(view === 'list' ? inactiveStyle : activeStyle, view === 'list' ? activeStyle : inactiveStyle);
+      tfRenderSchedule();
+    }
+
+    // --- Reset all filters ---
+    function tfResetFilters() {
+      const fmt = tfEl('tf-filter-format');
+      const tut = tfEl('tf-filter-tutor');
+      if (fmt) fmt.value = 'all';
+      if (tut) tut.value = 'all';
+      tfCenterFilter = 'all';
+      tfFilterByCenter('all');
+    }
+
+    // --- Change month ---
+    function tfChangeMonth(dir) {
+      tfCalDate = new Date(tfCalDate.getFullYear(), tfCalDate.getMonth() + dir, 1);
+      tfUpdateCalendarTitle();
+      tfRenderSchedule();
+      tfCloseDayDetail();
+    }
+
+    // --- Go to current month ---
+    function tfGoToCurrentMonth() {
+      const now = new Date();
+      tfCalDate = new Date(now.getFullYear(), now.getMonth(), 1);
+      tfUpdateCalendarTitle();
+      tfRenderSchedule();
+      tfCloseDayDetail();
+    }
+
+    // --- Update calendar title ---
+    function tfUpdateCalendarTitle() {
+      const title = tfEl('tf-calendar-title');
+      if (title) {
+        const y = tfCalDate.getFullYear() + 543;
+        title.textContent = TF_MONTH_NAMES[tfCalDate.getMonth()] + ' ' + y;
+      }
+      const portalTitle = tfEl('tf-portal-cal-title');
+      if (portalTitle) portalTitle.innerHTML = '<i data-lucide="calendar-check" class="w-4 h-4 text-indigo-600 inline-block mr-1"></i> ปฏิทินส่วนตัว — ' + TF_MONTH_NAMES[tfCalDate.getMonth()] + ' ' + (tfCalDate.getFullYear() + 543);
+    }
+
+    // --- Get filtered schedules ---
+    function tfGetFiltered() {
+      const scheds = tfGetMonthSchedules();
+      const fmt = tfEl('tf-filter-format') ? tfEl('tf-filter-format').value : 'all';
+      const tutId = tfEl('tf-filter-tutor') ? tfEl('tf-filter-tutor').value : 'all';
+      return scheds.filter(function(s) {
+        const centerOk = tfCenterFilter === 'all' ||
+          (tfCenterFilter === 'nongchang' && s.center && s.center.includes('หนองฉาง')) ||
+          (tfCenterFilter === 'nakhonsawan' && s.center && (s.center.includes('นครสวรรค์') || s.center.includes('นครสวรรค')));
+        const fmtOk = fmt === 'all' || s.format === fmt;
+        const tutOk = tutId === 'all' || s.tutorId === tutId;
+        return centerOk && fmtOk && tutOk;
+      });
+    }
+
+    // --- Render schedule (grid or list) ---
+    function tfRenderSchedule() {
+      if (tfCurrentView === 'grid') tfRenderGrid();
+      else tfRenderList();
+      tfUpdateStats();
+    }
+
+    // --- Render monthly grid calendar ---
+    function tfRenderGrid() {
+      const grid = tfEl('tf-calendar-grid');
+      if (!grid) return;
+      const year = tfCalDate.getFullYear();
+      const month = tfCalDate.getMonth();
+      const firstDay = new Date(year, month, 1).getDay();
+      const totalDays = new Date(year, month + 1, 0).getDate();
+      const prevDays = new Date(year, month, 0).getDate();
+      const scheds = tfGetFiltered();
+      const today = new Date();
+      const todayStr = today.getFullYear() + '-' + String(today.getMonth() + 1).padStart(2, '0') + '-' + String(today.getDate()).padStart(2, '0');
+
+      let html = '';
+      for (let i = 0; i < firstDay; i++) {
+        const day = prevDays - firstDay + 1 + i;
+        html += '<div class="min-h-16 p-1 rounded-lg bg-slate-50/50 text-slate-300">' +
+          '<span class="text-xs font-bold block text-right p-1">' + day + '</span></div>';
+      }
+      for (let d = 1; d <= totalDays; d++) {
+        const dateStr = year + '-' + String(month + 1).padStart(2, '0') + '-' + String(d).padStart(2, '0');
+        const dayScheds = scheds.filter(function(s) { return s.date === dateStr; });
+        const isToday = dateStr === todayStr;
+        const isSun = new Date(year, month, d).getDay() === 0;
+        const isSat = new Date(year, month, d).getDay() === 6;
+        const dayClass = isToday ? 'border-indigo-400 bg-indigo-50' : 'border-slate-200 bg-white hover:bg-slate-50';
+        html += '<div onclick="tfShowDayDetail(\'' + dateStr + '\')" class="min-h-16 p-1.5 rounded-lg border ' + dayClass + ' cursor-pointer transition-colors">' +
+          '<span class="text-xs font-bold block text-right p-0.5 ' + (isToday ? 'text-indigo-600 bg-indigo-100 rounded-full w-5 h-5 flex items-center justify-center ml-auto' : isSun ? 'text-rose-500' : isSat ? 'text-indigo-600' : 'text-slate-600') + '">' + d + '</span>' +
+          '<div class="space-y-0.5 mt-0.5">';
+        dayScheds.slice(0, 3).forEach(function(s) {
+          const colorCls = TF_FORMAT_COLORS[s.format] || 'bg-slate-100 text-slate-700';
+          const tname = tfGetTutorName(s.tutorId);
+          html += '<div class="' + colorCls + ' text-xs rounded px-1 py-0.5 truncate font-medium leading-tight">' +
+            escapeHtml((s.start || '') + ' ' + (tfGetCourseName(s.courseId) || '').slice(0, 10)) + '</div>';
+        });
+        if (dayScheds.length > 3) html += '<div class="text-xs text-slate-400 font-bold">+' + (dayScheds.length - 3) + ' คาบ</div>';
+        html += '</div></div>';
+      }
+      const remaining = (7 - (firstDay + totalDays) % 7) % 7;
+      for (let i = 1; i <= remaining; i++) {
+        html += '<div class="min-h-16 p-1 rounded-lg bg-slate-50/50 text-slate-300"><span class="text-xs font-bold block text-right p-1">' + i + '</span></div>';
+      }
+      grid.innerHTML = html;
+    }
+
+    // --- Render list view ---
+    function tfRenderList() {
+      const container = tfEl('tf-list-view');
+      if (!container) return;
+      const scheds = tfGetFiltered().sort(function(a, b) { return a.date.localeCompare(b.date) || a.start.localeCompare(b.start); });
+      if (!scheds.length) {
+        container.innerHTML = '<div class="text-center py-12 text-slate-400"><i data-lucide="calendar-x" class="w-12 h-12 mx-auto mb-3 opacity-30"></i><p class="text-sm font-medium">ไม่มีตารางสอนในช่วงที่เลือก</p></div>';
+        if (typeof lucide !== 'undefined') lucide.createIcons();
+        return;
+      }
+      const groups = {};
+      scheds.forEach(function(s) { (groups[s.date] = groups[s.date] || []).push(s); });
+      container.innerHTML = Object.keys(groups).sort().map(function(date) {
+        const d = new Date(date + 'T00:00:00');
+        const dayNames = ['อาทิตย์','จันทร์','อังคาร','พุธ','พฤหัสบดี','ศุกร์','เสาร์'];
+        const label = 'วัน' + dayNames[d.getDay()] + ' · ' + d.getDate() + ' ' + TF_MONTH_NAMES[d.getMonth()] + ' ' + (d.getFullYear() + 543);
+        const cards = groups[date].map(function(s) {
+          const colorCls = TF_FORMAT_COLORS[s.format] || 'bg-slate-100 text-slate-700';
+          return '<div class="flex items-start gap-3 p-3 bg-white border border-slate-200 rounded-xl hover:border-indigo-300 transition-colors cursor-pointer" onclick="tfShowDayDetail(\'' + date + '\')">' +
+            '<span class="' + colorCls + ' text-xs font-bold px-2 py-1 rounded-lg flex-shrink-0 mt-0.5">' + escapeHtml(TF_FORMAT_LABELS[s.format] || s.format) + '</span>' +
+            '<div class="min-w-0">' +
+            '<p class="font-semibold text-sm text-slate-900">' + escapeHtml(tfGetCourseName(s.courseId)) + '</p>' +
+            '<p class="text-xs text-slate-500">' + escapeHtml((s.start || '') + ' – ' + (s.end || '') + ' · ' + tfGetTutorName(s.tutorId)) + '</p>' +
+            (s.center ? '<p class="text-xs text-slate-400">' + escapeHtml(s.center) + '</p>' : '') + '</div>' +
+            '<div class="ml-auto flex-shrink-0">' + (s.completed ? '<span class="text-xs font-bold text-emerald-600 bg-emerald-50 px-2 py-1 rounded-lg">✓ สอนแล้ว</span>' : '<span class="text-xs text-slate-400">รอสอน</span>') + '</div></div>';
+        }).join('');
+        return '<div><p class="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2 px-1">' + label + '</p><div class="space-y-2">' + cards + '</div></div>';
+      }).join('');
+      if (typeof lucide !== 'undefined') lucide.createIcons();
+    }
+
+    // --- Show day detail panel ---
+    function tfShowDayDetail(dateStr) {
+      const panel = tfEl('tf-day-detail');
+      const label = tfEl('tf-day-date-label');
+      const content = tfEl('tf-day-detail-content');
+      if (!panel || !content) return;
+      const d = new Date(dateStr + 'T00:00:00');
+      const dayNames = ['อาทิตย์','จันทร์','อังคาร','พุธ','พฤหัสบดี','ศุกร์','เสาร์'];
+      if (label) label.textContent = 'วัน' + dayNames[d.getDay()] + ' ที่ ' + d.getDate() + ' ' + TF_MONTH_NAMES[d.getMonth()] + ' ' + (d.getFullYear() + 543);
+
+      const all = tfGetMonthSchedules().filter(function(s) { return s.date === dateStr; });
+      if (!all.length) {
+        content.innerHTML = '<p class="text-xs text-slate-400 text-center py-4">ไม่มีคาบเรียนวันนี้ <button onclick="tfOpenScheduleModal(\'' + dateStr + '\')" class="text-indigo-300 hover:text-indigo-200 font-bold underline bg-transparent border-0 cursor-pointer ml-1">+ เพิ่มคาบ</button></p>';
+      } else {
+        content.innerHTML = all.sort(function(a, b) { return a.start.localeCompare(b.start); }).map(function(s) {
+          const colorCls = TF_FORMAT_COLORS[s.format] || 'bg-slate-600';
+          const sessionId = s.id;
+          return '<div class="bg-slate-800 rounded-xl p-3 space-y-1.5">' +
+            '<div class="flex items-start justify-between gap-2">' +
+            '<div><span class="' + colorCls + ' text-xs font-bold px-2 py-0.5 rounded-md">' + escapeHtml(TF_FORMAT_LABELS[s.format] || s.format) + '</span></div>' +
+            '<button onclick="tfDeleteSession(\'' + sessionId + '\')" class="text-slate-400 hover:text-rose-400 text-xs cursor-pointer bg-transparent border-0">ลบ</button></div>' +
+            '<p class="font-bold text-sm">' + escapeHtml(tfGetCourseName(s.courseId)) + '</p>' +
+            '<p class="text-xs text-slate-400">' + escapeHtml((s.start || '') + ' – ' + (s.end || '')) + ' · ' + escapeHtml(tfGetTutorName(s.tutorId)) + '</p>' +
+            (s.center ? '<p class="text-xs text-slate-400">📍 ' + escapeHtml(s.center) + '</p>' : '') +
+            (s.location ? '<p class="text-xs text-slate-400">🚪 ' + escapeHtml(s.location) + '</p>' : '') +
+            (s.notes ? '<p class="text-xs text-slate-500 italic">' + escapeHtml(s.notes) + '</p>' : '') +
+            '<div class="flex gap-2 pt-1">' +
+            (s.completed ? '<span class="text-xs font-bold text-emerald-400">✓ สอนแล้ว</span>' : '<button onclick="tfMarkDone(\'' + sessionId + '\')" class="text-xs text-emerald-400 hover:text-emerald-300 font-bold cursor-pointer bg-transparent border-0">✓ มาร์กว่าสอนแล้ว</button>') +
+            '</div></div>';
+        }).join('') + '<button onclick="tfOpenScheduleModal(\'' + dateStr + '\')" class="w-full mt-2 text-xs text-indigo-300 hover:text-indigo-200 font-bold py-2 border border-dashed border-slate-700 rounded-xl cursor-pointer bg-transparent">+ เพิ่มคาบวันนี้</button>';
+      }
+      panel.classList.remove('hidden');
+      panel.classList.add('tf-fade');
+    }
+
+    // --- Close day detail ---
+    function tfCloseDayDetail() {
+      const panel = tfEl('tf-day-detail');
+      if (panel) panel.classList.add('hidden');
+    }
+
+    // --- Helper: get course name ---
+    function tfGetCourseName(courseId) {
+      const c = (courses || []).find(function(c) { return (c.id || c.firebaseDocId || '') === courseId; });
+      return c ? (c.name || c.title || courseId) : (courseId || '—');
+    }
+
+    // --- Helper: get tutor name ---
+    function tfGetTutorName(tutorId) {
+      const t = (teachers || []).find(function(t) { return (t.id || t.firebaseDocId || '') === tutorId; });
+      return t ? (t.name || t.displayName || tutorId) : (tutorId || '—');
+    }
+
+    // --- Open schedule modal ---
+    function tfOpenScheduleModal(prefillDate) {
+      const modal = tfEl('tf-schedule-modal');
+      if (!modal) return;
+      // Populate course select
+      const courseSel = tfEl('tf-sched-course');
+      if (courseSel) {
+        courseSel.innerHTML = '<option value="">เลือกคอร์ส</option>' +
+          tfGetCourses().map(function(c) {
+            const id = c.id || c.firebaseDocId || '';
+            return '<option value="' + escapeHtml(id) + '">' + escapeHtml((c.grade || '') + (c.grade ? ' · ' : '') + (c.name || c.title || id)) + '</option>';
+          }).join('');
+      }
+      // Populate tutor select
+      tfPopulateSchedTutors();
+      // Pre-fill date
+      if (prefillDate && tfEl('tf-sched-date')) tfEl('tf-sched-date').value = prefillDate;
+      else if (tfEl('tf-sched-date')) tfEl('tf-sched-date').value = '';
+      // Reset editing id
+      if (tfEl('tf-schedule-editing-id')) tfEl('tf-schedule-editing-id').value = '';
+      // Reset error
+      const errEl = tfEl('tf-sched-error');
+      if (errEl) errEl.classList.add('hidden');
+      modal.classList.remove('hidden');
+      if (typeof lucide !== 'undefined') lucide.createIcons();
+    }
+
+    function tfCloseScheduleModal() {
+      const modal = tfEl('tf-schedule-modal');
+      if (modal) { modal.classList.add('hidden'); }
+      const form = tfEl('tf-schedule-form');
+      if (form) form.reset();
+    }
+
+    function tfOnFormatChange() {
+      const fmt = tfEl('tf-sched-format') ? tfEl('tf-sched-format').value : '';
+      const locLabel = tfEl('tf-sched-location-label');
+      if (locLabel) {
+        if (fmt === 'online' || fmt === 'ondemand') locLabel.textContent = 'ลิงก์เข้าเรียน / รหัสห้อง';
+        else locLabel.textContent = 'ห้องเรียน / สถานที่';
+      }
+      tfPopulateSchedTutors(fmt);
+    }
+
+    function tfPopulateSchedTutors(fmt) {
+      const sel = tfEl('tf-sched-tutor');
+      if (!sel) return;
+      const prev = sel.value;
+      sel.innerHTML = '<option value="">เลือกผู้สอน</option>' +
+        tfGetTutors().map(function(t) {
+          const id = t.id || t.firebaseDocId || '';
+          return '<option value="' + escapeHtml(id) + '">' + escapeHtml(t.name || t.displayName || id) + '</option>';
+        }).join('');
+      if (prev) sel.value = prev;
+    }
+
+    // --- Save schedule to Firebase ---
+    async function tfSaveSchedule(event) {
+      event.preventDefault();
+      const errEl = tfEl('tf-sched-error');
+      if (errEl) errEl.classList.add('hidden');
+      const editingId = tfEl('tf-schedule-editing-id') ? tfEl('tf-schedule-editing-id').value : '';
+      const courseId = tfEl('tf-sched-course') ? tfEl('tf-sched-course').value : '';
+      const tutorId = tfEl('tf-sched-tutor') ? tfEl('tf-sched-tutor').value : '';
+      const date = tfEl('tf-sched-date') ? tfEl('tf-sched-date').value : '';
+      const start = tfEl('tf-sched-start') ? tfEl('tf-sched-start').value : '';
+      const end = tfEl('tf-sched-end') ? tfEl('tf-sched-end').value : '';
+      const format = tfEl('tf-sched-format') ? tfEl('tf-sched-format').value : 'onsite';
+      const center = tfEl('tf-sched-center') ? tfEl('tf-sched-center').value : '';
+      const location = tfEl('tf-sched-location') ? tfEl('tf-sched-location').value.trim() : '';
+      const notes = tfEl('tf-sched-notes') ? tfEl('tf-sched-notes').value.trim() : '';
+      if (!courseId || !date || !start || !end) {
+        if (errEl) { errEl.textContent = 'กรุณากรอกข้อมูลที่จำเป็นให้ครบ (คอร์ส, วันที่, เวลา)'; errEl.classList.remove('hidden'); }
+        return;
+      }
+      const docId = editingId || createFirebaseDocId('monthlyPlanSessions');
+      const existing = monthlyPlanSessions.find(function(s) { return (s.id || s.firebaseDocId || '') === docId; }) || null;
+      const sch = { id: docId, courseId, tutorId, format, center, date, start, end, location, notes, completed: false, report: '' };
+      const session = tfSchedToSession(sch, existing);
+      try {
+        await setFirebaseDocument('monthlyPlanSessions', session);
+        if (existing) {
+          Object.assign(existing, session);
+        } else {
+          monthlyPlanSessions.push(session);
+        }
+        tfCloseScheduleModal();
+        tfRenderSchedule();
+        tfToast('บันทึกตารางสอนสำเร็จ', 'success');
+        safeRun(renderStudentMonthlyPlanSummary, 'student-plan-summary-refresh');
+        safeRun(renderTeacherMonthlyPlanSummary, 'teacher-plan-summary-refresh');
+      } catch (err) {
+        if (errEl) { errEl.textContent = 'บันทึกไม่สำเร็จ: ' + (err.message || err); errEl.classList.remove('hidden'); }
+      }
+    }
+
+    // --- Delete session ---
+    function tfDeleteSession(sessionId) {
+      tfConfirm('ลบตารางสอน', 'ต้องการลบคาบนี้ออกจากระบบใช่หรือไม่?', async function() {
+        const session = monthlyPlanSessions.find(function(s) { return (s.id || s.firebaseDocId || '') === sessionId; });
+        if (!session) return;
+        try {
+          await deleteFirebaseDocument('monthlyPlanSessions', session);
+          const idx = monthlyPlanSessions.indexOf(session);
+          if (idx > -1) monthlyPlanSessions.splice(idx, 1);
+          tfCloseDayDetail();
+          tfRenderSchedule();
+          tfToast('ลบตารางสอนแล้ว', 'info');
+          safeRun(renderStudentMonthlyPlanSummary, 'student-plan-summary-refresh');
+          safeRun(renderTeacherMonthlyPlanSummary, 'teacher-plan-summary-refresh');
+        } catch (err) {
+          tfToast('ลบไม่สำเร็จ: ' + (err.message || err), 'error');
+        }
+      });
+    }
+
+    // --- Mark session as done ---
+    async function tfMarkDone(sessionId) {
+      const session = monthlyPlanSessions.find(function(s) { return (s.id || s.firebaseDocId || '') === sessionId; });
+      if (!session) return;
+      session.status = 'done';
+      session.updatedAtText = new Date().toLocaleString('th-TH');
+      try {
+        await setFirebaseDocument('monthlyPlanSessions', session);
+        tfRenderSchedule();
+        if (tfActiveTutorId) { tfRenderPortalStats(); tfRenderPortalGrid(); }
+        tfToast('มาร์กสอนแล้วเรียบร้อย', 'success');
+      } catch (err) {
+        tfToast('อัปเดตสถานะไม่สำเร็จ: ' + (err.message || err), 'error');
+      }
+    }
+
+    // --- Tutor Portal: populate select ---
+    function tfPopulatePortalSelect() {
+      const sel = tfEl('tf-portal-select');
+      if (!sel) return;
+      sel.innerHTML = tfGetTutors().map(function(t) {
+        const id = t.id || t.firebaseDocId || '';
+        return '<option value="' + escapeHtml(id) + '">👨‍🏫 ' + escapeHtml(t.name || t.displayName || id) + '</option>';
+      }).join('');
+      if (tfActiveTutorId) sel.value = tfActiveTutorId;
+    }
+
+    // --- Tutor Portal: login ---
+    function tfPortalLogin() {
+      const sel = tfEl('tf-portal-select');
+      if (sel) tfActiveTutorId = sel.value;
+      const dash = tfEl('tf-portal-dashboard');
+      if (!tfActiveTutorId) { if (dash) dash.classList.add('hidden'); return; }
+      if (dash) dash.classList.remove('hidden');
+      tfRenderPortalStats();
+      tfRenderPortalGrid();
+      const info = tfEl('tf-portal-session-info');
+      if (info) info.innerHTML = '<div class="p-4 bg-slate-50 rounded-xl border border-slate-200 text-center py-8 text-slate-400"><p class="text-xs">คลิกเลือกคาบเรียนบนปฏิทินเพื่อดูรายละเอียด</p></div>';
+      if (typeof lucide !== 'undefined') lucide.createIcons();
+    }
+
+    // --- Portal: render stats ---
+    function tfRenderPortalStats() {
+      const myScheds = (monthlyPlanSessions || []).filter(function(s) {
+        return (s.teacherId || '') === tfActiveTutorId && !s.deleted && s.status !== 'cancelled';
+      });
+      const y = tfCalDate.getFullYear();
+      const m = tfCalDate.getMonth();
+      const monthKey = y + '-' + String(m + 1).padStart(2, '0');
+      const thisMonth = myScheds.filter(function(s) { return (s.date || s.sessionDate || '').startsWith(monthKey); });
+      const done = thisMonth.filter(function(s) { return s.status === 'done' || s.status === 'completed'; }).length;
+      let hours = 0;
+      myScheds.forEach(function(s) {
+        if (!s.timeStart || !s.timeEnd) return;
+        const [sh, sm] = s.timeStart.split(':').map(Number);
+        const [eh, em] = s.timeEnd.split(':').map(Number);
+        hours += ((eh * 60 + em) - (sh * 60 + sm)) / 60;
+      });
+      const set = function(id, v) { const e = tfEl(id); if (e) e.textContent = v; };
+      set('tf-portal-stat-total', thisMonth.length + ' คลาส');
+      set('tf-portal-stat-done', done + ' คลาส');
+      set('tf-portal-stat-hours', hours.toFixed(1) + ' ชม.');
+    }
+
+    // --- Portal: render personal calendar ---
+    function tfRenderPortalGrid() {
+      const grid = tfEl('tf-portal-grid');
+      if (!grid) return;
+      const year = tfCalDate.getFullYear();
+      const month = tfCalDate.getMonth();
+      const firstDay = new Date(year, month, 1).getDay();
+      const totalDays = new Date(year, month + 1, 0).getDate();
+      const prevDays = new Date(year, month, 0).getDate();
+      const monthKey = year + '-' + String(month + 1).padStart(2, '0');
+      const myScheds = (monthlyPlanSessions || []).filter(function(s) {
+        return (s.teacherId || '') === tfActiveTutorId && !s.deleted && s.status !== 'cancelled' &&
+          (s.date || s.sessionDate || '').startsWith(monthKey);
+      });
+      const today = new Date();
+      const todayStr = today.getFullYear() + '-' + String(today.getMonth() + 1).padStart(2, '0') + '-' + String(today.getDate()).padStart(2, '0');
+
+      let html = '';
+      for (let i = 0; i < firstDay; i++) {
+        html += '<div class="min-h-12 p-1 rounded-lg bg-slate-50/50 text-slate-300"><span class="text-xs block text-right">' + (prevDays - firstDay + 1 + i) + '</span></div>';
+      }
+      for (let d = 1; d <= totalDays; d++) {
+        const dateStr = year + '-' + String(month + 1).padStart(2, '0') + '-' + String(d).padStart(2, '0');
+        const daySch = myScheds.filter(function(s) { return (s.date || s.sessionDate || '') === dateStr; });
+        const isToday = dateStr === todayStr;
+        html += '<div onclick="tfPortalSelectDay(\'' + dateStr + '\')" class="min-h-12 p-1.5 rounded-lg border ' + (isToday ? 'border-indigo-400 bg-indigo-50' : 'border-slate-200 bg-white hover:bg-slate-50') + ' cursor-pointer transition-colors">' +
+          '<span class="text-xs font-bold block text-right mb-0.5 ' + (isToday ? 'text-indigo-600' : 'text-slate-600') + '">' + d + '</span>';
+        daySch.slice(0, 2).forEach(function(s) {
+          const colorCls = TF_FORMAT_COLORS[s.type] || 'bg-indigo-100 text-indigo-800';
+          html += '<div class="' + colorCls + ' text-xs rounded px-1 py-0.5 truncate font-medium leading-tight">' + escapeHtml(s.timeStart || '') + '</div>';
+        });
+        if (daySch.length > 2) html += '<div class="text-xs text-slate-400">+' + (daySch.length - 2) + '</div>';
+        html += '</div>';
+      }
+      const rem = (7 - (firstDay + totalDays) % 7) % 7;
+      for (let i = 1; i <= rem; i++) {
+        html += '<div class="min-h-12 p-1 rounded-lg bg-slate-50/50 text-slate-300"><span class="text-xs block text-right">' + i + '</span></div>';
+      }
+      grid.innerHTML = html;
+    }
+
+    // --- Portal: select day and show sessions ---
+    function tfPortalSelectDay(dateStr) {
+      const info = tfEl('tf-portal-session-info');
+      if (!info) return;
+      const monthKey = tfCalDate.getFullYear() + '-' + String(tfCalDate.getMonth() + 1).padStart(2, '0');
+      const daySch = (monthlyPlanSessions || []).filter(function(s) {
+        return (s.teacherId || '') === tfActiveTutorId && !s.deleted && s.status !== 'cancelled' &&
+          (s.date || s.sessionDate || '') === dateStr;
+      }).sort(function(a, b) { return (a.timeStart || '').localeCompare(b.timeStart || ''); });
+      if (!daySch.length) {
+        info.innerHTML = '<div class="p-4 bg-slate-50 rounded-xl border border-slate-200 text-center py-6 text-slate-400"><p class="text-xs">ไม่มีคาบเรียนในวันที่เลือก</p></div>';
+        return;
+      }
+      const d = new Date(dateStr + 'T00:00:00');
+      const dayNames = ['อา','จ','อ','พ','พฤ','ศ','ส'];
+      info.innerHTML = '<p class="text-xs font-bold text-slate-500 mb-3">วัน' + ['อาทิตย์','จันทร์','อังคาร','พุธ','พฤหัสบดี','ศุกร์','เสาร์'][d.getDay()] + ' ' + d.getDate() + ' ' + TF_MONTH_NAMES[d.getMonth()] + '</p>' +
+        daySch.map(function(s) {
+          const sched = tfSessionToSched(s);
+          const sessionId = s.id || s.firebaseDocId || '';
+          const colorCls = TF_FORMAT_COLORS[s.type] || 'bg-slate-100 text-slate-700';
+          return '<div class="p-3 bg-slate-50 rounded-xl border border-slate-200 space-y-2 mb-2">' +
+            '<div class="flex items-center justify-between">' +
+            '<span class="' + colorCls + ' text-xs font-bold px-2 py-0.5 rounded-md">' + escapeHtml(TF_FORMAT_LABELS[s.type] || s.type) + '</span>' +
+            (sched.completed ? '<span class="text-xs font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-md">✓ สอนแล้ว</span>' : '<button onclick="tfMarkDone(\'' + sessionId + '\')" class="text-xs text-emerald-600 hover:text-emerald-700 font-bold cursor-pointer bg-transparent border-0">✓ มาร์กสอนแล้ว</button>') +
+            '</div>' +
+            '<p class="font-bold text-sm">' + escapeHtml(tfGetCourseName(s.courseId)) + '</p>' +
+            '<p class="text-xs text-slate-500">' + escapeHtml((s.timeStart || '') + ' – ' + (s.timeEnd || '')) + '</p>' +
+            (s.location || s.roomName ? '<p class="text-xs text-slate-400">📍 ' + escapeHtml(s.location || s.roomName || '') + '</p>' : '') +
+            (s.notes ? '<p class="text-xs text-slate-400 italic">' + escapeHtml(s.notes) + '</p>' : '') +
+            (sched.completed && sched.report ? '<div class="bg-emerald-50 p-2 rounded-lg"><p class="text-xs font-bold text-emerald-700 mb-1">บันทึกผลการสอน:</p><p class="text-xs text-emerald-600">' + escapeHtml(sched.report) + '</p></div>' : '') +
+            '</div>';
+        }).join('');
+      if (typeof lucide !== 'undefined') lucide.createIcons();
+    }
+
+    // --- Main init: called when admin-monthly-planner tab opens ---
+    function tfInit() {
+      tfUpdateCalendarTitle();
+      tfRenderCourseList();
+      tfRenderTutorList();
+      tfPopulateFilters();
+      tfRenderSchedule();
+      tfCloseDayDetail();
+      if (typeof lucide !== 'undefined') lucide.createIcons();
+    }
+
+    // ============================================================
+    // End TutorFlow Enterprise
+    // ============================================================
   </script>
+
+  <!-- ===== TutorFlow Modals & Toast ===== -->
+
+  <!-- Schedule Modal -->
+  <div id="tf-schedule-modal" class="hidden fixed inset-0 z-50 overflow-y-auto flex items-center justify-center p-4" style="background:rgba(15,23,42,.6);">
+    <div class="bg-white rounded-2xl shadow-xl max-w-lg w-full overflow-hidden border border-slate-200">
+      <div class="bg-indigo-600 text-white px-6 py-4 flex justify-between items-center">
+        <h3 class="font-bold text-lg flex items-center gap-2">
+          <i data-lucide="calendar-plus" class="w-5 h-5"></i> บันทึกตารางสอน
+        </h3>
+        <button onclick="tfCloseScheduleModal()" class="text-white/80 hover:text-white bg-transparent border-0 cursor-pointer">
+          <i data-lucide="x" class="w-6 h-6"></i>
+        </button>
+      </div>
+      <form id="tf-schedule-form" onsubmit="tfSaveSchedule(event)" class="p-6 space-y-4">
+        <input type="hidden" id="tf-schedule-editing-id" value="" />
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div>
+            <label class="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">สาขา/ศูนย์ *</label>
+            <select id="tf-sched-center" required class="w-full bg-slate-50 border border-slate-300 text-slate-900 rounded-xl p-2.5 font-medium text-sm">
+              <option value="IDEA CLUB ศูนย์ หนองฉาง">🏬 ศูนย์หนองฉาง</option>
+              <option value="IDEA CLUB ศูนย์ นครสวรรค์">🏫 ศูนย์นครสวรรค์</option>
+            </select>
+          </div>
+          <div>
+            <label class="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">รูปแบบการสอน *</label>
+            <select id="tf-sched-format" onchange="tfOnFormatChange()" required class="w-full bg-slate-50 border border-slate-300 text-slate-900 rounded-xl p-2.5 font-medium text-sm">
+              <option value="onsite">🏫 Onsite</option>
+              <option value="online">💻 Online</option>
+              <option value="ondemand">🎥 Ondemand</option>
+              <option value="oneOnOne">👥 สอนเดี่ยว (1:1)</option>
+            </select>
+          </div>
+        </div>
+        <div>
+          <label class="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">คอร์สเรียน *</label>
+          <select id="tf-sched-course" required class="w-full bg-slate-50 border border-slate-300 text-slate-900 rounded-xl p-2.5 font-medium text-sm"></select>
+        </div>
+        <div>
+          <label class="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">ผู้สอน *</label>
+          <select id="tf-sched-tutor" required class="w-full bg-slate-50 border border-slate-300 text-slate-900 rounded-xl p-2.5 font-medium text-sm"></select>
+        </div>
+        <div class="grid grid-cols-3 gap-3">
+          <div>
+            <label class="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">วันที่ *</label>
+            <input type="date" id="tf-sched-date" required class="w-full bg-slate-50 border border-slate-300 text-slate-900 rounded-xl p-2 font-medium text-sm" />
+          </div>
+          <div>
+            <label class="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">เวลาเริ่ม *</label>
+            <input type="time" id="tf-sched-start" required class="w-full bg-slate-50 border border-slate-300 text-slate-900 rounded-xl p-2 font-medium text-sm" />
+          </div>
+          <div>
+            <label class="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">เวลาสิ้นสุด *</label>
+            <input type="time" id="tf-sched-end" required class="w-full bg-slate-50 border border-slate-300 text-slate-900 rounded-xl p-2 font-medium text-sm" />
+          </div>
+        </div>
+        <div>
+          <label class="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1" id="tf-sched-location-label">ห้องเรียน / ลิงก์เข้าเรียน</label>
+          <input type="text" id="tf-sched-location" placeholder="เช่น ห้อง 101 หรือ Zoom Link" class="w-full bg-slate-50 border border-slate-300 text-slate-900 rounded-xl p-2.5 font-medium text-sm" />
+        </div>
+        <div>
+          <label class="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">หมายเหตุ</label>
+          <textarea id="tf-sched-notes" rows="2" class="w-full bg-slate-50 border border-slate-300 text-slate-900 rounded-xl p-2.5 font-medium text-sm" placeholder="หมายเหตุเพิ่มเติม..."></textarea>
+        </div>
+        <p id="tf-sched-error" class="text-xs text-red-600 font-medium hidden"></p>
+        <div class="flex justify-end space-x-3 pt-3 border-t border-slate-100">
+          <button type="button" onclick="tfCloseScheduleModal()" class="px-5 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold rounded-xl text-sm border-0 cursor-pointer">ยกเลิก</button>
+          <button type="submit" class="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold rounded-xl text-sm shadow-md border-0 cursor-pointer">ยืนยันจัดตาราง</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Confirm Modal -->
+  <div id="tf-confirm-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4" style="background:rgba(15,23,42,.6);">
+    <div class="bg-white rounded-2xl shadow-2xl max-w-sm w-full p-6 border border-slate-200">
+      <div class="w-12 h-12 bg-rose-50 text-rose-600 rounded-full flex items-center justify-center mb-4">
+        <i data-lucide="help-circle" class="w-6 h-6"></i>
+      </div>
+      <h3 class="font-bold text-lg text-slate-900 mb-2" id="tf-confirm-title">ยืนยันการทำรายการ</h3>
+      <p class="text-sm text-slate-500 mb-6 leading-relaxed" id="tf-confirm-message">ต้องการยืนยันใช่หรือไม่?</p>
+      <div class="flex justify-end space-x-2.5">
+        <button id="tf-confirm-cancel" class="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold cursor-pointer border-0">ยกเลิก</button>
+        <button id="tf-confirm-ok" class="px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-bold cursor-pointer border-0 shadow-sm">ยืนยัน</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast -->
+  <div id="tf-toast" class="hidden fixed bottom-5 right-5 z-50 text-white px-5 py-3.5 rounded-lg shadow-2xl flex items-center space-x-3 border border-slate-800 transition-all" style="background:#0f172a;">
+    <span id="tf-toast-icon" class="text-indigo-400"><i data-lucide="info" class="w-5 h-5"></i></span>
+    <span id="tf-toast-message" class="text-xs font-bold">—</span>
+  </div>
+  <!-- ===== End TutorFlow Modals ===== -->
 </body>
 </html>
