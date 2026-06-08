@@ -27274,7 +27274,7 @@ function receiptStatusText(status) {
       try {
         const doc = await db.collection('settings').doc('idCard').get();
         idCardSettings = doc.exists ? doc.data() : {};
-        idCardLogoUrl = (idCardSettings && idCardSettings.logoUrl) || ID_CARD_DEFAULT_LOGO;
+        idCardLogoUrl = parseDriveImageUrl((idCardSettings && idCardSettings.logoUrl) || ID_CARD_DEFAULT_LOGO);
         const manualInput = getElement('idCardLogoManualUrl');
         if (manualInput && idCardLogoUrl) manualInput.value = idCardLogoUrl;
         updateIdCardLogoPreview(idCardLogoUrl);
@@ -27288,7 +27288,8 @@ function receiptStatusText(status) {
       const el = getElement('idCardLogoPreviewArea');
       if (!el) return;
       if (url) {
-        el.innerHTML = '<img src="' + escapeHtml(url) + '" style="max-height:70px; max-width:180px; border-radius:6px; object-fit:contain;" onerror="this.parentNode.innerHTML=\'โหลดรูปไม่สำเร็จ\'" />';
+        const displayUrl = parseDriveImageUrl(url);
+        el.innerHTML = '<img src="' + escapeHtml(displayUrl) + '" style="max-height:70px; max-width:180px; border-radius:6px; object-fit:contain;" onerror="this.parentNode.innerHTML=\'โหลดรูปไม่สำเร็จ\'" />';
       } else {
         el.innerHTML = '<span style="color:#6b7280;">ยังไม่ได้ตั้งค่า Logo</span>';
       }
@@ -27336,10 +27337,10 @@ function receiptStatusText(status) {
         if (resultEl) { resultEl.textContent = 'กำลังบันทึก Logo...'; resultEl.style.color = '#2563eb'; }
         const input = getElement('idCardLogoUploadInput');
         const hasFile = input && input.files && input.files[0];
-        let logoUrl = (getElement('idCardLogoManualUrl') && getElement('idCardLogoManualUrl').value.trim()) || idCardLogoUrl;
+        let logoUrl = parseDriveImageUrl((getElement('idCardLogoManualUrl') && getElement('idCardLogoManualUrl').value.trim()) || idCardLogoUrl);
         if (hasFile) {
           const uploadedUrl = await uploadIdCardLogoToDrive('idCardLogoUploadInput', resultEl);
-          if (uploadedUrl) logoUrl = uploadedUrl;
+          if (uploadedUrl) logoUrl = parseDriveImageUrl(uploadedUrl);
         }
         if (!logoUrl) { throw new Error('กรุณากรอก URL หรืออัปโหลดรูป Logo ก่อน'); }
         await db.collection('settings').doc('idCard').set({
@@ -27587,7 +27588,7 @@ function receiptStatusText(status) {
       if (previewContent) previewContent.innerHTML = '<p style="color:#d97706; padding:12px;">กำลังสร้าง Preview...</p>';
       if (previewArea) previewArea.style.display = 'block';
       try {
-        const logoUrl = (getElement('idCardLogoManualUrl') && getElement('idCardLogoManualUrl').value.trim()) || idCardLogoUrl;
+        const logoUrl = parseDriveImageUrl((getElement('idCardLogoManualUrl') && getElement('idCardLogoManualUrl').value.trim()) || idCardLogoUrl);
         const chunk = target.slice(0, 10);
         const html = await buildIdCardPageHtml(chunk, logoUrl);
         if (previewContent) {
@@ -27624,7 +27625,7 @@ function receiptStatusText(status) {
       if (btn) { btn.disabled = true; btn.textContent = 'กำลังสร้าง PDF...'; }
       if (resultEl) { resultEl.textContent = 'กำลังสร้าง PDF...'; resultEl.style.color = '#d97706'; }
       try {
-        const logoUrl = (getElement('idCardLogoManualUrl') && getElement('idCardLogoManualUrl').value.trim()) || idCardLogoUrl;
+        const logoUrl = parseDriveImageUrl((getElement('idCardLogoManualUrl') && getElement('idCardLogoManualUrl').value.trim()) || idCardLogoUrl);
         const pdf = new JsPdfClass({ unit: 'mm', format: 'a4', orientation: 'portrait' });
         const chunks = [];
         for (var i = 0; i < target.length; i += 10) chunks.push(target.slice(i, i + 10));
