@@ -635,7 +635,7 @@
         bottom: 0;
         z-index: 999;
         display: grid;
-        grid-template-columns: repeat(4, minmax(0, 1fr));
+        grid-template-columns: repeat(5, minmax(0, 1fr));
         gap: 4px;
         padding: 18px 8px calc(8px + env(safe-area-inset-bottom));
         background: rgba(255, 255, 255, 0.96);
@@ -1779,10 +1779,13 @@
       </div>
 
       <h2 class="section-title">นักเรียน Ideaclub</h2>
-      <div id="studentMemberIdNotice" class="notice" style="margin-bottom:18px;">
-        <strong>Member ID สำหรับเข้าสู่ระบบ</strong>
-        <p>Member ID ของคุณคือ <strong id="studentMemberIdNoticeValue">-</strong> กรุณาจดหรือคัดลอกไว้สำหรับเข้าสู่ระบบครั้งถัดไป</p>
-        <button class="btn btn-blue" type="button" onclick="copyCurrentStudentMemberId()">คัดลอก Member ID</button>
+      <div id="studentMemberIdNotice" style="margin-bottom:18px; background:#eff6ff; border:1.5px solid #bfdbfe; border-radius:14px; padding:18px 20px; display:flex; align-items:center; gap:18px; flex-wrap:wrap;">
+        <div style="flex:1; min-width:160px;">
+          <p style="font-size:12px; color:#3b82f6; font-weight:700; letter-spacing:0.05em; margin:0 0 4px; text-transform:uppercase;">Member ID ของคุณ</p>
+          <p id="studentMemberIdNoticeValue" style="font-size:28px; font-weight:900; color:#0f4cbd; letter-spacing:0.08em; margin:0; font-variant-numeric:tabular-nums;">-</p>
+          <p style="font-size:12px; color:#6b7280; margin:4px 0 0;">ใช้สำหรับเข้าสู่ระบบทุกอุปกรณ์</p>
+        </div>
+        <button class="btn btn-blue" type="button" onclick="copyCurrentStudentMemberId()" style="white-space:nowrap;">คัดลอก</button>
       </div>
       
 
@@ -1833,6 +1836,7 @@
       <button type="button" onclick="studentMobileGo('studentDashboard')"><span>หน้าแรก</span></button>
       <button type="button" onclick="studentMobileGo('student-learning')"><span>เข้าเรียน</span></button>
       <button type="button" onclick="studentMobileGo('student-services')"><span>ชำระเงิน</span></button>
+      <button type="button" onclick="studentMobileGo('student-monthly-test')"><span>คะแนน/สอบ</span></button>
       <button type="button" onclick="studentMobileGo('student-online-exam')"><span>สอบออนไลน์</span></button>
       <button id="studentMobileNavToggle" class="student-mobile-nav-toggle" type="button" onclick="toggleStudentMobileBottomNav()" aria-label="ย่อเมนู"><span id="studentMobileNavToggleText">⌄</span></button>
     </nav>
@@ -15361,7 +15365,7 @@ function getCourseOnlineDocs(course, includeInactive) {
             ' data-course="' + escapeHtml(student.course || '') + '"' +
             ' data-location="' + escapeHtml(student.preferredLocation || '') + '"' +
             ' data-record-status="' + recordStatusText + '" style="' + (isSkipped ? 'opacity:0.45;' : '') + '">' +
-          '<td><strong>' + escapeHtml(student.name || '-') + '</strong><br><span class="mini-muted">' + escapeHtml(student.memberId || student.phone || '-') + '</span></td>' +
+          '<td style="max-width:160px;word-break:break-word;white-space:normal;"><strong>' + escapeHtml(student.name || '-') + '</strong>' + (student.nickname ? ' <span style="color:#6b7280;font-weight:400;font-size:13px;">(' + escapeHtml(student.nickname) + ')</span>' : '') + '<br><span class="mini-muted">' + escapeHtml(student.memberId || student.phone || '-') + '</span></td>' +
           '<td>' + escapeHtml(student.course || '-') + '</td>' +
           '<td><strong>' + formatPrice(row.amount) + '</strong></td>' +
           overrideTd +
@@ -17625,6 +17629,7 @@ function receiptStatusText(status) {
       const subjectSelect = getElement('studentExamSubjectFilter');
       const scoreMonthSelect = getElement('scoreHistoryMonthFilter');
       const months = Array.from(new Set(monthlyQuestions.map(function(q) { return getThaiMonthFromDate(q.testDate); })));
+      months.sort(function(a, b) { return compareThaiMonthYear(b, a); });
       const options = months.length ? months.map(function(month) { return '<option value="' + month + '">' + month + '</option>'; }).join('') : '<option value="">ยังไม่มีเดือนสอบ</option>';
 
       if (monthSelect) {
@@ -17649,7 +17654,18 @@ function receiptStatusText(status) {
       if (scoreMonthSelect) {
         const currentScoreMonth = scoreMonthSelect.value;
         scoreMonthSelect.innerHTML = options;
-        if (months.includes(currentScoreMonth)) scoreMonthSelect.value = currentScoreMonth;
+        if (months.includes(currentScoreMonth)) {
+          scoreMonthSelect.value = currentScoreMonth;
+        } else {
+          const grade = getProfileGrade();
+          const latestPublished = scoreReports
+            .filter(function(r) { return r.grade === grade && r.status === 'published'; })
+            .sort(function(a, b) { return compareThaiMonthYear(b.month || '', a.month || ''); })[0];
+          const defaultMonth = (latestPublished && months.includes(latestPublished.month))
+            ? latestPublished.month
+            : (months[0] || '');
+          scoreMonthSelect.value = defaultMonth;
+        }
       }
       if (getElement('scoreHistoryGradeFilter')) {
         const profileGrade = getProfileGrade();
@@ -17709,7 +17725,7 @@ function receiptStatusText(status) {
     const scoreReports = [];
 
     function renderScoreHistoryByMonth() {
-      const selectedMonth = getElement('scoreHistoryMonthFilter') ? getElement('scoreHistoryMonthFilter').value : 'พฤษภาคม 2569';
+      const selectedMonth = getElement('scoreHistoryMonthFilter') ? getElement('scoreHistoryMonthFilter').value : '';
       const selectedGrade = getElement('scoreHistoryGradeFilter') ? getElement('scoreHistoryGradeFilter').value : getProfileGrade();
       const gradeRecords = adminScoreRecords.filter(function(record) {
         return record.month === selectedMonth && record.grade === selectedGrade && record.status === 'published';
@@ -22776,6 +22792,7 @@ function receiptStatusText(status) {
       const scoreMonthSelect = getElement('scoreHistoryMonthFilter');
       const activeLinks = getActiveExamLinksForStudent();
       const months = Array.from(new Set(activeLinks.map(function(item) { return item.month; }).filter(Boolean)));
+      months.sort(function(a, b) { return compareThaiMonthYear(b, a); });
 
       if (monthSelect) {
         const current = monthSelect.value;
@@ -22799,9 +22816,21 @@ function receiptStatusText(status) {
 
       if (scoreMonthSelect) {
         const scoreMonths = Array.from(new Set(getAdminScoreMonths().concat(months))).filter(Boolean);
+        scoreMonths.sort(function(a, b) { return compareThaiMonthYear(b, a); });
         const currentScoreMonth = scoreMonthSelect.value;
         scoreMonthSelect.innerHTML = scoreMonths.length ? scoreMonths.map(function(month) { return '<option value="' + month + '">' + month + '</option>'; }).join('') : '<option value="">ยังไม่มีเดือนคะแนน</option>';
-        if (scoreMonths.includes(currentScoreMonth)) scoreMonthSelect.value = currentScoreMonth;
+        if (scoreMonths.includes(currentScoreMonth)) {
+          scoreMonthSelect.value = currentScoreMonth;
+        } else {
+          const grade = getProfileGrade();
+          const latestPublished = scoreReports
+            .filter(function(r) { return r.grade === grade && r.status === 'published'; })
+            .sort(function(a, b) { return compareThaiMonthYear(b.month || '', a.month || ''); })[0];
+          const defaultMonth = (latestPublished && scoreMonths.includes(latestPublished.month))
+            ? latestPublished.month
+            : (scoreMonths[0] || '');
+          scoreMonthSelect.value = defaultMonth;
+        }
       }
       if (getElement('scoreHistoryGradeFilter')) {
         const profileGrade = getProfileGrade();
