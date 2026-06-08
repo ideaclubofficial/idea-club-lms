@@ -1838,8 +1838,7 @@
       <button type="button" onclick="studentMobileGo('studentDashboard')"><span>หน้าแรก</span></button>
       <button type="button" onclick="studentMobileGo('student-learning')"><span>เข้าเรียน</span></button>
       <button type="button" onclick="studentMobileGo('student-services')"><span>ชำระเงิน</span></button>
-      <button type="button" onclick="studentMobileGo('student-monthly-test')"><span>คะแนน/สอบ</span></button>
-      <button type="button" onclick="studentMobileGo('student-online-exam')"><span>สอบออนไลน์</span></button>
+      <button type="button" onclick="goToStudentExamBestPage()"><span>ข้อสอบ</span></button>
       <button id="studentMobileNavToggle" class="student-mobile-nav-toggle" type="button" onclick="toggleStudentMobileBottomNav()" aria-label="ย่อเมนู"><span id="studentMobileNavToggleText">⌄</span></button>
     </nav>
 
@@ -2123,7 +2122,7 @@
       <div id="studentMobileExam" class="student-mobile-exam">
         <div class="student-mobile-hero-card">
           <p class="student-mobile-muted" style="color:rgba(255,255,255,0.82);">แบบทดสอบ / คะแนน</p>
-          <h2>Monthly Test</h2>
+          <h2>ข้อสอบ / คะแนน</h2>
           <p id="studentMobileExamHero">ทำแบบทดสอบและดูคะแนนย้อนหลัง</p>
         </div>
 
@@ -2139,7 +2138,8 @@
             <span id="studentMobileExamStatus" class="student-mobile-tag">-</span>
           </div>
           <div class="student-mobile-actions">
-            <button class="btn btn-blue" type="button" onclick="openMonthlyExamPage()">เปิด Google Form</button>
+            <button class="btn btn-green" type="button" onclick="studentMobileGo('student-online-exam')">📝 ทำข้อสอบในเว็บ</button>
+            <button class="btn btn-dark" type="button" onclick="openMonthlyExamPage()">เปิด Google Form</button>
             <button class="btn btn-dark" type="button" onclick="studentMobileOpenScoreHistory()">ดูคะแนนย้อนหลัง</button>
           </div>
         </div>
@@ -2166,8 +2166,17 @@
       </div>
 
       <div id="studentExamContent" class="hidden">
+      <div id="studentInWebExamSection" class="form-box" style="display:none;">
+        <h3>📝 ข้อสอบในเว็บ</h3>
+        <p style="color:#6b7280;margin-bottom:12px;">ทำข้อสอบได้โดยตรงในเว็บ ไม่ต้องใช้ Google Form</p>
+        <button class="btn btn-green" onclick="studentMobileGo('student-online-exam')">
+          🚀 ไปหน้าข้อสอบออนไลน์
+        </button>
+      </div>
+      <br id="studentInWebExamSpacer" style="display:none;" />
       <div class="form-box">
-        <h3>ทำแบบทดสอบประจำเดือน</h3>
+        <h3>แบบทดสอบ (Google Form)</h3>
+        <p class="mini-muted">ใช้กรณีที่ยังไม่มีข้อสอบออนไลน์ในระบบ</p>
         <p style="margin-bottom:18px; color:#6b7280;">เลือกเดือนและวิชาเพื่อเปิดแบบทดสอบ</p>
         <div class="form-row">
           <div>
@@ -2322,6 +2331,11 @@
 
           <!-- Phase 1: Course selection -->
           <div id="onlineExamCourseGrid">
+            <div style="margin-bottom:12px;">
+              <button class="btn btn-dark" type="button" onclick="studentMobileGo('student-monthly-test')" style="font-size:13px;padding:6px 14px;">
+                ← กลับ คะแนน/สอบ
+              </button>
+            </div>
             <div class="student-mobile-card">
               <h3>เลือกคอร์สที่ต้องการสอบ</h3>
               <p style="font-size:13px;color:#6b7280;margin-bottom:12px;">คลิกที่คอร์สเพื่อเริ่มทำข้อสอบ</p>
@@ -13576,6 +13590,37 @@ function getCourseOnlineDocs(course, includeInactive) {
       scrollToStudentSection(sectionId);
     }
 
+    function getPublishedOnlineExamCoursesForStudent(options) {
+      const opts = options || {};
+      const selectedCourse = getCurrentStudentCourse ? getCurrentStudentCourse() : null;
+      if (selectedCourse && courseFeatureEnabled(selectedCourse, 'exams') === false) return [];
+      const grade = currentStudent && currentStudent.grade ? currentStudent.grade : getProfileGrade();
+      return (onlineExamCourseCache || []).filter(function(c) {
+        if (!c) return false;
+        if (c.isActive === false) return false;
+        if (c.publishStatus !== 'published') return false;
+        if (opts.exactGradeOnly) return !!grade && c.grade === grade;
+        return !c.grade || !grade || c.grade === grade;
+      });
+    }
+
+    function getStudentOnlineExamCount(options) {
+      return getPublishedOnlineExamCoursesForStudent(options).length;
+    }
+
+    function updateStudentInWebExamUx() {
+      const count = getStudentOnlineExamCount({ exactGradeOnly: true });
+      const inWebSection = getElement('studentInWebExamSection');
+      const inWebSpacer = getElement('studentInWebExamSpacer');
+      if (inWebSection) inWebSection.style.display = count > 0 ? '' : 'none';
+      if (inWebSpacer) inWebSpacer.style.display = count > 0 ? '' : 'none';
+      setStudentMobileText('studentMobileExamHero', count > 0 ? ('มีข้อสอบออนไลน์ ' + count + ' ชุดสำหรับชั้นเรียนของคุณ') : 'ทำแบบทดสอบและดูคะแนนย้อนหลัง');
+    }
+
+    function goToStudentExamBestPage() {
+      studentMobileGo(getStudentOnlineExamCount() > 0 ? 'student-online-exam' : 'student-monthly-test');
+    }
+
     function studentMobileOpenProfile() {
       openStudentProfileEdit();
     }
@@ -13606,6 +13651,7 @@ function getCourseOnlineDocs(course, includeInactive) {
       const canUsePayment = hasRegisteredCourse && selectedFeatures.payment !== false;
       const canUseReceipts = hasRegisteredCourse && selectedFeatures.receipts !== false;
       const canUseExamArea = isCourseApproved && (selectedFeatures.exams !== false || selectedFeatures.scores !== false);
+      const canUseOnlineExamArea = isCourseApproved && selectedFeatures.exams !== false;
       const canUsePickupStatus = hasRegisteredCourse && selectedFeatures.attendance !== false;
       const canUseAnnouncements = !selectedCourse || selectedFeatures.announcements !== false;
 
@@ -13643,10 +13689,17 @@ function getCourseOnlineDocs(course, includeInactive) {
       // Online Exam Interactive — show/hide based on isCourseApproved
       const onlineExamLocked = getElement('onlineExamStudentLocked');
       const onlineExamContent = getElement('onlineExamStudentContent');
-      if (onlineExamLocked) onlineExamLocked.style.display = isCourseApproved ? 'none' : '';
+      if (onlineExamLocked) {
+        onlineExamLocked.style.display = canUseOnlineExamArea ? 'none' : '';
+        if (hasRegisteredCourse && isCourseApproved && selectedFeatures.exams === false) {
+          onlineExamLocked.innerHTML = '<div style="text-align:center;padding:32px 16px;color:#9ca3af;"><div style="font-size:48px;margin-bottom:12px;">🔒</div><p style="font-size:14px;font-weight:600;color:#374151;">คอร์สของคุณยังไม่เปิดฟีเจอร์ข้อสอบออนไลน์</p></div>';
+        } else {
+          onlineExamLocked.innerHTML = '<div style="text-align:center;padding:32px 16px;color:#9ca3af;"><div style="font-size:48px;margin-bottom:12px;">🔒</div><p style="font-size:14px;font-weight:600;color:#374151;">ยังไม่สามารถใช้งานได้</p><p style="font-size:13px;margin-top:6px;">กรุณาสมัครและรับการอนุมัติคอร์สก่อน จึงจะเข้าทำข้อสอบออนไลน์ได้</p></div>';
+        }
+      }
       if (onlineExamContent) {
-        onlineExamContent.style.display = isCourseApproved ? '' : 'none';
-        if (isCourseApproved) safeRun(function() { loadOnlineExamCourses().then(renderOnlineExamCourseGrid); }, 'online-exam-student-load');
+        onlineExamContent.style.display = canUseOnlineExamArea ? '' : 'none';
+        if (canUseOnlineExamArea) safeRun(function() { loadOnlineExamCourses().then(renderOnlineExamCourseGrid); }, 'online-exam-student-load');
       }
 
       if (getElement('studentDashboardCourseName')) getElement('studentDashboardCourseName').textContent = selectedCourse ? selectedCourse.name : '';
@@ -17874,7 +17927,8 @@ function receiptStatusText(status) {
       const selectedRecord = getStudentScoreRecordForMonth(selectedScoreMonth, grade);
       const latestRecord = getStudentPublishedScoreRecords()[0] || null;
 
-      setStudentMobileText('studentMobileExamHero', selectedMonth ? ('เดือน ' + selectedMonth + (selectedSubject ? ' · ' + selectedSubject : '')) : 'ยังไม่มีเดือนสอบ');
+      const onlineExamCount = getStudentOnlineExamCount({ exactGradeOnly: true });
+      setStudentMobileText('studentMobileExamHero', onlineExamCount > 0 ? ('มีข้อสอบออนไลน์ ' + onlineExamCount + ' ชุดสำหรับชั้นเรียนของคุณ') : 'ทำแบบทดสอบและดูคะแนนย้อนหลัง');
       setStudentMobileText('studentMobileExamTitle', examLink ? (examLink.title || 'Monthly Test') : 'Monthly Test');
       setStudentMobileText('studentMobileExamMonth', selectedMonth || '-');
       setStudentMobileText('studentMobileExamSubject', selectedSubject || '-');
@@ -22840,6 +22894,7 @@ function receiptStatusText(status) {
         getElement('scoreHistoryGradeFilter').value = profileGrade;
       }
       updateStudentExamInfo();
+      safeRun(updateStudentInWebExamUx, 'student-in-web-exam-ux');
       renderScoreHistoryByMonth();
     }
 
@@ -25696,6 +25751,7 @@ function receiptStatusText(status) {
         console.error('loadOnlineExamCourses error', e);
         onlineExamCourseCache = [];
       }
+      safeRun(updateStudentInWebExamUx, 'student-in-web-exam-ux');
     }
 
     async function saveOnlineExamCourse() {
@@ -26441,6 +26497,7 @@ function receiptStatusText(status) {
       const locked = getElement('onlineExamStudentLocked');
       const content = getElement('onlineExamStudentContent');
       if (!locked || !content) return;
+      const selectedCourse = getCurrentStudentCourse ? getCurrentStudentCourse() : null;
 
       // Reuse the isCourseApproved logic already used in updateStudentCourseDisplay
       const approved = currentStudent && (
@@ -26449,9 +26506,12 @@ function receiptStatusText(status) {
         currentStudent.isApproved === true
       );
 
-      if (!approved) {
+      if (!approved || (selectedCourse && courseFeatureEnabled(selectedCourse, 'exams') === false)) {
         locked.style.display = '';
         content.style.display = 'none';
+        locked.innerHTML = selectedCourse && courseFeatureEnabled(selectedCourse, 'exams') === false
+          ? '<div style="text-align:center;padding:32px 16px;color:#9ca3af;"><div style="font-size:48px;margin-bottom:12px;">🔒</div><p style="font-size:14px;font-weight:600;color:#374151;">คอร์สของคุณยังไม่เปิดฟีเจอร์ข้อสอบออนไลน์</p></div>'
+          : '<div style="text-align:center;padding:32px 16px;color:#9ca3af;"><div style="font-size:48px;margin-bottom:12px;">🔒</div><p style="font-size:14px;font-weight:600;color:#374151;">ยังไม่สามารถใช้งานได้</p><p style="font-size:13px;margin-top:6px;">กรุณาสมัครและรับการอนุมัติคอร์สก่อน จึงจะเข้าทำข้อสอบออนไลน์ได้</p></div>';
         return;
       }
       locked.style.display = 'none';
@@ -26464,6 +26524,21 @@ function receiptStatusText(status) {
     async function renderOnlineExamCourseGrid() {
       const container = getElement('onlineExamCourseCards');
       if (!container) return;
+      const selectedCourse = getCurrentStudentCourse ? getCurrentStudentCourse() : null;
+      const locked = getElement('onlineExamStudentLocked');
+      const content = getElement('onlineExamStudentContent');
+
+      if (selectedCourse && courseFeatureEnabled(selectedCourse, 'exams') === false) {
+        if (locked) {
+          locked.style.display = '';
+          locked.innerHTML = '<div style="text-align:center;padding:32px 16px;color:#9ca3af;"><div style="font-size:48px;margin-bottom:12px;">🔒</div><p style="font-size:14px;font-weight:600;color:#374151;">คอร์สของคุณยังไม่เปิดฟีเจอร์ข้อสอบออนไลน์</p></div>';
+        }
+        if (content) content.style.display = 'none';
+        container.innerHTML = '';
+        return;
+      }
+      if (locked) locked.style.display = 'none';
+      if (content) content.style.display = '';
 
       const grade = currentStudent ? (currentStudent.grade || '') : '';
       const filtered = onlineExamCourseCache.filter(function(c) {
