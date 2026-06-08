@@ -3734,6 +3734,23 @@
                   <div class="payment-step-title">Preview ยอด แล้วบันทึก</div>
                   <p style="color:#6b7280; margin-bottom:12px;">ตรวจยอดที่นักเรียนจะเห็น เมื่อถูกต้องให้กดบันทึก</p>
                   <div id="paymentRecordPreviewSummary" class="dashboard-grid"></div>
+                  <div id="paymentPreviewFilterBar" style="display:flex;flex-wrap:wrap;gap:10px;margin:14px 0 8px;align-items:center;">
+                    <input id="paymentPreviewFilterName" type="text" placeholder="ค้นหาชื่อนักเรียน..." style="flex:1;min-width:140px;max-width:220px;" oninput="filterPaymentPreviewTable()" />
+                    <select id="paymentPreviewFilterCourse" onchange="filterPaymentPreviewTable()" style="min-width:120px;">
+                      <option value="">คอร์สทั้งหมด</option>
+                    </select>
+                    <select id="paymentPreviewFilterLocation" onchange="filterPaymentPreviewTable()" style="min-width:120px;">
+                      <option value="">ศูนย์ทั้งหมด</option>
+                      <option>IDEA CLUB ศูนย์ นครสวรรค์</option>
+                      <option>IDEA CLUB ศูนย์ หนองฉาง</option>
+                    </select>
+                    <select id="paymentPreviewFilterStatus" onchange="filterPaymentPreviewTable()" style="min-width:130px;">
+                      <option value="">สถานะทั้งหมด</option>
+                      <option value="สร้างแล้ว">สร้างแล้ว</option>
+                      <option value="ยังไม่ได้สร้าง">ยังไม่ได้สร้าง</option>
+                      <option value="ยกเว้น">ยกเว้นรอบนี้</option>
+                    </select>
+                  </div>
                   <div class="table-wrap" style="margin-top:14px;">
                     <table>
                       <thead>
@@ -3744,6 +3761,7 @@
                           <th>ยอดพิเศษรายคน</th>
                           <th>สถานะรายการ</th>
                           <th>สถานะชำระเงิน</th>
+                          <th>จัดการ</th>
                         </tr>
                       </thead>
                       <tbody id="paymentRecordPreviewTableBody"></tbody>
@@ -15160,7 +15178,10 @@ function getCourseOnlineDocs(course, includeInactive) {
 
     function getMonthlyPaymentTargetStudentsForMonth(month) {
       if (!month) return [];
+      const pmItem = getPaymentMonthItem(month);
+      const skipped = pmItem && pmItem.skippedStudents ? pmItem.skippedStudents : {};
       return getMonthlyPaymentTargetStudents().filter(function(s) {
+        if (skipped[String(s.id)]) return false;
         if (!s.billingStartMonth) return true;
         return compareThaiMonthYear(s.billingStartMonth, month) <= 0;
       });
@@ -15170,6 +15191,7 @@ function getCourseOnlineDocs(course, includeInactive) {
       if (!payment) return false;
       const status = String(payment.status || payment.paymentStatus || '').trim();
       const slipStatus = String(payment.slipStatus || '').trim();
+      if (status === 'ยกเว้น') return false;
       return status === 'รอชำระเงิน' || status === 'ค้างชำระ' || status === 'รอตรวจสลิป' ||
         slipStatus === 'รอตรวจสลิป' || slipStatus === 'pending' || slipStatus === 'waiting';
     }
@@ -15232,6 +15254,45 @@ function getCourseOnlineDocs(course, includeInactive) {
       return { created: created, updated: updated, skipped: skipped };
     }
 
+    async function voidStudentMonthPayment(month, studentId) {
+      const pmItem = getPaymentMonthItem(month);
+      if (!pmItem) return;
+      if (!confirm('ยืนยันยกเลิกยอดเรียกเก็บรอบ ' + month + ' ของนักเรียนรายนี้?')) return;
+      if (!pmItem.skippedStudents) pmItem.skippedStudents = {};
+      pmItem.skippedStudents[String(studentId)] = true;
+      await setFirebaseDocument('paymentMonths', pmItem);
+      const payment = payments.find(function(p) {
+        return String(p.studentId || '') === String(studentId) && p.month === month;
+      });
+      if (payment && isPaymentRecordUpdatable(payment)) {
+        payment.status = 'ยกเว้น';
+        payment.paymentStatus = 'ยกเว้น';
+        payment.adminNote = (payment.adminNote ? payment.adminNote + ' | ' : '') + 'ยกเว้นรอบ ' + month;
+        await setFirebaseDocument('payments', payment);
+      }
+      addActivityLog('ยกเลิกยอดเรียกเก็บรายบุคคล', (students.find(function(s) { return String(s.id) === String(studentId); }) || {}).name + ' · ' + month);
+      renderPaymentRecordPreview();
+      renderPaymentTable();
+    }
+
+    async function restoreStudentMonthPayment(month, studentId) {
+      const pmItem = getPaymentMonthItem(month);
+      if (!pmItem || !pmItem.skippedStudents) return;
+      delete pmItem.skippedStudents[String(studentId)];
+      await setFirebaseDocument('paymentMonths', pmItem);
+      const payment = payments.find(function(p) {
+        return String(p.studentId || '') === String(studentId) && p.month === month && p.status === 'ยกเว้น';
+      });
+      if (payment) {
+        payment.status = 'รอชำระเงิน';
+        payment.paymentStatus = 'รอชำระเงิน';
+        await setFirebaseDocument('payments', payment);
+      }
+      addActivityLog('คืนสิทธิ์ยอดเรียกเก็บ', (students.find(function(s) { return String(s.id) === String(studentId); }) || {}).name + ' · ' + month);
+      renderPaymentRecordPreview();
+      renderPaymentTable();
+    }
+
     function renderPaymentRecordPreview(message, isError) {
       const summaryBox = getElement('paymentRecordPreviewSummary');
       const tbody = getElement('paymentRecordPreviewTableBody');
@@ -15241,7 +15302,7 @@ function getCourseOnlineDocs(course, includeInactive) {
       const month = getSelectedPaymentRecordMonth();
       if (!month) {
         summaryBox.innerHTML = '<div class="stat"><h4>เดือนที่เลือก</h4><p>-</p></div><div class="stat"><h4>นักเรียนที่ต้องเรียกเก็บ</h4><p>0 คน</p></div><div class="stat"><h4>ยอดรวม</h4><p>0 บาท</p></div>';
-        tbody.innerHTML = '<tr><td colspan="6">ยังไม่มีเดือนชำระเงิน ให้เพิ่มรอบเดือนก่อน</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="7">ยังไม่มีเดือนชำระเงิน ให้เพิ่มรอบเดือนก่อน</td></tr>';
         const excludedContainer = getElement('paymentRecordExcludedSection');
         if (excludedContainer) excludedContainer.innerHTML = '';
         if (result) result.textContent = message || '';
@@ -15249,23 +15310,31 @@ function getCourseOnlineDocs(course, includeInactive) {
       }
 
       const allEligibleStudents = getMonthlyPaymentTargetStudents();
-      const targetStudents = getMonthlyPaymentTargetStudentsForMonth(month);
-      const targetIds = new Set(targetStudents.map(function(s) { return String(s.id); }));
-      const excludedStudents = allEligibleStudents.filter(function(s) {
-        return !targetIds.has(String(s.id));
+      const pmItem = getPaymentMonthItem(month);
+      const skipped = pmItem && pmItem.skippedStudents ? pmItem.skippedStudents : {};
+      const previewStudents = allEligibleStudents.filter(function(s) {
+        if (!s.billingStartMonth) return true;
+        return compareThaiMonthYear(s.billingStartMonth, month) <= 0;
       });
-      const rows = targetStudents.map(function(student) {
+      const previewIds = new Set(previewStudents.map(function(s) { return String(s.id); }));
+      const excludedStudents = allEligibleStudents.filter(function(s) {
+        return !previewIds.has(String(s.id));
+      });
+      const rows = previewStudents.map(function(student) {
         const amount = getMonthlyPaymentAmountForStudent(student, month);
         const payment = findPaymentForStudentMonth(student, month);
+        const isSkipped = !!skipped[String(student.id)];
         return {
           student: student,
           amount: amount,
-          payment: payment
+          payment: payment,
+          isSkipped: isSkipped
         };
       });
-      const createdRows = rows.filter(function(row) { return !!row.payment; });
-      const pendingRows = rows.filter(function(row) { return !row.payment; });
-      const totalAmount = rows.reduce(function(sum, row) { return sum + (Number(row.amount || 0) || 0); }, 0);
+      const createdRows = rows.filter(function(row) { return !row.isSkipped && !!row.payment; });
+      const pendingRows = rows.filter(function(row) { return !row.isSkipped && !row.payment; });
+      const skippedRows = rows.filter(function(row) { return row.isSkipped; });
+      const totalAmount = rows.reduce(function(sum, row) { return row.isSkipped ? sum : sum + (Number(row.amount || 0) || 0); }, 0);
 
       summaryBox.innerHTML =
         '<div class="stat"><h4>เดือนที่เลือก</h4><p>' + escapeHtml(month) + '</p></div>' +
@@ -15273,26 +15342,46 @@ function getCourseOnlineDocs(course, includeInactive) {
         '<div class="stat"><h4>ยอดรวมที่ต้องเรียกเก็บ</h4><p>' + formatPrice(totalAmount) + '</p></div>' +
         '<div class="stat"><h4>ยังไม่เรียกเก็บรอบนี้</h4><p>' + excludedStudents.length + ' คน</p></div>' +
         '<div class="stat"><h4>สร้างแล้ว</h4><p>' + createdRows.length + ' รายการ</p></div>' +
-        '<div class="stat"><h4>ยังไม่ได้สร้าง</h4><p>' + pendingRows.length + ' รายการ</p></div>';
+        '<div class="stat"><h4>ยังไม่ได้สร้าง</h4><p>' + pendingRows.length + ' รายการ</p></div>' +
+        '<div class="stat"><h4>ยกเว้นรอบนี้</h4><p>' + skippedRows.length + ' คน</p></div>';
 
       tbody.innerHTML = rows.length ? rows.map(function(row) {
         const student = row.student;
         const payment = row.payment;
+        const isSkipped = row.isSkipped;
         const paymentStatus = payment ? (payment.status || payment.paymentStatus || 'รอชำระเงิน') : '-';
-        const recordStatus = payment ? '<span class="status-paid">สร้างแล้ว</span>' : '<span class="status-waiting">ยังไม่ได้สร้าง</span>';
-        const paymentStatusClass = paymentStatus === 'ชำระแล้ว' ? 'status-paid' : paymentStatus === 'ค้างชำระ' || paymentStatus === 'สลิปไม่ผ่าน' ? 'status-absent' : 'status-waiting';
+        const recordStatus = isSkipped ? '<span class="status-absent">ยกเว้นรอบนี้</span>' : (payment ? '<span class="status-paid">สร้างแล้ว</span>' : '<span class="status-waiting">ยังไม่ได้สร้าง</span>');
+        const recordStatusText = isSkipped ? 'ยกเว้น' : (payment ? 'สร้างแล้ว' : 'ยังไม่ได้สร้าง');
+        const paymentStatusClass = paymentStatus === 'ชำระแล้ว' ? 'status-paid' : paymentStatus === 'ค้างชำระ' || paymentStatus === 'สลิปไม่ผ่าน' || paymentStatus === 'ยกเว้น' ? 'status-absent' : 'status-waiting';
         const override = getStudentMonthPriceOverride(month, student.id);
         const inputStyle = 'width:90px;border:1px solid ' + (override > 0 ? '#3b82f6;color:#1d4ed8;font-weight:700' : '#d1d5db;color:#6b7280') + ';border-radius:6px;padding:3px 6px;font-size:13px;';
         const overrideTd = '<td><input type="number" min="0" style="' + inputStyle + '" placeholder="ปกติ" value="' + (override > 0 ? override : '') + '" onblur="saveStudentMonthPriceOverride(' + jsArg(month) + ',' + jsArg(student.id) + ',this.value)" onkeydown="if(event.key===\'Enter\')this.blur()"></td>';
-        return '<tr>' +
+        return '<tr data-student-id="' + escapeHtml(String(student.id || '')) + '"' +
+            ' data-name="' + escapeHtml((student.name || '').toLowerCase()) + '"' +
+            ' data-course="' + escapeHtml(student.course || '') + '"' +
+            ' data-location="' + escapeHtml(student.preferredLocation || '') + '"' +
+            ' data-record-status="' + recordStatusText + '" style="' + (isSkipped ? 'opacity:0.45;' : '') + '">' +
           '<td><strong>' + escapeHtml(student.name || '-') + '</strong><br><span class="mini-muted">' + escapeHtml(student.memberId || student.phone || '-') + '</span></td>' +
           '<td>' + escapeHtml(student.course || '-') + '</td>' +
           '<td><strong>' + formatPrice(row.amount) + '</strong></td>' +
           overrideTd +
           '<td>' + recordStatus + '</td>' +
           '<td>' + (payment ? '<span class="' + paymentStatusClass + '">' + escapeHtml(paymentStatus) + '</span>' : '-') + '</td>' +
+          '<td>' + (isSkipped
+            ? '<button class="btn btn-dark" style="font-size:12px;padding:4px 10px;" type="button" onclick="restoreStudentMonthPayment(\'' + jsArg(month) + '\',\'' + jsArg(student.id) + '\')">คืนสิทธิ์</button>'
+            : '<button class="btn btn-red" style="font-size:12px;padding:4px 10px;" type="button" onclick="voidStudentMonthPayment(\'' + jsArg(month) + '\',\'' + jsArg(student.id) + '\')">ยกเลิกยอด</button>'
+          ) + '</td>' +
         '</tr>';
-      }).join('') : '<tr><td colspan="6">ยังไม่มีนักเรียนที่เข้าเงื่อนไขสำหรับสร้างรายการเรียกเก็บ</td></tr>';
+      }).join('') : '<tr><td colspan="7">ยังไม่มีนักเรียนที่เข้าเงื่อนไขสำหรับสร้างรายการเรียกเก็บ</td></tr>';
+
+      const courseFilter = getElement('paymentPreviewFilterCourse');
+      if (courseFilter) {
+        const courses = Array.from(new Set(rows.map(function(r) { return r.student.course || ''; }).filter(Boolean)));
+        const currentCourse = courseFilter.value;
+        courseFilter.innerHTML = '<option value="">คอร์สทั้งหมด</option>' +
+          courses.map(function(c) { return '<option value="' + escapeHtml(c) + '"' + (c === currentCourse ? ' selected' : '') + '>' + escapeHtml(c) + '</option>'; }).join('');
+      }
+      filterPaymentPreviewTable();
 
       const excludedContainer = getElement('paymentRecordExcludedSection') || (function() {
         const div = document.createElement('div');
@@ -15325,6 +15414,26 @@ function getCourseOnlineDocs(course, includeInactive) {
         result.textContent = message || '';
         result.style.color = isError ? '#dc2626' : '#16a34a';
       }
+    }
+
+    function filterPaymentPreviewTable() {
+      const nameVal = (getElement('paymentPreviewFilterName') ? getElement('paymentPreviewFilterName').value : '').trim().toLowerCase();
+      const courseVal = getElement('paymentPreviewFilterCourse') ? getElement('paymentPreviewFilterCourse').value : '';
+      const locationVal = getElement('paymentPreviewFilterLocation') ? getElement('paymentPreviewFilterLocation').value : '';
+      const statusVal = getElement('paymentPreviewFilterStatus') ? getElement('paymentPreviewFilterStatus').value : '';
+      const tbody = getElement('paymentRecordPreviewTableBody');
+      if (!tbody) return;
+      Array.from(tbody.querySelectorAll('tr[data-student-id]')).forEach(function(tr) {
+        const name = (tr.getAttribute('data-name') || '').toLowerCase();
+        const course = tr.getAttribute('data-course') || '';
+        const location = tr.getAttribute('data-location') || '';
+        const recordStatus = tr.getAttribute('data-record-status') || '';
+        const matchName = !nameVal || name.indexOf(nameVal) !== -1;
+        const matchCourse = !courseVal || course === courseVal;
+        const matchLocation = !locationVal || location === locationVal;
+        const matchStatus = !statusVal || recordStatus === statusVal;
+        tr.style.display = (matchName && matchCourse && matchLocation && matchStatus) ? '' : 'none';
+      });
     }
 
     function formatPaymentSlipCell(payment) {
