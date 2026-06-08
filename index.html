@@ -2000,6 +2000,10 @@
           <select id="studentPaymentMonth" onchange="updateStudentSelectedPaymentMonth(); updateStudentCourseDisplay()">
             <option value="">ยังไม่มีเดือนชำระเงิน</option>
           </select>
+          <div id="studentBillingStartNotice" class="notice hidden" style="margin-top:10px; background:#eff6ff; border-color:#bfdbfe; color:#1e40af;">
+            <strong>ยังไม่มียอดเรียกเก็บ</strong>
+            <p id="studentBillingStartNoticeText">ยอดเรียกเก็บจะเริ่มในเดือนถัดไป</p>
+          </div>
           <p style="margin-top:12px;"><strong>เดือนที่เลือก:</strong> <span id="studentPaymentCurrentMonth">-</span></p>
           <p><strong>ยอดที่ต้องชำระ:</strong> <span id="studentPaymentAmount" class="price">-</span></p>
           <p id="studentPaymentDiscountDetail" style="color:#6b7280; font-size:13px;" class="hidden"></p>
@@ -13412,7 +13416,7 @@ function getCourseOnlineDocs(course, includeInactive) {
       const today = getThaiDayName(new Date());
       const hasClassToday = !!(selectedCourse && Array.isArray(selectedCourse.days) && selectedCourse.days.includes(today));
       const courseStatusForHome = currentStudent && currentStudent.courseStatus ? currentStudent.courseStatus : '';
-      const isApprovedForHome = hasRegisteredCourse && (courseStatusForHome === 'อนุมัติแล้ว' || courseStatusForHome === 'Active' || courseStatusForHome === 'สมัครแล้ว');
+      const isApprovedForHome = hasRegisteredCourse && isCourseStatusApproved(courseStatusForHome);
       if (getElement('studentDashClassToday')) {
         getElement('studentDashClassToday').textContent = !hasRegisteredCourse ? 'ยังไม่ได้สมัครคอร์ส' : (!isApprovedForHome ? 'รออนุมัติคอร์ส' : (hasClassToday ? 'มีเรียนวันนี้' : 'ไม่มีเรียนวันนี้'));
         getElement('studentDashClassToday').className = 'status-badge ' + (isApprovedForHome && hasClassToday ? 'present' : 'parent');
@@ -13486,7 +13490,7 @@ function getCourseOnlineDocs(course, includeInactive) {
       const displayName = student.nickname || student.name || 'นักเรียน';
       const memberId = student.memberId || student.studentId || '-';
       const courseStatus = student.courseStatus || '';
-      const isApproved = !!(hasRegisteredCourse && (courseStatus === 'อนุมัติแล้ว' || courseStatus === 'Active' || courseStatus === 'สมัครแล้ว'));
+      const isApproved = !!(hasRegisteredCourse && isCourseStatusApproved(courseStatus));
       const today = getThaiDayName(new Date());
       const hasClassToday = !!(selectedCourse && Array.isArray(selectedCourse.days) && selectedCourse.days.includes(today));
       const selectedMonth = getStudentMobileSelectedMonth();
@@ -13572,7 +13576,7 @@ function getCourseOnlineDocs(course, includeInactive) {
 
       const hasRegisteredCourse = !!(currentStudent && currentStudent.courseId && selectedCourse);
       const courseStatus = currentStudent && currentStudent.courseStatus ? currentStudent.courseStatus : '';
-      const isCourseApproved = hasRegisteredCourse && (courseStatus === 'อนุมัติแล้ว' || courseStatus === 'Active' || courseStatus === 'สมัครแล้ว');
+      const isCourseApproved = hasRegisteredCourse && isCourseStatusApproved(courseStatus);
       const selectedFeatures = selectedCourse ? normalizeCourseFeatures(selectedCourse) : {};
       const canUsePayment = hasRegisteredCourse && selectedFeatures.payment !== false;
       const canUseReceipts = hasRegisteredCourse && selectedFeatures.receipts !== false;
@@ -13634,7 +13638,7 @@ function getCourseOnlineDocs(course, includeInactive) {
       if (getElement('studentDashboardCourseStatus')) {
         const courseStatusText = hasRegisteredCourse && currentStudent && currentStudent.courseStatus ? currentStudent.courseStatus : '';
         getElement('studentDashboardCourseStatus').textContent = courseStatusText;
-        getElement('studentDashboardCourseStatus').className = courseStatusText === 'อนุมัติแล้ว' || courseStatusText === 'สมัครแล้ว' || courseStatusText === 'Active' ? 'status-paid' : 'status-waiting';
+        getElement('studentDashboardCourseStatus').className = isCourseStatusApproved(courseStatusText) ? 'status-paid' : 'status-waiting';
       }
       if (getElement('studentDashboardCourseStatusRow')) {
         getElement('studentDashboardCourseStatusRow').classList.toggle('hidden', !hasRegisteredCourse);
@@ -13781,7 +13785,7 @@ function getCourseOnlineDocs(course, includeInactive) {
     function getStudentEntitledCoursesForMobile() {
       const selectedCourse = getCurrentStudentCourse();
       const courseStatus = currentStudent && currentStudent.courseStatus ? currentStudent.courseStatus : '';
-      const approved = !!(currentStudent && currentStudent.courseId && selectedCourse && (courseStatus === 'อนุมัติแล้ว' || courseStatus === 'Active' || courseStatus === 'สมัครแล้ว'));
+      const approved = !!(currentStudent && currentStudent.courseId && selectedCourse && isCourseStatusApproved(courseStatus));
       return approved ? [selectedCourse] : [];
     }
 
@@ -14541,8 +14545,21 @@ function getCourseOnlineDocs(course, includeInactive) {
       const monthOptions = getStudentPaymentMonthOptions();
       const currentValue = studentSelect.value;
       if (!monthOptions.length) {
-        studentSelect.innerHTML = '<option value="">ยังไม่มีรายการเรียกเก็บเงิน</option>';
+        const billingStart = currentStudent && currentStudent.billingStartMonth;
+        studentSelect.innerHTML = billingStart
+          ? '<option value="">ยังไม่ถึงรอบเรียกเก็บเงิน</option>'
+          : '<option value="">ยังไม่มีรายการเรียกเก็บเงิน</option>';
         studentSelect.value = '';
+        const notice = getElement('studentBillingStartNotice');
+        const noticeText = getElement('studentBillingStartNoticeText');
+        if (notice) {
+          if (billingStart) {
+            notice.classList.remove('hidden');
+            if (noticeText) noticeText.textContent = 'ยอดเรียกเก็บจะเริ่มตั้งแต่เดือน ' + billingStart + ' เป็นต้นไป';
+          } else {
+            notice.classList.add('hidden');
+          }
+        }
       } else {
         studentSelect.innerHTML = monthOptions.map(function(month) {
           return '<option value="' + escapeHtml(month) + '">' + escapeHtml(month) + '</option>';
@@ -14557,6 +14574,8 @@ function getCourseOnlineDocs(course, includeInactive) {
           return monthOptions[0];
         })();
         studentSelect.value = monthOptions.includes(priorityMonth) ? priorityMonth : monthOptions[0];
+        const noticeEl = getElement('studentBillingStartNotice');
+        if (noticeEl) noticeEl.classList.add('hidden');
       }
       updateStudentSelectedPaymentMonth();
       updateStudentPendingPaymentBanner();
@@ -15116,6 +15135,11 @@ function getCourseOnlineDocs(course, includeInactive) {
       const statusMonth = getElement('paymentStatusMonthFilter') ? getElement('paymentStatusMonthFilter').value : '';
       const month = pricingMonth || (statusMonth && statusMonth !== 'ทั้งหมด' ? statusMonth : (paymentMonths[0] ? paymentMonths[0].month : ''));
       return paymentMonths.some(function(item) { return item.month === month; }) ? month : '';
+    }
+
+    function isCourseStatusApproved(status) {
+      const s = String(status || '');
+      return s === 'อนุมัติแล้ว' || s === 'Active' || s === 'สมัครแล้ว';
     }
 
     function getMonthlyPaymentTargetStudents() {
