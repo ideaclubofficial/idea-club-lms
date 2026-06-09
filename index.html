@@ -1944,6 +1944,12 @@
 
         <div class="student-mobile-card">
           <h3>สถานะชำระเงิน</h3>
+          <div style="margin-bottom:12px;">
+            <label style="font-size:13px;color:rgba(255,255,255,0.75);display:block;margin-bottom:4px;">เลือกเดือนที่ชำระ</label>
+            <select id="studentMobilePaymentMonthSelect" style="width:100%;padding:8px 10px;border-radius:8px;border:none;font-size:14px;background:#fff;color:#111;" onchange="syncMobilePaymentMonthSelect(); updateStudentSelectedPaymentMonth(); updateStudentCourseDisplay()">
+              <option value="">ยังไม่มีเดือนชำระเงิน</option>
+            </select>
+          </div>
           <div class="student-mobile-card-main">
             <div>
               <strong id="studentMobilePaymentMonth">-</strong>
@@ -1954,7 +1960,7 @@
           </div>
         </div>
 
-        <div class="student-mobile-card">
+        <div class="student-mobile-card" id="studentMobileQrCard">
           <h3>QR Code</h3>
           <div id="studentMobileQrBox" class="student-mobile-qr-box">กำลังโหลด QR Code</div>
           <button class="btn btn-blue" type="button" onclick="downloadPaymentQr('student')">ดาวน์โหลด QR</button>
@@ -14604,6 +14610,13 @@ function getCourseOnlineDocs(course, includeInactive) {
     function refreshStudentPaymentMonthSelect() {
       const studentSelect = getElement('studentPaymentMonth');
       if (!studentSelect) return;
+      const syncMobilePaymentOptions = function() {
+        const mobileSelect = getElement('studentMobilePaymentMonthSelect');
+        if (mobileSelect) {
+          mobileSelect.innerHTML = studentSelect.innerHTML;
+          mobileSelect.value = studentSelect.value;
+        }
+      };
       const monthOptions = getStudentPaymentMonthOptions();
       const currentValue = studentSelect.value;
       if (!monthOptions.length) {
@@ -14622,6 +14635,7 @@ function getCourseOnlineDocs(course, includeInactive) {
             notice.classList.add('hidden');
           }
         }
+        syncMobilePaymentOptions();
       } else {
         studentSelect.innerHTML = monthOptions.map(function(month) {
           return '<option value="' + escapeHtml(month) + '">' + escapeHtml(month) + '</option>';
@@ -14638,9 +14652,18 @@ function getCourseOnlineDocs(course, includeInactive) {
         studentSelect.value = monthOptions.includes(priorityMonth) ? priorityMonth : monthOptions[0];
         const noticeEl = getElement('studentBillingStartNotice');
         if (noticeEl) noticeEl.classList.add('hidden');
+        syncMobilePaymentOptions();
       }
       updateStudentSelectedPaymentMonth();
       updateStudentPendingPaymentBanner();
+    }
+
+    function syncMobilePaymentMonthSelect() {
+      const mobileSelect = getElement('studentMobilePaymentMonthSelect');
+      const desktopSelect = getElement('studentPaymentMonth');
+      if (mobileSelect && desktopSelect) {
+        desktopSelect.value = mobileSelect.value;
+      }
     }
 
     function updateStudentPendingPaymentBanner() {
@@ -14712,6 +14735,11 @@ function getCourseOnlineDocs(course, includeInactive) {
       }
       updateStudentSlipUploadControls();
       if (typeof updateStudentPendingPaymentBanner === 'function') updateStudentPendingPaymentBanner();
+      const mobileSelect = getElement('studentMobilePaymentMonthSelect');
+      const desktopSelect = getElement('studentPaymentMonth');
+      if (mobileSelect && desktopSelect && mobileSelect.value !== desktopSelect.value) {
+        mobileSelect.value = desktopSelect.value;
+      }
     }
 
     function renderPaymentMonths() {
@@ -16546,7 +16574,10 @@ function receiptStatusText(status) {
       setStudentMobileText('studentMobilePaymentAmount', amount ? formatPrice(amount) : '-');
       setStudentMobileTag('studentMobilePaymentStatusBadge', statusText || '-');
 
-      syncStudentMobileQrBox();
+      const isPaid = statusText === 'ชำระแล้ว';
+      const qrCard = getElement('studentMobileQrCard');
+      if (qrCard) qrCard.style.display = isPaid ? 'none' : '';
+      if (!isPaid) syncStudentMobileQrBox();
 
       const fileInput = getElement('studentSlipFile');
       const fileName = fileInput && fileInput.files && fileInput.files[0] ? fileInput.files[0].name : 'ยังไม่ได้เลือกไฟล์';
