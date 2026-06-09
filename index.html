@@ -14149,10 +14149,45 @@ function getCourseOnlineDocs(course, includeInactive) {
         '</div>';
     }
 
+    function findPaymentByAnyId(paymentId) {
+      return (payments || []).find(function(p) {
+        return String(p.id || '') === String(paymentId) || String(p.firebaseDocId || '') === String(paymentId);
+      }) || null;
+    }
+
+    async function syncStudentPaymentStatusFromPayment(payment, status) {
+      if (!payment) return null;
+      const student = getPaymentStudentRecord(payment) || (students || []).find(function(s) {
+        return isStudentPaymentRecord(s, payment);
+      });
+      if (!student) return null;
+      const month = payment.paymentMonth || payment.month || payment.billingMonth || '';
+      student.overdueMonths = Array.isArray(student.overdueMonths) ? student.overdueMonths : [];
+
+      if (status === 'ค้างชำระ') {
+        if (month && !student.overdueMonths.includes(month)) student.overdueMonths.push(month);
+        student.paymentStatus = 'ค้างชำระ';
+      } else {
+        if (month) student.overdueMonths = student.overdueMonths.filter(function(item) { return item !== month; });
+        student.paymentStatus = status;
+      }
+
+      if (status === 'ชำระแล้ว' && student.courseId && String(student.courseId) === String(payment.courseId || '') && student.courseStatus === 'รออนุมัติคอร์ส') {
+        student.courseStatus = 'อนุมัติแล้ว';
+      }
+
+      await setFirebaseDocument('students', student);
+      if (currentStudent && isStudentPaymentRecord(currentStudent, payment)) {
+        Object.assign(currentStudent, student);
+        updateStudentCourseDisplay();
+      }
+      return student;
+    }
+
     async function updatePaymentRowStatus(row, status) {
       if (!row) return;
       const paymentId = row.getAttribute('data-payment-id');
-      const payment = payments.find(function(p) { return String(p.id) === String(paymentId); });
+      const payment = findPaymentByAnyId(paymentId);
       if (payment) {
         payment.status = status;
         payment.paymentStatus = status;
@@ -14170,29 +14205,40 @@ function getCourseOnlineDocs(course, includeInactive) {
       if (status === 'ชำระแล้ว') {
         row.children[4].innerHTML = payment ? formatPaymentSlipReviewCell(payment) : '<span class="status-paid">ตรวจแล้ว</span>';
         row.children[5].innerHTML = '<span class="status-paid">ชำระแล้ว</span>';
-        await syncStudentPaymentStatusFromRow(row, 'ชำระแล้ว');
         if (payment) {
-          await createReceipt(getPaymentDataFromRow(row), { publish: true, silent: true, source: 'auto-approve' });
-          await approveStudentCourseFromPayment(payment);
+          const receipt = await issueReceiptFromPayment(payment);
+          if (receipt) {
+            payment.receiptId = receipt.id || payment.receiptId || '';
+            payment.receiptNo = receipt.receiptNo || payment.receiptNo || '';
+            payment.receiptStatus = 'published';
+            await setFirebaseDocument('payments', payment);
+          }
+          await syncStudentPaymentStatusFromPayment(payment, 'ชำระแล้ว');
+        } else {
+          await syncStudentPaymentStatusFromRow(row, 'ชำระแล้ว');
         }
       } else if (status === 'สลิปไม่ผ่าน') {
         row.children[4].innerHTML = payment ? formatPaymentSlipReviewCell(payment) : '<span class="status-absent">สลิปไม่ผ่าน</span>';
         row.children[5].innerHTML = '<span class="status-absent">สลิปไม่ผ่าน</span>';
-        await syncStudentPaymentStatusFromRow(row, 'สลิปไม่ผ่าน');
+        if (payment) await syncStudentPaymentStatusFromPayment(payment, 'สลิปไม่ผ่าน');
+        else await syncStudentPaymentStatusFromRow(row, 'สลิปไม่ผ่าน');
       } else if (status === 'ค้างชำระ') {
         row.children[4].innerHTML = payment ? formatPaymentSlipReviewCell(payment) : '<span class="status-absent">ยังไม่พบสลิป</span>';
         row.children[5].innerHTML = '<span class="status-absent">ค้างชำระ</span>';
-        await syncStudentPaymentStatusFromRow(row, 'ค้างชำระ');
+        if (payment) await syncStudentPaymentStatusFromPayment(payment, 'ค้างชำระ');
+        else await syncStudentPaymentStatusFromRow(row, 'ค้างชำระ');
       } else {
         row.children[4].innerHTML = payment ? formatPaymentSlipReviewCell(payment) : '<span class="status-waiting">มีสลิป</span>';
         row.children[5].innerHTML = '<span class="status-waiting">รอตรวจสลิป</span>';
-        await syncStudentPaymentStatusFromRow(row, 'รอตรวจสลิป');
+        if (payment) await syncStudentPaymentStatusFromPayment(payment, 'รอตรวจสลิป');
+        else await syncStudentPaymentStatusFromRow(row, 'รอตรวจสลิป');
       }
       row.children[6].innerHTML = paymentActionButtons(status, paymentId);
       addActivityLog('เปลี่ยนสถานะชำระเงิน', (row.children[0] ? row.children[0].innerText : '-') + ' · ' + (row.children[2] ? row.children[2].innerText : '-') + ' · ' + status);
       updatePaymentSummary();
       renderAdminReceipts();
       renderStudentReceipts();
+      safeRun(renderStudentMobilePayment, 'payment-row-status-mobile');
     }
 
     function openSlipReviewModal(paymentId) {
@@ -14248,21 +14294,15 @@ function getCourseOnlineDocs(course, includeInactive) {
       payment.slipStatus = 'rejected';
       await setFirebaseDocument('payments', payment);
       addActivityLog('สลิปไม่ผ่าน', (payment.student || '-') + ' · ' + (payment.month || '-'));
-      const student = (students || []).find(function(s) {
-        return (payment.studentId && String(s.id || '') === String(payment.studentId)) ||
-               (payment.authUid && s.authUid === payment.authUid);
-      });
-      if (student) {
-        student.paymentStatus = 'สลิปไม่ผ่าน';
-        await setFirebaseDocument('students', student);
-      }
+      await syncStudentPaymentStatusFromPayment(payment, 'สลิปไม่ผ่าน');
       getElement('editBubbleOverlay').classList.add('hidden');
       renderPaymentTable();
       updatePaymentSummary();
+      safeRun(renderStudentMobilePayment, 'reject-payment-mobile');
     }
 
     async function approvePaymentAndIssueReceipt(paymentId) {
-      const payment = payments.find(function(p) { return String(p.id) === String(paymentId); });
+      const payment = findPaymentByAnyId(paymentId);
       if (!payment) return null;
       payment.status = 'ชำระแล้ว';
       payment.paymentStatus = 'ชำระแล้ว';
@@ -14270,8 +14310,17 @@ function getCourseOnlineDocs(course, includeInactive) {
       payment.receiptStatus = 'issued';
       await setFirebaseDocument('payments', payment);
       const receipt = await issueReceiptFromPayment(payment);
-      await approveStudentCourseFromPayment(payment);
+      if (receipt) {
+        payment.receiptId = receipt.id || payment.receiptId || '';
+        payment.receiptNo = receipt.receiptNo || payment.receiptNo || '';
+        payment.receiptStatus = 'published';
+        await setFirebaseDocument('payments', payment);
+      }
+      await syncStudentPaymentStatusFromPayment(payment, 'ชำระแล้ว');
       renderPaymentTable();
+      updatePaymentSummary();
+      renderAdminReceipts();
+      renderStudentReceipts();
       safeRun(renderStudentMobilePayment, 'approve-payment-mobile');
       if (receipt) addActivityLog('อนุมัติชำระเงินและสร้างใบเสร็จ', (receipt.receiptNo || '-') + ' · ' + (payment.student || '-'));
       return payment;
@@ -14279,12 +14328,14 @@ function getCourseOnlineDocs(course, includeInactive) {
 
     async function issueReceiptFromPayment(payment) {
       if (!payment) return null;
+      const student = getPaymentStudentRecord(payment) || {};
       return await createReceipt({
-        paymentId: payment.id,
-        studentId: payment.studentId || '',
-        authUid: payment.authUid || '',
+        paymentId: payment.id || payment.firebaseDocId || '',
+        studentId: payment.studentId || student.id || student.firebaseDocId || '',
+        authUid: payment.authUid || payment.studentAuthUid || student.authUid || '',
+        memberId: payment.memberId || student.memberId || student.studentId || '',
         courseId: payment.courseId || '',
-        phone: payment.phone || payment.studentPhone || '',
+        phone: payment.phone || payment.studentPhone || student.phone || '',
         student: payment.student || '',
         course: payment.course || payment.courseName || '',
         month: payment.month || '',
@@ -15759,7 +15810,7 @@ function getCourseOnlineDocs(course, includeInactive) {
         const nameCell = '<strong>' + escapeHtml(p.student || '-') + '</strong>' +
           (nickname ? ' <span style="color:#6b7280;font-weight:400;font-size:13px;">(' + escapeHtml(nickname) + ')</span>' : '') +
           (memberId ? '<br><span class="mini-muted">' + escapeHtml(memberId) + '</span>' : '');
-        return '<tr data-payment-id="' + p.id + '"><td style="word-break:break-word;white-space:normal;">' + nameCell + '</td><td>' + renderPaymentCourseText(p) + '</td><td>' + (p.month || '-') + '</td><td>' + renderPaymentAmountText(p) + '</td><td>' + slipCell + '</td><td><span class="' + statusClass + '">' + statusText + '</span></td><td>' + paymentActionButtons(p.status || p.paymentStatus || 'รอชำระเงิน', pid) + '</td></tr>';
+        return '<tr data-payment-id="' + escapeHtml(pid) + '"><td style="word-break:break-word;white-space:normal;">' + nameCell + '</td><td>' + renderPaymentCourseText(p) + '</td><td>' + (p.month || '-') + '</td><td>' + renderPaymentAmountText(p) + '</td><td>' + slipCell + '</td><td><span class="' + statusClass + '">' + statusText + '</span></td><td>' + paymentActionButtons(p.status || p.paymentStatus || 'รอชำระเงิน', pid) + '</td></tr>';
       }).join('') : '<tr><td colspan="7">ยังไม่มีรายการชำระเงินตามเงื่อนไขที่เลือก</td></tr>';
       renderTablePagination('paymentTablePagination', paymentCurrentPage, ptTotalPages, filtered.length, 'changePaymentPage');
       updatePaymentSummary();
@@ -15790,7 +15841,7 @@ function getCourseOnlineDocs(course, includeInactive) {
 
     function getPaymentDataFromRow(row) {
       const paymentId = row ? row.getAttribute('data-payment-id') : '';
-      const payment = payments.find(function(p) { return String(p.id) === String(paymentId); });
+      const payment = findPaymentByAnyId(paymentId);
       return {
         paymentId: paymentId,
         studentId: payment ? payment.studentId : '',
@@ -16075,6 +16126,14 @@ function getCourseOnlineDocs(course, includeInactive) {
       });
 
       if (exists) {
+        const beforeExistingMeta = [exists.studentId, exists.authUid, exists.memberId, exists.courseId, exists.phone, exists.paymentId].join('|');
+        exists.studentId = exists.studentId || data.studentId || '';
+        exists.authUid = exists.authUid || data.authUid || '';
+        exists.memberId = exists.memberId || data.memberId || '';
+        exists.courseId = exists.courseId || data.courseId || '';
+        exists.phone = exists.phone || data.phone || '';
+        exists.paymentId = exists.paymentId || data.paymentId || '';
+        const existingMetaChanged = beforeExistingMeta !== [exists.studentId, exists.authUid, exists.memberId, exists.courseId, exists.phone, exists.paymentId].join('|');
         if (options.publish && exists.status !== 'published') {
           exists.status = 'published';
           exists.autoPublished = true;
@@ -16083,6 +16142,10 @@ function getCourseOnlineDocs(course, includeInactive) {
           renderAdminReceipts();
           renderStudentReceipts();
           addActivityLog('แสดงใบเสร็จอัตโนมัติ', (exists.receiptNo || '-') + ' · ' + (exists.student || '-'));
+        } else if (existingMetaChanged) {
+          await setFirebaseDocument('receipts', exists);
+          renderAdminReceipts();
+          renderStudentReceipts();
         }
         if (!options.silent) openReceiptDetail(exists.id, 'admin');
         return exists;
@@ -16095,6 +16158,7 @@ function getCourseOnlineDocs(course, includeInactive) {
         paymentId: data.paymentId || '',
         studentId: data.studentId || '',
         authUid: data.authUid || '',
+        memberId: data.memberId || '',
         courseId: data.courseId || '',
         phone: data.phone || '',
         receiptNo: createReceiptNo(),
