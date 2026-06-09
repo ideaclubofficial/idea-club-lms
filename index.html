@@ -4309,6 +4309,18 @@
                   </div>
                 </div>
                 <div class="form-row" style="margin-top:8px;">
+                  <div>
+                    <label>เปิดสอบ (วัน-เวลาเริ่ม)</label>
+                    <input type="datetime-local" id="onlineExamCourseOpenAt">
+                    <p style="font-size:10px;color:#9ca3af;margin:2px 0 0;">ปล่อยว่างไว้ = เปิดทันที</p>
+                  </div>
+                  <div>
+                    <label>ปิดสอบ (วัน-เวลาสิ้นสุด)</label>
+                    <input type="datetime-local" id="onlineExamCourseCloseAt">
+                    <p style="font-size:10px;color:#9ca3af;margin:2px 0 0;">ปล่อยว่างไว้ = ไม่มีกำหนดปิด</p>
+                  </div>
+                </div>
+                <div class="form-row" style="margin-top:8px;">
                   <button id="onlineExamCourseSaveBtn" class="btn btn-green" onclick="saveOnlineExamCourse()">💾 บันทึกคอร์ส</button>
                   <button id="onlineExamCourseCancelBtn" class="btn" onclick="resetOnlineExamCourseForm()" style="display:none;">ยกเลิก</button>
                 </div>
@@ -26050,6 +26062,10 @@ function receiptStatusText(status) {
       const showScoreAfterSubmit = (getElement('onlineExamCourseShowScore') || {}).value !== '0';
       const shuffleQuestions = (getElement('onlineExamCourseShuffleQ') || {}).value === '1';
       const shuffleChoices = (getElement('onlineExamCourseShuffleC') || {}).value === '1';
+      const openAtRaw = ((getElement('onlineExamCourseOpenAt') || {}).value || '').trim();
+      const closeAtRaw = ((getElement('onlineExamCourseCloseAt') || {}).value || '').trim();
+      const openAt = openAtRaw ? new Date(openAtRaw).toISOString() : null;
+      const closeAt = closeAtRaw ? new Date(closeAtRaw).toISOString() : null;
       const isActive = status === 'active';
       const editingId = (getElement('onlineExamEditingCourseId') || {}).value || '';
       const resultEl = getElement('onlineExamCourseSaveResult');
@@ -26060,7 +26076,7 @@ function receiptStatusText(status) {
       try {
         const now = firebase.firestore.FieldValue.serverTimestamp();
         const uid = firebaseUser ? firebaseUser.uid : '';
-        const extraFields = { publishStatus, isActive, showScoreAfterSubmit, shuffleQuestions, shuffleChoices };
+        const extraFields = { publishStatus, isActive, showScoreAfterSubmit, shuffleQuestions, shuffleChoices, openAt, closeAt };
 
         if (editingId) {
           await db.collection('onlineExamCourses').doc(editingId).set(
@@ -26124,6 +26140,8 @@ function receiptStatusText(status) {
       setValue('onlineExamCourseShowScore', course.showScoreAfterSubmit === false ? '0' : '1');
       setValue('onlineExamCourseShuffleQ', course.shuffleQuestions ? '1' : '0');
       setValue('onlineExamCourseShuffleC', course.shuffleChoices ? '1' : '0');
+      setValue('onlineExamCourseOpenAt', course.openAt ? course.openAt.slice(0, 16) : '');
+      setValue('onlineExamCourseCloseAt', course.closeAt ? course.closeAt.slice(0, 16) : '');
       const cancelBtn = getElement('onlineExamCourseCancelBtn');
       if (cancelBtn) cancelBtn.style.display = '';
       const saveBtn = getElement('onlineExamCourseSaveBtn');
@@ -26142,6 +26160,8 @@ function receiptStatusText(status) {
       setValue('onlineExamCourseShowScore', '1');
       setValue('onlineExamCourseShuffleQ', '0');
       setValue('onlineExamCourseShuffleC', '0');
+      setValue('onlineExamCourseOpenAt', '');
+      setValue('onlineExamCourseCloseAt', '');
       const cancelBtn = getElement('onlineExamCourseCancelBtn');
       if (cancelBtn) cancelBtn.style.display = 'none';
       const saveBtn = getElement('onlineExamCourseSaveBtn');
@@ -26317,6 +26337,8 @@ function receiptStatusText(status) {
               (c.showScoreAfterSubmit === false ? '<span style="font-size:10px;padding:1px 8px;border-radius:99px;background:#fef3c7;color:#92400e;">🔒 ซ่อนคะแนน</span>' : '') +
               (c.shuffleQuestions ? '<span style="font-size:10px;padding:1px 8px;border-radius:99px;background:#ede9fe;color:#5b21b6;">🔀 สุ่มข้อ</span>' : '') +
               (c.shuffleChoices ? '<span style="font-size:10px;padding:1px 8px;border-radius:99px;background:#ede9fe;color:#5b21b6;">🔀 สุ่มตัวเลือก</span>' : '') +
+              (c.openAt ? '<span style="font-size:10px;padding:1px 8px;border-radius:99px;background:#dbeafe;color:#1d4ed8;">🕐 ' + formatThaiDateTime(new Date(c.openAt)) + '</span>' : '') +
+              (c.closeAt ? '<span style="font-size:10px;padding:1px 8px;border-radius:99px;background:#fee2e2;color:#991b1b;">🕔 ' + formatThaiDateTime(new Date(c.closeAt)) + '</span>' : '') +
             '</div>' +
           '</div>' +
           '<div style="display:flex;gap:6px;flex-shrink:0;">' +
@@ -26805,6 +26827,21 @@ function receiptStatusText(status) {
       renderOnlineExamCourseGrid();
     }
 
+    function getOnlineExamScheduleStatus(c) {
+      const now = Date.now();
+      const open = c.openAt ? new Date(c.openAt).getTime() : null;
+      const close = c.closeAt ? new Date(c.closeAt).getTime() : null;
+      if (open && now < open) return { state: 'not_yet', openAt: new Date(c.openAt) };
+      if (close && now > close) return { state: 'closed', closeAt: new Date(c.closeAt) };
+      return { state: 'open' };
+    }
+
+    function formatThaiDateTime(d) {
+      if (!d) return '';
+      return d.toLocaleDateString('th-TH', { day: 'numeric', month: 'short', year: 'numeric' }) +
+        ' ' + d.toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' }) + ' น.';
+    }
+
     async function renderOnlineExamCourseGrid() {
       const container = getElement('onlineExamCourseCards');
       if (!container) return;
@@ -26865,8 +26902,27 @@ function receiptStatusText(status) {
 
           var statusHtml = '';
           var actionHtml = '';
+          var scheduleHtml = '';
 
-          if (latest && !canStart) {
+          const sched = getOnlineExamScheduleStatus(c);
+
+          if (c.openAt || c.closeAt) {
+            const openLabel = c.openAt ? formatThaiDateTime(new Date(c.openAt)) : null;
+            const closeLabel = c.closeAt ? formatThaiDateTime(new Date(c.closeAt)) : null;
+            scheduleHtml = '<p style="font-size:11px;color:#6b7280;margin-bottom:6px;">' +
+              (openLabel ? '🕐 เปิดสอบ: ' + openLabel : '') +
+              (openLabel && closeLabel ? '<br>' : '') +
+              (closeLabel ? '🕔 ปิดสอบ: ' + closeLabel : '') +
+            '</p>';
+          }
+
+          if (sched.state === 'not_yet') {
+            statusHtml = '<span style="font-size:10px;background:#dbeafe;color:#1d4ed8;padding:1px 8px;border-radius:99px;">⏳ ยังไม่เปิดสอบ</span>';
+            actionHtml = '<div style="text-align:center;font-size:12px;color:#6b7280;padding:8px 0;border:1px dashed #bfdbfe;border-radius:8px;background:#eff6ff;">เปิดสอบ: ' + formatThaiDateTime(sched.openAt) + '</div>';
+          } else if (sched.state === 'closed') {
+            statusHtml = '<span style="font-size:10px;background:#fee2e2;color:#991b1b;padding:1px 8px;border-radius:99px;">🔒 ปิดรับสอบแล้ว</span>';
+            actionHtml = '<div style="text-align:center;font-size:12px;color:#9ca3af;padding:8px 0;border:1px dashed #e2e8f0;border-radius:8px;">หมดเวลาสอบ: ' + formatThaiDateTime(sched.closeAt) + '</div>';
+          } else if (latest && !canStart) {
             if (rStatus === 'published') {
               statusHtml = '<span style="font-size:10px;background:#d1fae5;color:#065f46;padding:1px 8px;border-radius:99px;">ประกาศผลแล้ว</span>';
               actionHtml = '<button class="btn btn-blue" onclick="viewStudentExamResult(\'' + c.firebaseDocId + '\')" style="width:100%;font-size:13px;">📊 ดูผลคะแนน</button>';
@@ -26888,11 +26944,12 @@ function receiptStatusText(status) {
               (statusHtml ? statusHtml : '') +
             '</div>' +
             '<h4 style="font-size:14px;font-weight:700;margin:0 0 6px;">' + escapeHtml(c.title || '') + '</h4>' +
-            '<p style="font-size:12px;color:#6b7280;margin-bottom:10px;">' +
+            '<p style="font-size:12px;color:#6b7280;margin-bottom:6px;">' +
               (c.grade ? '<span style="margin-right:8px;">📚 ' + c.grade + '</span>' : '') +
               '<span style="margin-right:8px;">⏱️ ' + (c.durationMinutes || 15) + ' นาที</span>' +
               '<span>📝 ' + qCount + ' ข้อ</span>' +
             '</p>' +
+            scheduleHtml +
             actionHtml +
           '</div>';
         }).join('');
@@ -26987,6 +27044,9 @@ function receiptStatusText(status) {
       if (!course) { alert('ไม่พบข้อมูลคอร์ส'); return; }
       if (!(course.questions || []).length) { alert('คอร์สนี้ยังไม่มีข้อสอบ'); return; }
       if (!firebaseUser) { alert('กรุณาเข้าสู่ระบบก่อน'); return; }
+      const sched = getOnlineExamScheduleStatus(course);
+      if (sched.state === 'not_yet') { alert('ยังไม่ถึงเวลาสอบ\nเปิดสอบ: ' + formatThaiDateTime(sched.openAt)); return; }
+      if (sched.state === 'closed') { alert('หมดเวลาสอบแล้ว\nปิดสอบ: ' + formatThaiDateTime(sched.closeAt)); return; }
 
       // Duplicate prevention: check for existing submitted result
       try {
