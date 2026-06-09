@@ -15264,11 +15264,14 @@ function getCourseOnlineDocs(course, includeInactive) {
     }
 
     async function saveAllPaymentCoursePrices() {
+      if (saveAllPaymentCoursePrices._saving) return;
+      saveAllPaymentCoursePrices._saving = true;
       const month = getElement('paymentPriceMonthSelect') ? getElement('paymentPriceMonthSelect').value : '';
       const result = getElement('paymentCoursePriceResult');
       const item = getPaymentMonthItem(month);
       if (!item) {
         if (result) { result.textContent = 'กรุณาเลือกเดือนก่อนบันทึกราคา'; result.style.color = '#dc2626'; }
+        saveAllPaymentCoursePrices._saving = false;
         return;
       }
       item.coursePrices = item.coursePrices || {};
@@ -15284,7 +15287,7 @@ function getCourseOnlineDocs(course, includeInactive) {
         }
       });
       try {
-        if (item.visibleToStudents === undefined) item.visibleToStudents = true;
+        if (item.visibleToStudents === undefined) item.visibleToStudents = false;
         await setFirebaseDocument('paymentMonths', item);
         addActivityLog('บันทึกราคาคอร์สทั้งเดือน', month + ' · ' + savedCount + ' คอร์ส');
         const paymentCounts = await createOrUpdateMonthlyPaymentRecordsForMonth(month);
@@ -15297,7 +15300,9 @@ function getCourseOnlineDocs(course, includeInactive) {
         updateStudentSelectedPaymentMonth();
         updateStudentCourseDisplay();
         renderDashboardPaymentSummary();
+        saveAllPaymentCoursePrices._saving = false;
       } catch (error) {
+        saveAllPaymentCoursePrices._saving = false;
         if (result) { result.textContent = 'บันทึกไม่สำเร็จ: ' + (error.message || error.code); result.style.color = '#dc2626'; }
       }
     }
@@ -15595,8 +15600,9 @@ function getCourseOnlineDocs(course, includeInactive) {
     }
 
     function findPaymentForStudentMonth(student, month) {
+      const m = String(month || '').trim();
       return payments.find(function(p) {
-        return String(p.studentId || '') === String(student.id || '') && p.month === month;
+        return String(p.studentId || '') === String(student.id || '') && String(p.month || '').trim() === m;
       }) || null;
     }
 
@@ -15636,7 +15642,6 @@ function getCourseOnlineDocs(course, includeInactive) {
       for (const student of targetStudents) {
         const existing = findPaymentForStudentMonth(student, month);
         const listAmount = getExpectedPaymentAmountForStudent(student, month);
-        const finalAmount = getMonthlyPaymentAmountForStudent(student, month);
 
         if (existing) {
           const existingStatus = String(existing.status || existing.paymentStatus || '').trim();
@@ -17028,7 +17033,7 @@ function receiptStatusText(status) {
           if (!payment.receiptNo) payment.receiptNo = receipt.receiptNo || '';
           if (receiptAmount > 0 && payment.finalAmount !== receiptAmount) {
             payment.originalAmount = payment.originalAmount || receiptAmount;
-            payment.baseAmount = payment.originalAmount;
+            payment.baseAmount = receiptAmount;
             payment.finalAmount = receiptAmount;
             payment.amount = receiptAmount;
             payment.totalAmount = receiptAmount;
@@ -23929,6 +23934,7 @@ function receiptStatusText(status) {
           } catch (error) { console.error(error); }
           renderPaymentTable();
           renderAdminDashboard();
+          renderPaymentRecordPreview();
           closeEditBubble();
         }
       );
