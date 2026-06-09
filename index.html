@@ -5251,6 +5251,16 @@
               <p style="color:#6b7280; margin-bottom:12px; font-size:13px;">เนื้อหาที่แสดงด้านหลังบัตร — Export PDF จะมีทั้งหน้าหน้าและหน้าหลังโดยสลับคอลัมน์อัตโนมัติสำหรับพิมพ์ 2 หน้า</p>
               <div class="form-row">
                 <div>
+                  <label>Logo หลังบัตร (URL) — ถ้าว่างจะใช้ Logo หน้าบัตร</label>
+                  <input id="idCardBackLogoUrl" type="url" placeholder="https://drive.google.com/uc?export=view&id=..." oninput="updateIdCardBackLogoPreview(this.value)" />
+                </div>
+                <div>
+                  <label>ตัวอย่าง Logo หลังบัตร</label>
+                  <div id="idCardBackLogoPreview" class="notice" style="min-height:60px; display:flex; align-items:center; justify-content:center; font-size:12px; color:#9ca3af;">ยังไม่ได้ตั้งค่า</div>
+                </div>
+              </div>
+              <div class="form-row" style="margin-top:8px;">
+                <div>
                   <label>เบอร์โทรศัพท์</label>
                   <input id="idCardBackPhone" type="text" placeholder="เช่น 056-123-456, 089-123-4567" />
                 </div>
@@ -28080,6 +28090,7 @@ function receiptStatusText(status) {
     let idCardBackWebsite = '';
     let idCardBackLineUrl = '';
     let idCardBackLineQrDataUrl = '';
+    let idCardBackLogoUrl = '';
     let idCardInitialized = false;
     const ID_CARD_QR_BASE = 'https://idea-club-lms.vercel.app/?memberId=';
     const ID_CARD_LOGO_GAS_URL = 'https://script.google.com/macros/s/AKfycbzbpCSRl2oVx8WpCin0Vx9dPGBNNWnVm7oVj5ANH5M9WNQ2wJvHRcmsljN1w7dLnCbc/exec';
@@ -28116,6 +28127,9 @@ function receiptStatusText(status) {
         var webEl = getElement('idCardBackWebsite'); if (webEl) webEl.value = idCardBackWebsite;
         var lineEl = getElement('idCardBackLineUrl'); if (lineEl) lineEl.value = idCardBackLineUrl;
         if (idCardBackLineUrl) updateIdCardBackLineQrPreview(idCardBackLineUrl);
+        idCardBackLogoUrl = (idCardSettings && idCardSettings.backLogoUrl) ? parseDriveImageUrl(idCardSettings.backLogoUrl) : '';
+        var backLogoEl = getElement('idCardBackLogoUrl'); if (backLogoEl) backLogoEl.value = idCardBackLogoUrl;
+        updateIdCardBackLogoPreview(idCardBackLogoUrl);
       } catch (e) {
         console.warn('loadIdCardSettings error', e);
         idCardSettings = {};
@@ -28407,9 +28421,17 @@ function receiptStatusText(status) {
       });
     }
 
+    function updateIdCardBackLogoPreview(url) {
+      const el = getElement('idCardBackLogoPreview');
+      if (!el) return;
+      if (!url) { el.innerHTML = '<span style="font-size:12px;color:#9ca3af;">ยังไม่ได้ตั้งค่า</span>'; return; }
+      el.innerHTML = '<img src="' + escapeHtml(parseDriveImageUrl(url)) + '" style="max-height:52px;max-width:100%;object-fit:contain;" />';
+    }
+
     async function saveIdCardBackSettings() {
       if (!firebaseReady || !db) return;
       const resultEl = getElement('idCardBackSaveResult');
+      const backLogoRaw = (getElement('idCardBackLogoUrl') || {}).value || '';
       const phone = (getElement('idCardBackPhone') || {}).value || '';
       const address = (getElement('idCardBackAddress') || {}).value || '';
       const website = (getElement('idCardBackWebsite') || {}).value || '';
@@ -28417,12 +28439,13 @@ function receiptStatusText(status) {
       try {
         if (resultEl) { resultEl.style.color = '#d97706'; resultEl.textContent = '⏳ กำลังบันทึก...'; }
         await db.collection('settings').doc('idCard').set(
-          { backPhone: phone, backAddress: address, backWebsite: website, backLineUrl: lineUrl },
+          { backLogoUrl: backLogoRaw, backPhone: phone, backAddress: address, backWebsite: website, backLineUrl: lineUrl },
           { merge: true }
         );
+        idCardBackLogoUrl = backLogoRaw ? parseDriveImageUrl(backLogoRaw) : '';
         idCardBackPhone = phone; idCardBackAddress = address;
         idCardBackWebsite = website; idCardBackLineUrl = lineUrl;
-        idCardSettings = Object.assign({}, idCardSettings, { backPhone: phone, backAddress: address, backWebsite: website, backLineUrl: lineUrl });
+        idCardSettings = Object.assign({}, idCardSettings, { backLogoUrl: backLogoRaw, backPhone: phone, backAddress: address, backWebsite: website, backLineUrl: lineUrl });
         if (lineUrl) await updateIdCardBackLineQrPreview(lineUrl);
         if (resultEl) { resultEl.style.color = '#16a34a'; resultEl.textContent = '✅ บันทึกหลังบัตรแล้ว'; }
       } catch (e) {
@@ -28439,9 +28462,10 @@ function receiptStatusText(status) {
       } catch (e) { if (previewEl) previewEl.innerHTML = '<span style="color:#dc2626;font-size:11px;">สร้าง QR ไม่ได้</span>'; }
     }
 
-    async function buildIdCardBackCellHtml(logoUrl, phone, address, website, lineQrDataUrl) {
-      const logoHtml = logoUrl
-        ? '<img class="id-card-back-logo-large" src="' + logoUrl + '" crossorigin="anonymous" />'
+    async function buildIdCardBackCellHtml(frontLogoUrl, phone, address, website, lineQrDataUrl, backLogoUrl) {
+      const resolvedLogo = backLogoUrl || frontLogoUrl;
+      const logoHtml = resolvedLogo
+        ? '<img class="id-card-back-logo-large" src="' + resolvedLogo + '" crossorigin="anonymous" />'
         : '<div class="id-card-back-logo-fallback">IC</div>';
       const infoRows = [
         phone   ? '<div class="id-card-back-info-row"><span class="id-card-back-info-icon">📞</span><span>' + escapeHtml(phone) + '</span></div>' : '',
@@ -28466,11 +28490,11 @@ function receiptStatusText(status) {
       '</div>';
     }
 
-    async function buildIdCardBackPageHtml(chunk, logoUrl, phone, address, website, lineQrDataUrl) {
+    async function buildIdCardBackPageHtml(chunk, logoUrl, phone, address, website, lineQrDataUrl, backLogoUrl) {
       // duplex-aware: mirror column order so after flipping paper the backs align with fronts
       // chunk is up to 10 students; grid is 2 cols × 5 rows
       // back page order: for each row [i*2, i*2+1], swap to [back_of_(i*2+1), back_of_(i*2)]
-      const backCell = await buildIdCardBackCellHtml(logoUrl, phone, address, website, lineQrDataUrl);
+      const backCell = await buildIdCardBackCellHtml(logoUrl, phone, address, website, lineQrDataUrl, backLogoUrl);
       const emptyCell = '<div class="id-card-cell"></div>';
       const cells = [];
       for (var row = 0; row < 5; row++) {
@@ -28489,13 +28513,15 @@ function receiptStatusText(status) {
       if (previewArea) previewArea.style.display = 'block';
       try {
         const logoUrl = parseDriveImageUrl((getElement('idCardLogoManualUrl') && getElement('idCardLogoManualUrl').value.trim()) || idCardLogoUrl);
+        const backLogoRaw = (getElement('idCardBackLogoUrl') || {}).value || idCardBackLogoUrl;
+        const resolvedBackLogo = backLogoRaw ? parseDriveImageUrl(backLogoRaw) : '';
         const phone = (getElement('idCardBackPhone') || {}).value || idCardBackPhone;
         const address = (getElement('idCardBackAddress') || {}).value || idCardBackAddress;
         const website = (getElement('idCardBackWebsite') || {}).value || idCardBackWebsite;
         const lineUrl = (getElement('idCardBackLineUrl') || {}).value || idCardBackLineUrl;
         const qrUrl = lineUrl ? (idCardBackLineQrDataUrl || await generateQrDataUrl(lineUrl)) : '';
         const dummyChunk = Array(10).fill({ name: 'ตัวอย่างนักเรียน', memberId: '001' });
-        const html = await buildIdCardBackPageHtml(dummyChunk, logoUrl, phone, address, website, qrUrl);
+        const html = await buildIdCardBackPageHtml(dummyChunk, logoUrl, phone, address, website, qrUrl, resolvedBackLogo);
         if (previewContent) {
           previewContent.innerHTML = html;
           const page = previewContent.querySelector('.id-card-page');
@@ -28622,7 +28648,8 @@ function receiptStatusText(status) {
       if (resultEl) { resultEl.textContent = 'กำลังสร้าง PDF...'; resultEl.style.color = '#d97706'; }
       try {
         const logoUrl = parseDriveImageUrl((getElement('idCardLogoManualUrl') && getElement('idCardLogoManualUrl').value.trim()) || idCardLogoUrl);
-        const hasBack = !!(idCardBackPhone || idCardBackAddress || idCardBackWebsite || idCardBackLineUrl);
+        const resolvedBackLogo = idCardBackLogoUrl ? parseDriveImageUrl(idCardBackLogoUrl) : '';
+        const hasBack = !!(idCardBackPhone || idCardBackAddress || idCardBackWebsite || idCardBackLineUrl || idCardBackLogoUrl);
         const backPhone = idCardBackPhone; const backAddress = idCardBackAddress;
         const backWebsite = idCardBackWebsite; const backLineUrl = idCardBackLineUrl;
         const backLineQr = backLineUrl ? (idCardBackLineQrDataUrl || await generateQrDataUrl(backLineUrl)) : '';
@@ -28661,7 +28688,7 @@ function receiptStatusText(status) {
 
           if (hasBack) {
             if (resultEl) { resultEl.textContent = 'กำลังสร้าง PDF หน้าที่ ' + (pdfPageNum + 1) + '/' + totalPages + ' (หลัง)...'; resultEl.style.color = '#d97706'; }
-            const backHtml = await buildIdCardBackPageHtml(chunks[pageIdx].slice(), logoUrl, backPhone, backAddress, backWebsite, backLineQr);
+            const backHtml = await buildIdCardBackPageHtml(chunks[pageIdx].slice(), logoUrl, backPhone, backAddress, backWebsite, backLineQr, resolvedBackLogo);
             await renderPageToPdf(backHtml, false);
           }
         }
