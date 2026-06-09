@@ -6993,6 +6993,7 @@
 
     function showStudentAreas() {
       document.querySelectorAll('.student-area').forEach(function(area) { area.classList.remove('hidden'); });
+      updateStudentCourseApplySectionVisibility();
     }
 
     function hideStudentAreas() {
@@ -11981,6 +11982,17 @@
       return !!courseId && courseName !== 'ยังไม่ได้สมัครคอร์ส';
     }
 
+    function studentHasApprovedCourse(student) {
+      const activeStudent = student || currentStudent;
+      return studentHasAppliedCourse(activeStudent) && isCourseStatusApproved(activeStudent.courseStatus || '');
+    }
+
+    function updateStudentCourseApplySectionVisibility() {
+      const section = getElement('course-section');
+      if (!section) return;
+      section.classList.toggle('hidden', studentHasApprovedCourse());
+    }
+
     function getStudentAppliedCourse(student) {
       const activeStudent = student || currentStudent;
       const appliedCourseId = getStudentAppliedCourseId(activeStudent);
@@ -12008,6 +12020,11 @@
       const gradeFilter = getElement('courseGradeFilter');
       const list = getElement('studentCourseList');
       if (!gradeFilter || !list) return;
+      updateStudentCourseApplySectionVisibility();
+      if (studentHasApprovedCourse()) {
+        list.innerHTML = '<div class="card"><h3>คอร์สของคุณได้รับอนุมัติแล้ว</h3><p>ระบบซ่อนหน้าสมัครคอร์สเพื่อป้องกันการสมัครซ้ำ</p></div>';
+        return;
+      }
       const registeredGrade = getCurrentStudentRegisteredGrade();
       const studentLocation = getCurrentStudentPreferredLocation();
       const grade = registeredGrade || gradeFilter.value;
@@ -13368,6 +13385,7 @@ function getCourseOnlineDocs(course, includeInactive) {
 
     function scrollToStudentSection(sectionId) {
       if (sectionId === 'student-online-exam') sectionId = 'student-monthly-test';
+      if (sectionId === 'course-section' && studentHasApprovedCourse()) sectionId = 'studentDashboard';
       if (sectionId !== 'student-monthly-test') document.body.classList.remove('student-mobile-online-exam-open');
       const target = getElement(sectionId);
       if (sectionId === 'student-monthly-test' && currentStudent) {
@@ -13663,6 +13681,7 @@ function getCourseOnlineDocs(course, includeInactive) {
       const canUseAnnouncements = !selectedCourse || selectedFeatures.announcements !== false;
 
       if (selectedCourse) currentStudentCourseId = selectedCourse.id;
+      updateStudentCourseApplySectionVisibility();
 
       safeRun(function() { updateStudentHomeSummary(selectedCourse, hasRegisteredCourse); }, 'student-home-summary');
       safeRun(function() { updateStudentMobileHomeFromCurrentStudent(selectedCourse, hasRegisteredCourse); }, 'student-mobile-home');
