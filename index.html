@@ -5513,6 +5513,30 @@
       return null;
     }
 
+    async function loadStudentOwnCollection(collectionName, studentDocId, authUid) {
+      if (!firebaseReady || !db) return [];
+      try {
+        const queries = [];
+        if (studentDocId) queries.push(db.collection(collectionName).where('studentId', '==', String(studentDocId)).get());
+        if (authUid) queries.push(db.collection(collectionName).where('authUid', '==', String(authUid)).get());
+        const snapshots = await Promise.all(queries);
+        const seen = new Set();
+        const result = [];
+        for (const snapshot of snapshots) {
+          for (const doc of snapshot.docs) {
+            if (!seen.has(doc.id) && doc.data().deleted !== true) {
+              seen.add(doc.id);
+              result.push(Object.assign({ firebaseDocId: doc.id }, doc.data()));
+            }
+          }
+        }
+        return result;
+      } catch (error) {
+        console.warn('student ' + collectionName + ' load skipped:', error);
+        return [];
+      }
+    }
+
     async function loadStudentDataOnly(userProfile) {
       if (!firebaseReady || !db || !firebaseUser) return null;
       console.log('student-data-load-start', {
@@ -5522,11 +5546,13 @@
       });
 
       const studentRecord = await getOwnedStudentRecord(userProfile);
+      let studentDocId = '';
       if (studentRecord) {
         const normalizedStudent = sanitizeStudentProfile(Object.assign({}, studentRecord, {
           id: studentRecord.id || studentRecord.firebaseDocId || studentRecord.authUid || firebaseUser.uid,
           authUid: studentRecord.authUid || firebaseUser.uid
         }));
+        studentDocId = normalizedStudent.id;
         replaceArray(students, [normalizedStudent]);
         currentStudent = normalizedStudent;
       }
@@ -5537,7 +5563,9 @@
         getFirebaseCollectionQuiet('announcements'),
         getFirebaseCollectionQuiet('scoreReports'),
         getFirebaseCollectionQuiet('paymentMonths'),
-        getFirebaseCollectionQuiet('lineGroups')
+        getFirebaseCollectionQuiet('lineGroups'),
+        loadStudentOwnCollection('payments', studentDocId, firebaseUser.uid),
+        loadStudentOwnCollection('receipts', studentDocId, firebaseUser.uid)
       ]);
 
       replaceArray(courses, results[0]);
@@ -5546,11 +5574,15 @@
       replaceArray(scoreReports, results[3]);
       replaceArray(paymentMonths, results[4]);
       replaceArray(lineGroups, results[5]);
+      replaceArray(payments, results[6]);
+      replaceArray(receipts, results[7]);
 
       console.log('student-data-load-success', {
         uid: firebaseUser.uid,
         hasStudent: !!studentRecord,
-        collections: ['students:own', 'courses', 'onDemandClips', 'announcements', 'scoreReports', 'paymentMonths', 'lineGroups']
+        paymentsLoaded: results[6].length,
+        receiptsLoaded: results[7].length,
+        collections: ['students:own', 'courses', 'onDemandClips', 'announcements', 'scoreReports', 'paymentMonths', 'lineGroups', 'payments:own', 'receipts:own']
       });
       return studentRecord;
     }
