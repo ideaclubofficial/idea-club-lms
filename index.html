@@ -4105,6 +4105,7 @@
                 <button class="btn btn-green" type="button" onclick="saveAdjustedScores()">บันทึกคะแนนชุดนี้</button>
                 <button class="btn btn-dark" type="button" onclick="publishSelectedScoreSet()">ประกาศผลชุดนี้</button>
                 <button class="btn btn-blue" type="button" onclick="exportScoresCsv()">ส่งออกคะแนน CSV</button>
+                <button class="btn btn-blue" type="button" onclick="loadAdminDeficiencyData()">📊 โหลดข้อมูลบกพร่อง</button>
               </div>
               <p id="scoreAdjustResult" style="margin-top:14px; font-weight:bold;"></p>
 
@@ -4118,6 +4119,7 @@
                       <th>ภาษาอังกฤษ</th>
                       <th>คะแนนเต็ม</th>
                       <th>สถานะ</th>
+                      <th>บกพร่อง (ข้อสอบ Online)</th>
                     </tr>
                   </thead>
                   <tbody id="adminScoreAdjustTableBody"></tbody>
@@ -18352,11 +18354,114 @@ function receiptStatusText(status) {
       return status === 'published' ? '<span class="status-paid">ประกาศแล้ว</span>' : '<span class="status-waiting">รอประกาศ</span>';
     }
 
+    var adminDeficiencyResults = [];
+
+    async function loadAdminDeficiencyData() {
+      const grade = (getElement('adminScoreGradeFilter') || {}).value || '';
+      const resultEl = getElement('scoreAdjustResult');
+      if (resultEl) { resultEl.style.color = '#d97706'; resultEl.textContent = '⏳ กำลังโหลดข้อมูลบกพร่อง...'; }
+      try {
+        let snap;
+        if (grade) {
+          snap = await db.collection('onlineExamResults').where('grade', '==', grade).where('deleted', '!=', true).get()
+            .catch(function() { return db.collection('onlineExamResults').where('grade', '==', grade).get(); });
+        } else {
+          snap = await db.collection('onlineExamResults').get();
+        }
+        adminDeficiencyResults = snap.docs.map(function(d) { return Object.assign({ _docId: d.id }, d.data()); });
+        renderAdminScoreAdjustTable();
+        if (resultEl) { resultEl.style.color = '#16a34a'; resultEl.textContent = '✅ โหลดข้อมูลบกพร่องแล้ว ' + adminDeficiencyResults.length + ' รายการ'; }
+      } catch(e) {
+        if (resultEl) { resultEl.style.color = '#dc2626'; resultEl.textContent = '❌ โหลดข้อมูลบกพร่องไม่สำเร็จ: ' + (e.message || e); }
+      }
+    }
+
+    function getStudentDeficiency(record) {
+      if (!adminDeficiencyResults.length) return null;
+      const results = adminDeficiencyResults.filter(function(r) {
+        if (r.deleted) return false;
+        if (record.authUid && r.studentUid && record.authUid === r.studentUid) return true;
+        if (record.studentId && r.studentId && String(record.studentId) === String(r.studentId)) return true;
+        if (record.student && r.studentName && record.student === r.studentName) return true;
+        return false;
+      });
+      if (!results.length) return null;
+
+      var wrongItems = [];
+      results.forEach(function(r) {
+        const course = onlineExamCourseCache.find(function(c) { return c.firebaseDocId === r.courseId; });
+        if (!course || !course.questions) return;
+        const qMap = {};
+        course.questions.forEach(function(q) { qMap[q.id] = q; });
+        const order = r.questionOrder || Object.keys(r.answers || {});
+        order.forEach(function(qid, idx) {
+          const q = qMap[qid];
+          if (!q) return;
+          const studentChoice = (r.answers || {})[qid];
+          if (studentChoice === undefined || studentChoice === null) return;
+          if (Number(studentChoice) !== Number(q.correctIndex)) {
+            wrongItems.push({
+              courseTitle: r.courseTitle || course.title || '',
+              no: idx + 1,
+              text: q.text || ('ข้อที่ ' + (idx + 1)),
+              studentChoice: (q.choices || [])[Number(studentChoice)] || ('ตัวเลือก ' + studentChoice),
+              correctChoice: (q.choices || [])[Number(q.correctIndex)] || ('ตัวเลือก ' + q.correctIndex)
+            });
+          }
+        });
+      });
+
+      const totalQ = results.reduce(function(s, r) { return s + (r.totalQ || 0); }, 0);
+      return { wrongItems: wrongItems, totalQ: totalQ, resultCount: results.length };
+    }
+
+    function showDeficiencyModal(encodedData) {
+      const items = JSON.parse(decodeURIComponent(encodedData));
+      const modal = getElement('onlineExamDetailModal');
+      const content = getElement('onlineExamDetailModalContent');
+      if (!modal || !content) return;
+      const bySubject = {};
+      items.forEach(function(item) {
+        const key = item.courseTitle || 'ไม่ระบุวิชา';
+        if (!bySubject[key]) bySubject[key] = [];
+        bySubject[key].push(item);
+      });
+      content.innerHTML = '<h3 style="margin-bottom:12px;">⚠️ ข้อที่ทำผิด (' + items.length + ' ข้อ)</h3>' +
+        Object.keys(bySubject).map(function(subject) {
+          return '<div style="margin-bottom:14px;">' +
+            '<p style="font-weight:700;color:#7c3aed;margin-bottom:6px;font-size:13px;">' + escapeHtml(subject) + ' (' + bySubject[subject].length + ' ข้อ)</p>' +
+            '<div style="display:flex;flex-direction:column;gap:6px;">' +
+            bySubject[subject].map(function(item) {
+              return '<div style="background:#fef2f2;border:1px solid #fecaca;border-radius:8px;padding:8px 12px;">' +
+                '<p style="font-size:12px;font-weight:600;color:#374151;margin-bottom:4px;">ข้อ ' + item.no + ': ' + escapeHtml(item.text) + '</p>' +
+                '<p style="font-size:11px;color:#dc2626;">❌ ตอบ: ' + escapeHtml(item.studentChoice) + '</p>' +
+                '<p style="font-size:11px;color:#16a34a;">✅ เฉลย: ' + escapeHtml(item.correctChoice) + '</p>' +
+              '</div>';
+            }).join('') +
+            '</div></div>';
+        }).join('');
+      modal.style.display = '';
+    }
+
     function renderAdminScoreAdjustTable() {
       const tbody = getElement('adminScoreAdjustTableBody');
       if (!tbody) return;
       const records = getSelectedAdminScoreRecords();
+      const hasDeficiency = adminDeficiencyResults.length > 0;
       tbody.innerHTML = records.length ? records.map(function(record) {
+        const def = hasDeficiency ? getStudentDeficiency(record) : null;
+        var defCell = '<td style="color:#9ca3af;font-size:11px;">—</td>';
+        if (def) {
+          const wrongCount = def.wrongItems.length;
+          const color = wrongCount === 0 ? '#16a34a' : wrongCount <= 3 ? '#d97706' : '#dc2626';
+          const btnData = wrongCount > 0 ? ' <button onclick="showDeficiencyModal(decodeURIComponent(\'' + encodeURIComponent(JSON.stringify(def.wrongItems)) + '\'))" style="font-size:10px;padding:1px 6px;background:none;border:1px solid ' + color + ';color:' + color + ';border-radius:6px;cursor:pointer;">ดู</button>' : '';
+          defCell = '<td style="white-space:nowrap;">' +
+            '<span style="font-size:11px;font-weight:700;color:' + color + ';">' +
+              (wrongCount === 0 ? '✅ ไม่มีข้อบกพร่อง' : '⚠️ ผิด ' + wrongCount + ' ข้อ') +
+            '</span>' + btnData + '</td>';
+        } else if (hasDeficiency) {
+          defCell = '<td style="font-size:11px;color:#9ca3af;">ไม่มีข้อมูล</td>';
+        }
         return '<tr data-score-id="' + record.id + '">' +
           '<td>' + record.student + '</td>' +
           '<td><input class="score-input" data-subject="วิทยาศาสตร์" type="number" min="0" max="50" step="1" value="' + (record.scores['วิทยาศาสตร์'] || 0) + '"></td>' +
@@ -18364,8 +18469,9 @@ function receiptStatusText(status) {
           '<td><input class="score-input" data-subject="ภาษาอังกฤษ" type="number" min="0" max="50" step="1" value="' + (record.scores['ภาษาอังกฤษ'] || 0) + '"></td>' +
           '<td>50</td>' +
           '<td>' + scoreStatusText(record.status) + '</td>' +
+          defCell +
         '</tr>';
-      }).join('') : '<tr><td colspan="6">ยังไม่มีข้อมูลคะแนนของชุดข้อสอบและระดับชั้นที่เลือก</td></tr>';
+      }).join('') : '<tr><td colspan="7">ยังไม่มีข้อมูลคะแนนของชุดข้อสอบและระดับชั้นที่เลือก</td></tr>';
     }
 
     function calculateSubjectStats(records, subject) {
