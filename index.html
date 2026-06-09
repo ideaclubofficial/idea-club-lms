@@ -4105,7 +4105,7 @@
                 <button class="btn btn-green" type="button" onclick="saveAdjustedScores()">บันทึกคะแนนชุดนี้</button>
                 <button class="btn btn-dark" type="button" onclick="publishSelectedScoreSet()">ประกาศผลชุดนี้</button>
                 <button class="btn btn-blue" type="button" onclick="exportScoresCsv()">ส่งออกคะแนน CSV</button>
-                <button class="btn btn-blue" type="button" onclick="loadAdminDeficiencyData()">📊 โหลดข้อมูลบกพร่อง</button>
+                <button class="btn btn-blue" type="button" onclick="importScoresFromOnlineExam()">📥 นำเข้าคะแนนจากข้อสอบออนไลน์</button>
               </div>
               <p id="scoreAdjustResult" style="margin-top:14px; font-weight:bold;"></p>
 
@@ -4119,7 +4119,6 @@
                       <th>ภาษาอังกฤษ</th>
                       <th>คะแนนเต็ม</th>
                       <th>สถานะ</th>
-                      <th>บกพร่อง (ข้อสอบ Online)</th>
                     </tr>
                   </thead>
                   <tbody id="adminScoreAdjustTableBody"></tbody>
@@ -17684,9 +17683,9 @@ function receiptStatusText(status) {
         const record = adminScoreRecords.find(function(item) { return Number(item.id) === recordId; });
         if (!record) continue;
         record.scores = record.scores || {};
-        record.scores['วิทยาศาสตร์'] = Number(row.querySelector('.score-input[data-subject="วิทยาศาสตร์"]').value || 0);
-        record.scores['คณิตศาสตร์'] = Number(row.querySelector('.score-input[data-subject="คณิตศาสตร์"]').value || 0);
-        record.scores['ภาษาอังกฤษ'] = Number(row.querySelector('.score-input[data-subject="ภาษาอังกฤษ"]').value || 0);
+        row.querySelectorAll('.score-input[data-subject]').forEach(function(inp) {
+          record.scores[inp.getAttribute('data-subject')] = Number(inp.value || 0);
+        });
         record.month = selectedMonth;
         record.grade = selectedGrade;
         record.status = 'draft';
@@ -18354,124 +18353,118 @@ function receiptStatusText(status) {
       return status === 'published' ? '<span class="status-paid">ประกาศแล้ว</span>' : '<span class="status-waiting">รอประกาศ</span>';
     }
 
-    var adminDeficiencyResults = [];
-
-    async function loadAdminDeficiencyData() {
-      const grade = (getElement('adminScoreGradeFilter') || {}).value || '';
+    async function importScoresFromOnlineExam() {
+      if (!hasPermission('admin.onlineExams') && !hasPermission('admin.exams')) { alert('ไม่มีสิทธิ์'); return; }
+      if (!firebaseReady || !db) { alert('Firebase ยังไม่พร้อม'); return; }
+      const selectedMonth = (getElement('adminScoreTestSetFilter') || {}).value || '';
+      const selectedGrade = (getElement('adminScoreGradeFilter') || {}).value || '';
       const resultEl = getElement('scoreAdjustResult');
-      if (resultEl) { resultEl.style.color = '#d97706'; resultEl.textContent = '⏳ กำลังโหลดข้อมูลบกพร่อง...'; }
-      try {
-        let snap;
-        if (grade) {
-          snap = await db.collection('onlineExamResults').where('grade', '==', grade).where('deleted', '!=', true).get()
-            .catch(function() { return db.collection('onlineExamResults').where('grade', '==', grade).get(); });
-        } else {
-          snap = await db.collection('onlineExamResults').get();
-        }
-        adminDeficiencyResults = snap.docs.map(function(d) { return Object.assign({ _docId: d.id }, d.data()); });
-        renderAdminScoreAdjustTable();
-        if (resultEl) { resultEl.style.color = '#16a34a'; resultEl.textContent = '✅ โหลดข้อมูลบกพร่องแล้ว ' + adminDeficiencyResults.length + ' รายการ'; }
-      } catch(e) {
-        if (resultEl) { resultEl.style.color = '#dc2626'; resultEl.textContent = '❌ โหลดข้อมูลบกพร่องไม่สำเร็จ: ' + (e.message || e); }
+      if (!selectedMonth || !selectedGrade) {
+        if (resultEl) { resultEl.style.color = '#dc2626'; resultEl.textContent = '❌ กรุณาเลือกเดือนและระดับชั้นก่อน'; }
+        return;
       }
-    }
+      if (resultEl) { resultEl.style.color = '#d97706'; resultEl.textContent = '⏳ กำลังนำเข้าคะแนนจากข้อสอบออนไลน์...'; }
+      try {
+        const snap = await db.collection('onlineExamResults')
+          .where('grade', '==', selectedGrade)
+          .get()
+          .catch(function() { return db.collection('onlineExamResults').get(); });
 
-    function getStudentDeficiency(record) {
-      if (!adminDeficiencyResults.length) return null;
-      const results = adminDeficiencyResults.filter(function(r) {
-        if (r.deleted) return false;
-        if (record.authUid && r.studentUid && record.authUid === r.studentUid) return true;
-        if (record.studentId && r.studentId && String(record.studentId) === String(r.studentId)) return true;
-        if (record.student && r.studentName && record.student === r.studentName) return true;
-        return false;
-      });
-      if (!results.length) return null;
+        const allResults = snap.docs.map(function(d) { return Object.assign({ _docId: d.id }, d.data()); })
+          .filter(function(r) {
+            if (r.deleted) return false;
+            if (r.grade && r.grade !== selectedGrade) return false;
+            const resultMonth = getThaiMonthYearFromText(r.submittedAtText || '');
+            return resultMonth === selectedMonth;
+          });
 
-      var wrongItems = [];
-      results.forEach(function(r) {
-        const course = onlineExamCourseCache.find(function(c) { return c.firebaseDocId === r.courseId; });
-        if (!course || !course.questions) return;
-        const qMap = {};
-        course.questions.forEach(function(q) { qMap[q.id] = q; });
-        const order = r.questionOrder || Object.keys(r.answers || {});
-        order.forEach(function(qid, idx) {
-          const q = qMap[qid];
-          if (!q) return;
-          const studentChoice = (r.answers || {})[qid];
-          if (studentChoice === undefined || studentChoice === null) return;
-          if (Number(studentChoice) !== Number(q.correctIndex)) {
-            wrongItems.push({
-              courseTitle: r.courseTitle || course.title || '',
-              no: idx + 1,
-              text: q.text || ('ข้อที่ ' + (idx + 1)),
-              studentChoice: (q.choices || [])[Number(studentChoice)] || ('ตัวเลือก ' + studentChoice),
-              correctChoice: (q.choices || [])[Number(q.correctIndex)] || ('ตัวเลือก ' + q.correctIndex)
-            });
+        if (!allResults.length) {
+          if (resultEl) { resultEl.style.color = '#d97706'; resultEl.textContent = '⚠️ ไม่พบผลสอบออนไลน์ของเดือน ' + selectedMonth + ' ระดับชั้น ' + selectedGrade; }
+          return;
+        }
+
+        let imported = 0;
+        let created = 0;
+        for (var i = 0; i < allResults.length; i++) {
+          const r = allResults[i];
+          const subject = (r.courseTitle || '').trim() || (r.courseId || '');
+          if (!subject) continue;
+          const score50val = r.score50 !== undefined ? r.score50 : onlineExamGetScore50Value(r.correctCount, r.totalQ);
+
+          var record = adminScoreRecords.find(function(rec) {
+            if (rec.month !== selectedMonth || rec.grade !== selectedGrade) return false;
+            if (rec.authUid && r.studentUid && rec.authUid === r.studentUid) return true;
+            if (rec.studentId && r.studentId && String(rec.studentId) === String(r.studentId)) return true;
+            if (rec.student && r.studentName && rec.student === r.studentName) return true;
+            return false;
+          });
+
+          if (!record) {
+            const newId = createFirebaseDocId('adminScoreRecords');
+            record = {
+              id: newId, firebaseDocId: newId,
+              month: selectedMonth, grade: selectedGrade,
+              studentId: r.studentId || '', authUid: r.studentUid || '',
+              student: r.studentName || '-', nickname: '-',
+              scores: {}, status: 'draft'
+            };
+            adminScoreRecords.push(record);
+            created++;
           }
-        });
-      });
 
-      const totalQ = results.reduce(function(s, r) { return s + (r.totalQ || 0); }, 0);
-      return { wrongItems: wrongItems, totalQ: totalQ, resultCount: results.length };
-    }
+          record.scores = record.scores || {};
+          record.scores[subject] = score50val;
+          imported++;
+          try { await setFirebaseDocument('adminScoreRecords', record); } catch(e) { console.warn(e); }
+        }
 
-    function showDeficiencyModal(encodedData) {
-      const items = JSON.parse(decodeURIComponent(encodedData));
-      const modal = getElement('onlineExamDetailModal');
-      const content = getElement('onlineExamDetailModalContent');
-      if (!modal || !content) return;
-      const bySubject = {};
-      items.forEach(function(item) {
-        const key = item.courseTitle || 'ไม่ระบุวิชา';
-        if (!bySubject[key]) bySubject[key] = [];
-        bySubject[key].push(item);
-      });
-      content.innerHTML = '<h3 style="margin-bottom:12px;">⚠️ ข้อที่ทำผิด (' + items.length + ' ข้อ)</h3>' +
-        Object.keys(bySubject).map(function(subject) {
-          return '<div style="margin-bottom:14px;">' +
-            '<p style="font-weight:700;color:#7c3aed;margin-bottom:6px;font-size:13px;">' + escapeHtml(subject) + ' (' + bySubject[subject].length + ' ข้อ)</p>' +
-            '<div style="display:flex;flex-direction:column;gap:6px;">' +
-            bySubject[subject].map(function(item) {
-              return '<div style="background:#fef2f2;border:1px solid #fecaca;border-radius:8px;padding:8px 12px;">' +
-                '<p style="font-size:12px;font-weight:600;color:#374151;margin-bottom:4px;">ข้อ ' + item.no + ': ' + escapeHtml(item.text) + '</p>' +
-                '<p style="font-size:11px;color:#dc2626;">❌ ตอบ: ' + escapeHtml(item.studentChoice) + '</p>' +
-                '<p style="font-size:11px;color:#16a34a;">✅ เฉลย: ' + escapeHtml(item.correctChoice) + '</p>' +
-              '</div>';
-            }).join('') +
-            '</div></div>';
-        }).join('');
-      modal.style.display = '';
+        renderAdminScoreFilters();
+        if (getElement('adminScoreTestSetFilter')) getElement('adminScoreTestSetFilter').value = selectedMonth;
+        if (getElement('adminScoreGradeFilter')) getElement('adminScoreGradeFilter').value = selectedGrade;
+        renderAdminScoreAdjustTable();
+        renderAdminScoreStatsTable();
+
+        if (resultEl) {
+          resultEl.style.color = '#16a34a';
+          resultEl.textContent = '✅ นำเข้าคะแนนสำเร็จ ' + imported + ' รายการ' + (created ? ' · สร้างแถวใหม่ ' + created + ' คน' : '') + ' · กด "บันทึก" แล้ว "ประกาศผล" เพื่อเผยแพร่';
+        }
+      } catch(e) {
+        console.error('importScoresFromOnlineExam error', e);
+        if (resultEl) { resultEl.style.color = '#dc2626'; resultEl.textContent = '❌ นำเข้าไม่สำเร็จ: ' + (e.message || e); }
+      }
     }
 
     function renderAdminScoreAdjustTable() {
       const tbody = getElement('adminScoreAdjustTableBody');
       if (!tbody) return;
       const records = getSelectedAdminScoreRecords();
-      const hasDeficiency = adminDeficiencyResults.length > 0;
+
+      // collect all subjects across records (dynamic — not hardcoded)
+      const subjectSet = {};
+      records.forEach(function(rec) { Object.keys(rec.scores || {}).forEach(function(k) { subjectSet[k] = true; }); });
+      const subjects = Object.keys(subjectSet).length
+        ? Object.keys(subjectSet)
+        : ['วิทยาศาสตร์', 'คณิตศาสตร์', 'ภาษาอังกฤษ'];
+
+      // update header to match dynamic subjects
+      const thead = tbody.closest('table') && tbody.closest('table').querySelector('thead tr');
+      if (thead) {
+        thead.innerHTML = '<th>นักเรียน</th>' +
+          subjects.map(function(s) { return '<th>' + escapeHtml(s) + '</th>'; }).join('') +
+          '<th>คะแนนเต็ม</th><th>สถานะ</th>';
+      }
+
+      const colCount = subjects.length + 3;
       tbody.innerHTML = records.length ? records.map(function(record) {
-        const def = hasDeficiency ? getStudentDeficiency(record) : null;
-        var defCell = '<td style="color:#9ca3af;font-size:11px;">—</td>';
-        if (def) {
-          const wrongCount = def.wrongItems.length;
-          const color = wrongCount === 0 ? '#16a34a' : wrongCount <= 3 ? '#d97706' : '#dc2626';
-          const btnData = wrongCount > 0 ? ' <button onclick="showDeficiencyModal(decodeURIComponent(\'' + encodeURIComponent(JSON.stringify(def.wrongItems)) + '\'))" style="font-size:10px;padding:1px 6px;background:none;border:1px solid ' + color + ';color:' + color + ';border-radius:6px;cursor:pointer;">ดู</button>' : '';
-          defCell = '<td style="white-space:nowrap;">' +
-            '<span style="font-size:11px;font-weight:700;color:' + color + ';">' +
-              (wrongCount === 0 ? '✅ ไม่มีข้อบกพร่อง' : '⚠️ ผิด ' + wrongCount + ' ข้อ') +
-            '</span>' + btnData + '</td>';
-        } else if (hasDeficiency) {
-          defCell = '<td style="font-size:11px;color:#9ca3af;">ไม่มีข้อมูล</td>';
-        }
         return '<tr data-score-id="' + record.id + '">' +
-          '<td>' + record.student + '</td>' +
-          '<td><input class="score-input" data-subject="วิทยาศาสตร์" type="number" min="0" max="50" step="1" value="' + (record.scores['วิทยาศาสตร์'] || 0) + '"></td>' +
-          '<td><input class="score-input" data-subject="คณิตศาสตร์" type="number" min="0" max="50" step="1" value="' + (record.scores['คณิตศาสตร์'] || 0) + '"></td>' +
-          '<td><input class="score-input" data-subject="ภาษาอังกฤษ" type="number" min="0" max="50" step="1" value="' + (record.scores['ภาษาอังกฤษ'] || 0) + '"></td>' +
+          '<td>' + escapeHtml(record.student) + '</td>' +
+          subjects.map(function(s) {
+            return '<td><input class="score-input" data-subject="' + escapeHtml(s) + '" type="number" min="0" max="50" step="1" value="' + (record.scores[s] || 0) + '"></td>';
+          }).join('') +
           '<td>50</td>' +
           '<td>' + scoreStatusText(record.status) + '</td>' +
-          defCell +
         '</tr>';
-      }).join('') : '<tr><td colspan="7">ยังไม่มีข้อมูลคะแนนของชุดข้อสอบและระดับชั้นที่เลือก</td></tr>';
+      }).join('') : '<tr><td colspan="' + colCount + '">ยังไม่มีข้อมูลคะแนนของชุดข้อสอบและระดับชั้นที่เลือก</td></tr>';
     }
 
     function calculateSubjectStats(records, subject) {
@@ -18506,7 +18499,10 @@ function receiptStatusText(status) {
         return record.month === month && record.grade === grade;
       });
       if (!records.length) return null;
-      const subjects = ['วิทยาศาสตร์', 'คณิตศาสตร์', 'ภาษาอังกฤษ'].map(function(subject) {
+      const subjectSet2 = {};
+      records.forEach(function(rec) { Object.keys(rec.scores || {}).forEach(function(k) { subjectSet2[k] = true; }); });
+      const subjectKeys = Object.keys(subjectSet2).length ? Object.keys(subjectSet2) : ['วิทยาศาสตร์', 'คณิตศาสตร์', 'ภาษาอังกฤษ'];
+      const subjects = subjectKeys.map(function(subject) {
         return calculateSubjectStats(records, subject);
       });
       let report = scoreReports.find(function(item) { return item.month === month && item.grade === grade; });
