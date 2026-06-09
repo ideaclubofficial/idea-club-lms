@@ -3797,11 +3797,12 @@
                 <thead>
                   <tr>
                     <th class="sortable" onclick="sortStaticTable(this, 0)">นักเรียน</th>
-                    <th class="sortable" onclick="sortStaticTable(this, 1)">คอร์ส</th>
-                    <th class="sortable" onclick="sortStaticTable(this, 2)">เดือนที่ชำระ</th>
-                    <th class="sortable" onclick="sortStaticTable(this, 3)">ยอดเงิน</th>
-                    <th class="sortable" onclick="sortStaticTable(this, 4)">สลิป</th>
-                    <th class="sortable" onclick="sortStaticTable(this, 5)">สถานะ</th>
+                    <th class="sortable" onclick="sortStaticTable(this, 1)">ชื่อเล่น</th>
+                    <th class="sortable" onclick="sortStaticTable(this, 2)">คอร์ส</th>
+                    <th class="sortable" onclick="sortStaticTable(this, 3)">เดือนที่ชำระ</th>
+                    <th class="sortable" onclick="sortStaticTable(this, 4)">ยอดเงิน</th>
+                    <th class="sortable" onclick="sortStaticTable(this, 5)">สลิป</th>
+                    <th class="sortable" onclick="sortStaticTable(this, 6)">สถานะ</th>
                     <th>จัดการ</th>
                   </tr>
                 </thead>
@@ -15632,6 +15633,20 @@ function getCourseOnlineDocs(course, includeInactive) {
       );
     }
 
+    function gradeOrder(grade) {
+      var order = ['ป.1','ป.2','ป.3','ป.4','ป.5','ป.6','ม.1','ม.2','ม.3','ม.4','ม.5','ม.6'];
+      var idx = order.indexOf(String(grade || '').trim());
+      return idx >= 0 ? idx : 99;
+    }
+
+    function getPaymentStudentRecord(p) {
+      return students.find(function(s) {
+        return (p.studentId && String(s.id || '') === String(p.studentId)) ||
+               (p.authUid && p.authUid === s.authUid) ||
+               (p.memberId && p.memberId === s.memberId);
+      }) || null;
+    }
+
     function getFilteredPaymentsForTable() {
       const selectedMonth = getElement('paymentStatusMonthFilter') ? getElement('paymentStatusMonthFilter').value : 'ทั้งหมด';
       const selectedLocation = getElement('paymentStatusLocationFilter') ? getElement('paymentStatusLocationFilter').value : 'ทั้งหมด';
@@ -15641,11 +15656,7 @@ function getCourseOnlineDocs(course, includeInactive) {
       return payments.filter(function(p) {
         const monthText = String(p.month || '');
         const statusText = getPaymentDisplayStatus(p);
-        const student = students.find(function(s) {
-          return (p.studentId && String(s.id || '') === String(p.studentId)) ||
-                 (p.authUid && p.authUid === s.authUid) ||
-                 (p.memberId && p.memberId === s.memberId);
-        });
+        const student = getPaymentStudentRecord(p);
         const course = getCourseByStudentOrName(student, p.course || p.courseName || '');
         const locationText = course ? (course.location || '') : '';
         const gradeText = student ? (student.grade || '') : (course ? (course.grade || '') : '');
@@ -15655,6 +15666,14 @@ function getCourseOnlineDocs(course, includeInactive) {
           (selectedGrade === 'ทั้งหมด' || gradeText === selectedGrade) &&
           (selectedStatus === 'ทั้งหมด' || statusText.includes(selectedStatus)) &&
           (!keyword || rowText.includes(keyword));
+      }).sort(function(a, b) {
+        const sA = getPaymentStudentRecord(a);
+        const sB = getPaymentStudentRecord(b);
+        const gDiff = gradeOrder(sA ? sA.grade : '') - gradeOrder(sB ? sB.grade : '');
+        if (gDiff !== 0) return gDiff;
+        const mA = String(a.memberId || '').padStart(10, '0');
+        const mB = String(b.memberId || '').padStart(10, '0');
+        return mA.localeCompare(mB);
       });
     }
 
@@ -15671,8 +15690,10 @@ function getCourseOnlineDocs(course, includeInactive) {
         const pid = p.id || p.firebaseDocId || '';
         const statusText = getPaymentDisplayStatus(p);
         const statusClass = statusText === 'ชำระแล้ว' ? 'status-paid' : statusText === 'ค้างชำระ' || statusText === 'สลิปไม่ผ่าน' || statusText === 'ไม่ผ่าน' ? 'status-absent' : 'status-waiting';
-        return '<tr data-payment-id="' + p.id + '"><td>' + (p.student || '-') + '</td><td>' + renderPaymentCourseText(p) + '</td><td>' + (p.month || '-') + '</td><td>' + renderPaymentAmountText(p) + '</td><td>' + slipCell + '</td><td><span class="' + statusClass + '">' + statusText + '</span></td><td>' + paymentActionButtons(p.status || p.paymentStatus || 'รอชำระเงิน', pid) + '</td></tr>';
-      }).join('') : '<tr><td colspan="7">ยังไม่มีรายการชำระเงินตามเงื่อนไขที่เลือก</td></tr>';
+        const student = getPaymentStudentRecord(p);
+        const nickname = student ? (student.nickname || '-') : '-';
+        return '<tr data-payment-id="' + p.id + '"><td>' + (p.student || '-') + '</td><td>' + escapeHtml(nickname) + '</td><td>' + renderPaymentCourseText(p) + '</td><td>' + (p.month || '-') + '</td><td>' + renderPaymentAmountText(p) + '</td><td>' + slipCell + '</td><td><span class="' + statusClass + '">' + statusText + '</span></td><td>' + paymentActionButtons(p.status || p.paymentStatus || 'รอชำระเงิน', pid) + '</td></tr>';
+      }).join('') : '<tr><td colspan="8">ยังไม่มีรายการชำระเงินตามเงื่อนไขที่เลือก</td></tr>';
       renderTablePagination('paymentTablePagination', paymentCurrentPage, ptTotalPages, filtered.length, 'changePaymentPage');
       updatePaymentSummary();
     }
