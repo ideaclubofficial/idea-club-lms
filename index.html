@@ -15617,6 +15617,8 @@ function getCourseOnlineDocs(course, includeInactive) {
       const status = String(payment.status || payment.paymentStatus || '').trim();
       const slipStatus = String(payment.slipStatus || '').trim();
       if (status === 'ยกเว้น') return false;
+      if (status === 'ชำระแล้ว' || status === 'paid') return false;
+      if (slipStatus === 'approved') return false;
       return status === 'รอชำระเงิน' || status === 'ค้างชำระ' || status === 'รอตรวจสลิป' ||
         slipStatus === 'รอตรวจสลิป' || slipStatus === 'pending' || slipStatus === 'waiting';
     }
@@ -15634,7 +15636,8 @@ function getCourseOnlineDocs(course, includeInactive) {
         const finalAmount = getMonthlyPaymentAmountForStudent(student, month);
 
         if (existing) {
-          if (!isPaymentRecordUpdatable(existing)) {
+          const existingStatus = String(existing.status || existing.paymentStatus || '').trim();
+          if (!isPaymentRecordUpdatable(existing) || existingStatus === 'ชำระแล้ว' || existingStatus === 'paid') {
             skipped++;
             continue;
           }
@@ -15746,12 +15749,14 @@ function getCourseOnlineDocs(course, includeInactive) {
         return !previewIds.has(String(s.id));
       });
       const rows = previewStudents.map(function(student) {
-        const amount = getMonthlyPaymentAmountForStudent(student, month);
+        const expectedAmount = getMonthlyPaymentAmountForStudent(student, month);
         const payment = findPaymentForStudentMonth(student, month);
+        const amount = payment ? getPaymentFinalAmount(payment) : expectedAmount;
         const isSkipped = !!skipped[String(student.id)];
         return {
           student: student,
           amount: amount,
+          expectedAmount: expectedAmount,
           payment: payment,
           isSkipped: isSkipped
         };
@@ -15778,13 +15783,14 @@ function getCourseOnlineDocs(course, includeInactive) {
         const student = row.student;
         const payment = row.payment;
         const isSkipped = row.isSkipped;
-        const paymentStatus = payment ? (payment.status || payment.paymentStatus || 'รอชำระเงิน') : '-';
+        const displayStatus = payment ? getPaymentDisplayStatus(payment) : '-';
         const recordStatus = isSkipped ? '<span class="status-absent">ยกเว้นรอบนี้</span>' : (payment ? '<span class="status-paid">สร้างแล้ว</span>' : '<span class="status-waiting">ยังไม่ได้สร้าง</span>');
         const recordStatusText = isSkipped ? 'ยกเว้น' : (payment ? 'สร้างแล้ว' : 'ยังไม่ได้สร้าง');
-        const paymentStatusClass = paymentStatus === 'ชำระแล้ว' ? 'status-paid' : paymentStatus === 'ค้างชำระ' || paymentStatus === 'สลิปไม่ผ่าน' || paymentStatus === 'ยกเว้น' ? 'status-absent' : 'status-waiting';
+        const displayStatusClass = displayStatus === 'ชำระแล้ว' ? 'status-paid' : (displayStatus === 'ค้างชำระ' || displayStatus === 'สลิปไม่ผ่าน' || displayStatus === 'ยกเว้น' ? 'status-absent' : 'status-waiting');
         const override = getStudentMonthPriceOverride(month, student.id);
         const inputStyle = 'width:90px;border:1px solid ' + (override > 0 ? '#3b82f6;color:#1d4ed8;font-weight:700' : '#d1d5db;color:#6b7280') + ';border-radius:6px;padding:3px 6px;font-size:13px;';
         const overrideTd = '<td><input type="number" min="0" style="' + inputStyle + '" placeholder="ปกติ" value="' + (override > 0 ? override : '') + '" onblur="saveStudentMonthPriceOverride(' + jsArg(month) + ',' + jsArg(student.id) + ',this.value)" onkeydown="if(event.key===\'Enter\')this.blur()"></td>';
+        const amountDiffNote = (payment && row.expectedAmount !== row.amount) ? '<br><span class="mini-muted">ราคาปกติ: ' + formatPrice(row.expectedAmount) + '</span>' : '';
         return '<tr data-student-id="' + escapeHtml(String(student.id || '')) + '"' +
             ' data-name="' + escapeHtml((student.name || '').toLowerCase()) + '"' +
             ' data-course="' + escapeHtml(student.course || '') + '"' +
@@ -15792,10 +15798,10 @@ function getCourseOnlineDocs(course, includeInactive) {
             ' data-record-status="' + recordStatusText + '" style="' + (isSkipped ? 'opacity:0.45;' : '') + '">' +
           '<td style="word-break:break-word;white-space:normal;"><strong>' + escapeHtml(student.name || '-') + '</strong>' + (student.nickname ? ' <span style="color:#6b7280;font-weight:400;font-size:13px;">(' + escapeHtml(student.nickname) + ')</span>' : '') + '<br><span class="mini-muted">' + escapeHtml(student.memberId || student.phone || '-') + '</span></td>' +
           '<td>' + escapeHtml(student.course || '-') + '</td>' +
-          '<td><strong>' + formatPrice(row.amount) + '</strong></td>' +
+          '<td><strong>' + formatPrice(row.amount) + '</strong>' + amountDiffNote + '</td>' +
           overrideTd +
           '<td>' + recordStatus + '</td>' +
-          '<td>' + (payment ? '<span class="' + paymentStatusClass + '">' + escapeHtml(paymentStatus) + '</span>' : '-') + '</td>' +
+          '<td>' + (payment ? '<span class="' + displayStatusClass + '">' + escapeHtml(displayStatus) + '</span>' : '-') + '</td>' +
           '<td>' + (isSkipped
             ? '<button class="btn btn-dark" style="font-size:12px;padding:4px 10px;" type="button" onclick="restoreStudentMonthPayment(\'' + jsArg(month) + '\',\'' + jsArg(student.id) + '\')">คืนสิทธิ์</button>'
             : '<button class="btn btn-red" style="font-size:12px;padding:4px 10px;" type="button" onclick="voidStudentMonthPayment(\'' + jsArg(month) + '\',\'' + jsArg(student.id) + '\')">ยกเลิกยอด</button>'
@@ -17416,7 +17422,6 @@ function receiptStatusText(status) {
         if (fileInput) fileInput.value = '';
         updateStudentSlipUploadControls();
 
-        await loadCoreDataFromFirebase();
         updateStudentCourseDisplay();
         renderPaymentTable();
         renderAdminDashboard();
