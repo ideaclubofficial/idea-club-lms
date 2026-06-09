@@ -1653,7 +1653,7 @@
     <section class="section auth-section login-fullpage" id="student-login">
       <div class="login-card">
         <div class="login-brand">
-          <div class="login-logo-mark">IC</div>
+          <div class="login-logo-mark" id="loginLogoMark">IC</div>
           <h1 class="login-card-title">IDEA CLUB</h1>
           <p class="login-card-subtitle">ระบบจัดการการเรียนและสมาชิกออนไลน์</p>
         </div>
@@ -4982,6 +4982,13 @@
               <div class="form-row">
                 <div><label>รหัสผ่านเริ่มต้น</label><input id="settingDefaultPassword" type="text" placeholder="000000" /></div>
                 <div><label>Logo URL</label><input id="settingLogoUrl" type="url" placeholder="https://..." /></div>
+                <div>
+                  <label>Login Logo URL</label>
+                  <input id="settingLoginLogoUrl" type="url"
+                    placeholder="https://... (ปล่อยว่างเพื่อใช้ Logo หลัก)"
+                    oninput="applyLoginLogoPreview(this.value)" />
+                  <div id="settingLoginLogoPreview" style="margin-top:8px;min-height:40px;"></div>
+                </div>
                 <div><label>Favicon URL</label><input id="settingFaviconUrl" type="url" placeholder="https://..." /></div>
                 <div><label>QR Code URL</label><input id="settingQrUrl" type="url" placeholder="https://..." /></div>
               </div>
@@ -6254,6 +6261,7 @@
       lineOfficial: '@ideaclub',
       phone: '',
       logoUrl: '',
+      loginLogoUrl: '',
       faviconUrl: '',
       qrUrl: '',
       receiptFooter: 'เอกสารนี้เป็นใบยืนยันการชำระเงินจากสถาบัน IDEA CLUB ไม่ใช่สลิปโอนเงินธนาคาร',
@@ -17395,6 +17403,15 @@ function receiptStatusText(status) {
       previewImageFile(inputId, previewId, 'ยังไม่ได้เลือกรูป');
     }
 
+    function applyLoginLogoPreview(url) {
+      const el = getElement('settingLoginLogoPreview');
+      if (!el) return;
+      const src = parseDriveImageUrl(url || '');
+      el.innerHTML = src
+        ? '<img src="' + escapeHtml(src) + '" style="height:48px;object-fit:contain;">'
+        : '';
+    }
+
     async function uploadSiteAssetToDrive(assetType, inputId, resultElement) {
       const input = getElement(inputId);
       const file = input && input.files ? input.files[0] : null;
@@ -23825,12 +23842,14 @@ function receiptStatusText(status) {
       getElement('settingLineOfficial').value = systemSettings.lineOfficial || '';
       getElement('settingPhone').value = systemSettings.phone || '';
       getElement('settingLogoUrl').value = systemSettings.logoUrl || '';
+      if (getElement('settingLoginLogoUrl')) getElement('settingLoginLogoUrl').value = systemSettings.loginLogoUrl || '';
       if (getElement('settingFaviconUrl')) getElement('settingFaviconUrl').value = systemSettings.faviconUrl || '';
       getElement('settingQrUrl').value = systemSettings.qrUrl || '';
       getElement('settingReceiptFooter').value = systemSettings.receiptFooter || '';
       getElement('settingAcademicYear').value = systemSettings.academicYear || '';
       getElement('settingDefaultPassword').value = systemSettings.defaultPassword || '000000';
       if (getElement('settingLogoPreview')) getElement('settingLogoPreview').innerHTML = systemSettings.logoUrl ? '<img src="' + parseDriveImageUrl(systemSettings.logoUrl) + '" alt="Logo Preview">' : 'ยังไม่ได้เลือกรูป';
+      applyLoginLogoPreview(systemSettings.loginLogoUrl || '');
       if (getElement('settingFaviconPreview')) getElement('settingFaviconPreview').innerHTML = systemSettings.faviconUrl ? '<img src="' + parseDriveImageUrl(systemSettings.faviconUrl) + '" alt="Favicon Preview">' : 'ยังไม่ได้เลือกรูป';
     }
 
@@ -23849,6 +23868,9 @@ function receiptStatusText(status) {
           lineOfficial: getElement('settingLineOfficial').value.trim(),
           phone: getElement('settingPhone').value.trim(),
           logoUrl: parseDriveImageUrl(uploadedLogoUrl || getElement('settingLogoUrl').value.trim()),
+          loginLogoUrl: parseDriveImageUrl(
+            getElement('settingLoginLogoUrl') ? getElement('settingLoginLogoUrl').value.trim() : ''
+          ),
           faviconUrl: parseDriveImageUrl(uploadedFaviconUrl || (getElement('settingFaviconUrl') ? getElement('settingFaviconUrl').value.trim() : '')),
           qrUrl: getElement('settingQrUrl').value.trim(),
           receiptFooter: getElement('settingReceiptFooter').value.trim(),
@@ -23857,6 +23879,7 @@ function receiptStatusText(status) {
         });
         await setFirebaseDocument('settings', systemSettings);
         if (getElement('settingLogoUrl')) getElement('settingLogoUrl').value = systemSettings.logoUrl || '';
+        if (getElement('settingLoginLogoUrl')) getElement('settingLoginLogoUrl').value = systemSettings.loginLogoUrl || '';
         if (getElement('settingFaviconUrl')) getElement('settingFaviconUrl').value = systemSettings.faviconUrl || '';
         if (uploadSiteAssetToDrive.lastWarnings && uploadSiteAssetToDrive.lastWarnings.length) {
           result.textContent = 'บันทึกตั้งค่าระบบเรียบร้อย แต่ Google Drive ยังตั้งสิทธิ์ public ของบางไฟล์ไม่สำเร็จ กรุณาตรวจสิทธิ์ไฟล์ใน Drive';
@@ -23880,6 +23903,22 @@ function receiptStatusText(status) {
           ? '<img class="site-logo-img" src="' + parseDriveImageUrl(systemSettings.logoUrl) + '" alt="' + escapeHtml(name) + '"><span>' + escapeHtml(name) + '</span>'
           : escapeHtml(name);
       });
+      const loginLogoEl = getElement('loginLogoMark');
+      if (loginLogoEl) {
+        const loginLogoSrc = parseDriveImageUrl(
+          systemSettings.loginLogoUrl || systemSettings.logoUrl || ''
+        );
+        if (loginLogoSrc) {
+          loginLogoEl.innerHTML = '<img src="' + escapeHtml(loginLogoSrc) +
+            '" alt="logo" style="width:100%;height:100%;object-fit:contain;border-radius:12px;">';
+          loginLogoEl.style.background = 'none';
+          loginLogoEl.style.padding = '4px';
+        } else {
+          loginLogoEl.innerHTML = 'IC';
+          loginLogoEl.style.background = '';
+          loginLogoEl.style.padding = '';
+        }
+      }
       document.querySelectorAll('footer strong').forEach(function(el) { el.textContent = name; });
       if (systemSettings.faviconUrl) {
         if (getElement('dynamicFavicon')) getElement('dynamicFavicon').href = systemSettings.faviconUrl;
