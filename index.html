@@ -720,12 +720,6 @@
         color: #0f4cbd;
       }
 
-      .student-profile-summary-actions {
-        display: grid;
-        grid-template-columns: 1fr;
-        gap: 10px;
-      }
-
       .student-profile-modal {
         align-items: stretch;
         padding: 12px;
@@ -1615,24 +1609,12 @@
     <h3 style="font-size:18px;">แก้ไขข้อมูลส่วนตัว</h3>
     <div class="form-row">
       <div>
-        <label>ชื่อเล่น</label>
-        <input id="profileNickname" type="text" value="" />
+        <label>ชื่อ-นามสกุล</label>
+        <input id="profileNameInput" type="text" />
       </div>
       <div>
-        <label>ชื่อผู้ปกครอง</label>
-        <input id="profileParentName" type="text" value="" />
-      </div>
-      <div>
-        <label>เบอร์ผู้ปกครอง</label>
+        <label>เบอร์ติดต่อ</label>
         <input id="profilePhone" type="text" value="" />
-      </div>
-      <div>
-        <label>LINE ID</label>
-        <input id="profileLineId" type="text" value="" />
-      </div>
-      <div>
-        <label>โรงเรียน</label>
-        <input id="profileSchool" type="text" value="" />
       </div>
     </div>
 
@@ -1876,11 +1858,10 @@
         <h2 id="studentProfileModalTitle" class="student-profile-modal-title">แก้ไขข้อมูล</h2>
         <p class="student-profile-modal-subtitle">ตรวจสอบ Member ID แก้ไขข้อมูลติดต่อ และเปลี่ยนรหัสผ่าน</p>
         <div id="studentProfileSummary" class="notice" style="margin-bottom:16px;"></div>
-        <div class="student-profile-summary-actions">
-          <button id="studentProfileEditToggle" class="btn btn-blue" type="button" onclick="toggleStudentProfileEdit(true)">แก้ไขข้อมูล</button>
+        <div style="margin-bottom:12px;">
           <button class="btn btn-dark" type="button" onclick="copyCurrentStudentMemberId()">คัดลอก Member ID</button>
         </div>
-        <div id="studentProfileEditPanel" class="hidden" style="margin-top:18px;">
+        <div id="studentProfileEditPanel" style="margin-top:18px;">
           <div class="form-row">
             <div>
               <label>ชื่อเล่น</label>
@@ -8334,11 +8315,8 @@
       if (getElement('profileDisplayLoginLabel')) getElement('profileDisplayLoginLabel').textContent = display.loginLabel;
       if (getElement('profileDisplayLogin')) getElement('profileDisplayLogin').textContent = display.loginText;
 
-      if (getElement('profileNickname')) getElement('profileNickname').value = record.nickname || '';
-      if (getElement('profileParentName')) getElement('profileParentName').value = record.parentName || '';
+      if (getElement('profileNameInput')) getElement('profileNameInput').value = record.name || record.displayName || '';
       if (getElement('profilePhone')) getElement('profilePhone').value = record.phone || '';
-      if (getElement('profileLineId')) getElement('profileLineId').value = record.lineId || '';
-      if (getElement('profileSchool')) getElement('profileSchool').value = record.school || '';
       if (getElement('profilePassword')) getElement('profilePassword').value = '';
       if (getElement('profilePasswordConfirm')) getElement('profilePasswordConfirm').value = '';
       applyIdeaclubPageLabels();
@@ -8397,7 +8375,6 @@
       if (panel) panel.classList.add('hidden');
       const modal = getElement('student-profile');
       renderProfileSettingsForRole('student');
-      toggleStudentProfileEdit(true);
       if (modal) {
         modal.classList.remove('hidden');
         const firstInput = getElement('studentProfileNickname');
@@ -8410,7 +8387,6 @@
     function closeStudentProfileEdit() {
       const modal = getElement('student-profile');
       if (modal) modal.classList.add('hidden');
-      toggleStudentProfileEdit(false);
       const result = getElement('studentProfileResult');
       if (result) {
         result.textContent = '';
@@ -8444,15 +8420,6 @@
       return el ? el.value.trim() : '';
     }
 
-    function toggleStudentProfileEdit(show) {
-      const panel = getElement('studentProfileEditPanel');
-      const button = getElement('studentProfileEditToggle');
-      const shouldShow = typeof show === 'boolean' ? show : !!(panel && panel.classList.contains('hidden'));
-      if (panel) panel.classList.toggle('hidden', !shouldShow);
-      if (button) button.textContent = shouldShow ? 'ซ่อนฟอร์มแก้ไข' : 'แก้ไขข้อมูล';
-      if (shouldShow) renderProfileSettingsForRole('student');
-    }
-
     function renderProfileSettingsForRole(role) {
       const config = getProfileRoleConfig(role);
       const prefix = config.prefix;
@@ -8464,7 +8431,7 @@
           : role === 'teacher'
             ? (record.teacherId || record.username || record.email || '-')
             : (record.email || record.username || getFirebaseAuthUidText());
-        summary.innerHTML = '<p><strong>' + escapeHtml(record.name || record.nickname || record.displayName || 'ผู้ใช้งาน') + '</strong></p>' +
+        summary.innerHTML = '<p><strong>' + escapeHtml(record.name || record.displayName || 'ผู้ใช้งาน') + '</strong></p>' +
           '<p><span class="mini-muted">ID:</span> ' + escapeHtml(idText) + '</p>' +
           '<p><span class="mini-muted">ประเภทบัญชี:</span> ' + escapeHtml(role === 'student' ? 'นักเรียน' : role === 'teacher' ? getRoleLabel(record.appRole || record.role || 'Teacher') : getRoleLabel(record.appRole || record.role || 'Admin')) + '</p>' +
           (role === 'student'
@@ -8630,11 +8597,9 @@
         return;
       }
 
-      record.nickname = getElement('profileNickname') ? getElement('profileNickname').value.trim() : (record.nickname || '');
-      record.parentName = getElement('profileParentName') ? getElement('profileParentName').value.trim() : (record.parentName || '');
+      record.name = getElement('profileNameInput') ? getElement('profileNameInput').value.trim() : (record.name || '');
+      record.displayName = record.name || record.displayName || '';
       record.phone = getElement('profilePhone') ? getElement('profilePhone').value.trim() : (record.phone || '');
-      record.lineId = getElement('profileLineId') ? getElement('profileLineId').value.trim() : (record.lineId || '');
-      record.school = getElement('profileSchool') ? getElement('profileSchool').value.trim() : (record.school || '');
 
       try {
         if (info.type === 'student') {
