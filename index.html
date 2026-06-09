@@ -2807,7 +2807,6 @@
           <a data-menu-label="ใบเสร็จ" onclick="showAdminTab('admin-receipts')"><span class="menu-icon">🧾</span>ใบเสร็จ</a>
           <div class="sidebar-group-title"><span class="menu-icon">📊</span>แบบทดสอบ</div>
 
-          <a data-menu-label="ระบบวิเคราะห์คะแนน" onclick="showAdminTab('admin-exam-processor')"><span class="menu-icon">📝</span>ระบบวิเคราะห์คะแนน</a>
           <a data-menu-label="ข้อสอบออนไลน์ Interactive" onclick="showAdminTab('admin-online-exam')"><span class="menu-icon">🖥️</span>ข้อสอบออนไลน์ Interactive</a>
           <a data-menu-label="แผนสอนรายเดือน" onclick="showAdminTab('admin-monthly-planner')"><span class="menu-icon">🗓️</span>แผนสอนรายเดือน</a>
           <div class="sidebar-group-title"><span class="menu-icon">📅</span>ครูผู้สอน</div>
@@ -4145,236 +4144,6 @@
             </div>
           </section>
 
-          <!-- ========================================================
-               ระบบวิเคราะห์คะแนน  (admin-exam-processor)
-               Collections: examBank / examResults / learningMaterials
-               ======================================================== -->
-          <section id="admin-exam-processor" class="admin-tab hidden">
-
-            <!-- 1. Sync จาก Google Drive -->
-            <div class="form-box">
-              <h3>Sync ข้อสอบจาก Google Drive</h3>
-              <p style="color:#6b7280; margin-bottom:12px;">
-                โฟลเดอร์ต้นทาง: <code>16t5boPIY4736OkQLv3S7JWZ02QvQeqBW</code><br/>
-                ระบบเรียก Cloud Function <code>syncExamBankFromDrive</code> แล้วบันทึก metadata เข้า collection <strong>examBank</strong>
-              </p>
-              <div style="display:flex;gap:10px;flex-wrap:wrap;">
-                <button class="btn btn-blue" type="button" onclick="syncExamBankFromDrive()">🔄 Sync ข้อสอบจาก Google Drive</button>
-                <button class="btn btn-dark" type="button" onclick="seedExamBank()" title="เพิ่มข้อสอบตัวอย่าง 3 ชุด (ป.4/ป.5/ป.6) — idempotent">🌱 เพิ่มข้อสอบทดสอบ</button>
-                <button class="btn btn-dark" type="button" onclick="seedLearningMaterials()" title="เพิ่ม learning materials ตัวอย่าง 6 รายการ — idempotent">📚 เพิ่ม Learning Materials</button>
-              </div>
-              <p style="color:#6b7280;font-size:0.82em;margin-top:6px;">
-                ปุ่ม seed จะเพิ่มข้อมูลตัวอย่างเข้า Firestore โดยตรง — ปลอดภัย ไม่ทับข้อมูลที่มีอยู่แล้ว (idempotent)
-              </p>
-              <p id="examSyncStatus" style="margin-top:8px; font-weight:bold;"></p>
-            </div>
-
-            <!-- 2. เพิ่ม / แก้ไขข้อสอบในคลัง -->
-            <div class="form-box">
-              <h3>เพิ่ม / แก้ไขข้อสอบในคลัง (examBank)</h3>
-              <input id="editingExamBankId" type="hidden" value="" />
-              <div class="form-row">
-                <div>
-                  <label>ชื่อข้อสอบ</label>
-                  <input id="examBankTitle" type="text" placeholder="เช่น Monthly Test ป.4 วิทย์ พ.ค." />
-                </div>
-                <div>
-                  <label>ระดับชั้น</label>
-                  <select id="examBankGrade">
-                    <option>ป.4</option><option>ป.5</option><option selected>ป.6</option>
-                  </select>
-                </div>
-                <div>
-                  <label>วิชา</label>
-                  <select id="examBankSubject">
-                    <option>วิทยาศาสตร์</option>
-                    <option>คณิตศาสตร์</option>
-                    <option>ภาษาอังกฤษ</option>
-                    <option>ภาษาไทย</option>
-                    <option>สังคมศึกษา</option>
-                  </select>
-                </div>
-              </div>
-              <div class="form-row">
-                <div>
-                  <label>หัวข้อ (คั่นด้วยลูกน้ำ)</label>
-                  <input id="examBankTopics" type="text" placeholder="เช่น แสงและการมองเห็น, ระบบสุริยะ" />
-                </div>
-                <div>
-                  <label>จำนวนข้อ</label>
-                  <input id="examBankTotalItems" type="number" min="1" max="100" value="20" style="max-width:90px;" />
-                </div>
-              </div>
-              <div class="form-row">
-                <div>
-                  <label>Drive File ID (ถ้ามี)</label>
-                  <input id="examBankDriveFileId" type="text" placeholder="ID ของไฟล์ข้อสอบใน Google Drive" />
-                </div>
-                <div>
-                  <label>สถานะ</label>
-                  <select id="examBankStatus">
-                    <option value="active">ใช้งาน</option>
-                    <option value="inactive">ปิดใช้งาน</option>
-                  </select>
-                </div>
-              </div>
-              <label>เฉลย (A,B,C,D,... คั่นด้วยลูกน้ำ ตามลำดับข้อ)</label>
-              <input id="examBankAnswerKey" type="text" placeholder="เช่น A,B,C,D,A,B,C,D,A,B,A,C,D,B,A,C,D,A,B,C" style="font-family:monospace;" />
-              <p style="color:#6b7280; font-size:0.85em; margin-top:4px;">ใส่ทุกข้อตามลำดับ เช่น 20 ข้อ ใส่ 20 ตัวอักษรคั่นด้วยลูกน้ำ (A/B/C/D)</p>
-              <br />
-              <button class="btn btn-green" type="button" onclick="saveExamToBank()">บันทึกข้อสอบในคลัง</button>
-              <button class="btn btn-dark" type="button" onclick="clearExamBankForm()">ล้างฟอร์ม</button>
-              <p id="examBankSaveResult" style="margin-top:12px; font-weight:bold;"></p>
-            </div>
-
-            <!-- 3. รายการข้อสอบในคลัง -->
-            <div class="form-box">
-              <h3>รายการข้อสอบในคลัง</h3>
-              <div class="form-row" style="margin-bottom:12px;">
-                <div>
-                  <label>กรองระดับชั้น</label>
-                  <select id="examBankGradeFilter" onchange="renderExamBankList()">
-                    <option value="ทั้งหมด">ทั้งหมด</option>
-                    <option>ป.4</option><option>ป.5</option><option>ป.6</option>
-                  </select>
-                </div>
-                <div>
-                  <label>กรองวิชา</label>
-                  <select id="examBankSubjectFilter" onchange="renderExamBankList()">
-                    <option value="ทั้งหมด">ทั้งหมด</option>
-                    <option>วิทยาศาสตร์</option><option>คณิตศาสตร์</option>
-                    <option>ภาษาอังกฤษ</option><option>ภาษาไทย</option><option>สังคมศึกษา</option>
-                  </select>
-                </div>
-                <div style="display:flex; align-items:flex-end;">
-                  <button class="btn btn-blue" type="button" onclick="loadExamBank()">🔃 โหลด Exam Bank</button>
-                </div>
-              </div>
-              <div id="examBankList"><p style="color:#6b7280;">กด "โหลด Exam Bank" เพื่อดูรายการข้อสอบจาก Firestore</p></div>
-              <div id="examBankPagination" class="test-actions" style="margin-top:10px;"></div>
-            </div>
-
-            <!-- 4a. Student Database — โหลดจาก users collection -->
-            <div class="form-box">
-              <h3>Student Database (ป.4–ป.6)</h3>
-              <p style="color:#6b7280; margin-bottom:12px;">
-                ดึงรายชื่อนักเรียนจาก <code>users</code> collection โดยตรง —
-                role == "student" · status == "active" · grade ป.4/ป.5/ป.6
-              </p>
-              <div class="form-row">
-                <div>
-                  <label>กรองระดับชั้น</label>
-                  <select id="examProcGradeFilter" onchange="loadStudentsFromFirebase()">
-                    <option value="ทั้งหมด">ทั้งหมด</option>
-                    <option>ป.4</option><option>ป.5</option><option>ป.6</option>
-                  </select>
-                </div>
-                <div style="display:flex; align-items:flex-end;">
-                  <button class="btn btn-blue" type="button" onclick="loadStudentsFromFirebase()">👥 โหลดนักเรียนจาก Firebase</button>
-                </div>
-              </div>
-              <div id="examStudentDbArea" style="margin-top:14px;">
-                <p style="color:#6b7280;">กด "โหลดนักเรียนจาก Firebase" เพื่อดึงรายชื่อ</p>
-              </div>
-            </div>
-
-            <!-- 4b. Gen ข้อสอบ + ตรวจคำตอบ -->
-            <div class="form-box">
-              <h3>Gen ข้อสอบจาก examBank + ตรวจคำตอบ</h3>
-              <div class="form-row">
-                <div>
-                  <label>เลือกนักเรียน</label>
-                  <select id="examProcStudentSelect" onchange="focusStudent(this.value)">
-                    <option value="">— เลือกนักเรียน —</option>
-                  </select>
-                </div>
-                <div>
-                  <label>Mode การสร้างข้อสอบ</label>
-                  <select id="examProcMode" onchange="onExamModeChange()">
-                    <option value="normal">ปกติ — เลือกจากคลัง</option>
-                    <option value="adaptive">Adaptive — เฉพาะ Weak Topics</option>
-                  </select>
-                </div>
-                <div>
-                  <label>เลือกข้อสอบจากคลัง</label>
-                  <select id="examProcTestSelect" onchange="generateExamFromBank()">
-                    <option value="">— เลือกข้อสอบ —</option>
-                  </select>
-                </div>
-              </div>
-              <p id="examAdaptiveHint" style="color:#d97706; font-size:0.85em; margin-top:6px; display:none;">
-                ⚡ Adaptive mode: แสดงเฉพาะข้อสอบที่ตรงกับ weak topics ของนักเรียนที่เลือก
-              </p>
-
-              <!-- Preview ก่อนตรวจ -->
-              <div id="examPreviewArea" style="margin-top:16px; display:none; background:#f8fafc; border:1px solid #e5e7eb; border-radius:8px; padding:14px;">
-                <h4 style="margin-bottom:8px; color:#374151;">📋 Preview ข้อสอบที่เลือก</h4>
-                <div id="examPreviewContent"></div>
-              </div>
-
-              <!-- ชุดกรอกคำตอบ -->
-              <div id="examAnswerInputArea" style="margin-top:16px;"></div>
-
-              <!-- ปุ่ม Submit + OCR จำลอง -->
-              <div id="examSubmitArea" style="margin-top:16px; display:none;">
-                <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:center;">
-                  <button class="btn btn-green" type="button" onclick="processOCRSubmit()">✅ ส่งคำตอบ / ตรวจข้อสอบ</button>
-                  <button class="btn btn-blue" type="button" onclick="simulateOCR()" title="จำลอง OCR — สุ่มคำตอบเพื่อทดสอบระบบ">🤖 จำลอง OCR</button>
-                </div>
-                <p style="color:#6b7280; font-size:0.82em; margin-top:6px;">
-                  จำลอง OCR: สุ่มคำตอบเพื่อทดสอบระบบตรวจและ weakTopics |
-                  OCR จริง: Cloud Function <code>processExamOCR</code> (stub พร้อม connect)
-                </p>
-              </div>
-              <p id="examSubmitResult" style="margin-top:12px; font-weight:bold;"></p>
-            </div>
-
-            <!-- 5. รายงานผลสอบ -->
-            <div class="form-box">
-              <h3>รายงานผลสอบ (examResults)</h3>
-              <div class="form-row" style="margin-bottom:12px;">
-                <div>
-                  <label>กรองระดับชั้น</label>
-                  <select id="examReportGradeFilter" onchange="renderReports()">
-                    <option value="ทั้งหมด">ทั้งหมด</option>
-                    <option>ป.4</option><option>ป.5</option><option>ป.6</option>
-                  </select>
-                </div>
-                <div>
-                  <label>กรองวิชา</label>
-                  <select id="examReportSubjectFilter" onchange="renderReports()">
-                    <option value="ทั้งหมด">ทั้งหมด</option>
-                    <option>วิทยาศาสตร์</option><option>คณิตศาสตร์</option>
-                    <option>ภาษาอังกฤษ</option><option>ภาษาไทย</option><option>สังคมศึกษา</option>
-                  </select>
-                </div>
-                <div style="display:flex; align-items:flex-end;">
-                  <button class="btn btn-blue" type="button" onclick="loadAndRenderReports()">📊 โหลดรายงาน</button>
-                </div>
-              </div>
-              <p style="color:#6b7280; font-size:0.85em; margin-bottom:8px;">
-                <span style="background:#fef2f2; padding:2px 6px; border-radius:4px; color:#dc2626;">แดง</span> = คะแนนต่ำกว่า 60% &nbsp;
-                <span style="background:#f0fdf4; padding:2px 6px; border-radius:4px; color:#16a34a;">เขียว</span> = ผ่าน (≥ 60%)
-              </p>
-              <div id="examReportArea"><p style="color:#6b7280;">กด "โหลดรายงาน" เพื่อดึงผลสอบจาก Firestore</p></div>
-              <div id="reportsPagination" class="test-actions" style="margin-top:10px;"></div>
-            </div>
-
-            <!-- 6. E-Learning + ข้อสอบซ่อมเสริม -->
-            <div class="form-box">
-              <h3>E-Learning แนะนำ + ข้อสอบซ่อมเสริม</h3>
-              <p style="color:#6b7280; margin-bottom:12px;">
-                เลือกนักเรียนจากแผงด้านบนเพื่อดู weak topics และสื่อการเรียนที่แนะนำจาก collection <strong>learningMaterials</strong>
-              </p>
-              <div id="examElearningArea"><p style="color:#aaa;">ยังไม่ได้เลือกนักเรียน</p></div>
-              <div id="examRemedialArea" style="margin-top:16px; display:none;">
-                <button class="btn btn-blue" type="button" onclick="generateTargetedExam()">📝 สร้างข้อสอบซ่อมเสริมจาก Weak Topics</button>
-                <p style="color:#6b7280; font-size:0.85em; margin-top:6px;">ระบบจะค้นหาข้อสอบใน examBank ที่ตรงกับ weak topics แล้ว pre-select ให้อัตโนมัติ</p>
-              </div>
-            </div>
-
-          </section>
-          <!-- end admin-exam-processor -->
 
           <!-- ===================== admin-online-exam ===================== -->
           <section id="admin-online-exam" class="admin-tab hidden">
@@ -4397,6 +4166,11 @@
                   onclick="switchOnlineExamAdminTab('manage')"
                   style="padding:8px 16px;font-size:12px;font-weight:700;border:none;background:none;cursor:pointer;border-bottom:2px solid transparent;color:#6b7280;margin-bottom:-2px;">
                   ⚙️ จัดการคอร์สและข้อสอบ
+                </button>
+                <button id="onlineExamAdminTabBtnExambank"
+                  onclick="switchOnlineExamAdminTab('exambank')"
+                  style="padding:8px 16px;font-size:12px;font-weight:700;border:none;background:none;cursor:pointer;border-bottom:2px solid transparent;color:#6b7280;margin-bottom:-2px;">
+                  📝 คลังข้อสอบ &amp; Weak Topics
                 </button>
               </div>
             </div>
@@ -4663,6 +4437,228 @@
               </div>
 
             </div>
+
+            <!-- Inner Tab: คลังข้อสอบ & Weak Topics (ย้ายมาจาก admin-exam-processor) -->
+            <div id="onlineExamTab-exambank" style="display:none;">
+
+              <!-- 1. Sync จาก Google Drive -->
+              <div class="form-box">
+                <h3>Sync ข้อสอบจาก Google Drive</h3>
+                <p style="color:#6b7280; margin-bottom:12px;">
+                  โฟลเดอร์ต้นทาง: <code>16t5boPIY4736OkQLv3S7JWZ02QvQeqBW</code><br/>
+                  ระบบเรียก Cloud Function <code>syncExamBankFromDrive</code> แล้วบันทึก metadata เข้า collection <strong>examBank</strong>
+                </p>
+                <div style="display:flex;gap:10px;flex-wrap:wrap;">
+                  <button class="btn btn-blue" type="button" onclick="syncExamBankFromDrive()">🔄 Sync ข้อสอบจาก Google Drive</button>
+                  <button class="btn btn-dark" type="button" onclick="seedExamBank()" title="เพิ่มข้อสอบตัวอย่าง 3 ชุด (ป.4/ป.5/ป.6) — idempotent">🌱 เพิ่มข้อสอบทดสอบ</button>
+                  <button class="btn btn-dark" type="button" onclick="seedLearningMaterials()" title="เพิ่ม learning materials ตัวอย่าง 6 รายการ — idempotent">📚 เพิ่ม Learning Materials</button>
+                </div>
+                <p style="color:#6b7280;font-size:0.82em;margin-top:6px;">
+                  ปุ่ม seed จะเพิ่มข้อมูลตัวอย่างเข้า Firestore โดยตรง — ปลอดภัย ไม่ทับข้อมูลที่มีอยู่แล้ว (idempotent)
+                </p>
+                <p id="examSyncStatus" style="margin-top:8px; font-weight:bold;"></p>
+              </div>
+
+              <!-- 2. เพิ่ม / แก้ไขข้อสอบในคลัง -->
+              <div class="form-box">
+                <h3>เพิ่ม / แก้ไขข้อสอบในคลัง (examBank)</h3>
+                <input id="editingExamBankId" type="hidden" value="" />
+                <div class="form-row">
+                  <div>
+                    <label>ชื่อข้อสอบ</label>
+                    <input id="examBankTitle" type="text" placeholder="เช่น Monthly Test ป.4 วิทย์ พ.ค." />
+                  </div>
+                  <div>
+                    <label>ระดับชั้น</label>
+                    <select id="examBankGrade">
+                      <option>ป.4</option><option>ป.5</option><option selected>ป.6</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label>วิชา</label>
+                    <select id="examBankSubject">
+                      <option>วิทยาศาสตร์</option>
+                      <option>คณิตศาสตร์</option>
+                      <option>ภาษาอังกฤษ</option>
+                      <option>ภาษาไทย</option>
+                      <option>สังคมศึกษา</option>
+                    </select>
+                  </div>
+                </div>
+                <div class="form-row">
+                  <div>
+                    <label>หัวข้อ (คั่นด้วยลูกน้ำ)</label>
+                    <input id="examBankTopics" type="text" placeholder="เช่น แสงและการมองเห็น, ระบบสุริยะ" />
+                  </div>
+                  <div>
+                    <label>จำนวนข้อ</label>
+                    <input id="examBankTotalItems" type="number" min="1" max="100" value="20" style="max-width:90px;" />
+                  </div>
+                </div>
+                <div class="form-row">
+                  <div>
+                    <label>Drive File ID (ถ้ามี)</label>
+                    <input id="examBankDriveFileId" type="text" placeholder="ID ของไฟล์ข้อสอบใน Google Drive" />
+                  </div>
+                  <div>
+                    <label>สถานะ</label>
+                    <select id="examBankStatus">
+                      <option value="active">ใช้งาน</option>
+                      <option value="inactive">ปิดใช้งาน</option>
+                    </select>
+                  </div>
+                </div>
+                <label>เฉลย (A,B,C,D,... คั่นด้วยลูกน้ำ ตามลำดับข้อ)</label>
+                <input id="examBankAnswerKey" type="text" placeholder="เช่น A,B,C,D,A,B,C,D,A,B,A,C,D,B,A,C,D,A,B,C" style="font-family:monospace;" />
+                <p style="color:#6b7280; font-size:0.85em; margin-top:4px;">ใส่ทุกข้อตามลำดับ เช่น 20 ข้อ ใส่ 20 ตัวอักษรคั่นด้วยลูกน้ำ (A/B/C/D)</p>
+                <br />
+                <button class="btn btn-green" type="button" onclick="saveExamToBank()">บันทึกข้อสอบในคลัง</button>
+                <button class="btn btn-dark" type="button" onclick="clearExamBankForm()">ล้างฟอร์ม</button>
+                <p id="examBankSaveResult" style="margin-top:12px; font-weight:bold;"></p>
+              </div>
+
+              <!-- 3. รายการข้อสอบในคลัง -->
+              <div class="form-box">
+                <h3>รายการข้อสอบในคลัง</h3>
+                <div class="form-row" style="margin-bottom:12px;">
+                  <div>
+                    <label>กรองระดับชั้น</label>
+                    <select id="examBankGradeFilter" onchange="renderExamBankList()">
+                      <option value="ทั้งหมด">ทั้งหมด</option>
+                      <option>ป.4</option><option>ป.5</option><option>ป.6</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label>กรองวิชา</label>
+                    <select id="examBankSubjectFilter" onchange="renderExamBankList()">
+                      <option value="ทั้งหมด">ทั้งหมด</option>
+                      <option>วิทยาศาสตร์</option><option>คณิตศาสตร์</option>
+                      <option>ภาษาอังกฤษ</option><option>ภาษาไทย</option><option>สังคมศึกษา</option>
+                    </select>
+                  </div>
+                  <div style="display:flex; align-items:flex-end;">
+                    <button class="btn btn-blue" type="button" onclick="loadExamBank()">🔃 โหลด Exam Bank</button>
+                  </div>
+                </div>
+                <div id="examBankList"><p style="color:#6b7280;">กด "โหลด Exam Bank" เพื่อดูรายการข้อสอบจาก Firestore</p></div>
+                <div id="examBankPagination" class="test-actions" style="margin-top:10px;"></div>
+              </div>
+
+              <!-- 4a. Student Database -->
+              <div class="form-box">
+                <h3>Student Database (ป.4–ป.6)</h3>
+                <p style="color:#6b7280; margin-bottom:12px;">
+                  ดึงรายชื่อนักเรียนจาก <code>users</code> collection — role == "student" · status == "active"
+                </p>
+                <div class="form-row">
+                  <div>
+                    <label>กรองระดับชั้น</label>
+                    <select id="examProcGradeFilter" onchange="loadStudentsFromFirebase()">
+                      <option value="ทั้งหมด">ทั้งหมด</option>
+                      <option>ป.4</option><option>ป.5</option><option>ป.6</option>
+                    </select>
+                  </div>
+                  <div style="display:flex; align-items:flex-end;">
+                    <button class="btn btn-blue" type="button" onclick="loadStudentsFromFirebase()">👥 โหลดนักเรียนจาก Firebase</button>
+                  </div>
+                </div>
+                <div id="examStudentDbArea" style="margin-top:14px;">
+                  <p style="color:#6b7280;">กด "โหลดนักเรียนจาก Firebase" เพื่อดึงรายชื่อ</p>
+                </div>
+              </div>
+
+              <!-- 4b. Gen ข้อสอบ + ตรวจคำตอบ -->
+              <div class="form-box">
+                <h3>Gen ข้อสอบจาก examBank + ตรวจคำตอบ</h3>
+                <div class="form-row">
+                  <div>
+                    <label>เลือกนักเรียน</label>
+                    <select id="examProcStudentSelect" onchange="focusStudent(this.value)">
+                      <option value="">— เลือกนักเรียน —</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label>Mode การสร้างข้อสอบ</label>
+                    <select id="examProcMode" onchange="onExamModeChange()">
+                      <option value="normal">ปกติ — เลือกจากคลัง</option>
+                      <option value="adaptive">Adaptive — เฉพาะ Weak Topics</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label>เลือกข้อสอบจากคลัง</label>
+                    <select id="examProcTestSelect" onchange="generateExamFromBank()">
+                      <option value="">— เลือกข้อสอบ —</option>
+                    </select>
+                  </div>
+                </div>
+                <p id="examAdaptiveHint" style="color:#d97706; font-size:0.85em; margin-top:6px; display:none;">
+                  ⚡ Adaptive mode: แสดงเฉพาะข้อสอบที่ตรงกับ weak topics ของนักเรียนที่เลือก
+                </p>
+                <div id="examPreviewArea" style="margin-top:16px; display:none; background:#f8fafc; border:1px solid #e5e7eb; border-radius:8px; padding:14px;">
+                  <h4 style="margin-bottom:8px; color:#374151;">📋 Preview ข้อสอบที่เลือก</h4>
+                  <div id="examPreviewContent"></div>
+                </div>
+                <div id="examAnswerInputArea" style="margin-top:16px;"></div>
+                <div id="examSubmitArea" style="margin-top:16px; display:none;">
+                  <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:center;">
+                    <button class="btn btn-green" type="button" onclick="processOCRSubmit()">✅ ส่งคำตอบ / ตรวจข้อสอบ</button>
+                    <button class="btn btn-blue" type="button" onclick="simulateOCR()" title="จำลอง OCR — สุ่มคำตอบเพื่อทดสอบระบบ">🤖 จำลอง OCR</button>
+                  </div>
+                  <p style="color:#6b7280; font-size:0.82em; margin-top:6px;">
+                    จำลอง OCR: สุ่มคำตอบเพื่อทดสอบระบบตรวจและ weakTopics |
+                    OCR จริง: Cloud Function <code>processExamOCR</code> (stub พร้อม connect)
+                  </p>
+                </div>
+                <p id="examSubmitResult" style="margin-top:12px; font-weight:bold;"></p>
+              </div>
+
+              <!-- 5. รายงานผลสอบ -->
+              <div class="form-box">
+                <h3>รายงานผลสอบ (examResults)</h3>
+                <div class="form-row" style="margin-bottom:12px;">
+                  <div>
+                    <label>กรองระดับชั้น</label>
+                    <select id="examReportGradeFilter" onchange="renderReports()">
+                      <option value="ทั้งหมด">ทั้งหมด</option>
+                      <option>ป.4</option><option>ป.5</option><option>ป.6</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label>กรองวิชา</label>
+                    <select id="examReportSubjectFilter" onchange="renderReports()">
+                      <option value="ทั้งหมด">ทั้งหมด</option>
+                      <option>วิทยาศาสตร์</option><option>คณิตศาสตร์</option>
+                      <option>ภาษาอังกฤษ</option><option>ภาษาไทย</option><option>สังคมศึกษา</option>
+                    </select>
+                  </div>
+                  <div style="display:flex; align-items:flex-end;">
+                    <button class="btn btn-blue" type="button" onclick="loadAndRenderReports()">📊 โหลดรายงาน</button>
+                  </div>
+                </div>
+                <p style="color:#6b7280; font-size:0.85em; margin-bottom:8px;">
+                  <span style="background:#fef2f2; padding:2px 6px; border-radius:4px; color:#dc2626;">แดง</span> = คะแนนต่ำกว่า 60% &nbsp;
+                  <span style="background:#f0fdf4; padding:2px 6px; border-radius:4px; color:#16a34a;">เขียว</span> = ผ่าน (≥ 60%)
+                </p>
+                <div id="examReportArea"><p style="color:#6b7280;">กด "โหลดรายงาน" เพื่อดึงผลสอบจาก Firestore</p></div>
+                <div id="reportsPagination" class="test-actions" style="margin-top:10px;"></div>
+              </div>
+
+              <!-- 6. E-Learning + ข้อสอบซ่อมเสริม -->
+              <div class="form-box">
+                <h3>E-Learning แนะนำ + ข้อสอบซ่อมเสริม</h3>
+                <p style="color:#6b7280; margin-bottom:12px;">
+                  เลือกนักเรียนจากแผงด้านบนเพื่อดู weak topics และสื่อการเรียนที่แนะนำจาก collection <strong>learningMaterials</strong>
+                </p>
+                <div id="examElearningArea"><p style="color:#aaa;">ยังไม่ได้เลือกนักเรียน</p></div>
+                <div id="examRemedialArea" style="margin-top:16px; display:none;">
+                  <button class="btn btn-blue" type="button" onclick="generateTargetedExam()">📝 สร้างข้อสอบซ่อมเสริมจาก Weak Topics</button>
+                  <p style="color:#6b7280; font-size:0.85em; margin-top:6px;">ระบบจะค้นหาข้อสอบใน examBank ที่ตรงกับ weak topics แล้ว pre-select ให้อัตโนมัติ</p>
+                </div>
+              </div>
+
+            </div>
+            <!-- end exambank tab -->
+
           </section>
           <!-- Result detail / choice distribution modal — outside tabs so it works from any tab -->
           <div id="onlineExamDetailModal" style="display:none;position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.55);overflow-y:auto;padding:20px;">
@@ -6332,7 +6328,6 @@
       'admin-private-lesson-billing': 'admin.finance',
       'admin-receipts': 'admin.receipts',
       'admin-monthly-test': 'admin.exams',
-      'admin-exam-processor': 'admin.exams',
       'admin-online-exam': 'admin.onlineExams',
       'admin-monthly-planner': 'admin.monthlyPlanner',
       'admin-teachers': 'admin.users',
@@ -6637,7 +6632,7 @@
     }
 
     function findFirstAllowedAdminTab() {
-      const order = ['admin-dashboard','admin-profile','admin-students','admin-id-cards','admin-private-students','admin-courses','admin-online-class','admin-video','admin-payment-round','admin-payment','admin-private-lesson-billing','admin-receipts','admin-exam-processor','admin-online-exam','admin-monthly-planner','admin-teachers','admin-announcements','admin-settings','admin-activity-log'];
+      const order = ['admin-dashboard','admin-profile','admin-students','admin-id-cards','admin-private-students','admin-courses','admin-online-class','admin-video','admin-payment-round','admin-payment','admin-private-lesson-billing','admin-receipts','admin-online-exam','admin-monthly-planner','admin-teachers','admin-announcements','admin-settings','admin-activity-log'];
       return order.find(function(tabId) { return canOpenAdminTab(tabId); }) || 'admin-dashboard';
     }
 
@@ -7112,7 +7107,6 @@
       { tabId: 'admin-payment', permission: 'admin.finance', label: 'การเงิน' },
       { tabId: 'admin-receipts', permission: 'admin.receipts', label: 'ใบเสร็จ' },
 
-      { tabId: 'admin-exam-processor', permission: 'admin.exams', label: 'ระบบวิเคราะห์คะแนน' },
       { tabId: 'admin-online-exam', permission: 'admin.onlineExams', label: 'ข้อสอบออนไลน์ Interactive' },
       { tabId: 'admin-monthly-planner', permission: 'admin.monthlyPlanner', label: 'แผนสอนรายเดือน' },
       { tabId: 'admin-announcements', permission: 'admin.announcements', label: 'ประกาศ' },
@@ -25986,9 +25980,11 @@ function receiptStatusText(status) {
       const gradeView = getElement('onlineExamTab-grade');
       const analysisView = getElement('onlineExamTab-analysis');
       const manageView = getElement('onlineExamTab-manage');
+      const exambankView = getElement('onlineExamTab-exambank');
       const btnGrade = getElement('onlineExamAdminTabBtnGrade');
       const btnAnalysis = getElement('onlineExamAdminTabBtnAnalysis');
       const btnManage = getElement('onlineExamAdminTabBtnManage');
+      const btnExambank = getElement('onlineExamAdminTabBtnExambank');
       if (!gradeView || !manageView) return;
 
       const activeStyle = 'padding:8px 16px;font-size:12px;font-weight:700;border:none;background:none;cursor:pointer;border-bottom:2px solid #4f46e5;color:#4f46e5;margin-bottom:-2px;';
@@ -25997,9 +25993,11 @@ function receiptStatusText(status) {
       gradeView.style.display = 'none';
       if (analysisView) analysisView.style.display = 'none';
       manageView.style.display = 'none';
+      if (exambankView) exambankView.style.display = 'none';
       if (btnGrade) btnGrade.style.cssText = inactiveStyle;
       if (btnAnalysis) btnAnalysis.style.cssText = inactiveStyle;
       if (btnManage) btnManage.style.cssText = inactiveStyle;
+      if (btnExambank) btnExambank.style.cssText = inactiveStyle;
 
       if (tab === 'grade') {
         gradeView.style.display = '';
@@ -26011,6 +26009,9 @@ function receiptStatusText(status) {
         safeRun(populateOnlineExamCourseSelects, 'online-exam-analysis-selects');
         const ac = getElement('onlineExamAnalysisContent');
         if (ac) ac.style.display = 'none';
+      } else if (tab === 'exambank') {
+        if (exambankView) exambankView.style.display = '';
+        if (btnExambank) btnExambank.style.cssText = activeStyle;
       } else {
         manageView.style.display = '';
         if (btnManage) btnManage.style.cssText = activeStyle;
