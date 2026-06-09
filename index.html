@@ -13211,7 +13211,14 @@ function getCourseOnlineDocs(course, includeInactive) {
         .filter(function(month) { return month && isStudentBillingMonthActive(month); });
       const paymentRecordMonths = getStudentVisiblePayments(currentStudent)
         .map(function(p) { return String(p.paymentMonth || p.month || p.billingMonth || '').trim(); })
-        .filter(function(month) { return month && isPaymentMonthVisibleByName(month) && isStudentBillingMonthActive(month); });
+        .filter(function(month) {
+          if (!month || !isPaymentMonthVisibleByName(month) || !isStudentBillingMonthActive(month)) return false;
+          const payment = payments.find(function(p) {
+            const pMonth = String(p.paymentMonth || p.month || p.billingMonth || '').trim();
+            return isCurrentStudentMatchRecord(p) && pMonth === month;
+          });
+          return !(payment && String(payment.status || payment.paymentStatus || '').trim() === 'ยกเว้น');
+        });
       return Array.from(new Set(visibleRoundMonths.concat(paymentRecordMonths))).sort(function(a, b) {
         return compareThaiMonthYear(b, a);
       });
@@ -15244,6 +15251,8 @@ function getCourseOnlineDocs(course, includeInactive) {
       const visible = (Array.isArray(paymentMonths) ? paymentMonths : []).filter(isPaymentMonthVisibleToStudents);
       if (!currentStudent || !currentStudent.courseId) return visible;
       return visible.filter(function(item) {
+        const skipped = item && item.skippedStudents ? item.skippedStudents : {};
+        if (skipped[String(currentStudent.id || '')]) return false;
         return item && item.month && isStudentBillingMonthActive(item.month);
       });
     }
