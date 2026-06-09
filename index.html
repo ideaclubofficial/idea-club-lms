@@ -17900,7 +17900,11 @@ function receiptStatusText(status) {
         if (!record) continue;
         record.scores = record.scores || {};
         row.querySelectorAll('.score-input[data-subject]').forEach(function(inp) {
-          record.scores[inp.getAttribute('data-subject')] = Number(inp.value || 0);
+          const rawVal = Number(inp.value || 0);
+          const maxQ = Number(inp.getAttribute('data-max-q') || 50);
+          record.scores[inp.getAttribute('data-subject')] = (maxQ > 0 && maxQ !== 50)
+            ? Math.round(rawVal / maxQ * 50 * 10) / 10
+            : rawVal;
         });
         record.month = selectedMonth;
         record.grade = selectedGrade;
@@ -18661,10 +18665,17 @@ function receiptStatusText(status) {
       }
     }
 
+    function getMonthlyQuestionCountForSubject(month, subject) {
+      return monthlyQuestions.filter(function(q) {
+        return getThaiMonthFromDate(q.testDate) === month && q.subject === subject;
+      }).length;
+    }
+
     function renderAdminScoreAdjustTable() {
       const tbody = getElement('adminScoreAdjustTableBody');
       if (!tbody) return;
       const records = getSelectedAdminScoreRecords();
+      const selectedMonth = getElement('adminScoreTestSetFilter') ? getElement('adminScoreTestSetFilter').value : '';
 
       // collect all subjects across records (dynamic — not hardcoded)
       const subjectSet = {};
@@ -18673,11 +18684,21 @@ function receiptStatusText(status) {
         ? Object.keys(subjectSet)
         : ['วิทยาศาสตร์', 'คณิตศาสตร์', 'ภาษาอังกฤษ'];
 
+      // number of questions per subject for this month (0 = no data → fallback to 50)
+      const subjectMaxQ = {};
+      subjects.forEach(function(s) {
+        const cnt = getMonthlyQuestionCountForSubject(selectedMonth, s);
+        subjectMaxQ[s] = cnt > 0 ? cnt : 50;
+      });
+
       // update header to match dynamic subjects
       const thead = tbody.closest('table') && tbody.closest('table').querySelector('thead tr');
       if (thead) {
         thead.innerHTML = '<th>นักเรียน</th>' +
-          subjects.map(function(s) { return '<th>' + escapeHtml(s) + '</th>'; }).join('') +
+          subjects.map(function(s) {
+            const maxQ = subjectMaxQ[s];
+            return '<th>' + escapeHtml(s) + (maxQ !== 50 ? '<br><span style="font-weight:normal;font-size:11px;color:#6b7280;">' + maxQ + ' ข้อ → /50</span>' : '') + '</th>';
+          }).join('') +
           '<th>คะแนนเต็ม</th><th>สถานะ</th><th></th>';
       }
 
@@ -18686,7 +18707,13 @@ function receiptStatusText(status) {
         return '<tr data-score-id="' + record.id + '">' +
           '<td>' + escapeHtml(record.student) + '</td>' +
           subjects.map(function(s) {
-            return '<td><input class="score-input" data-subject="' + escapeHtml(s) + '" type="number" min="0" max="50" step="1" value="' + (record.scores[s] || 0) + '"></td>';
+            const maxQ = subjectMaxQ[s];
+            const stored50 = Number(record.scores[s] || 0);
+            // back-convert stored 50-pt value to raw question count for display
+            const displayVal = (maxQ !== 50 && stored50 > 0)
+              ? Math.round(stored50 / 50 * maxQ * 10) / 10
+              : stored50;
+            return '<td><input class="score-input" data-subject="' + escapeHtml(s) + '" data-max-q="' + maxQ + '" type="number" min="0" max="' + maxQ + '" step="1" value="' + displayVal + '"></td>';
           }).join('') +
           '<td>50</td>' +
           '<td>' + scoreStatusText(record.status) + '</td>' +
