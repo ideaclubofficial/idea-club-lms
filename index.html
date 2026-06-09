@@ -4725,6 +4725,7 @@
                   <button class="btn btn-green" type="button" onclick="saveAdjustedScores()">บันทึกคะแนนชุดนี้</button>
                   <button class="btn btn-dark" type="button" onclick="publishSelectedScoreSet()">ประกาศผลชุดนี้</button>
                   <button class="btn btn-blue" type="button" onclick="exportScoresCsv()">ส่งออกคะแนน CSV</button>
+                  <button class="btn btn-red" type="button" onclick="deleteAllScoreRecordsForSet()">ยกเลิกทั้งชุด</button>
                 </div>
                 <p id="scoreAdjustResult" style="margin-top:14px; font-weight:bold;"></p>
 
@@ -18677,10 +18678,10 @@ function receiptStatusText(status) {
       if (thead) {
         thead.innerHTML = '<th>นักเรียน</th>' +
           subjects.map(function(s) { return '<th>' + escapeHtml(s) + '</th>'; }).join('') +
-          '<th>คะแนนเต็ม</th><th>สถานะ</th>';
+          '<th>คะแนนเต็ม</th><th>สถานะ</th><th></th>';
       }
 
-      const colCount = subjects.length + 3;
+      const colCount = subjects.length + 4;
       tbody.innerHTML = records.length ? records.map(function(record) {
         return '<tr data-score-id="' + record.id + '">' +
           '<td>' + escapeHtml(record.student) + '</td>' +
@@ -18689,8 +18690,59 @@ function receiptStatusText(status) {
           }).join('') +
           '<td>50</td>' +
           '<td>' + scoreStatusText(record.status) + '</td>' +
+          '<td><button class="btn btn-red" style="padding:3px 8px;font-size:12px;" onclick="deleteScoreRecord(\'' + record.id + '\')">ยกเลิก</button></td>' +
         '</tr>';
       }).join('') : '<tr><td colspan="' + colCount + '">ยังไม่มีข้อมูลคะแนนของชุดข้อสอบและระดับชั้นที่เลือก</td></tr>';
+    }
+
+    async function deleteScoreRecord(recordId) {
+      const idx = adminScoreRecords.findIndex(function(r) { return String(r.id) === String(recordId); });
+      if (idx === -1) return;
+      const record = adminScoreRecords[idx];
+      if (!confirm('ยืนยันยกเลิกคะแนนของ "' + (record.student || '-') + '"?')) return;
+      adminScoreRecords.splice(idx, 1);
+      renderAdminScoreAdjustTable();
+      renderAdminScoreStatsTable();
+      const result = getElement('scoreAdjustResult');
+      try {
+        await deleteFirebaseDocument('adminScoreRecords', record);
+        if (result) { result.textContent = 'ยกเลิกคะแนนของ ' + (record.student || '-') + ' แล้ว'; result.style.color = '#d97706'; }
+      } catch (e) {
+        console.error('deleteScoreRecord error:', e);
+        adminScoreRecords.splice(idx, 0, record);
+        renderAdminScoreAdjustTable();
+        if (result) { result.textContent = 'ยกเลิกไม่สำเร็จ: ' + (e.message || e.code); result.style.color = '#dc2626'; }
+      }
+    }
+
+    async function deleteAllScoreRecordsForSet() {
+      const selectedMonth = getElement('adminScoreTestSetFilter') ? getElement('adminScoreTestSetFilter').value : '';
+      const selectedGrade = getElement('adminScoreGradeFilter') ? getElement('adminScoreGradeFilter').value : '';
+      const result = getElement('scoreAdjustResult');
+      if (!selectedMonth || !selectedGrade) {
+        if (result) { result.textContent = 'กรุณาเลือกเดือนสอบและระดับชั้นก่อน'; result.style.color = '#dc2626'; }
+        return;
+      }
+      const toDelete = adminScoreRecords.filter(function(r) { return r.month === selectedMonth && r.grade === selectedGrade; });
+      if (!toDelete.length) {
+        if (result) { result.textContent = 'ไม่พบรายการคะแนนสำหรับชุดนี้'; result.style.color = '#6b7280'; }
+        return;
+      }
+      if (!confirm('ยืนยันยกเลิกตารางคะแนนทั้งชุด ' + selectedMonth + ' ระดับชั้น ' + selectedGrade + ' (' + toDelete.length + ' รายการ)?')) return;
+      toDelete.forEach(function(r) {
+        const idx = adminScoreRecords.indexOf(r);
+        if (idx !== -1) adminScoreRecords.splice(idx, 1);
+      });
+      renderAdminScoreAdjustTable();
+      renderAdminScoreStatsTable();
+      let failed = 0;
+      for (const r of toDelete) {
+        try { await deleteFirebaseDocument('adminScoreRecords', r); } catch (e) { failed++; console.error('deleteAllScoreRecords error:', e); }
+      }
+      if (result) {
+        result.textContent = 'ยกเลิกตารางคะแนนทั้งชุดแล้ว ' + (toDelete.length - failed) + ' รายการ' + (failed ? ' (ผิดพลาด ' + failed + ' รายการ)' : '');
+        result.style.color = failed ? '#dc2626' : '#d97706';
+      }
     }
 
     function calculateSubjectStats(records, subject) {
