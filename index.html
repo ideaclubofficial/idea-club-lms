@@ -2179,6 +2179,7 @@
             <div id="onlineExamCourseGrid">
               <div class="form-box">
                 <h3>📝 การทดสอบรายเดือน</h3>
+                <div id="onlineExamSubjectFilter" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px;"></div>
                 <div id="onlineExamCourseCards" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:12px;"></div>
               </div>
               <div id="onlineExamHistoryCard" class="form-box" style="display:none;">
@@ -4252,6 +4253,13 @@
                     <input type="text" id="onlineExamCourseTitle" placeholder="เช่น วิทยาศาสตร์ ป.6 ชุด A">
                   </div>
                   <div>
+                    <label>ผูกกับคอร์ส (เลือกคอร์สที่นักเรียนสมัคร)</label>
+                    <select id="onlineExamLinkedCourseId" onchange="onOnlineExamLinkedCourseChange()">
+                      <option value="">-- ไม่ผูกกับคอร์สใด (ใช้ระดับชั้น) --</option>
+                    </select>
+                    <p style="font-size:10px;color:#9ca3af;margin:2px 0 0;">เฉพาะนักเรียนที่สมัครคอร์สนี้เท่านั้นที่จะเห็นข้อสอบ</p>
+                  </div>
+                  <div>
                     <label>ระดับชั้น</label>
                     <select id="onlineExamCourseGrade">
                       <option value="">-- ทุกระดับ --</option>
@@ -4266,6 +4274,20 @@
                       <option value="ม.3">ม.3</option>
                     </select>
                   </div>
+                  <div>
+                    <label>วิชา</label>
+                    <select id="onlineExamCourseSubject">
+                      <option value="">-- ไม่ระบุ --</option>
+                      <option value="วิทยาศาสตร์">วิทยาศาสตร์</option>
+                      <option value="คณิตศาสตร์">คณิตศาสตร์</option>
+                      <option value="ภาษาอังกฤษ">ภาษาอังกฤษ</option>
+                      <option value="ภาษาไทย">ภาษาไทย</option>
+                      <option value="สังคมศึกษา">สังคมศึกษา</option>
+                      <option value="อื่นๆ">อื่นๆ</option>
+                    </select>
+                  </div>
+                </div>
+                <div class="form-row" style="margin-top:8px;">
                   <div>
                     <label>เวลาสอบ (นาที)</label>
                     <input type="number" id="onlineExamCourseDuration" value="15" min="1">
@@ -26056,6 +26078,8 @@ function receiptStatusText(status) {
 
       const title = (getElement('onlineExamCourseTitle') || {}).value || '';
       const grade = (getElement('onlineExamCourseGrade') || {}).value || '';
+      const subject = (getElement('onlineExamCourseSubject') || {}).value || '';
+      const linkedCourseId = (getElement('onlineExamLinkedCourseId') || {}).value || '';
       const duration = parseInt((getElement('onlineExamCourseDuration') || {}).value || '15', 10) || 15;
       const status = (getElement('onlineExamCourseStatus') || {}).value || 'active';
       const publishStatus = (getElement('onlineExamCoursePublishStatus') || {}).value || 'draft';
@@ -26076,7 +26100,7 @@ function receiptStatusText(status) {
       try {
         const now = firebase.firestore.FieldValue.serverTimestamp();
         const uid = firebaseUser ? firebaseUser.uid : '';
-        const extraFields = { publishStatus, isActive, showScoreAfterSubmit, shuffleQuestions, shuffleChoices, openAt, closeAt };
+        const extraFields = { publishStatus, isActive, showScoreAfterSubmit, shuffleQuestions, shuffleChoices, openAt, closeAt, subject, linkedCourseId: linkedCourseId || null };
 
         if (editingId) {
           await db.collection('onlineExamCourses').doc(editingId).set(
@@ -26142,6 +26166,8 @@ function receiptStatusText(status) {
       setValue('onlineExamCourseShuffleC', course.shuffleChoices ? '1' : '0');
       setValue('onlineExamCourseOpenAt', course.openAt ? course.openAt.slice(0, 16) : '');
       setValue('onlineExamCourseCloseAt', course.closeAt ? course.closeAt.slice(0, 16) : '');
+      setValue('onlineExamCourseSubject', course.subject || '');
+      setValue('onlineExamLinkedCourseId', course.linkedCourseId || '');
       const cancelBtn = getElement('onlineExamCourseCancelBtn');
       if (cancelBtn) cancelBtn.style.display = '';
       const saveBtn = getElement('onlineExamCourseSaveBtn');
@@ -26162,6 +26188,8 @@ function receiptStatusText(status) {
       setValue('onlineExamCourseShuffleC', '0');
       setValue('onlineExamCourseOpenAt', '');
       setValue('onlineExamCourseCloseAt', '');
+      setValue('onlineExamCourseSubject', '');
+      setValue('onlineExamLinkedCourseId', '');
       const cancelBtn = getElement('onlineExamCourseCancelBtn');
       if (cancelBtn) cancelBtn.style.display = 'none';
       const saveBtn = getElement('onlineExamCourseSaveBtn');
@@ -26310,10 +26338,33 @@ function receiptStatusText(status) {
     }
 
     function renderOnlineExamAdminManage() {
+      populateOnlineExamLinkedCourseSelect();
       renderOnlineExamCourseList();
       populateOnlineExamCourseSelects();
       renderOnlineExamQuestionList();
       exportOnlineExamJson();
+    }
+
+    function populateOnlineExamLinkedCourseSelect() {
+      const sel = getElement('onlineExamLinkedCourseId');
+      if (!sel) return;
+      const current = sel.value;
+      sel.innerHTML = '<option value="">-- ไม่ผูกกับคอร์สใด (ใช้ระดับชั้น) --</option>';
+      (courses || []).filter(function(c) { return c.status !== 'closed' && c.status !== 'deleted'; })
+        .forEach(function(c) {
+          const opt = document.createElement('option');
+          opt.value = c.id;
+          opt.textContent = (c.grade ? c.grade + ' · ' : '') + (c.name || c.title || c.id);
+          sel.appendChild(opt);
+        });
+      if (current) sel.value = current;
+    }
+
+    function onOnlineExamLinkedCourseChange() {
+      const sel = getElement('onlineExamLinkedCourseId');
+      if (!sel || !sel.value) return;
+      const course = (courses || []).find(function(c) { return String(c.id) === String(sel.value); });
+      if (course && course.grade) setValue('onlineExamCourseGrade', course.grade);
     }
 
     function renderOnlineExamCourseList() {
@@ -26330,7 +26381,9 @@ function receiptStatusText(status) {
         return '<div style="display:flex;justify-content:space-between;align-items:flex-start;padding:10px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;margin-bottom:8px;flex-wrap:wrap;gap:6px;">' +
           '<div style="flex:1;min-width:0;">' +
             '<strong style="font-size:13px;">' + escapeHtml(c.title || '') + '</strong>' +
+            (c.subject ? '<span style="font-size:10px;background:#ede9fe;color:#5b21b6;padding:1px 7px;border-radius:99px;margin-left:6px;">' + escapeHtml(c.subject) + '</span>' : '') +
             '<span style="font-size:11px;color:#6b7280;margin-left:8px;">' + (c.grade || 'ทุกชั้น') + ' · ' + (c.durationMinutes || 15) + ' นาที · ' + qCount + ' ข้อ</span>' +
+            (c.linkedCourseId ? (function() { var lc = (courses||[]).find(function(x){return String(x.id)===String(c.linkedCourseId);}); return lc ? '<span style="font-size:10px;background:#d1fae5;color:#065f46;padding:1px 7px;border-radius:99px;margin-left:4px;">🔗 ' + escapeHtml(lc.name || lc.title || c.linkedCourseId) + '</span>' : ''; })() : '') +
             '<div style="margin-top:4px;display:flex;gap:4px;flex-wrap:wrap;">' +
               '<span style="font-size:10px;padding:1px 8px;border-radius:99px;' + (pStatus === 'published' ? 'background:#d1fae5;color:#065f46;">' + '✅ Published' : 'background:#f3f4f6;color:#6b7280;">📋 Draft') + '</span>' +
               '<span style="font-size:10px;padding:1px 8px;border-radius:99px;' + (active ? 'background:#dbeafe;color:#1d4ed8;">' + 'Active' : 'background:#fee2e2;color:#991b1b;">Inactive') + '</span>' +
@@ -26827,6 +26880,12 @@ function receiptStatusText(status) {
       renderOnlineExamCourseGrid();
     }
 
+    function onlineExamSetSubjectFilter(subject) {
+      const subjectBar = getElement('onlineExamSubjectFilter');
+      if (subjectBar) subjectBar.dataset.active = subject;
+      safeRun(renderOnlineExamCourseGrid, 'online-exam-subject-filter');
+    }
+
     function getOnlineExamScheduleStatus(c) {
       const now = Date.now();
       const open = c.openAt ? new Date(c.openAt).getTime() : null;
@@ -26862,14 +26921,39 @@ function receiptStatusText(status) {
       if (content) content.style.display = '';
 
       const grade = currentStudent ? (currentStudent.grade || '') : '';
-      const filtered = onlineExamCourseCache.filter(function(c) {
-        // Student visibility: publishStatus=published OR (no publishStatus AND status=active)
+      const studentCourseId = currentStudent ? (currentStudent.courseId || '') : '';
+      const allVisible = onlineExamCourseCache.filter(function(c) {
         if (c.isActive === false) return false;
         if (c.publishStatus) { if (c.publishStatus !== 'published') return false; }
         else { if (c.status !== 'active') return false; }
+        if (c.linkedCourseId) {
+          return studentCourseId && String(c.linkedCourseId) === String(studentCourseId);
+        }
         if (c.grade && grade && c.grade !== grade) return false;
         return true;
       });
+
+      // Build subject filter bar
+      const subjectBar = getElement('onlineExamSubjectFilter');
+      const subjects = Array.from(new Set(allVisible.map(function(c) { return c.subject || ''; }).filter(Boolean)));
+      var activeSubject = (subjectBar && subjectBar.dataset.active) || '';
+      if (subjectBar) {
+        if (subjects.length > 1) {
+          const all = [{ v: '', label: 'ทั้งหมด' }].concat(subjects.map(function(s) { return { v: s, label: s }; }));
+          subjectBar.innerHTML = all.map(function(item) {
+            const isActive = item.v === activeSubject;
+            return '<button onclick="onlineExamSetSubjectFilter(\'' + escapeHtml(item.v) + '\')" style="padding:4px 12px;font-size:12px;border-radius:99px;border:1.5px solid ' + (isActive ? '#4f46e5' : '#e2e8f0') + ';background:' + (isActive ? '#4f46e5' : '#fff') + ';color:' + (isActive ? '#fff' : '#374151') + ';cursor:pointer;font-weight:' + (isActive ? '700' : '400') + ';">' + escapeHtml(item.label) + '</button>';
+          }).join('');
+        } else {
+          subjectBar.innerHTML = '';
+          activeSubject = '';
+          subjectBar.dataset.active = '';
+        }
+      }
+
+      const filtered = activeSubject
+        ? allVisible.filter(function(c) { return (c.subject || '') === activeSubject; })
+        : allVisible;
 
       // Fetch student's existing results
       var studentResults = {};
@@ -26946,6 +27030,7 @@ function receiptStatusText(status) {
             '<h4 style="font-size:14px;font-weight:700;margin:0 0 6px;">' + escapeHtml(c.title || '') + '</h4>' +
             '<p style="font-size:12px;color:#6b7280;margin-bottom:6px;">' +
               (c.grade ? '<span style="margin-right:8px;">📚 ' + c.grade + '</span>' : '') +
+              (c.subject ? '<span style="margin-right:8px;background:#ede9fe;color:#5b21b6;padding:1px 7px;border-radius:99px;font-size:11px;">' + escapeHtml(c.subject) + '</span>' : '') +
               '<span style="margin-right:8px;">⏱️ ' + (c.durationMinutes || 15) + ' นาที</span>' +
               '<span>📝 ' + qCount + ' ข้อ</span>' +
             '</p>' +
