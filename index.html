@@ -3797,12 +3797,11 @@
                 <thead>
                   <tr>
                     <th class="sortable" onclick="sortStaticTable(this, 0)">นักเรียน</th>
-                    <th class="sortable" onclick="sortStaticTable(this, 1)">ชื่อเล่น</th>
-                    <th class="sortable" onclick="sortStaticTable(this, 2)">คอร์ส</th>
-                    <th class="sortable" onclick="sortStaticTable(this, 3)">เดือนที่ชำระ</th>
-                    <th class="sortable" onclick="sortStaticTable(this, 4)">ยอดเงิน</th>
-                    <th class="sortable" onclick="sortStaticTable(this, 5)">สลิป</th>
-                    <th class="sortable" onclick="sortStaticTable(this, 6)">สถานะ</th>
+                    <th class="sortable" onclick="sortStaticTable(this, 1)">คอร์ส</th>
+                    <th class="sortable" onclick="sortStaticTable(this, 2)">เดือนที่ชำระ</th>
+                    <th class="sortable" onclick="sortStaticTable(this, 3)">ยอดเงิน</th>
+                    <th class="sortable" onclick="sortStaticTable(this, 4)">สลิป</th>
+                    <th class="sortable" onclick="sortStaticTable(this, 5)">สถานะ</th>
                     <th>จัดการ</th>
                   </tr>
                 </thead>
@@ -15434,6 +15433,10 @@ function getCourseOnlineDocs(course, includeInactive) {
           payment: payment,
           isSkipped: isSkipped
         };
+      }).sort(function(a, b) {
+        const gDiff = gradeOrder(a.student.grade) - gradeOrder(b.student.grade);
+        if (gDiff !== 0) return gDiff;
+        return String(a.student.memberId || '').padStart(10, '0').localeCompare(String(b.student.memberId || '').padStart(10, '0'));
       });
       const createdRows = rows.filter(function(row) { return !row.isSkipped && !!row.payment; });
       const pendingRows = rows.filter(function(row) { return !row.isSkipped && !row.payment; });
@@ -15691,9 +15694,13 @@ function getCourseOnlineDocs(course, includeInactive) {
         const statusText = getPaymentDisplayStatus(p);
         const statusClass = statusText === 'ชำระแล้ว' ? 'status-paid' : statusText === 'ค้างชำระ' || statusText === 'สลิปไม่ผ่าน' || statusText === 'ไม่ผ่าน' ? 'status-absent' : 'status-waiting';
         const student = getPaymentStudentRecord(p);
-        const nickname = student ? (student.nickname || '-') : '-';
-        return '<tr data-payment-id="' + p.id + '"><td>' + (p.student || '-') + '</td><td>' + escapeHtml(nickname) + '</td><td>' + renderPaymentCourseText(p) + '</td><td>' + (p.month || '-') + '</td><td>' + renderPaymentAmountText(p) + '</td><td>' + slipCell + '</td><td><span class="' + statusClass + '">' + statusText + '</span></td><td>' + paymentActionButtons(p.status || p.paymentStatus || 'รอชำระเงิน', pid) + '</td></tr>';
-      }).join('') : '<tr><td colspan="8">ยังไม่มีรายการชำระเงินตามเงื่อนไขที่เลือก</td></tr>';
+        const nickname = student ? (student.nickname || '') : '';
+        const memberId = student ? (student.memberId || p.memberId || '') : (p.memberId || '');
+        const nameCell = '<strong>' + escapeHtml(p.student || '-') + '</strong>' +
+          (nickname ? ' <span style="color:#6b7280;font-weight:400;font-size:13px;">(' + escapeHtml(nickname) + ')</span>' : '') +
+          (memberId ? '<br><span class="mini-muted">' + escapeHtml(memberId) + '</span>' : '');
+        return '<tr data-payment-id="' + p.id + '"><td style="word-break:break-word;white-space:normal;">' + nameCell + '</td><td>' + renderPaymentCourseText(p) + '</td><td>' + (p.month || '-') + '</td><td>' + renderPaymentAmountText(p) + '</td><td>' + slipCell + '</td><td><span class="' + statusClass + '">' + statusText + '</span></td><td>' + paymentActionButtons(p.status || p.paymentStatus || 'รอชำระเงิน', pid) + '</td></tr>';
+      }).join('') : '<tr><td colspan="7">ยังไม่มีรายการชำระเงินตามเงื่อนไขที่เลือก</td></tr>';
       renderTablePagination('paymentTablePagination', paymentCurrentPage, ptTotalPages, filtered.length, 'changePaymentPage');
       updatePaymentSummary();
     }
