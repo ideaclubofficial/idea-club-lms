@@ -5447,6 +5447,8 @@
     let coreDataLoadingPromise = null;
     let studentDataLoadedForUid = '';
     let studentDataLoadingPromise = null;
+    let studentPaymentsUnsubscribe = null;
+    let studentReceiptsUnsubscribe = null;
 
     try {
       firebase.initializeApp(firebaseConfig);
@@ -5573,6 +5575,72 @@
       }
     }
 
+    function stopStudentPaymentListeners() {
+      if (studentPaymentsUnsubscribe) { try { studentPaymentsUnsubscribe(); } catch(e) {} studentPaymentsUnsubscribe = null; }
+      if (studentReceiptsUnsubscribe) { try { studentReceiptsUnsubscribe(); } catch(e) {} studentReceiptsUnsubscribe = null; }
+    }
+
+    function startStudentPaymentListeners(studentDocId, authUid) {
+      stopStudentPaymentListeners();
+      if (!firebaseReady || !db) return;
+
+      function applyDocChanges(targetArray, changes) {
+        let changed = false;
+        changes.forEach(function(change) {
+          const data = Object.assign({ firebaseDocId: change.doc.id }, change.doc.data());
+          if (change.type === 'removed') {
+            const idx = targetArray.findIndex(function(x) { return x.firebaseDocId === change.doc.id; });
+            if (idx !== -1) { targetArray.splice(idx, 1); changed = true; }
+          } else {
+            if (data.deleted === true) {
+              const idx = targetArray.findIndex(function(x) { return x.firebaseDocId === change.doc.id; });
+              if (idx !== -1) { targetArray.splice(idx, 1); changed = true; }
+            } else {
+              const idx = targetArray.findIndex(function(x) { return x.firebaseDocId === change.doc.id; });
+              if (idx !== -1) { Object.assign(targetArray[idx], data); changed = true; }
+              else { targetArray.push(data); changed = true; }
+            }
+          }
+        });
+        return changed;
+      }
+
+      function refreshStudentUI() {
+        safeRun(refreshStudentPaymentMonthSelect, 'listener-refresh-month');
+        safeRun(updateStudentSelectedPaymentMonth, 'listener-update-month');
+        safeRun(renderStudentReceipts, 'listener-receipts');
+        safeRun(renderStudentMobilePayment, 'listener-mobile-payment');
+        safeRun(updateStudentCourseDisplay, 'listener-course-display');
+      }
+
+      const paymentsQueries = [];
+      if (studentDocId) paymentsQueries.push(db.collection('payments').where('studentId', '==', String(studentDocId)));
+      if (authUid && authUid !== studentDocId) paymentsQueries.push(db.collection('payments').where('authUid', '==', String(authUid)));
+
+      const receiptsQueries = [];
+      if (studentDocId) receiptsQueries.push(db.collection('receipts').where('studentId', '==', String(studentDocId)));
+      if (authUid && authUid !== studentDocId) receiptsQueries.push(db.collection('receipts').where('authUid', '==', String(authUid)));
+
+      const paymentUnsubs = paymentsQueries.map(function(q) {
+        return q.onSnapshot(function(snapshot) {
+          if (snapshot.metadata && snapshot.metadata.hasPendingWrites) return;
+          const changes = snapshot.docChanges().filter(function(c) { return c.type !== 'added' || true; });
+          if (applyDocChanges(payments, changes)) refreshStudentUI();
+        }, function(err) { console.warn('payments listener error:', err); });
+      });
+
+      const receiptUnsubs = receiptsQueries.map(function(q) {
+        return q.onSnapshot(function(snapshot) {
+          if (snapshot.metadata && snapshot.metadata.hasPendingWrites) return;
+          const changes = snapshot.docChanges();
+          if (applyDocChanges(receipts, changes)) refreshStudentUI();
+        }, function(err) { console.warn('receipts listener error:', err); });
+      });
+
+      studentPaymentsUnsubscribe = function() { paymentUnsubs.forEach(function(u) { try { u(); } catch(e) {} }); };
+      studentReceiptsUnsubscribe = function() { receiptUnsubs.forEach(function(u) { try { u(); } catch(e) {} }); };
+    }
+
     async function loadStudentDataOnly(userProfile) {
       if (!firebaseReady || !db || !firebaseUser) return null;
       console.log('student-data-load-start', {
@@ -5620,6 +5688,7 @@
         receiptsLoaded: results[7].length,
         collections: ['students:own', 'courses', 'onDemandClips', 'announcements', 'scoreReports', 'paymentMonths', 'lineGroups', 'payments:own', 'receipts:own']
       });
+      startStudentPaymentListeners(studentDocId, firebaseUser.uid);
       return studentRecord;
     }
 
@@ -8240,6 +8309,7 @@
     }
 
     async function logoutSystem() {
+      stopStudentPaymentListeners();
       if (PRODUCTION_MODE && auth) {
         try { await auth.signOut(); } catch (error) { console.error('Firebase sign out error:', error); }
       }
