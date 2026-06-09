@@ -6165,6 +6165,7 @@
       const mainSettings = settingsItems.find(function(item) { return item.id === 'main' || item.firebaseDocId === 'main'; });
       if (mainSettings) systemSettings = Object.assign(systemSettings, mainSettings);
       safeRun(repairReceiptMonthsFromPayments, 'repair-receipt-months');
+      safeRun(repairApprovedPaymentsForStudentInterface, 'repair-approved-payments-student-interface');
       safeRun(updateMemberIdPreview, 'member-id-preview-after-load');
       safeRun(updateTeacherIdPreview, 'teacher-id-preview-after-load');
       safeRun(renderReceiptMonthFilter, 'receipt-month-filter-after-load');
@@ -14162,6 +14163,7 @@ function getCourseOnlineDocs(course, includeInactive) {
       });
       if (!student) return null;
       const month = payment.paymentMonth || payment.month || payment.billingMonth || '';
+      const beforeSync = [student.paymentStatus, student.courseStatus, Array.isArray(student.overdueMonths) ? student.overdueMonths.join('|') : ''].join('::');
       student.overdueMonths = Array.isArray(student.overdueMonths) ? student.overdueMonths : [];
 
       if (status === 'ค้างชำระ') {
@@ -14176,7 +14178,8 @@ function getCourseOnlineDocs(course, includeInactive) {
         student.courseStatus = 'อนุมัติแล้ว';
       }
 
-      await setFirebaseDocument('students', student);
+      const afterSync = [student.paymentStatus, student.courseStatus, Array.isArray(student.overdueMonths) ? student.overdueMonths.join('|') : ''].join('::');
+      if (beforeSync !== afterSync) await setFirebaseDocument('students', student);
       if (currentStudent && isStudentPaymentRecord(currentStudent, payment)) {
         Object.assign(currentStudent, student);
         updateStudentCourseDisplay();
@@ -16688,6 +16691,80 @@ function receiptStatusText(status) {
       }
       if (changed) {
         renderAdminReceipts();
+      }
+    }
+
+    function isApprovedPaymentNeedingStudentRepair(payment) {
+      if (!payment) return false;
+      const rawValues = [
+        payment.status,
+        payment.paymentStatus,
+        payment.slipStatus,
+        payment.receiptStatus
+      ].map(function(value) { return String(value || '').trim().toLowerCase(); });
+      return rawValues.some(function(value) {
+        return value === 'ชำระแล้ว' || value === 'paid' || value === 'approved' || value === 'issued' || value === 'published';
+      });
+    }
+
+    function findPublishedReceiptForPayment(payment) {
+      if (!payment) return null;
+      const paymentId = String(payment.id || payment.firebaseDocId || '');
+      const month = String(payment.paymentMonth || payment.month || payment.billingMonth || '').trim();
+      const student = getPaymentStudentRecord(payment);
+      return (receipts || []).find(function(receipt) {
+        const samePayment = paymentId && String(receipt.paymentId || '') === paymentId;
+        const sameStudent = (student && isStudentPaymentRecord(student, receipt)) ||
+          (!!payment.student && normalizeTextValue(receipt.student) === normalizeTextValue(payment.student));
+        const sameMonth = !month || String(getReceiptMonth(receipt) || '').trim() === month;
+        return normalizeReceiptStatus(receipt.status) === 'published' && (samePayment || (sameStudent && sameMonth));
+      }) || null;
+    }
+
+    async function repairApprovedPaymentsForStudentInterface() {
+      if (!Array.isArray(payments) || !payments.length) return;
+      if (repairApprovedPaymentsForStudentInterface.running) return;
+      repairApprovedPaymentsForStudentInterface.running = true;
+      let repaired = 0;
+      try {
+        for (const payment of payments) {
+          if (!isApprovedPaymentNeedingStudentRepair(payment)) continue;
+          const existingReceipt = findPublishedReceiptForPayment(payment);
+          const needsPaymentNormalize = payment.status !== 'ชำระแล้ว' ||
+            payment.paymentStatus !== 'ชำระแล้ว' ||
+            payment.slipStatus !== 'approved' ||
+            payment.receiptStatus !== 'published' ||
+            (!payment.receiptId && !existingReceipt);
+
+          if (!needsPaymentNormalize && existingReceipt && payment.receiptId && payment.receiptNo) continue;
+
+          try {
+            payment.status = 'ชำระแล้ว';
+            payment.paymentStatus = 'ชำระแล้ว';
+            payment.slipStatus = 'approved';
+            payment.receiptStatus = 'published';
+            const receipt = await issueReceiptFromPayment(payment);
+            if (receipt) {
+              payment.receiptId = receipt.id || payment.receiptId || '';
+              payment.receiptNo = receipt.receiptNo || payment.receiptNo || '';
+            }
+            await setFirebaseDocument('payments', payment);
+            await syncStudentPaymentStatusFromPayment(payment, 'ชำระแล้ว');
+            repaired++;
+          } catch (error) {
+            console.error('repair approved payment status error:', error);
+          }
+        }
+        if (repaired) {
+          renderPaymentTable();
+          renderAdminReceipts();
+          renderStudentReceipts();
+          updatePaymentSummary();
+          safeRun(renderStudentMobilePayment, 'repair-approved-payments-mobile');
+          addActivityLog('ซ่อมสถานะรายการอนุมัติเก่า', repaired + ' รายการ');
+        }
+      } finally {
+        repairApprovedPaymentsForStudentInterface.running = false;
       }
     }
 
