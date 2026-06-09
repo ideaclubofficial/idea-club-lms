@@ -1808,8 +1808,8 @@
         </div>
         <div class="student-status-tile">
           <h4>ห้องเรียนวันนี้</h4>
-          <p><span id="studentDashClassToday" class="status-badge parent">กำลังตรวจสอบ</span></p>
-          <p class="mini-muted" id="studentDashClassDetail">ระบบดูจากวันเรียนของคอร์สที่สมัคร</p>
+          <p><span id="studentDashClassToday" class="status-badge parent" style="display:inline-flex;max-width:100%;white-space:normal;line-height:1.35;">กำลังตรวจสอบ</span></p>
+          <p class="mini-muted" id="studentDashClassDetail" style="line-height:1.6;">ระบบดูจากวันเรียนของคอร์สที่สมัคร</p>
         </div>
         <div class="student-status-tile">
           <h4>คะแนนล่าสุด</h4>
@@ -2161,8 +2161,7 @@
         </div>
       </div>
 
-      <h2 class="section-title">ข้อสอบ / คะแนน</h2>
-      <p class="section-subtitle">ทำข้อสอบออนไลน์และดูคะแนนที่สถาบันประกาศ</p>
+      <h2 class="section-title">การทดสอบรายเดือน</h2>
 
       <div id="studentExamLocked" class="form-box hidden">
         <h3>🔒 ยังไม่สามารถใช้งานได้</h3>
@@ -2181,8 +2180,7 @@
           <div id="onlineExamStudentContent" style="display:none;">
             <div id="onlineExamCourseGrid">
               <div class="form-box">
-                <h3>📝 เลือกข้อสอบที่ต้องการทำ</h3>
-                <p style="color:#6b7280;margin-bottom:12px;">คลิกที่ชุดข้อสอบเพื่อเริ่มทำ ระบบตรวจคะแนนอัตโนมัติ</p>
+                <h3>📝 การทดสอบรายเดือน</h3>
                 <div id="onlineExamCourseCards" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:12px;"></div>
               </div>
               <div id="onlineExamHistoryCard" class="form-box" style="display:none;">
@@ -12241,6 +12239,47 @@
       return '';
     }
 
+    function getStudentTodayClassSummary(course) {
+      const today = getThaiDayName(new Date());
+      const todayKey = getCourseScheduleDayKey(today);
+      const schedule = getCourseScheduleDefaults(course);
+      const items = [];
+      schedule.onsiteSlots.forEach(function(slot) {
+        if (getCourseScheduleDayKey(slot.day) === todayKey) {
+          items.push({ type: 'Onsite', time: slot.startTime + '-' + slot.endTime });
+        }
+      });
+      schedule.onlineSlots.forEach(function(slot) {
+        if (getCourseScheduleDayKey(slot.day) === todayKey) {
+          items.push({ type: 'Online', time: slot.startTime + '-' + slot.endTime });
+        }
+      });
+      schedule.ondemandSlots.forEach(function(slot) {
+        if (getCourseScheduleDayKey(slot.day) === todayKey) {
+          items.push({ type: 'On-demand', time: slot.publishTime ? ('ปล่อยบทเรียน ' + slot.publishTime) : 'ปล่อยบทเรียนวันนี้' });
+        }
+      });
+      if (!items.length && course && course.onlineClassDay && getCourseScheduleDayText(course.onlineClassDay) === today) {
+        items.push({ type: 'Online', time: course.onlineClassTime || '' });
+      }
+      const hasClassToday = items.length || !!(course && Array.isArray(course.days) && course.days.includes(today));
+      const types = items.map(function(item) { return item.type; }).filter(function(type, index, arr) { return arr.indexOf(type) === index; });
+      const fallbackSchedule = course ? getCourseDisplaySchedule(course) : '';
+      return {
+        today: today,
+        hasClassToday: hasClassToday,
+        statusText: hasClassToday ? ('วันนี้มีเรียน' + (types.length ? ': ' + types.join(' / ') : '')) : 'ไม่มีเรียนวันนี้',
+        detailText: items.length
+          ? items.map(function(item) { return item.type + ' ' + today + ' ' + item.time; }).join(' / ')
+          : (hasClassToday ? (fallbackSchedule || 'มีเรียนวันนี้') : (fallbackSchedule || 'ยังไม่ได้ตั้งวันเรียน')),
+        detailHtml: items.length
+          ? items.map(function(item) {
+              return '<span style="display:block;margin-top:4px;"><strong style="color:#0f172a;">' + escapeHtml(item.type) + '</strong> <span style="color:#4b5563;">' + escapeHtml(today + ' ' + item.time) + '</span></span>';
+            }).join('')
+          : escapeHtml(hasClassToday ? (fallbackSchedule || 'มีเรียนวันนี้') : (fallbackSchedule || 'ยังไม่ได้ตั้งวันเรียน'))
+      };
+    }
+
     function renderAdminCourses() {
       const tbody = getElement('adminCourseTableBody');
       if (!tbody) return;
@@ -13450,15 +13489,16 @@ function getCourseOnlineDocs(course, includeInactive) {
       }
 
       const today = getThaiDayName(new Date());
-      const hasClassToday = !!(selectedCourse && Array.isArray(selectedCourse.days) && selectedCourse.days.includes(today));
+      const classSummary = getStudentTodayClassSummary(selectedCourse);
+      const hasClassToday = classSummary.hasClassToday;
       const courseStatusForHome = currentStudent && currentStudent.courseStatus ? currentStudent.courseStatus : '';
       const isApprovedForHome = hasRegisteredCourse && isCourseStatusApproved(courseStatusForHome);
       if (getElement('studentDashClassToday')) {
-        getElement('studentDashClassToday').textContent = !hasRegisteredCourse ? 'ยังไม่ได้สมัครคอร์ส' : (!isApprovedForHome ? 'รออนุมัติคอร์ส' : (hasClassToday ? 'มีเรียนวันนี้' : 'ไม่มีเรียนวันนี้'));
+        getElement('studentDashClassToday').textContent = !hasRegisteredCourse ? 'ยังไม่ได้สมัครคอร์ส' : (!isApprovedForHome ? 'รออนุมัติคอร์ส' : classSummary.statusText);
         getElement('studentDashClassToday').className = 'status-badge ' + (isApprovedForHome && hasClassToday ? 'present' : 'parent');
       }
       if (getElement('studentDashClassDetail')) {
-        getElement('studentDashClassDetail').textContent = !selectedCourse ? 'สมัครคอร์สก่อนจึงจะเห็นห้องเรียน' : (!isApprovedForHome ? 'รอเจ้าหน้าที่ตรวจสอบการชำระเงิน' : (getCourseDisplaySchedule(selectedCourse) || 'ยังไม่ได้ตั้งวันเรียน'));
+        getElement('studentDashClassDetail').innerHTML = !selectedCourse ? 'สมัครคอร์สก่อนจึงจะเห็นห้องเรียน' : (!isApprovedForHome ? 'รอเจ้าหน้าที่ตรวจสอบการชำระเงิน' : classSummary.detailHtml);
       }
 
       const latestScore = isApprovedForHome ? getLatestPublishedScoreInfo() : null;
@@ -13528,7 +13568,8 @@ function getCourseOnlineDocs(course, includeInactive) {
       const courseStatus = student.courseStatus || '';
       const isApproved = !!(hasRegisteredCourse && isCourseStatusApproved(courseStatus));
       const today = getThaiDayName(new Date());
-      const hasClassToday = !!(selectedCourse && Array.isArray(selectedCourse.days) && selectedCourse.days.includes(today));
+      const classSummary = getStudentTodayClassSummary(selectedCourse);
+      const hasClassToday = classSummary.hasClassToday;
       const selectedMonth = getStudentMobileSelectedMonth();
       const paymentText = hasRegisteredCourse ? getCurrentStudentPaymentStatusText() : 'ยังไม่ได้สมัครคอร์ส';
       const paymentAmount = currentStudent && selectedMonth ? getCurrentStudentAdjustedPaymentAmount(selectedMonth) : 0;
@@ -13538,10 +13579,10 @@ function getCourseOnlineDocs(course, includeInactive) {
       setStudentMobileText('studentMobileMemberId', memberId);
 
       setStudentMobileText('studentMobileTodayClassTitle',
-        !hasRegisteredCourse ? 'ยังไม่ได้สมัครคอร์ส' : (!isApproved ? 'รออนุมัติคอร์ส' : (hasClassToday ? 'มีเรียนวันนี้' : 'ไม่มีเรียนวันนี้'))
+        !hasRegisteredCourse ? 'ยังไม่ได้สมัครคอร์ส' : (!isApproved ? 'รออนุมัติคอร์ส' : classSummary.statusText)
       );
       setStudentMobileText('studentMobileTodayClassDetail',
-        !selectedCourse ? 'สมัครคอร์สก่อนจึงจะเห็นห้องเรียน' : (!isApproved ? 'รอเจ้าหน้าที่ตรวจสอบการชำระเงิน' : (getCourseDisplaySchedule(selectedCourse) || 'ยังไม่ได้ตั้งวันเรียน'))
+        !selectedCourse ? 'สมัครคอร์สก่อนจึงจะเห็นห้องเรียน' : (!isApproved ? 'รอเจ้าหน้าที่ตรวจสอบการชำระเงิน' : classSummary.detailText)
       );
       setStudentMobileTag('studentMobileTodayClassTag', today || 'วันนี้');
 
