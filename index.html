@@ -3771,23 +3771,6 @@
 
             <br />
 
-            
-            <div class="form-box">
-              <h3>บันทึกการชำระเงินเอง</h3>
-              <p style="margin-bottom:14px; color:#6b7280;">ใช้เฉพาะกรณีจ่ายเงินสด โอนแล้วแจ้งส่วนตัว หรือ Admin ต้องการบันทึกเอง</p>
-              <button class="btn btn-dark" type="button" onclick="openManualPaymentBubble()">+ บันทึกชำระเงินเอง</button>
-              <p id="manualPaymentResult" style="margin-top:14px; font-weight:bold;"></p>
-              <div class="hidden">
-                <select id="manualPaymentStudent" onchange="updateManualPaymentSuggestedAmount()"></select>
-                <select id="manualPaymentMonth" onchange="updateManualPaymentSuggestedAmount()"></select>
-                <input id="manualPaymentAmount" type="number" placeholder="2400" />
-                <select id="manualPaymentStatus"><option>รอชำระเงิน</option><option>ชำระแล้ว</option><option>รอตรวจสลิป</option><option>ค้างชำระ</option><option>สลิปไม่ผ่าน</option></select>
-                <textarea id="manualPaymentNote"></textarea>
-              </div>
-            </div>
-
-            <br />
-
             <br />
 
             <div class="table-wrap">
@@ -12026,16 +12009,6 @@
       return escapeHtml(courseText) + '<br><span class="tag">เรียนเดี่ยว ' + privateCount + ' ครั้ง</span>';
     }
 
-    function updateManualPaymentSuggestedAmount() {
-      const studentId = getElement('manualPaymentStudent') ? getElement('manualPaymentStudent').value : '';
-      const month = getElement('manualPaymentMonth') ? getElement('manualPaymentMonth').value : '';
-      const amountInput = getElement('manualPaymentAmount');
-      const student = students.find(function(s) { return String(s.id) === String(studentId); });
-      if (!amountInput || !student || !month) return;
-      const suggested = getExpectedPaymentAmountForStudent(student, month);
-      amountInput.placeholder = suggested ? 'แนะนำ: ' + formatPrice(suggested) : 'กรอกยอดเงิน';
-      if (!amountInput.value && suggested) amountInput.value = suggested;
-    }
 
     function getCurrentStudentPreferredLocation() {
       return String((currentStudent && currentStudent.preferredLocation) || '').trim();
@@ -14218,6 +14191,7 @@ function getCourseOnlineDocs(course, includeInactive) {
         '<button class="btn btn-blue" type="button" onclick="' + rowIdScript + '">ตรวจสลิป</button>' +
         '<button class="btn btn-green" type="button" onclick="approvePayment(this)">' + (isPaid ? '✓ อนุมัติ' : 'อนุมัติ') + '</button>' +
         '<button class="btn btn-red" type="button" onclick="rejectPayment(this)">ไม่ผ่าน</button>' +
+        '<button class="btn btn-dark" type="button" onclick="paymentCash(this)">💵 จ่ายเงินสด</button>' +
         '</div>' +
         '<div class="payment-action-secondary">' +
         '<button class="btn btn-red" type="button" onclick="setPaymentOverdue(this)">ค้างชำระ</button>' +
@@ -14508,6 +14482,21 @@ function getCourseOnlineDocs(course, includeInactive) {
       const row = button.closest('tr');
       if (!row) return;
       await updatePaymentRowStatus(row, 'ค้างชำระ');
+    }
+
+    async function paymentCash(button) {
+      const row = button.closest('[data-payment-id]') || button.closest('tr');
+      if (!row) return;
+      const paymentId = row.getAttribute('data-payment-id');
+      if (!paymentId) return;
+      const payment = findPaymentByAnyId(paymentId);
+      if (!payment) return;
+      if (!confirm('บันทึกการจ่ายเงินสดสำหรับ ' + (payment.student || '-') + ' เดือน ' + (payment.month || '-') + '?')) return;
+      button.disabled = true;
+      button.textContent = 'กำลังบันทึก...';
+      payment.slipSource = 'จ่ายสด';
+      payment.slipNote = 'Admin บันทึกจ่ายเงินสด';
+      await approvePaymentAndIssueReceipt(paymentId);
     }
 
     async function syncStudentPaymentStatusFromRow(row, status) {
@@ -15778,6 +15767,9 @@ function getCourseOnlineDocs(course, includeInactive) {
       const slipUrl = getPaymentSlipUrl(payment);
       if (slipUrl) {
         return '<a class="btn btn-blue" href="' + escapeHtml(slipUrl) + '" target="_blank" rel="noopener">ดูสลิป</a>' + uploadedText + folderText + pausedText + statusText + noteText;
+      }
+      if (payment.slipSource) {
+        return '<span class="status-paid">' + escapeHtml(payment.slipSource) + '</span>' + pausedText + noteText;
       }
       return 'ยังไม่มีสลิป' + pausedText + noteText;
     }
@@ -23517,99 +23509,6 @@ function receiptStatusText(status) {
       renderActivityLogs();
     }
 
-    function renderManualPaymentStudentOptions() {
-      const select = getElement('manualPaymentStudent');
-      if (!select) return;
-      const current = select.value;
-      select.innerHTML = students.slice().sort(function(a, b) {
-        var idA = String(a.memberId || a.memberID || a.id || '');
-        var idB = String(b.memberId || b.memberID || b.id || '');
-        return idA.localeCompare(idB, undefined, { numeric: true });
-      }).map(function(s) { return '<option value="' + s.id + '">' + (s.name || '-') + ' · ' + (s.grade || '-') + ' · ' + (s.course || '-') + '</option>'; }).join('');
-      if (current) select.value = current;
-      updateManualPaymentSuggestedAmount();
-    }
-
-    function renderManualPaymentMonthOptions() {
-      const select = getElement('manualPaymentMonth');
-      if (!select) return;
-      const current = select.value;
-      select.innerHTML = paymentMonths.map(function(m) { return '<option value="' + m.month + '">' + m.month + '</option>'; }).join('');
-      if (current) select.value = current;
-      updateManualPaymentSuggestedAmount();
-    }
-
-    function openManualPaymentBubble() {
-      renderManualPaymentStudentOptions();
-      renderManualPaymentMonthOptions();
-      const studentOptions = getElement('manualPaymentStudent') ? getElement('manualPaymentStudent').innerHTML : '';
-      const monthOptions = getElement('manualPaymentMonth') ? getElement('manualPaymentMonth').innerHTML : '';
-      const statusOptions = getElement('manualPaymentStatus') ? getElement('manualPaymentStatus').innerHTML : '<option>ชำระแล้ว</option><option>รอตรวจสลิป</option><option>ค้างชำระ</option><option>สลิปไม่ผ่าน</option>';
-      openEditBubble('บันทึกการชำระเงินเอง',
-        '<div class="form-row">' +
-          '<div><label>เลือกนักเรียน</label><select id="bubbleManualPaymentStudent" onchange="updateBubbleManualPaymentSuggestedAmount()">' + studentOptions + '</select></div>' +
-          '<div><label>เดือนที่ชำระ</label><select id="bubbleManualPaymentMonth" onchange="updateBubbleManualPaymentSuggestedAmount()">' + monthOptions + '</select></div>' +
-          '<div><label>ยอดเงิน</label><input id="bubbleManualPaymentAmount" type="number" placeholder="ระบบจะแนะนำจากราคาคอร์ส"></div>' +
-          '<div><label>สถานะ</label><select id="bubbleManualPaymentStatus">' + statusOptions + '</select></div>' +
-        '</div>' +
-        '<label>หมายเหตุ Admin</label><textarea id="bubbleManualPaymentNote" placeholder="เช่น จ่ายเงินสดที่สถาบัน / โอนแล้วส่งส่วนตัว / ให้ส่วนลด"></textarea>',
-        async function() {
-          if (getElement('manualPaymentStudent')) getElement('manualPaymentStudent').value = bubbleSelectValue('bubbleManualPaymentStudent');
-          if (getElement('manualPaymentMonth')) getElement('manualPaymentMonth').value = bubbleSelectValue('bubbleManualPaymentMonth');
-          if (getElement('manualPaymentAmount')) getElement('manualPaymentAmount').value = bubbleValue('bubbleManualPaymentAmount');
-          if (getElement('manualPaymentStatus')) getElement('manualPaymentStatus').value = bubbleSelectValue('bubbleManualPaymentStatus');
-          if (getElement('manualPaymentNote')) getElement('manualPaymentNote').value = bubbleValue('bubbleManualPaymentNote');
-          await saveManualPayment();
-          const result = getElement('manualPaymentResult');
-          if (result && result.style.color === 'rgb(22, 163, 74)' || (result && result.style.color === '#16a34a')) closeEditBubble();
-        }
-      );
-      updateBubbleManualPaymentSuggestedAmount();
-    }
-
-    function updateBubbleManualPaymentSuggestedAmount() {
-      const studentId = getElement('bubbleManualPaymentStudent') ? getElement('bubbleManualPaymentStudent').value : '';
-      const month = getElement('bubbleManualPaymentMonth') ? getElement('bubbleManualPaymentMonth').value : '';
-      const amountInput = getElement('bubbleManualPaymentAmount');
-      const student = students.find(function(s) { return String(s.id) === String(studentId); });
-      if (!amountInput || !student || !month) return;
-      const suggested = getExpectedPaymentAmountForStudent(student, month);
-      amountInput.placeholder = suggested ? 'แนะนำ: ' + formatPrice(suggested) : 'กรอกยอดเงิน';
-      if (!amountInput.value && suggested) amountInput.value = suggested;
-    }
-
-    async function saveManualPayment() {
-      const studentId = getElement('manualPaymentStudent') ? getElement('manualPaymentStudent').value : '';
-      const month = getElement('manualPaymentMonth') ? getElement('manualPaymentMonth').value : '';
-      const status = getElement('manualPaymentStatus') ? getElement('manualPaymentStatus').value : 'ชำระแล้ว';
-      const note = getElement('manualPaymentNote') ? getElement('manualPaymentNote').value.trim() : '';
-      const result = getElement('manualPaymentResult');
-      const student = students.find(function(s) { return String(s.id) === String(studentId); });
-      if (!student || !month) { result.textContent = 'กรุณาเลือกนักเรียนและเดือนที่ชำระ'; result.style.color = '#dc2626'; return; }
-      const baseAmount = getExpectedPaymentAmountForStudent(student, month);
-      const manualAmount = Number(getElement('manualPaymentAmount') ? getElement('manualPaymentAmount').value || 0 : 0);
-      const amount = manualAmount || baseAmount;
-      const discount = Math.max(0, baseAmount - amount);
-      const paymentId = createFirebaseDocId('payments');
-      const payment = { id: paymentId, firebaseDocId: paymentId, studentId: student.id, memberId: student.memberId || '', studentName: student.name || '', studentAuthUid: student.authUid || '', authUid: student.authUid || '', student: student.name || '', courseId: student.courseId || '', courseName: student.course || '', course: student.course || '', month: month, studentSelectedMonth: month, baseAmount: baseAmount, expectedAmount: baseAmount, discount: discount, finalAmount: amount, amount: amount, slipUrl: '', slipNote: 'Admin บันทึกเอง', adminNote: note, paymentStatus: status, status: status, createdAtText: new Date().toLocaleString('th-TH') };
-      payments.push(payment);
-      student.paymentStatus = status;
-      student.overdueMonths = Array.isArray(student.overdueMonths) ? student.overdueMonths : [];
-      if (status === 'ค้างชำระ' && !student.overdueMonths.includes(month)) student.overdueMonths.push(month);
-      if (status !== 'ค้างชำระ') student.overdueMonths = student.overdueMonths.filter(function(m) { return m !== month; });
-      try {
-        const studentDocId = String(student.firebaseDocId || student.id || student.authUid || '');
-        if (!studentDocId) throw new Error('ไม่พบรหัสเอกสารนักเรียนสำหรับบันทึกสถานะชำระเงิน');
-        const batch = db.batch();
-        batch.set(db.collection('payments').doc(payment.firebaseDocId), buildFirebasePayload(payment, payment.firebaseDocId, true), { merge: true });
-        batch.set(db.collection('students').doc(studentDocId), buildFirebasePayload(student, studentDocId, false), { merge: true });
-        await batch.commit();
-        student.firebaseDocId = studentDocId;
-        result.textContent = 'บันทึกการชำระเงินเองเรียบร้อย'; result.style.color = '#16a34a';
-        addActivityLog('บันทึกการชำระเงินเอง', student.name + ' · ' + month + ' · ' + status);
-        renderPaymentTable(); renderAdminDashboard(); renderAdminStudents(); updateStudentCourseDisplay();
-      } catch (error) { result.textContent = 'บันทึกไม่สำเร็จ: ' + (error.message || error.code); result.style.color = '#dc2626'; }
-    }
 
     async function createMonthlyPaymentRecords() {
       const targetMonth = getSelectedPaymentRecordMonth();
