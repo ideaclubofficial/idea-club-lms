@@ -18066,23 +18066,27 @@ function receiptStatusText(status) {
       }
 
       if (scoreMonthSelect) {
-        const currentScoreMonth = scoreMonthSelect.value;
-        scoreMonthSelect.innerHTML = options;
-        if (months.includes(currentScoreMonth)) {
-          scoreMonthSelect.value = currentScoreMonth;
+        const studentGrade = currentStudent ? currentStudent.grade : getProfileGrade();
+        const publishedMonths = Array.from(new Set(
+          adminScoreRecords
+            .filter(function(r) { return r.status === 'published' && r.grade === studentGrade; })
+            .map(function(r) { return r.month; })
+            .filter(Boolean)
+        )).sort(function(a, b) { return compareThaiMonthYear(b, a); });
+
+        if (publishedMonths.length) {
+          scoreMonthSelect.innerHTML = publishedMonths.map(function(m) {
+            return '<option value="' + escapeHtml(m) + '">' + escapeHtml(m) + '</option>';
+          }).join('');
+          if (!publishedMonths.includes(scoreMonthSelect.value)) {
+            scoreMonthSelect.value = publishedMonths[0];
+          }
         } else {
-          const grade = getProfileGrade();
-          const latestPublished = scoreReports
-            .filter(function(r) { return r.grade === grade && r.status === 'published'; })
-            .sort(function(a, b) { return compareThaiMonthYear(b.month || '', a.month || ''); })[0];
-          const defaultMonth = (latestPublished && months.includes(latestPublished.month))
-            ? latestPublished.month
-            : (months[0] || '');
-          scoreMonthSelect.value = defaultMonth;
+          scoreMonthSelect.innerHTML = '<option value="">ยังไม่มีคะแนนที่ประกาศ</option>';
         }
       }
       if (getElement('scoreHistoryGradeFilter')) {
-        const profileGrade = getProfileGrade();
+        const profileGrade = currentStudent ? currentStudent.grade : getProfileGrade();
         getElement('scoreHistoryGradeFilter').value = profileGrade;
       }
       updateStudentExamInfo();
