@@ -1273,6 +1273,26 @@
       gap: 2mm;
       box-sizing: border-box;
       overflow: hidden;
+      position: relative;
+    }
+    .id-card-watermark {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%) rotate(-30deg);
+      opacity: 0.10;
+      pointer-events: none;
+      width: 55%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 1;
+    }
+    .id-card-watermark img {
+      width: 100%;
+      height: auto;
+      max-height: 22mm;
+      object-fit: contain;
     }
     .id-card-body-left {
       flex: 1;
@@ -5132,6 +5152,29 @@
               </div>
               <button class="btn btn-green" type="button" onclick="saveIdCardLogo()">บันทึก Logo บัตร</button>
               <p id="idCardLogoSaveResult" style="margin-top:10px; font-weight:bold;"></p>
+            </div>
+
+            <br />
+
+            <!-- ID Card Watermark Settings -->
+            <div class="form-box">
+              <h4 style="margin-bottom:10px;">ลายน้ำกลางบัตร (ไม่บังคับ)</h4>
+              <p style="color:#6b7280; margin-bottom:12px; font-size:13px;">รูปจะวางเฉียงตรงกลางบัตร ความโปร่งใส 90% — ใช้โลโก้หรือ icon ของสถาบัน</p>
+              <div class="form-row">
+                <div>
+                  <label>URL ลายน้ำ</label>
+                  <input id="idCardWatermarkManualUrl" type="url" placeholder="https://drive.google.com/..." oninput="updateIdCardWatermarkPreview(this.value)" />
+                </div>
+                <div>
+                  <label>ตัวอย่างลายน้ำ</label>
+                  <div id="idCardWatermarkPreviewArea" class="notice" style="min-height:60px; display:flex; align-items:center; justify-content:center;">ยังไม่ได้ตั้งค่า</div>
+                </div>
+              </div>
+              <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+                <button class="btn btn-green" type="button" onclick="saveIdCardWatermark()">บันทึกลายน้ำ</button>
+                <button class="btn btn-dark" type="button" onclick="clearIdCardWatermark()">ลบลายน้ำ</button>
+              </div>
+              <p id="idCardWatermarkSaveResult" style="margin-top:10px; font-weight:bold;"></p>
             </div>
 
             <br />
@@ -13148,16 +13191,29 @@ function getCourseOnlineDocs(course, includeInactive) {
 
     function getCurrentStudentRelevantPaymentMonthNames() {
       if (!currentStudent || !currentStudent.courseId) return [];
-      const months = getStudentVisiblePayments(currentStudent).map(function(p) { return p.month; }).filter(function(month) { return month; });
+      const months = getStudentVisiblePayments(currentStudent)
+        .map(function(p) { return p.paymentMonth || p.month || p.billingMonth; })
+        .filter(function(month) { return month; });
       return Array.from(new Set(months));
+    }
+
+    function isStudentBillingMonthActive(month) {
+      const billingStart = currentStudent && currentStudent.billingStartMonth;
+      if (!billingStart || !month) return true;
+      return compareThaiMonthYear(billingStart, month) <= 0;
     }
 
     function getStudentPaymentMonthOptions() {
       if (!currentStudent || !currentStudent.courseId) return [];
-      const months = getStudentVisiblePayments(currentStudent)
+      const visibleRoundMonths = getVisiblePaymentMonthsForStudents()
+        .map(function(item) { return String(item.month || '').trim(); })
+        .filter(function(month) { return month && isStudentBillingMonthActive(month); });
+      const paymentRecordMonths = getStudentVisiblePayments(currentStudent)
         .map(function(p) { return String(p.paymentMonth || p.month || p.billingMonth || '').trim(); })
-        .filter(function(month, idx, arr) { return month && arr.indexOf(month) === idx; });
-      return months;
+        .filter(function(month) { return month && isPaymentMonthVisibleByName(month) && isStudentBillingMonthActive(month); });
+      return Array.from(new Set(visibleRoundMonths.concat(paymentRecordMonths))).sort(function(a, b) {
+        return compareThaiMonthYear(b, a);
+      });
     }
 
     function getStudentSelectedPaymentMonth() {
@@ -13272,7 +13328,8 @@ function getCourseOnlineDocs(course, includeInactive) {
     function getCurrentStudentAdjustedPaymentAmount(month) {
       if (!currentStudent || !month) return 0;
       const payment = payments.find(function(p) {
-        return isCurrentStudentMatchRecord(p) && String(p.month || '') === String(month);
+        const pMonth = String(p.paymentMonth || p.month || p.billingMonth || '').trim();
+        return isCurrentStudentMatchRecord(p) && pMonth === String(month);
       });
       if (payment) return getPaymentFinalAmount(payment);
       return getExpectedPaymentAmountForStudent(currentStudent, month);
@@ -14703,9 +14760,9 @@ function getCourseOnlineDocs(course, includeInactive) {
     function updateStudentSelectedPaymentMonth() {
       const month = getStudentSelectedPaymentMonth();
       const selectedPayment = currentStudent && month ? getStudentPaymentForSelectedMonth() : null;
-      const canShowMonth = !!(month && month !== '-' && selectedPayment);
+      const canShowMonth = !!(month && month !== '-');
       const amount = canShowMonth ? getCurrentStudentAdjustedPaymentAmount(month) : 0;
-      const statusText = canShowMonth ? getCurrentStudentPaymentStatusText() : '-';
+      const statusText = canShowMonth ? (selectedPayment ? getPaymentDisplayStatus(selectedPayment) : getCurrentStudentPaymentStatusText()) : '-';
       if (getElement('studentPaymentCurrentMonth')) getElement('studentPaymentCurrentMonth').textContent = month || '-';
       if (getElement('studentPaymentAmount')) getElement('studentPaymentAmount').textContent = amount ? formatPrice(amount) : '-';
       if (getElement('studentPaymentStatus')) {
@@ -15185,13 +15242,14 @@ function getCourseOnlineDocs(course, includeInactive) {
     function getVisiblePaymentMonthsForStudents() {
       const visible = (Array.isArray(paymentMonths) ? paymentMonths : []).filter(isPaymentMonthVisibleToStudents);
       if (!currentStudent || !currentStudent.courseId) return visible;
-      const studentMonths = getCurrentStudentRelevantPaymentMonthNames();
-      return visible.filter(function(item) { return studentMonths.includes(item.month); });
+      return visible.filter(function(item) {
+        return item && item.month && isStudentBillingMonthActive(item.month);
+      });
     }
 
     function isPaymentMonthVisibleByName(month) {
       const item = getPaymentMonthItem(month);
-      return !!item && isPaymentMonthVisibleToStudents(item);
+      return isPaymentMonthVisibleToStudents(item);
     }
 
     function getPaymentMonthItem(month) {
@@ -16563,7 +16621,7 @@ function receiptStatusText(status) {
       if (!getElement('studentMobilePayment')) return;
       const selectedCourse = getCurrentStudentCourse();
       const selectedMonth = getStudentSelectedPaymentMonth();
-      const canShowMonth = !!(selectedMonth && selectedMonth !== '-' && getCurrentStudentPaymentForSelectedMonth());
+      const canShowMonth = !!(selectedMonth && selectedMonth !== '-');
       const amount = currentStudent && canShowMonth ? getCurrentStudentAdjustedPaymentAmount(selectedMonth) : 0;
       const statusText = currentStudent && currentStudent.courseId ? getCurrentStudentPaymentStatusText() : '-';
       const courseText = selectedCourse ? selectedCourse.name : '-';
@@ -27320,6 +27378,7 @@ function receiptStatusText(status) {
     let idCardLastExported = [];
     let idCardSettings = null;
     let idCardLogoUrl = '';
+    let idCardWatermarkUrl = '';
     let idCardInitialized = false;
     const ID_CARD_QR_BASE = 'https://idea-club-lms.vercel.app/?memberId=';
     const ID_CARD_LOGO_GAS_URL = 'https://script.google.com/macros/s/AKfycbzbpCSRl2oVx8WpCin0Vx9dPGBNNWnVm7oVj5ANH5M9WNQ2wJvHRcmsljN1w7dLnCbc/exec';
@@ -27342,6 +27401,10 @@ function receiptStatusText(status) {
         const manualInput = getElement('idCardLogoManualUrl');
         if (manualInput && idCardLogoUrl) manualInput.value = idCardLogoUrl;
         updateIdCardLogoPreview(idCardLogoUrl);
+        idCardWatermarkUrl = idCardSettings && idCardSettings.watermarkUrl ? parseDriveImageUrl(idCardSettings.watermarkUrl) : '';
+        const watermarkInput = getElement('idCardWatermarkManualUrl');
+        if (watermarkInput) watermarkInput.value = idCardWatermarkUrl;
+        updateIdCardWatermarkPreview(idCardWatermarkUrl);
       } catch (e) {
         console.warn('loadIdCardSettings error', e);
         idCardSettings = {};
@@ -27421,6 +27484,49 @@ function receiptStatusText(status) {
         if (resultEl) { resultEl.textContent = 'บันทึก Logo เรียบร้อย'; resultEl.style.color = '#16a34a'; }
       } catch (e) {
         if (resultEl) { resultEl.textContent = 'บันทึกไม่สำเร็จ: ' + (e.message || ''); resultEl.style.color = '#dc2626'; }
+      }
+    }
+
+    function updateIdCardWatermarkPreview(url) {
+      const el = getElement('idCardWatermarkPreviewArea');
+      if (!el) return;
+      const displayUrl = url ? parseDriveImageUrl(url) : '';
+      if (displayUrl) {
+        el.innerHTML = '<img src="' + escapeHtml(displayUrl) + '" style="max-height:70px; max-width:180px; border-radius:6px; object-fit:contain; opacity:0.5;" onerror="this.parentNode.innerHTML=\'โหลดรูปไม่สำเร็จ\'" />';
+      } else {
+        el.innerHTML = '<span style="color:#6b7280;">ยังไม่ได้ตั้งค่า</span>';
+      }
+    }
+
+    async function saveIdCardWatermark() {
+      const resultEl = getElement('idCardWatermarkSaveResult');
+      try {
+        if (resultEl) { resultEl.textContent = 'กำลังบันทึก...'; resultEl.style.color = '#2563eb'; }
+        const inputUrl = (getElement('idCardWatermarkManualUrl') && getElement('idCardWatermarkManualUrl').value.trim()) || '';
+        if (!inputUrl) { throw new Error('กรุณากรอก URL ลายน้ำก่อน'); }
+        const watermarkUrl = parseDriveImageUrl(inputUrl);
+        await db.collection('settings').doc('idCard').set({ watermarkUrl: watermarkUrl, updatedAt: firebase.firestore.FieldValue.serverTimestamp(), updatedBy: firebaseUser ? firebaseUser.uid : '' }, { merge: true });
+        idCardWatermarkUrl = watermarkUrl;
+        idCardSettings = Object.assign({}, idCardSettings, { watermarkUrl: watermarkUrl });
+        updateIdCardWatermarkPreview(watermarkUrl);
+        if (getElement('idCardWatermarkManualUrl')) getElement('idCardWatermarkManualUrl').value = watermarkUrl;
+        if (resultEl) { resultEl.textContent = 'บันทึกลายน้ำเรียบร้อย'; resultEl.style.color = '#16a34a'; }
+      } catch (e) {
+        if (resultEl) { resultEl.textContent = 'บันทึกไม่สำเร็จ: ' + (e.message || ''); resultEl.style.color = '#dc2626'; }
+      }
+    }
+
+    async function clearIdCardWatermark() {
+      const resultEl = getElement('idCardWatermarkSaveResult');
+      try {
+        await db.collection('settings').doc('idCard').set({ watermarkUrl: '' }, { merge: true });
+        idCardWatermarkUrl = '';
+        idCardSettings = Object.assign({}, idCardSettings, { watermarkUrl: '' });
+        if (getElement('idCardWatermarkManualUrl')) getElement('idCardWatermarkManualUrl').value = '';
+        updateIdCardWatermarkPreview('');
+        if (resultEl) { resultEl.textContent = 'ลบลายน้ำเรียบร้อย'; resultEl.style.color = '#16a34a'; }
+      } catch (e) {
+        if (resultEl) { resultEl.textContent = 'เกิดข้อผิดพลาด: ' + (e.message || ''); resultEl.style.color = '#dc2626'; }
       }
     }
 
@@ -27590,7 +27696,7 @@ function receiptStatusText(status) {
       });
     }
 
-    function buildIdCardCellHtml(student, qrDataUrl, logoUrl) {
+    function buildIdCardCellHtml(student, qrDataUrl, logoUrl, watermarkUrl) {
       if (!student) {
         return '<div class="id-card-cell"></div>';
       }
@@ -27605,6 +27711,9 @@ function receiptStatusText(status) {
       const qrHtml = qrDataUrl
         ? '<img class="id-card-qr-img" src="' + qrDataUrl + '" />'
         : '<div class="id-card-qr-img" style="border:1px dashed #cbd5e1; border-radius:2mm;"></div>';
+      const watermarkHtml = watermarkUrl
+        ? '<div class="id-card-watermark"><img src="' + escapeHtml(watermarkUrl) + '" crossorigin="anonymous" /></div>'
+        : '';
       return '<div class="id-card-cell">' +
         '<div class="cm-tl-h"></div><div class="cm-tl-v"></div>' +
         '<div class="cm-tr-h"></div><div class="cm-tr-v"></div>' +
@@ -27619,6 +27728,7 @@ function receiptStatusText(status) {
             '</div>' +
           '</div>' +
           '<div class="id-card-body">' +
+            watermarkHtml +
             '<div class="id-card-body-left">' +
               '<div class="id-card-name">' + name + '</div>' +
               '<div class="id-card-sub">ชื่อเล่น: ' + nickname + '</div>' +
@@ -27633,7 +27743,7 @@ function receiptStatusText(status) {
       '</div>';
     }
 
-    async function buildIdCardPageHtml(chunk, logoUrl) {
+    async function buildIdCardPageHtml(chunk, logoUrl, watermarkUrl) {
       const cards = chunk.slice(0, 10);
       const qrUrls = await Promise.all(cards.map(function(s) {
         if (!s) return Promise.resolve('');
@@ -27641,7 +27751,7 @@ function receiptStatusText(status) {
         return generateQrDataUrl(ID_CARD_QR_BASE + encodeURIComponent(memberId));
       }));
       const cells = cards.map(function(s, i) {
-        return buildIdCardCellHtml(s, qrUrls[i] || '', logoUrl || '');
+        return buildIdCardCellHtml(s, qrUrls[i] || '', logoUrl || '', watermarkUrl || '');
       }).join('');
       return '<div class="id-card-page"><div class="id-card-grid">' + cells + '</div></div>';
     }
@@ -27660,7 +27770,7 @@ function receiptStatusText(status) {
       try {
         const logoUrl = parseDriveImageUrl((getElement('idCardLogoManualUrl') && getElement('idCardLogoManualUrl').value.trim()) || idCardLogoUrl);
         const chunk = target.slice(0, 10);
-        const html = await buildIdCardPageHtml(chunk, logoUrl);
+        const html = await buildIdCardPageHtml(chunk, logoUrl, idCardWatermarkUrl);
         if (previewContent) {
           previewContent.innerHTML = html;
           const page = previewContent.querySelector('.id-card-page');
@@ -27701,7 +27811,7 @@ function receiptStatusText(status) {
         for (var i = 0; i < target.length; i += 10) chunks.push(target.slice(i, i + 10));
         for (var pageIdx = 0; pageIdx < chunks.length; pageIdx++) {
           if (resultEl) { resultEl.textContent = 'กำลังสร้าง PDF หน้าที่ ' + (pageIdx + 1) + '/' + chunks.length + '...'; }
-          const html = await buildIdCardPageHtml(chunks[pageIdx].slice(), logoUrl);
+          const html = await buildIdCardPageHtml(chunks[pageIdx].slice(), logoUrl, idCardWatermarkUrl);
           const tempDiv = document.createElement('div');
           tempDiv.style.cssText = 'position:fixed;left:-9999px;top:0;width:794px;height:1123px;background:#fff;overflow:hidden;z-index:-9999;';
           tempDiv.innerHTML = html;
