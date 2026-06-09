@@ -2273,7 +2273,7 @@
             <select id="scoreHistoryGradeFilter" onchange="renderScoreHistoryByMonth()">
               <option>ป.4</option>
               <option>ป.5</option>
-              <option selected>ป.6</option>
+              <option>ป.6</option>
               <option>ม.1</option>
               <option>ม.2</option>
               <option>ม.3</option>
@@ -5666,6 +5666,7 @@
         getFirebaseCollectionQuiet('onDemandClips'),
         getFirebaseCollectionQuiet('announcements'),
         getFirebaseCollectionQuiet('scoreReports'),
+        getFirebaseCollectionQuiet('adminScoreRecords'),
         getFirebaseCollectionQuiet('paymentMonths'),
         getFirebaseCollectionQuiet('lineGroups'),
         loadStudentOwnCollection('payments', studentDocId, firebaseUser.uid),
@@ -5676,17 +5677,19 @@
       replaceArray(onDemandClips, results[1]);
       replaceArray(announcements, results[2]);
       replaceArray(scoreReports, results[3]);
-      replaceArray(paymentMonths, results[4]);
-      replaceArray(lineGroups, results[5]);
-      replaceArray(payments, results[6]);
-      replaceArray(receipts, results[7]);
+      replaceArray(adminScoreRecords, results[4]);
+      replaceArray(paymentMonths, results[5]);
+      replaceArray(lineGroups, results[6]);
+      replaceArray(payments, results[7]);
+      replaceArray(receipts, results[8]);
 
       console.log('student-data-load-success', {
         uid: firebaseUser.uid,
         hasStudent: !!studentRecord,
-        paymentsLoaded: results[6].length,
-        receiptsLoaded: results[7].length,
-        collections: ['students:own', 'courses', 'onDemandClips', 'announcements', 'scoreReports', 'paymentMonths', 'lineGroups', 'payments:own', 'receipts:own']
+        scoreRecordsLoaded: results[4].length,
+        paymentsLoaded: results[7].length,
+        receiptsLoaded: results[8].length,
+        collections: ['students:own', 'courses', 'onDemandClips', 'announcements', 'scoreReports', 'adminScoreRecords', 'paymentMonths', 'lineGroups', 'payments:own', 'receipts:own']
       });
       startStudentPaymentListeners(studentDocId, firebaseUser.uid);
       return studentRecord;
@@ -18118,19 +18121,37 @@ function receiptStatusText(status) {
 
     const scoreReports = [];
 
+    function isCurrentStudentScoreRecord(record) {
+      if (!currentStudent || !record) return false;
+      const sameStudentId = record.studentId && currentStudent.id && String(record.studentId) === String(currentStudent.id);
+      const sameAuthUid = record.authUid && currentStudent.authUid && String(record.authUid) === String(currentStudent.authUid);
+      const sameMemberId = record.memberId && currentStudent.memberId && String(record.memberId) === String(currentStudent.memberId);
+      const sameName = String(record.student || '').trim() === String(currentStudent.name || '').trim();
+      return sameStudentId || sameAuthUid || sameMemberId || sameName;
+    }
+
     function renderScoreHistoryByMonth() {
       const selectedMonth = getElement('scoreHistoryMonthFilter') ? getElement('scoreHistoryMonthFilter').value : '';
-      const selectedGrade = getElement('scoreHistoryGradeFilter') ? getElement('scoreHistoryGradeFilter').value : getProfileGrade();
+      const gradeFilter = getElement('scoreHistoryGradeFilter');
+      if (gradeFilter) {
+        if (currentStudent) {
+          gradeFilter.value = currentStudent.grade || '';
+          gradeFilter.disabled = true;
+          gradeFilter.style.pointerEvents = 'none';
+          gradeFilter.style.opacity = '0.6';
+        } else {
+          gradeFilter.disabled = false;
+          gradeFilter.style.pointerEvents = '';
+          gradeFilter.style.opacity = '';
+        }
+      }
+      const selectedGrade = currentStudent && currentStudent.grade ? currentStudent.grade : (gradeFilter ? gradeFilter.value : getProfileGrade());
       const gradeRecords = adminScoreRecords.filter(function(record) {
         return record.month === selectedMonth && record.grade === selectedGrade && record.status === 'published';
       });
 
       const studentRecord = gradeRecords.find(function(record) {
-        if (!currentStudent) return false;
-        const sameStudentId = record.studentId && currentStudent.id && String(record.studentId) === String(currentStudent.id);
-        const sameAuthUid = record.authUid && currentStudent.authUid && String(record.authUid) === String(currentStudent.authUid);
-        const sameName = record.student === currentStudent.name;
-        return sameStudentId || sameAuthUid || sameName;
+        return isCurrentStudentScoreRecord(record);
       });
 
       const report = scoreReports.find(function(item) {
@@ -18183,8 +18204,23 @@ function receiptStatusText(status) {
       const chart = getElement('scoreChartBox');
       if (chart) {
         chart.innerHTML = hasPublishedScore ? subjects.map(function(item) {
-          const width = Math.max(0, Math.min(100, item.score * 2));
-          return '<div class="chart-row"><strong>' + item.subject + '</strong><div class="chart-track"><div class="chart-bar" style="width:' + width + '%;"></div></div><span>' + item.score + '</span></div>';
+          const score = Number(item.score || 0);
+          const avg = Number(item.avg || 0);
+          const scoreWidth = Math.max(0, Math.min(100, score * 2));
+          const avgWidth = Math.max(0, Math.min(100, avg * 2));
+          return '<div class="chart-row">' +
+            '<strong>' + item.subject + '</strong>' +
+            '<div style="display:flex;flex-direction:column;gap:3px;flex:1;">' +
+              '<div style="display:flex;align-items:center;gap:6px;">' +
+                '<div class="chart-track" style="flex:1;"><div class="chart-bar" style="width:' + scoreWidth + '%;"></div></div>' +
+                '<span style="font-size:12px;min-width:60px;">ของคุณ: ' + score + '</span>' +
+              '</div>' +
+              '<div style="display:flex;align-items:center;gap:6px;">' +
+                '<div class="chart-track" style="flex:1;"><div class="chart-bar chart-bar-avg" style="width:' + avgWidth + '%;background:#94a3b8;"></div></div>' +
+                '<span style="font-size:12px;color:#6b7280;min-width:60px;">เฉลี่ย: ' + avg + '</span>' +
+              '</div>' +
+            '</div>' +
+          '</div>';
         }).join('') : '<p class="status-waiting">ยังไม่มีกราฟคะแนนสำหรับเงื่อนไขนี้</p>';
       }
 
@@ -18193,14 +18229,10 @@ function receiptStatusText(status) {
 
     function getStudentScoreRecordForMonth(month, grade) {
       return adminScoreRecords.find(function(record) {
-        if (!currentStudent) return false;
         const sameMonth = !month || record.month === month;
         const sameGrade = !grade || record.grade === grade;
         const sameStatus = record.status === 'published';
-        const sameStudentId = record.studentId && currentStudent.id && String(record.studentId) === String(currentStudent.id);
-        const sameAuthUid = record.authUid && currentStudent.authUid && String(record.authUid) === String(currentStudent.authUid);
-        const sameName = record.student === currentStudent.name;
-        return sameMonth && sameGrade && sameStatus && (sameStudentId || sameAuthUid || sameName);
+        return sameMonth && sameGrade && sameStatus && isCurrentStudentScoreRecord(record);
       }) || null;
     }
 
@@ -18208,10 +18240,7 @@ function receiptStatusText(status) {
       if (!currentStudent) return [];
       return adminScoreRecords.filter(function(record) {
         if (record.status !== 'published') return false;
-        const sameStudentId = record.studentId && currentStudent.id && String(record.studentId) === String(currentStudent.id);
-        const sameAuthUid = record.authUid && currentStudent.authUid && String(record.authUid) === String(currentStudent.authUid);
-        const sameName = record.student === currentStudent.name;
-        return sameStudentId || sameAuthUid || sameName;
+        return isCurrentStudentScoreRecord(record);
       }).slice().sort(function(a, b) {
         return String(b.month || '').localeCompare(String(a.month || ''), 'th');
       });
