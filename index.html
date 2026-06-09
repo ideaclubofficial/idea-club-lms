@@ -3774,6 +3774,8 @@
                     <summary style="cursor:pointer; font-weight:700; color:#9ca3af;">เครื่องมือซ่อมข้อมูล</summary>
                     <p style="color:#6b7280; margin:10px 0;">ปกติไม่ต้องใช้ ใช้เฉพาะกรณีต้องซ่อมข้อมูล</p>
                     <button class="btn btn-dark" type="button" onclick="createMonthlyPaymentRecords()">สร้าง payment records ล่วงหน้าของเดือนนี้</button>
+                    <button class="btn btn-blue" type="button" style="margin-top:8px;" onclick="repairPaymentStatusFromReceipts().then(function(n){ alert(n ? 'ซ่อมแล้ว ' + n + ' รายการ' : 'ไม่พบรายการที่ต้องซ่อม'); })">ซ่อมสถานะ/ราคาจากใบเสร็จ</button>
+                    <p style="color:#6b7280; font-size:12px; margin-top:4px;">กดเมื่อ: นักเรียนที่ชำระแล้วยังขึ้นรอชำระ หรือราคาแสดงผิด — ระบบจะซ่อมจากใบเสร็จที่ออกไปแล้ว</p>
                   </details>
                 </div>
               </div>
@@ -6373,6 +6375,7 @@
       if (mainSettings) systemSettings = Object.assign(systemSettings, mainSettings);
       safeRun(repairReceiptMonthsFromPayments, 'repair-receipt-months');
       safeRun(repairApprovedPaymentsForStudentInterface, 'repair-approved-payments-student-interface');
+      safeRun(repairPaymentStatusFromReceipts, 'repair-payment-status-from-receipts');
       safeRun(updateMemberIdPreview, 'member-id-preview-after-load');
       safeRun(updateTeacherIdPreview, 'teacher-id-preview-after-load');
       safeRun(renderReceiptMonthFilter, 'receipt-month-filter-after-load');
@@ -16983,6 +16986,71 @@ function receiptStatusText(status) {
       } finally {
         repairApprovedPaymentsForStudentInterface.running = false;
       }
+    }
+
+    function findPaymentForReceiptAnyStatus(receipt) {
+      if (!receipt) return null;
+      if (receipt.paymentId) {
+        const byId = payments.find(function(p) {
+          return String(p.id || p.firebaseDocId || '') === String(receipt.paymentId);
+        });
+        if (byId) return byId;
+      }
+      const rMonth = String(getReceiptMonth(receipt) || '').trim();
+      if (!rMonth) return null;
+      return payments.find(function(p) {
+        const sameStudent = receipt.studentId && String(p.studentId || '') === String(receipt.studentId);
+        const sameAuth = receipt.authUid && String(p.authUid || p.studentAuthUid || '') === String(receipt.authUid);
+        const sameCourse = !receipt.courseId || String(p.courseId || '') === String(receipt.courseId);
+        const sameMonth = String(p.month || p.studentSelectedMonth || '').trim() === rMonth;
+        return (sameStudent || sameAuth) && sameCourse && sameMonth;
+      }) || null;
+    }
+
+    async function repairPaymentStatusFromReceipts() {
+      if (!Array.isArray(receipts) || !receipts.length) return 0;
+      if (repairPaymentStatusFromReceipts.running) return 0;
+      repairPaymentStatusFromReceipts.running = true;
+      let repaired = 0;
+      try {
+        for (const receipt of receipts) {
+          if (normalizeReceiptStatus(receipt.status) !== 'published') continue;
+          const payment = findPaymentForReceiptAnyStatus(receipt);
+          if (!payment) continue;
+          const needsRepair = payment.status !== 'ชำระแล้ว' || payment.paymentStatus !== 'ชำระแล้ว' || payment.slipStatus !== 'approved';
+          if (!needsRepair) continue;
+          const receiptAmount = parseReceiptAmount(receipt.amount);
+          payment.status = 'ชำระแล้ว';
+          payment.paymentStatus = 'ชำระแล้ว';
+          payment.slipStatus = 'approved';
+          payment.receiptStatus = 'published';
+          if (!payment.receiptId) payment.receiptId = receipt.id || '';
+          if (!payment.receiptNo) payment.receiptNo = receipt.receiptNo || '';
+          if (receiptAmount > 0 && payment.finalAmount !== receiptAmount) {
+            payment.originalAmount = payment.originalAmount || receiptAmount;
+            payment.baseAmount = payment.originalAmount;
+            payment.finalAmount = receiptAmount;
+            payment.amount = receiptAmount;
+            payment.totalAmount = receiptAmount;
+            payment.discountType = payment.discountType === 'none' || !payment.discountType ? 'manualCustom' : payment.discountType;
+          }
+          try {
+            await setFirebaseDocument('payments', payment);
+            await syncStudentPaymentStatusFromPayment(payment, 'ชำระแล้ว');
+            repaired++;
+          } catch (e) { console.error('repairPaymentStatusFromReceipts error:', e); }
+        }
+        if (repaired > 0) {
+          renderPaymentTable();
+          renderPaymentRecordPreview();
+          renderAdminReceipts();
+          updatePaymentSummary();
+          addActivityLog('ซ่อมสถานะและราคาจากใบเสร็จ', repaired + ' รายการ');
+        }
+      } finally {
+        repairPaymentStatusFromReceipts.running = false;
+      }
+      return repaired;
     }
 
     function renderStudentReceipts() {
