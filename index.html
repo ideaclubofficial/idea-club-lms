@@ -4252,19 +4252,19 @@
 
               <!-- Course CRUD -->
               <div class="form-box">
-                <h3>จัดการคอร์สวิชา</h3>
+                <h3>จัดการชุดข้อสอบ</h3>
                 <input type="hidden" id="onlineExamEditingCourseId" value="">
                 <div class="form-row">
                   <div>
-                    <label>ชื่อคอร์สวิชา</label>
+                    <label>ชื่อชุดข้อสอบ</label>
                     <input type="text" id="onlineExamCourseTitle" placeholder="เช่น วิทยาศาสตร์ ป.6 ชุด A">
                   </div>
                   <div>
-                    <label>ผูกกับคอร์ส (เลือกคอร์สที่นักเรียนสมัคร)</label>
-                    <select id="onlineExamLinkedCourseId" onchange="onOnlineExamLinkedCourseChange()">
-                      <option value="">-- ไม่ผูกกับคอร์สใด (ใช้ระดับชั้น) --</option>
+                    <label>ผูกกับระดับชั้น</label>
+                    <select id="onlineExamCourseGrade">
+                      <option value="">-- ทุกระดับชั้น --</option>
                     </select>
-                    <p style="font-size:10px;color:#9ca3af;margin:2px 0 0;">เฉพาะนักเรียนที่สมัครคอร์สนี้เท่านั้นที่จะเห็นข้อสอบ</p>
+                    <p style="font-size:10px;color:#9ca3af;margin:2px 0 0;">นักเรียนระดับชั้นนี้จะเห็นข้อสอบ โดยไม่ต้องผูกกับคอร์สรายตัว</p>
                   </div>
                   <div>
                     <label>วิชา</label>
@@ -4335,7 +4335,7 @@
                   </div>
                 </div>
                 <div class="form-row" style="margin-top:8px;">
-                  <button id="onlineExamCourseSaveBtn" class="btn btn-green" onclick="saveOnlineExamCourse()">💾 บันทึกคอร์ส</button>
+                  <button id="onlineExamCourseSaveBtn" class="btn btn-green" onclick="saveOnlineExamCourse()">💾 บันทึกชุดข้อสอบ</button>
                   <button id="onlineExamCourseCancelBtn" class="btn" onclick="resetOnlineExamCourseForm()" style="display:none;">ยกเลิก</button>
                 </div>
                 <p id="onlineExamCourseSaveResult" style="font-size:12px;margin-top:6px;"></p>
@@ -4343,7 +4343,7 @@
 
               <!-- Course list -->
               <div class="form-box">
-                <h3>รายการคอร์สทั้งหมด</h3>
+                <h3>รายการชุดข้อสอบทั้งหมด</h3>
                 <div id="onlineExamCourseList">
                   <p style="color:#9ca3af;font-size:13px;">กำลังโหลด...</p>
                 </div>
@@ -4355,9 +4355,9 @@
                 <input type="hidden" id="onlineExamEditingQuestionId" value="">
                 <div class="form-row">
                   <div>
-                    <label>คอร์สที่ต้องการเพิ่มข้อสอบ</label>
+                    <label>ชุดข้อสอบที่ต้องการเพิ่มข้อสอบ</label>
                     <select id="onlineExamQuestionCourseSelect" style="width:100%;" onchange="renderOnlineExamQuestionList()">
-                      <option value="">-- เลือกคอร์ส --</option>
+                      <option value="">-- เลือกชุดข้อสอบ --</option>
                     </select>
                   </div>
                 </div>
@@ -4433,9 +4433,9 @@
 
               <!-- Question list -->
               <div class="form-box">
-                <h3>รายการข้อสอบในคอร์สที่เลือก</h3>
+                <h3>รายการข้อสอบในชุดที่เลือก</h3>
                 <div id="onlineExamQuestionList">
-                  <p style="color:#9ca3af;font-size:13px;">เลือกคอร์สด้านบนเพื่อดูรายการข้อสอบ</p>
+                  <p style="color:#9ca3af;font-size:13px;">เลือกชุดข้อสอบด้านบนเพื่อดูรายการข้อสอบ</p>
                 </div>
               </div>
 
@@ -4455,7 +4455,7 @@
                     <label>นำเข้าข้อมูล JSON</label>
                     <textarea id="onlineExamJsonImport" rows="4"
                       style="font-family:monospace;font-size:11px;width:100%;"
-                      placeholder="วาง JSON โครงสร้างคอร์สที่นี่..."></textarea>
+                      placeholder="วาง JSON โครงสร้างชุดข้อสอบที่นี่..."></textarea>
                     <button class="btn btn-blue" onclick="importOnlineExamJson()" style="margin-top:6px;">📥 นำเข้าข้อมูล</button>
                     <p id="onlineExamJsonImportResult" style="font-size:12px;margin-top:6px;"></p>
                   </div>
@@ -6374,7 +6374,10 @@
       const settingsItems = results[19];
       const mainSettings = settingsItems.find(function(item) { return item.id === 'main' || item.firebaseDocId === 'main'; });
       if (mainSettings) systemSettings = Object.assign(systemSettings, mainSettings);
+      // Sync pre-repair: fix in-memory status immediately so first render is correct
+      safeRun(applyPaymentRepairsSync, 'sync-payment-repair');
       safeRun(repairReceiptMonthsFromPayments, 'repair-receipt-months');
+      // Async repairs run in background to persist fixes and create missing receipts
       safeRun(repairApprovedPaymentsForStudentInterface, 'repair-approved-payments-student-interface');
       safeRun(repairPaymentStatusFromReceipts, 'repair-payment-status-from-receipts');
       safeRun(updateMemberIdPreview, 'member-id-preview-after-load');
@@ -17017,6 +17020,35 @@ function receiptStatusText(status) {
       }) || null;
     }
 
+    // Sync (no Firebase writes): correct in-memory status before first render so admin never sees stale data
+    function applyPaymentRepairsSync() {
+      if (!Array.isArray(payments)) return;
+      // Pass 1: any field already shows approved → normalize all 4 status fields
+      for (const payment of payments) {
+        if (!isApprovedPaymentNeedingStudentRepair(payment)) continue;
+        if (payment.status === 'ชำระแล้ว' && payment.paymentStatus === 'ชำระแล้ว' &&
+            payment.slipStatus === 'approved' && payment.receiptStatus === 'published') continue;
+        payment.status = 'ชำระแล้ว';
+        payment.paymentStatus = 'ชำระแล้ว';
+        payment.slipStatus = 'approved';
+        payment.receiptStatus = 'published';
+      }
+      // Pass 2: match against published receipts as ground truth
+      if (!Array.isArray(receipts)) return;
+      for (const receipt of receipts) {
+        if (normalizeReceiptStatus(receipt.status) !== 'published') continue;
+        const payment = findPaymentForReceiptAnyStatus(receipt);
+        if (!payment) continue;
+        if (payment.status === 'ชำระแล้ว' && payment.paymentStatus === 'ชำระแล้ว' && payment.slipStatus === 'approved') continue;
+        payment.status = 'ชำระแล้ว';
+        payment.paymentStatus = 'ชำระแล้ว';
+        payment.slipStatus = 'approved';
+        payment.receiptStatus = 'published';
+        if (!payment.receiptId) payment.receiptId = receipt.id || '';
+        if (!payment.receiptNo) payment.receiptNo = receipt.receiptNo || '';
+      }
+    }
+
     async function repairPaymentStatusFromReceipts() {
       if (!Array.isArray(receipts) || !receipts.length) return 0;
       if (repairPaymentStatusFromReceipts.running) return 0;
@@ -26493,9 +26525,7 @@ function receiptStatusText(status) {
 
       const title = (getElement('onlineExamCourseTitle') || {}).value || '';
       const subject = (getElement('onlineExamCourseSubject') || {}).value || '';
-      const linkedCourseId = (getElement('onlineExamLinkedCourseId') || {}).value || '';
-      const linkedCourse = linkedCourseId ? (courses || []).find(function(c) { return String(c.id) === String(linkedCourseId); }) : null;
-      const grade = linkedCourse ? (linkedCourse.grade || '') : '';
+      const grade = (getElement('onlineExamCourseGrade') || {}).value || '';
       const duration = parseInt((getElement('onlineExamCourseDuration') || {}).value || '15', 10) || 15;
       const status = (getElement('onlineExamCourseStatus') || {}).value || 'active';
       const publishStatus = (getElement('onlineExamCoursePublishStatus') || {}).value || 'draft';
@@ -26510,21 +26540,21 @@ function receiptStatusText(status) {
       const editingId = (getElement('onlineExamEditingCourseId') || {}).value || '';
       const resultEl = getElement('onlineExamCourseSaveResult');
 
-      if (!title.trim()) { if (resultEl) { resultEl.style.color = '#dc2626'; resultEl.textContent = '❌ กรุณาใส่ชื่อคอร์ส'; } return; }
+      if (!title.trim()) { if (resultEl) { resultEl.style.color = '#dc2626'; resultEl.textContent = '❌ กรุณาใส่ชื่อชุดข้อสอบ'; } return; }
       if (resultEl) { resultEl.style.color = '#d97706'; resultEl.textContent = '⏳ กำลังบันทึก...'; }
 
       try {
         const now = firebase.firestore.FieldValue.serverTimestamp();
         const uid = firebaseUser ? firebaseUser.uid : '';
         const examMonth = (getElement('onlineExamCourseMonth') || {}).value || '';
-      const extraFields = { publishStatus, isActive, showScoreAfterSubmit, shuffleQuestions, shuffleChoices, openAt, closeAt, subject, linkedCourseId: linkedCourseId || null, examMonth: examMonth || null };
+        const extraFields = { publishStatus, isActive, showScoreAfterSubmit, shuffleQuestions, shuffleChoices, openAt, closeAt, subject, linkedCourseId: null, examMonth: examMonth || null };
 
         if (editingId) {
           await db.collection('onlineExamCourses').doc(editingId).set(
             Object.assign({ title: title.trim(), grade, durationMinutes: duration, status, updatedAt: now, updatedBy: uid }, extraFields),
             { merge: true }
           );
-          if (resultEl) { resultEl.style.color = '#16a34a'; resultEl.textContent = '✅ อัปเดตคอร์สสำเร็จ'; }
+          if (resultEl) { resultEl.style.color = '#16a34a'; resultEl.textContent = '✅ อัปเดตชุดข้อสอบสำเร็จ'; }
           addActivityLog('แก้ไขคอร์สข้อสอบ Interactive', title);
         } else {
           const newId = createFirebaseDocId('onlineExamCourses');
@@ -26535,7 +26565,7 @@ function receiptStatusText(status) {
               deleted: false, createdAt: now, createdBy: uid, updatedAt: now, updatedBy: uid
             }, extraFields)
           );
-          if (resultEl) { resultEl.style.color = '#16a34a'; resultEl.textContent = '✅ สร้างคอร์สสำเร็จ'; }
+          if (resultEl) { resultEl.style.color = '#16a34a'; resultEl.textContent = '✅ สร้างชุดข้อสอบสำเร็จ'; }
           addActivityLog('สร้างคอร์สข้อสอบ Interactive', title);
         }
 
@@ -26582,7 +26612,7 @@ function receiptStatusText(status) {
       setValue('onlineExamCourseOpenAt', course.openAt ? course.openAt.slice(0, 16) : '');
       setValue('onlineExamCourseCloseAt', course.closeAt ? course.closeAt.slice(0, 16) : '');
       setValue('onlineExamCourseSubject', course.subject || '');
-      setValue('onlineExamLinkedCourseId', course.linkedCourseId || '');
+      setValue('onlineExamCourseGrade', course.grade || getOnlineExamLinkedCourseGrade(course.linkedCourseId) || '');
       setValue('onlineExamCourseMonth', course.examMonth || '');
       const cancelBtn = getElement('onlineExamCourseCancelBtn');
       if (cancelBtn) cancelBtn.style.display = '';
@@ -26603,7 +26633,7 @@ function receiptStatusText(status) {
       setValue('onlineExamCourseOpenAt', '');
       setValue('onlineExamCourseCloseAt', '');
       setValue('onlineExamCourseSubject', '');
-      setValue('onlineExamLinkedCourseId', '');
+      setValue('onlineExamCourseGrade', '');
       setValue('onlineExamCourseMonth', '');
       const cancelBtn = getElement('onlineExamCourseCancelBtn');
       if (cancelBtn) cancelBtn.style.display = 'none';
@@ -26753,7 +26783,7 @@ function receiptStatusText(status) {
     }
 
     function renderOnlineExamAdminManage() {
-      populateOnlineExamLinkedCourseSelect();
+      populateOnlineExamGradeSelect();
       populateOnlineExamMonthSelect();
       renderOnlineExamCourseList();
       populateOnlineExamCourseSelects();
@@ -26761,22 +26791,19 @@ function receiptStatusText(status) {
       exportOnlineExamJson();
     }
 
-    function populateOnlineExamLinkedCourseSelect() {
-      const sel = getElement('onlineExamLinkedCourseId');
+    function populateOnlineExamGradeSelect() {
+      const sel = getElement('onlineExamCourseGrade');
       if (!sel) return;
       const current = sel.value;
-      sel.innerHTML = '<option value="">-- ไม่ผูกกับคอร์สใด (ใช้ระดับชั้น) --</option>';
-      (courses || []).filter(function(c) { return c.status !== 'closed' && c.status !== 'deleted'; })
-        .forEach(function(c) {
-          const opt = document.createElement('option');
-          opt.value = c.id;
-          opt.textContent = (c.grade ? c.grade + ' · ' : '') + (c.name || c.title || c.id);
-          sel.appendChild(opt);
-        });
+      sel.innerHTML = '<option value="">-- ทุกระดับชั้น --</option>' + gradeOptionsHtml(current);
       if (current) sel.value = current;
     }
 
-    function onOnlineExamLinkedCourseChange() { /* grade derived from linked course on save */ }
+    function getOnlineExamLinkedCourseGrade(linkedCourseId) {
+      if (!linkedCourseId) return '';
+      const linkedCourse = (courses || []).find(function(c) { return String(c.id) === String(linkedCourseId); });
+      return linkedCourse ? (linkedCourse.grade || '') : '';
+    }
 
     function populateOnlineExamMonthSelect() {
       const sel = getElement('onlineExamCourseMonth');
@@ -26802,7 +26829,7 @@ function receiptStatusText(status) {
       const container = getElement('onlineExamCourseList');
       if (!container) return;
       if (!onlineExamCourseCache.length) {
-        container.innerHTML = '<p style="color:#9ca3af;font-size:13px;">ยังไม่มีคอร์ส กรุณาสร้างคอร์สแรก</p>';
+        container.innerHTML = '<p style="color:#9ca3af;font-size:13px;">ยังไม่มีชุดข้อสอบ กรุณาสร้างชุดข้อสอบแรก</p>';
         return;
       }
 
@@ -26817,7 +26844,7 @@ function receiptStatusText(status) {
       const allSubjects = [];
       onlineExamCourseCache.forEach(function(c) {
         if (c.examMonth && !allMonths.includes(c.examMonth)) allMonths.push(c.examMonth);
-        const g = c.grade || '';
+        const g = c.grade || getOnlineExamLinkedCourseGrade(c.linkedCourseId) || '';
         if (g && !allGrades.includes(g)) allGrades.push(g);
         if (c.subject && !allSubjects.includes(c.subject)) allSubjects.push(c.subject);
       });
@@ -26839,13 +26866,14 @@ function receiptStatusText(status) {
           '<option value="">ทุกวิชา</option>' +
           allSubjects.map(function(s) { return '<option value="' + escapeHtml(s) + '"' + (s === filterSubject ? ' selected' : '') + '>' + escapeHtml(s) + '</option>'; }).join('') +
         '</select>' +
-        '<span style="font-size:11px;color:#6b7280;">' + onlineExamCourseCache.length + ' คอร์สทั้งหมด</span>' +
+        '<span style="font-size:11px;color:#6b7280;">' + onlineExamCourseCache.length + ' ชุดข้อสอบทั้งหมด</span>' +
       '</div>';
 
       // filter
       const filtered = onlineExamCourseCache.filter(function(c) {
+        const courseGrade = c.grade || getOnlineExamLinkedCourseGrade(c.linkedCourseId) || '';
         if (filterMonth && (c.examMonth || '') !== filterMonth) return false;
-        if (filterGrade && (c.grade || '') !== filterGrade) return false;
+        if (filterGrade && courseGrade !== filterGrade) return false;
         if (filterSubject && (c.subject || '') !== filterSubject) return false;
         return true;
       });
@@ -26859,7 +26887,7 @@ function receiptStatusText(status) {
       const groups = {}; // groups[month][grade] = [courses]
       filtered.forEach(function(c) {
         const m = c.examMonth || '(ไม่ระบุเดือน)';
-        const g = c.grade || '(ไม่ระบุระดับชั้น)';
+        const g = c.grade || getOnlineExamLinkedCourseGrade(c.linkedCourseId) || '(ไม่ระบุระดับชั้น)';
         if (!groups[m]) groups[m] = {};
         if (!groups[m][g]) groups[m][g] = [];
         groups[m][g].push(c);
@@ -26875,13 +26903,11 @@ function receiptStatusText(status) {
         const qCount = (c.questions || []).length;
         const pStatus = c.publishStatus || (c.status === 'active' ? 'published' : 'draft');
         const active = c.isActive !== false && c.status !== 'inactive';
-        const linkedLabel = c.linkedCourseId ? (function() { var lc = (courses||[]).find(function(x){return String(x.id)===String(c.linkedCourseId);}); return lc ? '🔗 ' + escapeHtml(lc.name || lc.title || '') : ''; })() : '';
         return '<div style="display:flex;justify-content:space-between;align-items:flex-start;padding:10px 12px;background:#fff;border:1px solid #e2e8f0;border-radius:10px;margin-bottom:6px;flex-wrap:wrap;gap:6px;">' +
           '<div style="flex:1;min-width:0;">' +
             '<div style="display:flex;align-items:center;flex-wrap:wrap;gap:4px;">' +
               '<strong style="font-size:13px;">' + escapeHtml(c.title || '') + '</strong>' +
               (c.subject ? '<span style="font-size:10px;background:#ede9fe;color:#5b21b6;padding:1px 7px;border-radius:99px;">' + escapeHtml(c.subject) + '</span>' : '') +
-              (linkedLabel ? '<span style="font-size:10px;background:#d1fae5;color:#065f46;padding:1px 7px;border-radius:99px;">' + linkedLabel + '</span>' : '') +
             '</div>' +
             '<div style="margin-top:4px;display:flex;gap:4px;flex-wrap:wrap;">' +
               '<span style="font-size:10px;color:#6b7280;">' + (c.durationMinutes || 15) + ' นาที · ' + qCount + ' ข้อ</span>' +
@@ -26905,7 +26931,7 @@ function receiptStatusText(status) {
         const gradeHtml = gradeOrder.map(function(grade) {
           const cards = gradeMap[grade].map(renderCourseCard).join('');
           return '<div style="margin-bottom:8px;">' +
-            '<p style="font-size:11px;font-weight:700;color:#4f46e5;margin:0 0 6px;padding:4px 8px;background:#ede9fe;border-radius:6px;display:inline-block;">' + escapeHtml(grade) + ' · ' + gradeMap[grade].length + ' คอร์ส</p>' +
+            '<p style="font-size:11px;font-weight:700;color:#4f46e5;margin:0 0 6px;padding:4px 8px;background:#ede9fe;border-radius:6px;display:inline-block;">' + escapeHtml(grade) + ' · ' + gradeMap[grade].length + ' ชุดข้อสอบ</p>' +
             cards +
           '</div>';
         }).join('');
@@ -27440,15 +27466,12 @@ function receiptStatusText(status) {
       if (content) content.style.display = '';
 
       const grade = currentStudent ? (currentStudent.grade || '') : '';
-      const studentCourseId = currentStudent ? (currentStudent.courseId || '') : '';
       const allVisible = onlineExamCourseCache.filter(function(c) {
+        const courseGrade = c.grade || getOnlineExamLinkedCourseGrade(c.linkedCourseId) || '';
         if (c.isActive === false) return false;
         if (c.publishStatus) { if (c.publishStatus !== 'published') return false; }
         else { if (c.status !== 'active') return false; }
-        if (c.linkedCourseId) {
-          return studentCourseId && String(c.linkedCourseId) === String(studentCourseId);
-        }
-        if (c.grade && grade && c.grade !== grade) return false;
+        if (courseGrade && grade && courseGrade !== grade) return false;
         return true;
       });
 
