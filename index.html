@@ -4699,9 +4699,10 @@
                   <div>
                     <label>เลือกระดับชั้น</label>
                     <select id="adminScoreGradeFilter" onchange="renderAdminScoreAdjustTable(); renderAdminScoreStatsTable();">
+                      <option value="">-- เลือกระดับชั้น --</option>
                       <option>ป.4</option>
                       <option>ป.5</option>
-                      <option selected>ป.6</option>
+                      <option>ป.6</option>
                       <option>ม.1</option>
                       <option>ม.2</option>
                       <option>ม.3</option>
@@ -17925,9 +17926,17 @@ function receiptStatusText(status) {
 
     async function saveAdjustedScores() {
       const selectedMonth = getElement('adminScoreTestSetFilter') ? getElement('adminScoreTestSetFilter').value : '';
-      const selectedGrade = getElement('adminScoreGradeFilter') ? getElement('adminScoreGradeFilter').value : 'ป.6';
+      const selectedGrade = getElement('adminScoreGradeFilter') ? getElement('adminScoreGradeFilter').value : '';
       const rows = document.querySelectorAll('#adminScoreAdjustTableBody tr[data-score-id]');
       const result = getElement('scoreAdjustResult');
+
+      if (!selectedMonth || !selectedGrade) {
+        if (result) {
+          result.textContent = 'กรุณาเลือกเดือนสอบและระดับชั้นก่อนบันทึกคะแนน';
+          result.style.color = '#dc2626';
+        }
+        return;
+      }
 
       if (!rows.length) {
         if (result) {
@@ -17973,11 +17982,19 @@ function receiptStatusText(status) {
 
     async function publishSelectedScoreSet() {
       const selectedMonth = getElement('adminScoreTestSetFilter') ? getElement('adminScoreTestSetFilter').value : '';
-      const selectedGrade = getElement('adminScoreGradeFilter') ? getElement('adminScoreGradeFilter').value : 'ป.6';
+      const selectedGrade = getElement('adminScoreGradeFilter') ? getElement('adminScoreGradeFilter').value : '';
       const records = adminScoreRecords.filter(function(record) {
         return record.month === selectedMonth && record.grade === selectedGrade;
       });
       const result = getElement('scoreAdjustResult');
+
+      if (!selectedMonth || !selectedGrade) {
+        if (result) {
+          result.textContent = 'กรุณาเลือกเดือนสอบและระดับชั้นก่อนประกาศผล';
+          result.style.color = '#dc2626';
+        }
+        return;
+      }
 
       if (!records.length) {
         if (result) {
@@ -18606,13 +18623,12 @@ function receiptStatusText(status) {
         return '<option value="' + month + '">' + month + '</option>';
       }).join('') : '<option value="">ยังไม่มีเดือนสอบ</option>';
       select.value = months.includes(current) ? current : (months[0] || '');
-      const gradeSelect = getElement('adminScoreGradeFilter');
-      if (gradeSelect && !gradeSelect.value) gradeSelect.value = 'ป.6';
     }
 
     function getSelectedAdminScoreRecords() {
       const selectedMonth = getElement('adminScoreTestSetFilter') ? getElement('adminScoreTestSetFilter').value : '';
-      const selectedGrade = getElement('adminScoreGradeFilter') ? getElement('adminScoreGradeFilter').value : 'ป.6';
+      const selectedGrade = getElement('adminScoreGradeFilter') ? getElement('adminScoreGradeFilter').value : '';
+      if (!selectedMonth || !selectedGrade) return [];
       return adminScoreRecords.filter(function(record) {
         return record.month === selectedMonth && record.grade === selectedGrade;
       });
@@ -18726,6 +18742,14 @@ function receiptStatusText(status) {
       if (!tbody) return;
       const records = getSelectedAdminScoreRecords();
       const selectedMonth = getElement('adminScoreTestSetFilter') ? getElement('adminScoreTestSetFilter').value : '';
+      const selectedGrade = getElement('adminScoreGradeFilter') ? getElement('adminScoreGradeFilter').value : '';
+
+      if (!selectedGrade) {
+        const thead = tbody.closest('table') && tbody.closest('table').querySelector('thead tr');
+        if (thead) thead.innerHTML = '<th>นักเรียน</th><th>คะแนน</th><th>คะแนนเต็ม</th><th>สถานะ</th><th></th>';
+        tbody.innerHTML = '<tr><td colspan="5">กรุณาเลือกระดับชั้นก่อน</td></tr>';
+        return;
+      }
 
       // collect all subjects across records (dynamic — not hardcoded)
       const subjectSet = {};
@@ -18839,6 +18863,11 @@ function receiptStatusText(status) {
       const tbody = getElement('adminScoreStatsTableBody');
       if (!tbody) return;
       const records = getSelectedAdminScoreRecords();
+      const selectedGrade = getElement('adminScoreGradeFilter') ? getElement('adminScoreGradeFilter').value : '';
+      if (!selectedGrade) {
+        tbody.innerHTML = '<tr><td colspan="5">กรุณาเลือกระดับชั้นก่อน</td></tr>';
+        return;
+      }
       const subjectSet = {};
       records.forEach(function(rec) { Object.keys(rec.scores || {}).forEach(function(k) { subjectSet[k] = true; }); });
       const subjects = Object.keys(subjectSet).length ? Object.keys(subjectSet) : ['วิทยาศาสตร์', 'คณิตศาสตร์', 'ภาษาอังกฤษ'];
