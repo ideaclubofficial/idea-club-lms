@@ -1865,6 +1865,12 @@
           <strong id="studentMobilePrivateLessonTime">-</strong>
           <p id="studentMobilePrivateLessonTeacher" class="student-mobile-muted">-</p>
         </div>
+
+        <div id="studentMobileAnnouncementCard" class="student-mobile-card hidden">
+          <h3>ประกาศจาก IDEA CLUB</h3>
+          <p class="student-mobile-muted" style="margin-bottom:10px;">ประกาศตามระดับชั้นและศูนย์ที่สมัคร</p>
+          <div id="studentMobileAnnouncementList" class="student-mobile-list"></div>
+        </div>
       </div>
 
       <div class="student-home-hero">
@@ -2045,6 +2051,15 @@
           <p class="student-mobile-muted" style="color:rgba(255,255,255,0.82);">ชำระเงิน</p>
           <h2>สถานะเดือนนี้</h2>
           <p id="studentMobilePaymentHero">ตรวจสอบยอดและส่งสลิปได้ที่นี่</p>
+        </div>
+
+        <div id="studentMobilePendingPaymentBanner" class="student-pending-banner hidden">
+          <div class="student-pending-banner-icon">💳</div>
+          <div class="student-pending-banner-text">
+            <h4 id="studentMobilePendingBannerLabel">ยอดที่ต้องชำระ</h4>
+            <p id="studentMobilePendingBannerAmount">-</p>
+            <small id="studentMobilePendingBannerMonth"></small>
+          </div>
         </div>
 
         <div class="student-mobile-card">
@@ -14108,6 +14123,7 @@ function getCourseOnlineDocs(course, includeInactive) {
       safeRun(renderStudentMobileLearning, 'student-mobile-learning');
       safeRun(renderStudentMobilePayment, 'student-mobile-payment');
       if (getElement('student-announcements')) getElement('student-announcements').classList.toggle('hidden', !canUseAnnouncements);
+      if (getElement('studentMobileAnnouncementCard')) getElement('studentMobileAnnouncementCard').classList.toggle('hidden', !canUseAnnouncements);
       if (canUseAnnouncements) renderStudentAnnouncements();
     }
 
@@ -15106,19 +15122,9 @@ function getCourseOnlineDocs(course, includeInactive) {
       if (mobileSelect && desktopSelect) desktopSelect.value = mobileSelect.value;
     }
 
-    function updateStudentPendingPaymentBanner() {
-      var banner = getElement('studentPendingPaymentBanner');
-      if (!banner) return;
-      if (!currentStudent || !currentStudent.courseId) { banner.classList.add('hidden'); return; }
-      var month = getStudentSelectedPaymentMonth();
-      if (!month) { banner.classList.add('hidden'); return; }
-      var payment = getStudentPaymentForSelectedMonth();
-      var statusText = payment ? getPaymentDisplayStatus(payment) : (currentStudent.courseId ? 'รอชำระเงิน' : '-');
-      var amount = getCurrentStudentAdjustedPaymentAmount(month);
-      var label = getElement('studentPendingBannerLabel');
-      var amountEl = getElement('studentPendingBannerAmount');
-      var monthEl = getElement('studentPendingBannerMonth');
+    function applyPaymentBannerState(banner, labelId, amountId, monthId, statusText, amount, month) {
       banner.classList.remove('hidden', 'paid', 'overdue');
+      var label = getElement(labelId), amountEl = getElement(amountId), monthEl = getElement(monthId);
       if (statusText === 'ชำระแล้ว') {
         banner.classList.add('paid');
         if (label) label.textContent = 'ชำระเงินเรียบร้อยแล้ว';
@@ -15138,6 +15144,23 @@ function getCourseOnlineDocs(course, includeInactive) {
         if (amountEl) amountEl.textContent = amount ? formatPrice(amount) : '-';
         if (monthEl) monthEl.textContent = 'เดือน ' + month;
       }
+    }
+
+    function updateStudentPendingPaymentBanner() {
+      var banner = getElement('studentPendingPaymentBanner');
+      var mobileBanner = getElement('studentMobilePendingPaymentBanner');
+      var hasData = currentStudent && currentStudent.courseId;
+      var month = hasData ? getStudentSelectedPaymentMonth() : null;
+      if (!hasData || !month) {
+        if (banner) banner.classList.add('hidden');
+        if (mobileBanner) mobileBanner.classList.add('hidden');
+        return;
+      }
+      var payment = getStudentPaymentForSelectedMonth();
+      var statusText = payment ? getPaymentDisplayStatus(payment) : 'รอชำระเงิน';
+      var amount = getCurrentStudentAdjustedPaymentAmount(month);
+      if (banner) applyPaymentBannerState(banner, 'studentPendingBannerLabel', 'studentPendingBannerAmount', 'studentPendingBannerMonth', statusText, amount, month);
+      if (mobileBanner) applyPaymentBannerState(mobileBanner, 'studentMobilePendingBannerLabel', 'studentMobilePendingBannerAmount', 'studentMobilePendingBannerMonth', statusText, amount, month);
     }
 
     function updateStudentSelectedPaymentMonth() {
@@ -24296,12 +24319,19 @@ function receiptStatusText(status) {
 
     function renderStudentAnnouncements() {
       const box = getElement('studentAnnouncementList');
-      if (!box) return;
+      const mobileBox = getElement('studentMobileAnnouncementList');
+      if (!box && !mobileBox) return;
       const grade = currentStudent ? currentStudent.grade : getProfileGrade();
       const course = getCurrentStudentCourse();
       const location = course ? course.location : '';
       const list = announcements.filter(function(a) { return isAnnouncementVisibleNow(a) && (a.grade === 'ทั้งหมด' || a.grade === grade) && (a.location === 'ทั้งหมด' || a.location === location); });
-      box.innerHTML = list.length ? list.slice().reverse().map(function(a) { return '<div class="card"><span class="tag">' + (a.grade || 'ทั้งหมด') + ' · ' + (a.location || 'ทั้งหมด') + '</span><h3>' + (a.title || '-') + '</h3><p>' + (a.body || '') + '</p><p class="mini-muted">อัปเดต: ' + (a.updatedAtText || '-') + '</p></div>'; }).join('') : '<div class="card"><h3>ยังไม่มีประกาศ</h3><p>ประกาศใหม่จากสถาบันจะแสดงที่นี่</p></div>';
+      const html = list.length ? list.slice().reverse().map(function(a) { return '<div class="card"><span class="tag">' + (a.grade || 'ทั้งหมด') + ' · ' + (a.location || 'ทั้งหมด') + '</span><h3>' + (a.title || '-') + '</h3><p>' + (a.body || '') + '</p><p class="mini-muted">อัปเดต: ' + (a.updatedAtText || '-') + '</p></div>'; }).join('') : '<div class="card"><h3>ยังไม่มีประกาศ</h3><p>ประกาศใหม่จากสถาบันจะแสดงที่นี่</p></div>';
+      if (box) box.innerHTML = html;
+      if (mobileBox) {
+        const mobileCard = getElement('studentMobileAnnouncementCard');
+        if (mobileCard) mobileCard.classList.toggle('hidden', !list.length);
+        mobileBox.innerHTML = list.length ? list.slice().reverse().map(function(a) { return '<div class="student-mobile-media-card"><strong>' + escapeHtml(a.title || '-') + '</strong><p class="student-mobile-muted">' + escapeHtml(a.body || '') + '</p><p class="student-mobile-muted">อัปเดต: ' + escapeHtml(a.updatedAtText || '-') + '</p></div>'; }).join('') : '';
+      }
     }
 
     function renderSystemSettingsForm() {
