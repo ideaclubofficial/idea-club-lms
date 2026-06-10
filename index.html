@@ -6406,7 +6406,8 @@
 
     const sortState = {
       students: { key: 'memberId', direction: 'asc' },
-      teachers: { key: 'id', direction: 'asc' }
+      teachers: { key: 'id', direction: 'asc' },
+      courses: { key: 'grade', direction: 'asc' }
     };
     let lastFullBackupExportedAt = null;
     let isSuperAdmin = false;
@@ -7137,25 +7138,34 @@
 
     function getTableSortState(type) {
       if (!sortState[type] || typeof sortState[type] !== 'object') {
-        sortState[type] = { key: type === 'students' ? 'memberId' : 'id', direction: 'asc' };
+        sortState[type] = { key: type === 'students' ? 'memberId' : (type === 'courses' ? 'grade' : 'id'), direction: 'asc' };
       }
       return sortState[type];
+    }
+
+    function compareRecordsForTable(a, b, type, key, direction) {
+      if (key === 'grade') {
+        const result = gradeOrder(a ? a.grade : '') - gradeOrder(b ? b.grade : '');
+        if (result !== 0) return direction === 'asc' ? result : -result;
+      }
+      return compareValues(a ? a[key] : '', b ? b[key] : '', direction);
     }
 
     function sortRecordsForTable(items, type) {
       const state = getTableSortState(type);
       return (items || []).slice().sort(function(a, b) {
-        return compareValues(a[state.key], b[state.key], state.direction);
+        return compareRecordsForTable(a, b, type, state.key, state.direction);
       });
     }
 
     function sortData(type, key) {
-      if (type === 'students' || type === 'teachers') {
+      if (type === 'students' || type === 'teachers' || type === 'courses') {
         const current = getTableSortState(type);
         const direction = current.key === key && current.direction === 'asc' ? 'desc' : 'asc';
         sortState[type] = { key: key, direction: direction };
         if (type === 'students') renderAdminStudents();
         if (type === 'teachers') renderTeachers();
+        if (type === 'courses') renderAdminCourses();
         return;
       }
       const stateKey = type + ':' + key;
@@ -12495,7 +12505,7 @@
         tbody.innerHTML = '<tr><td colspan="9">ยังไม่มีคอร์สในระบบ ให้เพิ่มคอร์สใหม่จากฟอร์มด้านบน</td></tr>';
         return;
       }
-      tbody.innerHTML = courses.map(function(c) {
+      tbody.innerHTML = sortRecordsForTable(courses, 'courses').map(function(c) {
         const statusText = c.status === 'open' ? '<span class="status-paid">เปิดรับสมัคร</span>' : '<span class="status-absent">ปิดรับสมัคร</span>';
         return '<tr><td>' + c.grade + '</td><td>' + c.name + '</td><td>' + formatPrice(c.price) + '</td><td>' + getCourseAccessLabel(c) + '</td><td>' + c.location + '</td><td>' + (getCourseDisplaySchedule(c) || '-') + '</td><td>' + renderCourseFeatureSummary(c) + '</td><td>' + statusText + '</td><td><button class="btn btn-blue" type="button" onclick="' + actionCall('editCourse', c.id) + '">แก้ไข</button><button class="btn btn-red" type="button" onclick="' + actionCall('deleteCourse', c.id) + '">ลบ</button></td></tr>';
       }).join('');
