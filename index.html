@@ -9992,9 +9992,13 @@
         safeRun(initializeThaiMonthYearPickers, 'month-year-pickers-monthly-test');
         safeRun(renderAdminExamSetFilters, 'admin-exam-set-filters');
         safeRun(renderAdminQuestions, 'admin-questions');
-        safeRun(renderAdminScoreFilters, 'admin-score-filters');
-        safeRun(renderAdminScoreAdjustTable, 'admin-score-table');
-        safeRun(renderAdminScoreStatsTable, 'admin-score-stats');
+        safeRun(function() {
+          loadOnlineExamCourses().then(function() {
+            renderAdminScoreFilters();
+            renderAdminScoreAdjustTable();
+            renderAdminScoreStatsTable();
+          });
+        }, 'admin-score-latest-online-exam-filters');
         safeRun(renderStudentExamFilters, 'student-exam-filters');
       }
       if (tabId === 'admin-online-exam') {
@@ -17880,7 +17884,7 @@ function receiptStatusText(status) {
     }
 
     async function saveAdjustedScores() {
-      const selectedMonth = getElement('adminScoreTestSetFilter') ? getElement('adminScoreTestSetFilter').value : 'พฤษภาคม 2569';
+      const selectedMonth = getElement('adminScoreTestSetFilter') ? getElement('adminScoreTestSetFilter').value : '';
       const selectedGrade = getElement('adminScoreGradeFilter') ? getElement('adminScoreGradeFilter').value : 'ป.6';
       const rows = document.querySelectorAll('#adminScoreAdjustTableBody tr[data-score-id]');
       const result = getElement('scoreAdjustResult');
@@ -17928,7 +17932,7 @@ function receiptStatusText(status) {
     }
 
     async function publishSelectedScoreSet() {
-      const selectedMonth = getElement('adminScoreTestSetFilter') ? getElement('adminScoreTestSetFilter').value : 'พฤษภาคม 2569';
+      const selectedMonth = getElement('adminScoreTestSetFilter') ? getElement('adminScoreTestSetFilter').value : '';
       const selectedGrade = getElement('adminScoreGradeFilter') ? getElement('adminScoreGradeFilter').value : 'ป.6';
       const records = adminScoreRecords.filter(function(record) {
         return record.month === selectedMonth && record.grade === selectedGrade;
@@ -18544,8 +18548,13 @@ function receiptStatusText(status) {
     const adminScoreRecords = [];
 
     function getAdminScoreMonths() {
-      const months = Array.from(new Set(adminScoreRecords.map(function(item) { return item.month; }).concat(monthlyQuestions.map(function(q) { return getThaiMonthFromDate(q.testDate); }))));
-      return months.length ? months : ['พฤษภาคม 2569'];
+      const months = Array.from(new Set(
+        adminScoreRecords
+          .map(function(item) { return item.month; })
+          .concat((onlineExamCourseCache || []).map(function(course) { return course.examMonth; }))
+      )).filter(Boolean);
+      months.sort(function(a, b) { return compareThaiMonthYear(b, a); });
+      return months;
     }
 
     function renderAdminScoreFilters() {
@@ -18553,16 +18562,16 @@ function receiptStatusText(status) {
       if (!select) return;
       const current = select.value;
       const months = getAdminScoreMonths();
-      select.innerHTML = months.map(function(month) {
+      select.innerHTML = months.length ? months.map(function(month) {
         return '<option value="' + month + '">' + month + '</option>';
-      }).join('');
-      select.value = months.includes(current) ? current : months[0];
+      }).join('') : '<option value="">ยังไม่มีเดือนสอบ</option>';
+      select.value = months.includes(current) ? current : (months[0] || '');
       const gradeSelect = getElement('adminScoreGradeFilter');
       if (gradeSelect && !gradeSelect.value) gradeSelect.value = 'ป.6';
     }
 
     function getSelectedAdminScoreRecords() {
-      const selectedMonth = getElement('adminScoreTestSetFilter') ? getElement('adminScoreTestSetFilter').value : 'พฤษภาคม 2569';
+      const selectedMonth = getElement('adminScoreTestSetFilter') ? getElement('adminScoreTestSetFilter').value : '';
       const selectedGrade = getElement('adminScoreGradeFilter') ? getElement('adminScoreGradeFilter').value : 'ป.6';
       return adminScoreRecords.filter(function(record) {
         return record.month === selectedMonth && record.grade === selectedGrade;
@@ -18585,6 +18594,7 @@ function receiptStatusText(status) {
       }
       if (resultEl) { resultEl.style.color = '#d97706'; resultEl.textContent = '⏳ กำลังนำเข้าคะแนนจากข้อสอบออนไลน์...'; }
       try {
+        if (!onlineExamCourseCache.length) await loadOnlineExamCourses();
         const snap = await db.collection('onlineExamResults')
           .where('grade', '==', selectedGrade)
           .get()
@@ -23649,7 +23659,7 @@ function receiptStatusText(status) {
       }
 
       if (scoreMonthSelect) {
-        const scoreMonths = Array.from(new Set(getAdminScoreMonths().concat(months))).filter(Boolean);
+        const scoreMonths = getAdminScoreMonths();
         scoreMonths.sort(function(a, b) { return compareThaiMonthYear(b, a); });
         const currentScoreMonth = scoreMonthSelect.value;
         scoreMonthSelect.innerHTML = scoreMonths.length ? scoreMonths.map(function(month) { return '<option value="' + month + '">' + month + '</option>'; }).join('') : '<option value="">ยังไม่มีเดือนคะแนน</option>';
@@ -23703,8 +23713,13 @@ function receiptStatusText(status) {
     }
 
     function getAdminScoreMonths() {
-      const months = Array.from(new Set(adminScoreRecords.map(function(item) { return item.month; }).concat(monthlyExamLinks.map(function(item) { return item.month; })))).filter(Boolean);
-      return months.length ? months : ['พฤษภาคม 2569'];
+      const months = Array.from(new Set(
+        adminScoreRecords
+          .map(function(item) { return item.month; })
+          .concat((onlineExamCourseCache || []).map(function(course) { return course.examMonth; }))
+      )).filter(Boolean);
+      months.sort(function(a, b) { return compareThaiMonthYear(b, a); });
+      return months;
     }
 
     function getVisibleAdminStudents() {
@@ -26439,9 +26454,13 @@ function receiptStatusText(status) {
       } else if (tab === 'score') {
         if (scoreView) scoreView.style.display = '';
         if (btnScore) btnScore.style.cssText = activeStyle;
-        safeRun(renderAdminScoreFilters, 'admin-score-filters');
-        safeRun(renderAdminScoreAdjustTable, 'admin-score-table');
-        safeRun(renderAdminScoreStatsTable, 'admin-score-stats');
+        safeRun(function() {
+          loadOnlineExamCourses().then(function() {
+            renderAdminScoreFilters();
+            renderAdminScoreAdjustTable();
+            renderAdminScoreStatsTable();
+          });
+        }, 'admin-score-latest-online-exam-filters');
       } else {
         manageView.style.display = '';
         if (btnManage) btnManage.style.cssText = activeStyle;
