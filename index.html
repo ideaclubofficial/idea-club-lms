@@ -9101,7 +9101,7 @@
         const select = getElement(id);
         if (!select) return;
         const current = select.value || 'ทั้งหมด';
-        select.innerHTML = '<option value="ทั้งหมด">ทั้งหมด</option>' + teacherCourses.map(function(c) {
+        select.innerHTML = '<option value="ทั้งหมด">ทั้งหมด</option>' + sortCoursesByGrade(teacherCourses).map(function(c) {
           return '<option value="' + c.name + '">' + (c.grade || '-') + ' · ' + (c.name || '-') + '</option>';
         }).join('');
         const hasCurrent = Array.from(select.options).some(function(option) { return option.value === current; });
@@ -11530,6 +11530,17 @@
       button.className = isActive ? 'btn btn-green' : 'btn btn-red';
     }
 
+    const GRADE_ORDER = ['ป.4','ป.5','ป.6','ม.1','ม.2','ม.3','ม.4','ม.5','ม.6'];
+    function sortCoursesByGrade(arr) {
+      return arr.slice().sort(function(a, b) {
+        const ai = GRADE_ORDER.indexOf(a.grade || '');
+        const bi = GRADE_ORDER.indexOf(b.grade || '');
+        const av = ai === -1 ? 99 : ai;
+        const bv = bi === -1 ? 99 : bi;
+        return av !== bv ? av - bv : (a.name || '').localeCompare(b.name || '', 'th');
+      });
+    }
+
     function gradeOptionsHtml(selected) {
       const grades = ['ป.4', 'ป.5', 'ป.6', 'ม.1', 'ม.2', 'ม.3', 'ม.4', 'ม.5', 'ม.6'];
       return grades.map(function(grade) {
@@ -11545,7 +11556,7 @@
     }
 
     function courseOptionsHtml(selectedId) {
-      return courses.map(function(c) {
+      return sortCoursesByGrade(courses).map(function(c) {
         return '<option value="' + c.id + '"' + (String(c.id) === String(selectedId) ? ' selected' : '') + '>' + c.grade + ' · ' + c.name + '</option>';
       }).join('');
     }
@@ -11570,7 +11581,7 @@
 
     function studentCourseOptionsHtml(selectedValue, center, grade) {
       const selectedText = String(selectedValue || '');
-      const filteredCourses = (grade || center) ? getCoursesForGradeAndCenter(grade || '', center || '') : courses;
+      const filteredCourses = sortCoursesByGrade((grade || center) ? getCoursesForGradeAndCenter(grade || '', center || '') : courses);
       const options = ['<option value="">ยังไม่ได้สมัครคอร์ส</option>'];
       if (grade && center && filteredCourses.length === 0) {
         options.push('<option value="" disabled>ไม่พบคอร์สที่ตรงกับชั้นและศูนย์นี้</option>');
@@ -12595,7 +12606,7 @@
       const select = getElement('adminOnlineClassCourseSelect');
       const docSelect = getElement('onlineDocCourseSelect');
       const current = select ? (select.value || String(currentStudentCourseId || (courses[0] ? courses[0].id : ''))) : String(courses[0] ? courses[0].id : '');
-      const optionsHtml = courses.length ? courses.map(function(c) {
+      const optionsHtml = courses.length ? sortCoursesByGrade(courses).map(function(c) {
         return '<option value="' + c.id + '">' + c.grade + ' · ' + c.name + '</option>';
       }).join('') : '<option value="">ยังไม่มีคอร์ส</option>';
 
@@ -12683,7 +12694,7 @@
         select.innerHTML = '<option value="">ยังไม่มีคอร์ส</option>';
         return;
       }
-      select.innerHTML = courses.map(function(c) {
+      select.innerHTML = sortCoursesByGrade(courses).map(function(c) {
         return '<option value="' + c.id + '">' + c.grade + ' · ' + c.name + '</option>';
       }).join('');
       select.value = courses.some(function(c) { return String(c.id) === String(current); }) ? current : String(courses[0].id);
@@ -20080,7 +20091,7 @@ function receiptStatusText(status) {
       const select = getElement('holidayCourseIds');
       if (!select) return;
       const currentValues = Array.from(select.selectedOptions || []).map(function(option) { return option.value; });
-      select.innerHTML = courses.filter(function(course) { return course && course.deleted !== true; }).map(function(course) {
+      select.innerHTML = sortCoursesByGrade(courses.filter(function(course) { return course && course.deleted !== true; })).map(function(course) {
         const id = String(course.id || course.firebaseDocId || '');
         return '<option value="' + escapeHtml(id) + '"' + (currentValues.includes(id) ? ' selected' : '') + '>' + escapeHtml((course.grade || '') + ' · ' + (course.name || id)) + '</option>';
       }).join('');
@@ -20634,9 +20645,9 @@ function receiptStatusText(status) {
     }
 
     function getSimpleScheduleActiveCourses() {
-      return courses.filter(function(course) {
+      return sortCoursesByGrade(courses.filter(function(course) {
         return course && course.deleted !== true && course.status !== 'closed' && course.status !== 'archived';
-      });
+      }));
     }
 
     function getSimpleScheduleActiveTeachers() {
@@ -21038,9 +21049,9 @@ function receiptStatusText(status) {
       const generatorCourseSelect = getElement('monthlyPlanGeneratorCourse');
       const courseFilter = getElement('monthlyPlanCourseFilter');
       const teacherSelect = getElement('monthlyPlanTeacher');
-      const activeCourses = courses.filter(function(course) {
+      const activeCourses = sortCoursesByGrade(courses.filter(function(course) {
         return course && course.deleted !== true && course.status !== 'closed' && course.status !== 'archived';
-      });
+      }));
       const activeTeachers = teachers.filter(function(teacher) {
         return teacher && teacher.deleted !== true && teacher.status !== 'inactive' && teacher.status !== 'archived';
       });
@@ -23926,7 +23937,7 @@ function receiptStatusText(status) {
       const select = getElement('studentCourseFilter');
       if (!select) return;
       const current = select.value || 'ทั้งหมด';
-      select.innerHTML = '<option value="ทั้งหมด">ทั้งหมด</option>' + courses.map(function(c) {
+      select.innerHTML = '<option value="ทั้งหมด">ทั้งหมด</option>' + sortCoursesByGrade(courses).map(function(c) {
         return '<option value="' + c.id + '">' + c.grade + ' · ' + c.name + '</option>';
       }).join('');
       select.value = Array.from(select.options).some(function(o) { return o.value === current; }) ? current : 'ทั้งหมด';
