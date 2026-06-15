@@ -5680,6 +5680,18 @@
     let studentPaymentsUnsubscribe = null;
     let studentReceiptsUnsubscribe = null;
     let authSessionRoutingDone = false;
+    const SESSION_DURATION_MS = 24 * 60 * 60 * 1000; // 24 hours
+
+    function setSessionExpiry() {
+      localStorage.setItem('ideaClubSessionExpiry', String(Date.now() + SESSION_DURATION_MS));
+    }
+    function isSessionExpired() {
+      const expiry = parseInt(localStorage.getItem('ideaClubSessionExpiry') || '0', 10);
+      return !expiry || Date.now() > expiry;
+    }
+    function clearSessionExpiry() {
+      localStorage.removeItem('ideaClubSessionExpiry');
+    }
 
     try {
       firebase.initializeApp(firebaseConfig);
@@ -5722,7 +5734,14 @@
     }
 
     async function restoreSessionFromAuth(user, profile) {
-      if (!profile) { hideAuthLoadingOverlay(); return; }
+      if (!profile || isSessionExpired()) {
+        clearSessionExpiry();
+        try { if (auth) await auth.signOut(); } catch (e) { /* ignore */ }
+        firebaseUser = null;
+        firebaseUserProfile = null;
+        hideAuthLoadingOverlay();
+        return;
+      }
       try {
         if (isStudentAccount(profile)) {
           await ensureStudentDataLoaded(profile, { force: false });
@@ -5746,6 +5765,7 @@
             const el = getElement(id);
             if (el) el.classList.add('hidden');
           });
+          setSessionExpiry();
           hideAuthLoadingOverlay();
           studentLogin(student.memberId || student.studentId || user.email || '');
         } else {
@@ -5761,6 +5781,7 @@
             currentAdmin = profile;
             currentStudent = null;
             setSuperAdminMode(getEffectivePermissions(profile).includes('admin.full') || primaryRole === 'SuperAdmin' || primaryRole === 'Admin');
+            setSessionExpiry();
             hideAuthLoadingOverlay();
             showAdminPanel(true);
           } else if (isTeacherRole(primaryRole)) {
@@ -5774,6 +5795,7 @@
             currentTeacher = teacher;
             currentStudent = null;
             currentAdmin = profile;
+            setSessionExpiry();
             hideAuthLoadingOverlay();
             showTeacherPanel(teacher);
           } else {
@@ -8230,6 +8252,7 @@
               role: 'student',
               accountType: 'student'
             });
+            setSessionExpiry();
             studentLogin(student.memberId || student.studentId || displayLoginId);
             firebaseUserProfile = sanitizedStudentUserProfile;
             return;
@@ -8263,6 +8286,7 @@
             currentAdmin = firebaseUserProfile;
             currentStudent = null;
             setSuperAdminMode(getEffectivePermissions(firebaseUserProfile).includes('admin.full') || activeAppRole === 'SuperAdmin' || activeAppRole === 'Admin');
+            setSessionExpiry();
             showAdminPanel(true);
             return;
           }
@@ -8302,6 +8326,7 @@
             currentStudent = null;
             currentAdmin = null;
             currentTeacher = teacher;
+            setSessionExpiry();
             showTeacherPanel(teacher);
             console.log('teacher-route-success', {
               teacherId: teacher.teacherId || teacher.id,
@@ -8638,6 +8663,7 @@
 
     async function logoutSystem() {
       stopStudentPaymentListeners();
+      clearSessionExpiry();
       if (PRODUCTION_MODE && auth) {
         try { await auth.signOut(); } catch (error) { console.error('Firebase sign out error:', error); }
       }
