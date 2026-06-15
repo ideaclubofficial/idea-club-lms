@@ -4352,7 +4352,7 @@
                   </div>
                   <div>
                     <label>วิชา</label>
-                    <select id="onlineExamCourseSubject" onchange="syncOnlineExamCourseTitleSuggestion()">
+                    <select id="onlineExamCourseSubject" onchange="onOnlineExamCourseSubjectChange()">
                       <option value="">-- ไม่ระบุ --</option>
                       <option value="วิทยาศาสตร์">วิทยาศาสตร์</option>
                       <option value="คณิตศาสตร์">คณิตศาสตร์</option>
@@ -26790,6 +26790,36 @@ function receiptStatusText(status) {
       if (titleEl && !titleEl.value.trim()) titleEl.value = getOnlineExamCourseTitleSuggestion();
     }
 
+    function parseOnlineExamDateTimeValue(value) {
+      if (!value) return null;
+      let date = null;
+      if (value instanceof Date) {
+        date = value;
+      } else if (value && typeof value.toDate === 'function') {
+        date = value.toDate();
+      } else if (value && typeof value.seconds === 'number') {
+        date = new Date(value.seconds * 1000);
+      } else {
+        date = new Date(value);
+      }
+      return date && !isNaN(date.getTime()) ? date : null;
+    }
+
+    function formatOnlineExamDateTimeLocal(value) {
+      const date = parseOnlineExamDateTimeValue(value);
+      if (!date) return '';
+      const pad = function(n) { return String(n).padStart(2, '0'); };
+      return date.getFullYear() + '-' + pad(date.getMonth() + 1) + '-' + pad(date.getDate()) +
+        'T' + pad(date.getHours()) + ':' + pad(date.getMinutes());
+    }
+
+    function onOnlineExamCourseSubjectChange() {
+      syncOnlineExamCourseTitleSuggestion();
+      resetOnlineExamQuestionForm();
+      setValue('onlineExamQuestionCourseSelect', '');
+      renderOnlineExamQuestionList();
+    }
+
     function findOnlineExamCourseByMonthGradeSubject(month, grade, subject, excludeCourseId) {
       return (onlineExamCourseCache || []).find(function(c) {
         return String(c.firebaseDocId || '') !== String(excludeCourseId || '') &&
@@ -26833,8 +26863,10 @@ function receiptStatusText(status) {
       const shuffleChoices = (getElement('onlineExamCourseShuffleC') || {}).value === '1';
       const openAtRaw = ((getElement('onlineExamCourseOpenAt') || {}).value || '').trim();
       const closeAtRaw = ((getElement('onlineExamCourseCloseAt') || {}).value || '').trim();
-      const openAt = openAtRaw ? new Date(openAtRaw).toISOString() : null;
-      const closeAt = closeAtRaw ? new Date(closeAtRaw).toISOString() : null;
+      const openAtDate = parseOnlineExamDateTimeValue(openAtRaw);
+      const closeAtDate = parseOnlineExamDateTimeValue(closeAtRaw);
+      const openAt = openAtDate ? openAtDate.toISOString() : null;
+      const closeAt = closeAtDate ? closeAtDate.toISOString() : null;
       const isActive = status === 'active';
       const editingId = (getElement('onlineExamEditingCourseId') || {}).value || '';
       const resultEl = getElement('onlineExamCourseSaveResult');
@@ -26927,8 +26959,8 @@ function receiptStatusText(status) {
       setValue('onlineExamCoursePublishStatus', course.publishStatus || 'draft');
       setValue('onlineExamCourseShuffleQ', course.shuffleQuestions ? '1' : '0');
       setValue('onlineExamCourseShuffleC', course.shuffleChoices ? '1' : '0');
-      setValue('onlineExamCourseOpenAt', course.openAt ? course.openAt.slice(0, 16) : '');
-      setValue('onlineExamCourseCloseAt', course.closeAt ? course.closeAt.slice(0, 16) : '');
+      setValue('onlineExamCourseOpenAt', formatOnlineExamDateTimeLocal(course.openAt));
+      setValue('onlineExamCourseCloseAt', formatOnlineExamDateTimeLocal(course.closeAt));
       setValue('onlineExamCourseSubject', course.subject || '');
       setValue('onlineExamCourseGrade', course.grade || getOnlineExamLinkedCourseGrade(course.linkedCourseId) || '');
       if (course.examMonth && getElement('onlineExamManageMonthFilter')) {
@@ -27249,8 +27281,8 @@ function receiptStatusText(status) {
               '<span style="font-size:10px;padding:1px 8px;border-radius:99px;' + (pStatus === 'published' ? 'background:#d1fae5;color:#065f46;">✅ Published' : 'background:#f3f4f6;color:#6b7280;">📋 Draft') + '</span>' +
               '<span style="font-size:10px;padding:1px 8px;border-radius:99px;' + (active ? 'background:#dbeafe;color:#1d4ed8;">Active' : 'background:#fee2e2;color:#991b1b;">Inactive') + '</span>' +
               (c.shuffleQuestions ? '<span style="font-size:10px;padding:1px 8px;border-radius:99px;background:#ede9fe;color:#5b21b6;">🔀 สุ่มข้อ</span>' : '') +
-              (c.openAt ? '<span style="font-size:10px;padding:1px 8px;border-radius:99px;background:#dbeafe;color:#1d4ed8;">🕐 ' + formatThaiDateTime(new Date(c.openAt)) + '</span>' : '') +
-              (c.closeAt ? '<span style="font-size:10px;padding:1px 8px;border-radius:99px;background:#fee2e2;color:#991b1b;">🕔 ' + formatThaiDateTime(new Date(c.closeAt)) + '</span>' : '') +
+              (c.openAt ? '<span style="font-size:10px;padding:1px 8px;border-radius:99px;background:#dbeafe;color:#1d4ed8;">🕐 ' + formatThaiDateTime(parseOnlineExamDateTimeValue(c.openAt)) + '</span>' : '') +
+              (c.closeAt ? '<span style="font-size:10px;padding:1px 8px;border-radius:99px;background:#fee2e2;color:#991b1b;">🕔 ' + formatThaiDateTime(parseOnlineExamDateTimeValue(c.closeAt)) + '</span>' : '') +
             '</div>' +
           '</div>' +
           '<div style="display:flex;gap:6px;flex-shrink:0;">' +
@@ -27918,10 +27950,12 @@ function receiptStatusText(status) {
 
     function getOnlineExamScheduleStatus(c) {
       const now = Date.now();
-      const open = c.openAt ? new Date(c.openAt).getTime() : null;
-      const close = c.closeAt ? new Date(c.closeAt).getTime() : null;
-      if (open && now < open) return { state: 'not_yet', openAt: new Date(c.openAt) };
-      if (close && now > close) return { state: 'closed', closeAt: new Date(c.closeAt) };
+      const openDate = parseOnlineExamDateTimeValue(c.openAt);
+      const closeDate = parseOnlineExamDateTimeValue(c.closeAt);
+      const open = openDate ? openDate.getTime() : null;
+      const close = closeDate ? closeDate.getTime() : null;
+      if (open && now < open) return { state: 'not_yet', openAt: openDate };
+      if (close && now > close) return { state: 'closed', closeAt: closeDate };
       return { state: 'open' };
     }
 
@@ -28018,8 +28052,8 @@ function receiptStatusText(status) {
           const sched = getOnlineExamScheduleStatus(c);
 
           if (c.openAt || c.closeAt) {
-            const openLabel = c.openAt ? formatThaiDateTime(new Date(c.openAt)) : null;
-            const closeLabel = c.closeAt ? formatThaiDateTime(new Date(c.closeAt)) : null;
+            const openLabel = c.openAt ? formatThaiDateTime(parseOnlineExamDateTimeValue(c.openAt)) : null;
+            const closeLabel = c.closeAt ? formatThaiDateTime(parseOnlineExamDateTimeValue(c.closeAt)) : null;
             scheduleHtml = '<p style="font-size:11px;color:#6b7280;margin-bottom:6px;">' +
               (openLabel ? '🕐 เปิดสอบ: ' + openLabel : '') +
               (openLabel && closeLabel ? '<br>' : '') +
