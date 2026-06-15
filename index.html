@@ -4426,6 +4426,20 @@
               <!-- Course list -->
               <div class="form-box">
                 <h3>รายการชุดข้อสอบทั้งหมด</h3>
+                <div class="form-row" style="margin-bottom:12px;">
+                  <div>
+                    <label>กรองตามเดือน</label>
+                    <select id="onlineExamCourseListMonthFilter" onchange="renderOnlineExamCourseList()">
+                      <option value="">-- ทุกเดือน --</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label>กรองตามชั้น</label>
+                    <select id="onlineExamCourseListGradeFilter" onchange="renderOnlineExamCourseList()">
+                      <option value="">-- ทุกระดับชั้น --</option>
+                    </select>
+                  </div>
+                </div>
                 <div id="onlineExamCourseList">
                   <p style="color:#9ca3af;font-size:13px;">กำลังโหลด...</p>
                 </div>
@@ -26797,6 +26811,7 @@ function receiptStatusText(status) {
       resetOnlineExamCourseForm();
       resetOnlineExamQuestionForm();
       syncOnlineExamCourseMonthDisplay();
+      syncOnlineExamCourseListMonthFilterToManageMonth();
       renderOnlineExamCourseList();
       populateOnlineExamCourseSelects();
       renderOnlineExamQuestionList();
@@ -27091,6 +27106,7 @@ function receiptStatusText(status) {
     function renderOnlineExamAdminManage() {
       populateOnlineExamGradeSelect();
       populateOnlineExamMonthSelect();
+      populateOnlineExamCourseListFilters();
       renderOnlineExamCourseList();
       populateOnlineExamCourseSelects();
       renderOnlineExamQuestionList();
@@ -27136,21 +27152,75 @@ function receiptStatusText(status) {
       syncOnlineExamCourseMonthDisplay();
     }
 
+    function getOnlineExamCourseListMonthFilter() {
+      return (getElement('onlineExamCourseListMonthFilter') || {}).value || '';
+    }
+
+    function getOnlineExamCourseListGradeFilter() {
+      return (getElement('onlineExamCourseListGradeFilter') || {}).value || '';
+    }
+
+    function getOnlineExamMonthOptions() {
+      const monthSet = {};
+      (onlineExamCourseCache || []).forEach(function(c) {
+        if (c.examMonth) monthSet[c.examMonth] = true;
+      });
+      const names = getThaiCalendarMonthNames ? getThaiCalendarMonthNames() : ['มกราคม','กุมภาพันธ์','มีนาคม','เมษายน','พฤษภาคม','มิถุนายน','กรกฎาคม','สิงหาคม','กันยายน','ตุลาคม','พฤศจิกายน','ธันวาคม'];
+      const now = new Date();
+      for (var i = 0; i < 18; i++) {
+        const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+        monthSet[names[d.getMonth()] + ' ' + (d.getFullYear() + 543)] = true;
+      }
+      return Object.keys(monthSet).sort(function(a, b) { return compareThaiMonthYear(b, a); });
+    }
+
+    function populateOnlineExamCourseListFilters() {
+      const monthSel = getElement('onlineExamCourseListMonthFilter');
+      const gradeSel = getElement('onlineExamCourseListGradeFilter');
+      if (monthSel) {
+        const current = monthSel.value;
+        const manageMonth = getSelectedOnlineExamManageMonth();
+        const months = getOnlineExamMonthOptions();
+        monthSel.innerHTML = '<option value="">-- ทุกเดือน --</option>' + months.map(function(month) {
+          return '<option value="' + escapeHtml(month) + '">' + escapeHtml(month) + '</option>';
+        }).join('');
+        monthSel.value = months.includes(current) ? current : (months.includes(manageMonth) ? manageMonth : '');
+      }
+      if (gradeSel) {
+        const currentGrade = gradeSel.value;
+        gradeSel.innerHTML = '<option value="">-- ทุกระดับชั้น --</option>' + gradeOptionsHtml(currentGrade);
+        if (currentGrade) gradeSel.value = currentGrade;
+      }
+    }
+
+    function syncOnlineExamCourseListMonthFilterToManageMonth() {
+      const monthSel = getElement('onlineExamCourseListMonthFilter');
+      if (!monthSel) return;
+      const manageMonth = getSelectedOnlineExamManageMonth();
+      if (!manageMonth) return;
+      if (!Array.prototype.some.call(monthSel.options || [], function(opt) { return opt.value === manageMonth; })) {
+        populateOnlineExamCourseListFilters();
+      }
+      monthSel.value = manageMonth;
+    }
+
     function renderOnlineExamCourseList() {
       const container = getElement('onlineExamCourseList');
       if (!container) return;
-      const selectedMonth = getSelectedOnlineExamManageMonth();
-      if (!selectedMonth) {
-        container.innerHTML = '<p style="color:#9ca3af;font-size:13px;">เลือกเดือนสอบด้านบนก่อน เพื่อดูชุดข้อสอบในเดือนนั้น</p>';
-        return;
-      }
+      const selectedMonth = getOnlineExamCourseListMonthFilter();
+      const selectedGrade = getOnlineExamCourseListGradeFilter();
 
       const filtered = onlineExamCourseCache.filter(function(c) {
-        return (c.examMonth || '') === selectedMonth;
+        const monthMatched = !selectedMonth || (c.examMonth || '') === selectedMonth;
+        const gradeMatched = !selectedGrade || getOnlineExamCourseGrade(c) === selectedGrade;
+        return monthMatched && gradeMatched;
       });
 
       if (!filtered.length) {
-        container.innerHTML = '<p style="color:#9ca3af;font-size:13px;">ยังไม่มีชุดข้อสอบในเดือน ' + escapeHtml(selectedMonth) + '</p>';
+        const emptyParts = [];
+        if (selectedMonth) emptyParts.push('เดือน ' + escapeHtml(selectedMonth));
+        if (selectedGrade) emptyParts.push('ชั้น ' + escapeHtml(selectedGrade));
+        container.innerHTML = '<p style="color:#9ca3af;font-size:13px;">ยังไม่มีชุดข้อสอบ' + (emptyParts.length ? 'ใน' + emptyParts.join(' / ') : '') + '</p>';
         return;
       }
 
@@ -27175,6 +27245,7 @@ function receiptStatusText(status) {
             '</div>' +
             '<div style="margin-top:4px;display:flex;gap:4px;flex-wrap:wrap;">' +
               '<span style="font-size:10px;color:#6b7280;">' + (c.durationMinutes || 15) + ' นาที · ' + qCount + ' ข้อ</span>' +
+              (c.examMonth ? '<span style="font-size:10px;padding:1px 8px;border-radius:99px;background:#eef2ff;color:#3730a3;">' + escapeHtml(c.examMonth) + '</span>' : '') +
               '<span style="font-size:10px;padding:1px 8px;border-radius:99px;' + (pStatus === 'published' ? 'background:#d1fae5;color:#065f46;">✅ Published' : 'background:#f3f4f6;color:#6b7280;">📋 Draft') + '</span>' +
               '<span style="font-size:10px;padding:1px 8px;border-radius:99px;' + (active ? 'background:#dbeafe;color:#1d4ed8;">Active' : 'background:#fee2e2;color:#991b1b;">Inactive') + '</span>' +
               (c.shuffleQuestions ? '<span style="font-size:10px;padding:1px 8px;border-radius:99px;background:#ede9fe;color:#5b21b6;">🔀 สุ่มข้อ</span>' : '') +
@@ -27198,7 +27269,8 @@ function receiptStatusText(status) {
           return String(a).localeCompare(String(b), 'th');
         }).map(function(subject) {
           const coursesForSubject = subjectMap[subject].slice().sort(function(a, b) {
-            return String(a.title || '').localeCompare(String(b.title || ''), 'th');
+            const monthCompare = compareThaiMonthYear(b.examMonth || '', a.examMonth || '');
+            return monthCompare || String(a.title || '').localeCompare(String(b.title || ''), 'th');
           });
           return '<div style="margin:8px 0 10px;">' +
             '<p style="font-size:11px;font-weight:700;color:#065f46;margin:0 0 6px;padding:4px 8px;background:#d1fae5;border-radius:6px;display:inline-block;">' + escapeHtml(subject) + ' · ' + coursesForSubject.length + ' ชุด</p>' +
@@ -27216,7 +27288,7 @@ function receiptStatusText(status) {
 
       container.innerHTML =
         '<div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;flex-wrap:wrap;">' +
-          '<strong style="font-size:14px;color:#0f172a;">เดือน ' + escapeHtml(selectedMonth) + '</strong>' +
+          '<strong style="font-size:14px;color:#0f172a;">' + escapeHtml(selectedMonth ? ('เดือน ' + selectedMonth) : 'ทุกเดือน') + (selectedGrade ? ' · ชั้น ' + escapeHtml(selectedGrade) : '') + '</strong>' +
           '<span style="font-size:11px;color:#6b7280;">' + filtered.length + ' ชุดข้อสอบ</span>' +
         '</div>' +
         gradeHtml;
