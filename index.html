@@ -1679,6 +1679,11 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
 </head>
 <body>
+  <style>@keyframes ideaClubSpin{to{transform:rotate(360deg)}}</style>
+  <div id="authLoadingOverlay" style="position:fixed;inset:0;z-index:9999;background:#fff;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:14px;">
+    <div style="width:44px;height:44px;border:4px solid #e2e8f0;border-top-color:#4f46e5;border-radius:50%;animation:ideaClubSpin 0.8s linear infinite;"></div>
+    <p style="color:#6b7280;font-size:13px;margin:0;">กำลังโหลด...</p>
+  </div>
   <header>
     <nav>
       <div class="logo">IDEA CLUB</div>
@@ -4439,6 +4444,32 @@
                       <option value="">-- ทุกระดับชั้น --</option>
                     </select>
                   </div>
+                  <div>
+                    <label>กรองตามวิชา</label>
+                    <select id="onlineExamCourseListSubjectFilter" onchange="renderOnlineExamCourseList()">
+                      <option value="">-- ทุกวิชา --</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label>เผยแพร่</label>
+                    <select id="onlineExamCourseListPublishFilter" onchange="renderOnlineExamCourseList()">
+                      <option value="">-- ทั้งหมด --</option>
+                      <option value="published">Published</option>
+                      <option value="draft">Draft</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label>สถานะ</label>
+                    <select id="onlineExamCourseListActiveFilter" onchange="renderOnlineExamCourseList()">
+                      <option value="">-- ทั้งหมด --</option>
+                      <option value="active">Active</option>
+                      <option value="inactive">Inactive</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label>ค้นหา</label>
+                    <input id="onlineExamCourseListSearch" type="search" placeholder="ชื่อชุดข้อสอบ" oninput="renderOnlineExamCourseList()">
+                  </div>
                 </div>
                 <div id="onlineExamCourseList">
                   <p style="color:#9ca3af;font-size:13px;">กำลังโหลด...</p>
@@ -4447,25 +4478,22 @@
 
               <!-- Question CRUD -->
               <div class="form-box">
-                <h3>เพิ่มข้อสอบ</h3>
+                <h3>ข้อสอบในชุดที่เลือก</h3>
                 <div class="form-row">
                   <div>
-                    <label>ชุดข้อสอบที่ต้องการเพิ่มข้อสอบ</label>
-                    <select id="onlineExamQuestionCourseSelect" style="width:100%;" onchange="renderOnlineExamQuestionList()">
+                    <label>ชุดข้อสอบ</label>
+                    <select id="onlineExamQuestionCourseSelect" style="width:100%;" onchange="onOnlineExamQuestionCourseChange()">
                       <option value="">-- เลือกชุดข้อสอบ --</option>
                     </select>
                   </div>
-                  <div>
-                    <label>&nbsp;</label>
-                    <button class="btn btn-green" type="button" onclick="openAddOnlineExamQuestionBubble()">➕ เพิ่มข้อสอบ</button>
-                  </div>
                 </div>
+                <div id="onlineExamSelectedCourseSummary" style="margin-top:12px;"></div>
                 <p id="onlineExamQuestionSaveResult" style="font-size:12px;margin-top:6px;"></p>
               </div>
 
               <!-- Question list -->
               <div class="form-box">
-                <h3>รายการข้อสอบในชุดที่เลือก</h3>
+                <h3>รายการข้อสอบ</h3>
                 <div id="onlineExamQuestionList">
                   <p style="color:#9ca3af;font-size:13px;">เลือกชุดข้อสอบด้านบนเพื่อดูรายการข้อสอบ</p>
                 </div>
@@ -5651,6 +5679,7 @@
     let studentDataLoadingPromise = null;
     let studentPaymentsUnsubscribe = null;
     let studentReceiptsUnsubscribe = null;
+    let authSessionRoutingDone = false;
 
     try {
       firebase.initializeApp(firebaseConfig);
@@ -5669,12 +5698,92 @@
           } catch (error) {
             console.error('load user profile error:', error);
           }
+          if (!authSessionRoutingDone) {
+            authSessionRoutingDone = true;
+            await restoreSessionFromAuth(user, firebaseUserProfile);
+          }
+        } else {
+          hideAuthLoadingOverlay();
         }
       });
       console.log('Firebase connected: ideaclub-webapp');
     } catch (error) {
       firebaseReady = false;
+      hideAuthLoadingOverlay();
       console.error('Firebase init error:', error);
+    }
+
+    function hideAuthLoadingOverlay() {
+      const overlay = getElement('authLoadingOverlay');
+      if (!overlay || overlay.style.display === 'none') return;
+      overlay.style.opacity = '0';
+      overlay.style.transition = 'opacity 0.25s';
+      setTimeout(function() { overlay.style.display = 'none'; }, 260);
+    }
+
+    async function restoreSessionFromAuth(user, profile) {
+      if (!profile) { hideAuthLoadingOverlay(); return; }
+      try {
+        if (isStudentAccount(profile)) {
+          await ensureStudentDataLoaded(profile, { force: false });
+          const uid = user.uid;
+          const linkedId = String(profile.linkedStudentId || profile.studentDocId || '').trim();
+          const memberId = String(profile.memberId || '').trim();
+          const studentId = String(profile.studentId || '').trim();
+          const student = students.find(function(s) {
+            return (uid && s.authUid === uid) ||
+                   (linkedId && String(s.firebaseDocId || s.id || '') === linkedId) ||
+                   (memberId && String(s.memberId || '') === memberId) ||
+                   (studentId && (String(s.studentId || '') === studentId || String(s.id || '') === studentId));
+          });
+          if (!student) { hideAuthLoadingOverlay(); return; }
+          currentStudent = student;
+          currentTeacher = null;
+          currentAdmin = null;
+          firebaseUserProfile = sanitizeStudentProfile(profile);
+          setSuperAdminMode(false);
+          ['superAdminTeacherLink', 'superAdminAdminLink'].forEach(function(id) {
+            const el = getElement(id);
+            if (el) el.classList.add('hidden');
+          });
+          hideAuthLoadingOverlay();
+          studentLogin(student.memberId || student.studentId || user.email || '');
+        } else {
+          await ensureCoreDataLoaded({ force: false });
+          const primaryRole = getPrimaryAppRole(profile);
+          const uid = user.uid;
+          if (isAdminRole(primaryRole)) {
+            const linkedTeacherId = String(profile.linkedTeacherId || profile.teacherDocId || profile.teacherId || '').trim();
+            currentTeacher = teachers.find(function(t) {
+              return (linkedTeacherId && (String(t.firebaseDocId || t.id || '') === linkedTeacherId || String(t.teacherId || '') === linkedTeacherId)) ||
+                     t.authUid === uid;
+            }) || null;
+            currentAdmin = profile;
+            currentStudent = null;
+            setSuperAdminMode(getEffectivePermissions(profile).includes('admin.full') || primaryRole === 'SuperAdmin' || primaryRole === 'Admin');
+            hideAuthLoadingOverlay();
+            showAdminPanel(true);
+          } else if (isTeacherRole(primaryRole)) {
+            const linkedTeacherId = String(profile.linkedTeacherId || profile.teacherDocId || '').trim();
+            const profileTeacherId = String(profile.teacherId || '').trim();
+            const teacher = teachers.find(function(t) {
+              return (linkedTeacherId && String(t.firebaseDocId || t.id || '') === linkedTeacherId) ||
+                     (profileTeacherId && String(t.teacherId || '') === profileTeacherId) ||
+                     t.authUid === uid;
+            }) || { id: uid, authUid: uid, name: profile.name || profile.displayName || user.email || '', email: profile.email || user.email || '' };
+            currentTeacher = teacher;
+            currentStudent = null;
+            currentAdmin = profile;
+            hideAuthLoadingOverlay();
+            showTeacherPanel(teacher);
+          } else {
+            hideAuthLoadingOverlay();
+          }
+        }
+      } catch (err) {
+        console.error('restoreSessionFromAuth error:', err);
+        hideAuthLoadingOverlay();
+      }
     }
 
     function showFirebaseStatus(message, isError) {
@@ -7921,10 +8030,11 @@
         }
 
         try {
+          authSessionRoutingDone = true;
           result.textContent = 'กำลังเข้าสู่ระบบ...';
           result.style.color = '#0f4cbd';
-          
-          console.log('login-lookup-start', { 
+
+          console.log('login-lookup-start', {
             loginId: displayLoginId,
             normalizedLogin: username,
             rawUsername: rawUsername
