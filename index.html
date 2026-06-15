@@ -4580,6 +4580,7 @@
                   <div>
                     <label>วิชา</label>
                     <select id="examBankSubject">
+                      <option value="">-- เลือกวิชา --</option>
                       <option>วิทยาศาสตร์</option>
                       <option>คณิตศาสตร์</option>
                       <option>ภาษาอังกฤษ</option>
@@ -25670,6 +25671,12 @@ function receiptStatusText(status) {
       });
       const totalEl = getElement('examBankTotalItems');
       if (totalEl) totalEl.value = '20';
+      const gradeEl = getElement('examBankGrade');
+      if (gradeEl) gradeEl.value = 'ป.6';
+      const subjectEl = getElement('examBankSubject');
+      if (subjectEl) subjectEl.value = '';
+      const statusEl2 = getElement('examBankStatus');
+      if (statusEl2) statusEl2.value = 'active';
       const resultEl = getElement('examBankSaveResult');
       if (resultEl) resultEl.textContent = '';
     }
@@ -25987,7 +25994,9 @@ function receiptStatusText(status) {
       }
 
       const answerKey = examProcActiveTest.answerKey || [];
-      const total = examProcActiveTest.totalItems || answerKey.length;
+      // answerKey.length is authoritative — if totalItems > answerKey.length,
+      // extra items have no key and would always be marked wrong, deflating the score
+      const total = answerKey.length || examProcActiveTest.totalItems || 20;
 
       // รวบรวมคำตอบนักเรียนจาก dropdown
       const studentAnswers = [];
@@ -26056,6 +26065,15 @@ function receiptStatusText(status) {
             correct + '/' + total + ' (' + scorePercent + '%)' +
             (weakTopics.length ? ' · Weak: ' + weakTopics.join(', ') : '');
         }
+        const answerArea = getElement('examAnswerInputArea');
+        if (answerArea) answerArea.innerHTML = '';
+        const submitArea = getElement('examSubmitArea');
+        if (submitArea) submitArea.style.display = 'none';
+        const previewArea = getElement('examPreviewArea');
+        if (previewArea) previewArea.style.display = 'none';
+        examProcActiveTest = null;
+        const testSelect = getElement('examProcTestSelect');
+        if (testSelect) testSelect.value = '';
         safeRun(function() { focusStudent(studentUid); }, 'focus-student-after-submit');
       } catch (error) {
         console.error('processOCRSubmit save error:', error);
@@ -26282,7 +26300,12 @@ function receiptStatusText(status) {
         return;
       }
 
-      const lastResult = studentResults[studentResults.length - 1];
+      const sortedResults = studentResults.slice().sort(function(a, b) {
+        const ta = a.createdAt && a.createdAt.seconds ? a.createdAt.seconds : 0;
+        const tb = b.createdAt && b.createdAt.seconds ? b.createdAt.seconds : 0;
+        return tb - ta;
+      });
+      const lastResult = sortedResults[0];
       html += '<p>ผลสอบล่าสุด: <strong>' + (lastResult.subject || '') + '</strong> ' +
         '<span style="' + ((lastResult.scorePercent || 0) >= 60 ? 'color:#16a34a' : 'color:#dc2626') + ';font-weight:bold;">' +
         (lastResult.scorePercent || 0) + '%</span></p>';
