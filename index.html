@@ -26952,27 +26952,91 @@ function receiptStatusText(status) {
     function editOnlineExamCourse(courseId) {
       const course = onlineExamCourseCache.find(function(c) { return c.firebaseDocId === courseId; });
       if (!course) return;
-      setValue('onlineExamEditingCourseId', courseId);
-      setValue('onlineExamCourseTitle', course.title || '');
-      setValue('onlineExamCourseDuration', course.durationMinutes || 15);
-      setValue('onlineExamCourseStatus', course.status || 'active');
-      setValue('onlineExamCoursePublishStatus', course.publishStatus || 'draft');
-      setValue('onlineExamCourseShuffleQ', course.shuffleQuestions ? '1' : '0');
-      setValue('onlineExamCourseShuffleC', course.shuffleChoices ? '1' : '0');
-      setValue('onlineExamCourseOpenAt', formatOnlineExamDateTimeLocal(course.openAt));
-      setValue('onlineExamCourseCloseAt', formatOnlineExamDateTimeLocal(course.closeAt));
-      setValue('onlineExamCourseSubject', course.subject || '');
-      setValue('onlineExamCourseGrade', course.grade || getOnlineExamLinkedCourseGrade(course.linkedCourseId) || '');
-      if (course.examMonth && getElement('onlineExamManageMonthFilter')) {
-        getElement('onlineExamManageMonthFilter').value = course.examMonth;
-      }
-      syncOnlineExamCourseMonthDisplay();
-      const cancelBtn = getElement('onlineExamCourseCancelBtn');
-      if (cancelBtn) cancelBtn.style.display = '';
-      const saveBtn = getElement('onlineExamCourseSaveBtn');
-      if (saveBtn) saveBtn.textContent = '💾 อัปเดตชุดข้อสอบ';
-      const form = getElement('onlineExamCourseTitle');
-      if (form) form.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      const selectedGrade = course.grade || getOnlineExamLinkedCourseGrade(course.linkedCourseId) || '';
+      const monthOptions = getOnlineExamMonthOptions().map(function(month) {
+        return '<option value="' + escapeHtml(month) + '"' + (month === (course.examMonth || '') ? ' selected' : '') + '>' + escapeHtml(month) + '</option>';
+      }).join('');
+      const subjectOptions = ['วิทยาศาสตร์', 'คณิตศาสตร์', 'ภาษาอังกฤษ', 'ภาษาไทย', 'สังคมศึกษา', 'อื่นๆ'].map(function(subject) {
+        return '<option value="' + escapeHtml(subject) + '"' + (subject === (course.subject || '') ? ' selected' : '') + '>' + escapeHtml(subject) + '</option>';
+      }).join('');
+      openEditBubble('แก้ไขชุดข้อสอบ',
+        '<div class="form-row">' +
+          '<div><label>เดือนสอบ</label><select id="bubbleOnlineExamMonth">' + monthOptions + '</select></div>' +
+          '<div><label>ระดับชั้น</label><select id="bubbleOnlineExamGrade">' + gradeOptionsHtml(selectedGrade) + '</select></div>' +
+          '<div><label>วิชา</label><select id="bubbleOnlineExamSubject"><option value="">-- ไม่ระบุ --</option>' + subjectOptions + '</select></div>' +
+        '</div>' +
+        '<div class="form-row">' +
+          '<div><label>ชื่อชุดข้อสอบ</label><input id="bubbleOnlineExamTitle" type="text" value="' + escapeHtml(course.title || '') + '"></div>' +
+          '<div><label>เวลาสอบ (นาที)</label><input id="bubbleOnlineExamDuration" type="number" min="1" value="' + escapeHtml(course.durationMinutes || 15) + '"></div>' +
+          '<div><label>สถานะ</label><select id="bubbleOnlineExamStatus"><option value="active"' + ((course.status || 'active') === 'active' ? ' selected' : '') + '>เปิดใช้งาน</option><option value="inactive"' + ((course.status || '') === 'inactive' ? ' selected' : '') + '>ปิดใช้งาน</option></select></div>' +
+        '</div>' +
+        '<div class="form-row">' +
+          '<div><label>การเผยแพร่ให้นักเรียน</label><select id="bubbleOnlineExamPublishStatus"><option value="draft"' + ((course.publishStatus || 'draft') === 'draft' ? ' selected' : '') + '>Draft — ยังไม่เผยแพร่</option><option value="published"' + ((course.publishStatus || '') === 'published' ? ' selected' : '') + '>Published — เผยแพร่แล้ว</option></select></div>' +
+          '<div><label>สุ่มลำดับคำถาม</label><select id="bubbleOnlineExamShuffleQ"><option value="0"' + (!course.shuffleQuestions ? ' selected' : '') + '>ไม่สุ่ม</option><option value="1"' + (course.shuffleQuestions ? ' selected' : '') + '>สุ่มทุกครั้งที่สอบ</option></select></div>' +
+          '<div><label>สุ่มลำดับตัวเลือก</label><select id="bubbleOnlineExamShuffleC"><option value="0"' + (!course.shuffleChoices ? ' selected' : '') + '>ไม่สุ่ม</option><option value="1"' + (course.shuffleChoices ? ' selected' : '') + '>สุ่มทุกครั้งที่สอบ</option></select></div>' +
+        '</div>' +
+        '<div class="form-row">' +
+          '<div><label>เปิดสอบ (วัน-เวลาเริ่ม)</label><input id="bubbleOnlineExamOpenAt" type="datetime-local" value="' + escapeHtml(formatOnlineExamDateTimeLocal(course.openAt)) + '"><p style="font-size:10px;color:#9ca3af;margin:2px 0 0;">ปล่อยว่างไว้ = เปิดทันที</p></div>' +
+          '<div><label>ปิดสอบ (วัน-เวลาสิ้นสุด)</label><input id="bubbleOnlineExamCloseAt" type="datetime-local" value="' + escapeHtml(formatOnlineExamDateTimeLocal(course.closeAt)) + '"><p style="font-size:10px;color:#9ca3af;margin:2px 0 0;">ปล่อยว่างไว้ = ไม่มีกำหนดปิด</p></div>' +
+        '</div>',
+        async function() {
+          if (!hasPermission('admin.onlineExams')) { alert('ไม่มีสิทธิ์'); return; }
+          if (!firebaseReady || !db) { alert('Firebase ยังไม่พร้อม'); return; }
+          const title = bubbleValue('bubbleOnlineExamTitle');
+          const examMonth = bubbleSelectValue('bubbleOnlineExamMonth');
+          const grade = bubbleSelectValue('bubbleOnlineExamGrade');
+          const subject = bubbleSelectValue('bubbleOnlineExamSubject');
+          const duration = parseInt(bubbleValue('bubbleOnlineExamDuration') || '15', 10) || 15;
+          const status = bubbleSelectValue('bubbleOnlineExamStatus') || 'active';
+          const publishStatus = bubbleSelectValue('bubbleOnlineExamPublishStatus') || 'draft';
+          const openAtDate = parseOnlineExamDateTimeValue(bubbleValue('bubbleOnlineExamOpenAt'));
+          const closeAtDate = parseOnlineExamDateTimeValue(bubbleValue('bubbleOnlineExamCloseAt'));
+          const duplicateCourse = findOnlineExamCourseByMonthGradeSubject(examMonth, grade, subject, courseId);
+          const resultEl = getElement('editBubbleResult');
+
+          if (!title || !examMonth || !grade || !subject) {
+            if (resultEl) { resultEl.style.color = '#dc2626'; resultEl.textContent = 'กรุณากรอกเดือน ระดับชั้น วิชา และชื่อชุดข้อสอบ'; }
+            return;
+          }
+          if (duplicateCourse) {
+            if (resultEl) { resultEl.style.color = '#dc2626'; resultEl.textContent = 'มีชุดข้อสอบเดือน/ชั้น/วิชานี้อยู่แล้ว'; }
+            return;
+          }
+
+          if (resultEl) { resultEl.style.color = '#d97706'; resultEl.textContent = 'กำลังบันทึก...'; }
+          try {
+            await db.collection('onlineExamCourses').doc(courseId).set({
+              title: title,
+              grade: grade,
+              durationMinutes: duration,
+              status: status,
+              publishStatus: publishStatus,
+              isActive: status === 'active',
+              subject: subject,
+              linkedCourseId: null,
+              examMonth: examMonth,
+              shuffleQuestions: bubbleSelectValue('bubbleOnlineExamShuffleQ') === '1',
+              shuffleChoices: bubbleSelectValue('bubbleOnlineExamShuffleC') === '1',
+              openAt: openAtDate ? openAtDate.toISOString() : null,
+              closeAt: closeAtDate ? closeAtDate.toISOString() : null,
+              updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
+              updatedBy: firebaseUser ? firebaseUser.uid : ''
+            }, { merge: true });
+            addActivityLog('แก้ไขชุดข้อสอบ Interactive', title);
+            await loadOnlineExamCourses();
+            populateOnlineExamMonthSelect();
+            populateOnlineExamCourseListFilters();
+            renderOnlineExamCourseList();
+            populateOnlineExamCourseSelects();
+            renderOnlineExamQuestionList();
+            exportOnlineExamJson();
+            closeEditBubble();
+          } catch (e) {
+            console.error('editOnlineExamCourse error', e);
+            if (resultEl) { resultEl.style.color = '#dc2626'; resultEl.textContent = 'บันทึกไม่สำเร็จ: ' + (e.message || e); }
+          }
+        }
+      );
     }
 
     function resetOnlineExamCourseForm() {
