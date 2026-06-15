@@ -2335,12 +2335,12 @@
             </div>
 
             <div id="onlineExamActiveExam" style="display:none;">
-              <div class="form-box" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;">
+              <div style="position:sticky;top:0;z-index:100;background:#fff;border-bottom:1px solid #e2e8f0;padding:10px 16px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;box-shadow:0 2px 8px rgba(0,0,0,.06);">
                 <div>
                   <p style="font-size:11px;font-weight:700;color:#4f46e5;text-transform:uppercase;letter-spacing:.05em;">กำลังทำข้อสอบ</p>
-                  <h3 id="onlineExamActiveCourseTitle" style="font-size:16px;margin-top:2px;"></h3>
+                  <h3 id="onlineExamActiveCourseTitle" style="font-size:15px;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:55vw;"></h3>
                 </div>
-                <div style="background:#fff1f2;border:1px solid #fecdd3;border-radius:10px;padding:8px 14px;text-align:right;">
+                <div style="background:#fff1f2;border:1px solid #fecdd3;border-radius:10px;padding:6px 14px;text-align:right;">
                   <p style="font-size:10px;font-weight:700;color:#e11d48;text-transform:uppercase;">เวลาที่เหลือ</p>
                   <p id="onlineExamTimer" style="font-family:monospace;font-size:24px;font-weight:700;color:#be123c;line-height:1;">00:00</p>
                 </div>
@@ -2352,16 +2352,21 @@
                     <span id="onlineExamAnsweredCount">0</span>/<span id="onlineExamTotalCount">0</span>
                   </span>
                 </div>
-                <div id="onlineExamNavigator" style="display:grid;grid-template-columns:repeat(10,1fr);gap:6px;"></div>
+                <div id="onlineExamNavigator" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(40px,1fr));gap:6px;max-height:160px;overflow-y:auto;"></div>
                 <div style="display:flex;gap:10px;margin-top:8px;font-size:11px;color:#6b7280;">
                   <span><span style="display:inline-block;width:12px;height:12px;background:#d1fae5;border:1.5px solid #34d399;border-radius:3px;vertical-align:middle;"></span> ตอบแล้ว</span>
                   <span><span style="display:inline-block;width:12px;height:12px;background:#f8fafc;border:1.5px solid #cbd5e1;border-radius:3px;vertical-align:middle;"></span> ยังไม่ตอบ</span>
                 </div>
               </div>
-              <div id="onlineExamQuestionFeed" style="display:flex;flex-direction:column;gap:12px;"></div>
-              <div class="form-box" style="text-align:center;">
+              <div id="onlineExamQuestionFeed" style="display:flex;flex-direction:column;gap:12px;max-width:800px;margin:0 auto;width:100%;padding-bottom:80px;"></div>
+              <div class="form-box" style="text-align:center;max-width:800px;margin:0 auto;display:none;" id="onlineExamDesktopSubmit">
                 <p style="font-size:13px;color:#6b7280;margin-bottom:12px;">ตรวจสอบคำตอบให้ครบก่อนกดส่ง</p>
                 <button class="btn btn-green" onclick="confirmSubmitOnlineExam()" style="padding:12px 32px;font-size:15px;">📨 ส่งคำตอบ</button>
+              </div>
+              <!-- Sticky submit bar (mobile + fallback PC) -->
+              <div id="onlineExamStickySubmit" style="position:fixed;bottom:0;left:0;right:0;z-index:200;background:#fff;border-top:1px solid #e2e8f0;padding:10px 16px;display:none;align-items:center;justify-content:space-between;gap:10px;box-shadow:0 -2px 12px rgba(0,0,0,.08);">
+                <span style="font-size:12px;color:#6b7280;">ตอบแล้ว <strong id="onlineExamStickyAnswered">0</strong>/<strong id="onlineExamStickyTotal">0</strong></span>
+                <button class="btn btn-green" onclick="confirmSubmitOnlineExam()" style="padding:10px 28px;font-size:14px;">📨 ส่งคำตอบ</button>
               </div>
             </div>
 
@@ -28155,6 +28160,9 @@ function receiptStatusText(status) {
       if (result) result.style.display = 'none';
       const titleEl = getElement('onlineExamActiveCourseTitle');
       if (titleEl) titleEl.textContent = course.title || '';
+      // แสดง sticky submit bar
+      const stickyBar = getElement('onlineExamStickySubmit');
+      if (stickyBar) stickyBar.style.display = 'flex';
       renderOnlineExamQuestionFeed(course);
       updateOnlineExamNavigator(course);
       startOnlineExamTimer(course);
@@ -28184,27 +28192,27 @@ function receiptStatusText(status) {
           const ciImg = (q.choiceImages || [])[origIdx];
           const selected = storedAnswer === origIdx;
           const ciImgHtml = ciImg
-            ? '<img src="' + escapeHtml(parseDriveImageUrl(ciImg)) + '" onerror="this.style.display=\'none\'" style="display:block;max-height:120px;max-width:100%;border-radius:8px;margin-top:6px;object-fit:contain;" alt="รูปตัวเลือก ' + alphabet[di] + '">'
+            ? '<img src="' + escapeHtml(parseDriveImageUrl(ciImg)) + '" onerror="this.style.display=\'none\'" style="display:block;max-height:min(180px,40vw);max-width:100%;border-radius:8px;margin-top:8px;object-fit:contain;" alt="รูปตัวเลือก ' + alphabet[di] + '">'
             : '';
           return '<label onclick="onOnlineExamChoiceSelected(\'' + q.questionId + '\',' + di + ',' + idx + ')" ' +
-            'style="display:flex;align-items:flex-start;gap:10px;padding:10px 12px;border-radius:10px;cursor:pointer;border:' +
+            'style="display:flex;align-items:flex-start;gap:12px;padding:12px 14px;border-radius:10px;cursor:pointer;border:' +
             (selected ? '2px solid #4f46e5;background:#eef2ff;' : '1.5px solid #e2e8f0;background:#fff;') +
-            'transition:border .1s,background .1s;" id="onlineExamLabel_' + q.questionId + '_' + di + '">' +
-            '<input type="radio" name="oeq_' + q.questionId + '" ' + (selected ? 'checked' : '') + ' style="width:16px;height:16px;accent-color:#4f46e5;margin-top:2px;">' +
-            '<div><span style="font-size:12px;font-weight:700;color:#6b7280;min-width:18px;">' + alphabet[di] + '</span>' +
-            ' <span style="font-size:13px;color:#1e293b;">' + escapeHtml(ch) + '</span>' + ciImgHtml + '</div>' +
+            'transition:border .1s,background .1s;min-height:48px;" id="onlineExamLabel_' + q.questionId + '_' + di + '">' +
+            '<input type="radio" name="oeq_' + q.questionId + '" ' + (selected ? 'checked' : '') + ' style="width:18px;height:18px;accent-color:#4f46e5;margin-top:2px;flex-shrink:0;">' +
+            '<div><span style="font-size:13px;font-weight:700;color:#6b7280;min-width:22px;">' + alphabet[di] + '</span>' +
+            ' <span style="font-size:15px;color:#1e293b;line-height:1.5;">' + escapeHtml(ch) + '</span>' + ciImgHtml + '</div>' +
           '</label>';
         }).join('');
 
         const imageHtml = q.imageUrl
-          ? '<img src="' + escapeHtml(parseDriveImageUrl(q.imageUrl)) + '" onerror="this.parentElement.style.display=\'none\'" style="max-height:200px;max-width:100%;border-radius:10px;border:1px solid #e2e8f0;margin-bottom:8px;" alt="รูปประกอบข้อ ' + (idx+1) + '">'
+          ? '<img src="' + escapeHtml(parseDriveImageUrl(q.imageUrl)) + '" onerror="this.parentElement.style.display=\'none\'" style="max-height:min(360px,50vw);max-width:100%;border-radius:10px;border:1px solid #e2e8f0;margin-bottom:10px;display:block;" alt="รูปประกอบข้อ ' + (idx+1) + '">'
           : '';
 
-        return '<div class="student-mobile-card" id="onlineExamQNode_' + idx + '" style="scroll-margin-top:80px;">' +
-          '<p style="font-size:11px;font-weight:700;color:#4f46e5;margin-bottom:6px;">ข้อสอบข้อที่ ' + (idx+1) + '</p>' +
-          '<p style="font-size:13px;font-weight:600;margin-bottom:8px;line-height:1.5;">' + escapeHtml(q.text || '') + '</p>' +
+        return '<div class="student-mobile-card" id="onlineExamQNode_' + idx + '" style="scroll-margin-top:120px;">' +
+          '<p style="font-size:12px;font-weight:700;color:#4f46e5;margin-bottom:6px;letter-spacing:.03em;">ข้อที่ ' + (idx+1) + '</p>' +
+          '<p style="font-size:15px;font-weight:600;margin-bottom:10px;line-height:1.6;color:#0f172a;">' + escapeHtml(q.text || '') + '</p>' +
           imageHtml +
-          '<div style="display:flex;flex-direction:column;gap:6px;">' + choicesHtml + '</div>' +
+          '<div style="display:flex;flex-direction:column;gap:8px;">' + choicesHtml + '</div>' +
         '</div>';
       }).join('');
     }
@@ -28249,9 +28257,15 @@ function receiptStatusText(status) {
       if (answeredEl) answeredEl.textContent = answered;
       if (totalEl) totalEl.textContent = displayQuestions.length;
 
+      // อัปเดต sticky bar counter
+      const stickyAns = getElement('onlineExamStickyAnswered');
+      const stickyTot = getElement('onlineExamStickyTotal');
+      if (stickyAns) stickyAns.textContent = answered;
+      if (stickyTot) stickyTot.textContent = displayQuestions.length;
+
       nav.innerHTML = displayQuestions.map(function(q, idx) {
         const isAnswered = onlineExamStudentAnswers[q.questionId] !== undefined;
-        return '<button onclick="document.getElementById(\'onlineExamQNode_' + idx + '\')&&document.getElementById(\'onlineExamQNode_' + idx + '\').scrollIntoView({behavior:\'smooth\',block:\'center\'})" ' +
+        return '<button onclick="document.getElementById(\'onlineExamQNode_' + idx + '\')&&document.getElementById(\'onlineExamQNode_' + idx + '\').scrollIntoView({behavior:\'smooth\',block:\'start\'})" ' +
           'style="padding:0;width:100%;aspect-ratio:1;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer;border:' +
           (isAnswered ? '2px solid #34d399;background:#d1fae5;color:#065f46;' : '1.5px solid #cbd5e1;background:#f8fafc;color:#64748b;') +
           '">' + (idx+1) + '</button>';
@@ -28396,6 +28410,9 @@ function receiptStatusText(status) {
       const result = getElement('onlineExamResultView');
       if (grid) grid.style.display = '';
       if (exam) exam.style.display = 'none';
+      // ซ่อน sticky submit bar
+      const stickyBar = getElement('onlineExamStickySubmit');
+      if (stickyBar) stickyBar.style.display = 'none';
       // Reload grid to reflect updated result status
       safeRun(renderOnlineExamCourseGrid, 'online-exam-grid-refresh');
       if (result) result.style.display = 'none';
