@@ -27155,26 +27155,95 @@ function receiptStatusText(status) {
       if (!course) return;
       const q = (course.questions || []).find(function(x) { return x.questionId === questionId; });
       if (!q) return;
-      setValue('onlineExamEditingQuestionId', questionId);
-      setValue('onlineExamQuestionCourseSelect', courseId);
-      setValue('onlineExamQuestionText', q.text || '');
-      setValue('onlineExamQuestionImageUrl', q.imageUrl || '');
-      setValue('onlineExamChoice0', (q.choices || [])[0] || '');
-      setValue('onlineExamChoice1', (q.choices || [])[1] || '');
-      setValue('onlineExamChoice2', (q.choices || [])[2] || '');
-      setValue('onlineExamChoice3', (q.choices || [])[3] || '');
-      setValue('onlineExamChoiceImage0', (q.choiceImages || [])[0] || '');
-      setValue('onlineExamChoiceImage1', (q.choiceImages || [])[1] || '');
-      setValue('onlineExamChoiceImage2', (q.choiceImages || [])[2] || '');
-      setValue('onlineExamChoiceImage3', (q.choiceImages || [])[3] || '');
-      setValue('onlineExamCorrectIndex', q.correctIndex || 0);
-      setValue('onlineExamQuestionScore', q.score || 1);
-      const cancelBtn = getElement('onlineExamQuestionCancelBtn');
-      if (cancelBtn) cancelBtn.style.display = '';
-      const saveBtn = getElement('onlineExamQuestionSaveBtn');
-      if (saveBtn) saveBtn.textContent = '💾 อัปเดตข้อสอบ';
-      const form = getElement('onlineExamQuestionText');
-      if (form) form.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      const choices = q.choices || [];
+      const choiceImages = q.choiceImages || [];
+      const correctIndex = Number(q.correctIndex || 0);
+      openEditBubble('แก้ไขข้อสอบ',
+        '<div class="edit-bubble-note" style="margin-bottom:12px;">ชุดข้อสอบ: ' + escapeHtml(course.title || courseId) + '</div>' +
+        '<label>คำถาม / โจทย์</label>' +
+        '<textarea id="bubbleOnlineExamQuestionText" rows="3" placeholder="ระบุเนื้อหาโจทย์...">' + escapeHtml(q.text || '') + '</textarea>' +
+        '<label style="margin-top:10px;">URL รูปภาพประกอบ (ถ้ามี)</label>' +
+        '<input id="bubbleOnlineExamQuestionImageUrl" type="url" value="' + escapeHtml(q.imageUrl || '') + '" placeholder="วางลิงก์ Google Drive หรือ URL รูปภาพโดยตรง" onblur="this.value=parseDriveImageUrl(this.value)" onpaste="setTimeout(()=>{this.value=parseDriveImageUrl(this.value)},50)">' +
+        '<div class="form-row" style="margin-top:10px;">' +
+          '<div><label>ตัวเลือก ก.</label><input id="bubbleOnlineExamChoice0" type="text" value="' + escapeHtml(choices[0] || '') + '"><input id="bubbleOnlineExamChoiceImage0" type="url" value="' + escapeHtml(choiceImages[0] || '') + '" placeholder="ลิงก์รูป ก." style="margin-top:4px;font-size:11px;" onblur="this.value=parseDriveImageUrl(this.value)" onpaste="setTimeout(()=>{this.value=parseDriveImageUrl(this.value)},50)"></div>' +
+          '<div><label>ตัวเลือก ข.</label><input id="bubbleOnlineExamChoice1" type="text" value="' + escapeHtml(choices[1] || '') + '"><input id="bubbleOnlineExamChoiceImage1" type="url" value="' + escapeHtml(choiceImages[1] || '') + '" placeholder="ลิงก์รูป ข." style="margin-top:4px;font-size:11px;" onblur="this.value=parseDriveImageUrl(this.value)" onpaste="setTimeout(()=>{this.value=parseDriveImageUrl(this.value)},50)"></div>' +
+        '</div>' +
+        '<div class="form-row" style="margin-top:10px;">' +
+          '<div><label>ตัวเลือก ค.</label><input id="bubbleOnlineExamChoice2" type="text" value="' + escapeHtml(choices[2] || '') + '"><input id="bubbleOnlineExamChoiceImage2" type="url" value="' + escapeHtml(choiceImages[2] || '') + '" placeholder="ลิงก์รูป ค." style="margin-top:4px;font-size:11px;" onblur="this.value=parseDriveImageUrl(this.value)" onpaste="setTimeout(()=>{this.value=parseDriveImageUrl(this.value)},50)"></div>' +
+          '<div><label>ตัวเลือก ง.</label><input id="bubbleOnlineExamChoice3" type="text" value="' + escapeHtml(choices[3] || '') + '"><input id="bubbleOnlineExamChoiceImage3" type="url" value="' + escapeHtml(choiceImages[3] || '') + '" placeholder="ลิงก์รูป ง." style="margin-top:4px;font-size:11px;" onblur="this.value=parseDriveImageUrl(this.value)" onpaste="setTimeout(()=>{this.value=parseDriveImageUrl(this.value)},50)"></div>' +
+        '</div>' +
+        '<div class="form-row" style="margin-top:10px;">' +
+          '<div><label>เฉลยข้อที่ถูก</label><select id="bubbleOnlineExamCorrectIndex">' +
+            '<option value="0"' + (correctIndex === 0 ? ' selected' : '') + '>ก.</option>' +
+            '<option value="1"' + (correctIndex === 1 ? ' selected' : '') + '>ข.</option>' +
+            '<option value="2"' + (correctIndex === 2 ? ' selected' : '') + '>ค.</option>' +
+            '<option value="3"' + (correctIndex === 3 ? ' selected' : '') + '>ง.</option>' +
+          '</select></div>' +
+          '<div><label>คะแนนข้อนี้</label><input id="bubbleOnlineExamQuestionScore" type="number" min="1" value="' + escapeHtml(q.score || 1) + '"></div>' +
+        '</div>',
+        async function() {
+          if (!hasPermission('admin.onlineExams')) { alert('ไม่มีสิทธิ์'); return; }
+          if (!firebaseReady || !db) { alert('Firebase ยังไม่พร้อม'); return; }
+          const text = bubbleValue('bubbleOnlineExamQuestionText');
+          const updatedChoices = [
+            bubbleValue('bubbleOnlineExamChoice0'),
+            bubbleValue('bubbleOnlineExamChoice1'),
+            bubbleValue('bubbleOnlineExamChoice2'),
+            bubbleValue('bubbleOnlineExamChoice3')
+          ];
+          const resultEl = getElement('editBubbleResult');
+          if (!text) {
+            if (resultEl) { resultEl.style.color = '#dc2626'; resultEl.textContent = 'กรุณาใส่คำถาม'; }
+            return;
+          }
+          if (updatedChoices.some(function(choice) { return !choice; })) {
+            if (resultEl) { resultEl.style.color = '#dc2626'; resultEl.textContent = 'กรุณาใส่ตัวเลือกให้ครบ 4 ข้อ'; }
+            return;
+          }
+
+          const updatedChoiceImages = [
+            parseDriveImageUrl(bubbleValue('bubbleOnlineExamChoiceImage0')) || null,
+            parseDriveImageUrl(bubbleValue('bubbleOnlineExamChoiceImage1')) || null,
+            parseDriveImageUrl(bubbleValue('bubbleOnlineExamChoiceImage2')) || null,
+            parseDriveImageUrl(bubbleValue('bubbleOnlineExamChoiceImage3')) || null
+          ];
+          const questions = (course.questions || []).slice();
+          const idx = questions.findIndex(function(item) { return item.questionId === questionId; });
+          if (idx < 0) {
+            if (resultEl) { resultEl.style.color = '#dc2626'; resultEl.textContent = 'ไม่พบข้อสอบที่ต้องการแก้ไข'; }
+            return;
+          }
+          questions[idx] = Object.assign({}, questions[idx], {
+            text: text,
+            choices: updatedChoices,
+            choiceImages: updatedChoiceImages,
+            correctIndex: parseInt(bubbleSelectValue('bubbleOnlineExamCorrectIndex') || '0', 10) || 0,
+            score: parseInt(bubbleValue('bubbleOnlineExamQuestionScore') || '1', 10) || 1,
+            imageUrl: parseDriveImageUrl(bubbleValue('bubbleOnlineExamQuestionImageUrl')) || null
+          });
+          const totalScore = questions.reduce(function(sum, item) { return sum + (item.score || 1); }, 0);
+
+          if (resultEl) { resultEl.style.color = '#d97706'; resultEl.textContent = 'กำลังบันทึก...'; }
+          try {
+            await db.collection('onlineExamCourses').doc(courseId).set({
+              questions: questions,
+              totalScore: totalScore,
+              updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
+              updatedBy: firebaseUser ? firebaseUser.uid : ''
+            }, { merge: true });
+            course.questions = questions;
+            course.totalScore = totalScore;
+            addActivityLog('แก้ไขข้อสอบ Interactive', courseId + ' · ' + questionId);
+            renderOnlineExamQuestionList();
+            renderOnlineExamCourseList();
+            exportOnlineExamJson();
+            closeEditBubble();
+          } catch (e) {
+            console.error('editOnlineExamQuestion error', e);
+            if (resultEl) { resultEl.style.color = '#dc2626'; resultEl.textContent = 'บันทึกไม่สำเร็จ: ' + (e.message || e); }
+          }
+        }
+      );
     }
 
     function resetOnlineExamQuestionForm() {
