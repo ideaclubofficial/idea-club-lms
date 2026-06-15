@@ -4516,6 +4516,34 @@
                 </div>
               </div>
 
+              <!-- Excel Import -->
+              <div class="form-box">
+                <h3>นำเข้าข้อสอบจาก Excel</h3>
+                <p style="font-size:12px;color:#6b7280;margin-bottom:12px;">
+                  ดาวน์โหลด Template แล้วกรอกข้อสอบ จากนั้นอัปโหลดไฟล์เพื่อเพิ่มเข้าชุดข้อสอบที่เลือก
+                </p>
+                <div class="form-row" style="margin-bottom:10px;">
+                  <div>
+                    <label>ชุดข้อสอบที่ต้องการนำเข้า</label>
+                    <select id="onlineExamXlsxCourseSelect" style="width:100%;">
+                      <option value="">-- เลือกชุดข้อสอบ --</option>
+                    </select>
+                  </div>
+                  <div style="align-self:flex-end;">
+                    <button class="btn btn-dark" type="button" onclick="downloadExamTemplate()">📄 ดาวน์โหลด Template Excel</button>
+                  </div>
+                </div>
+                <div class="form-row">
+                  <div>
+                    <label>เลือกไฟล์ Excel (.xlsx / .xls)</label>
+                    <input type="file" id="onlineExamXlsxInput" accept=".xlsx,.xls"
+                      onchange="importExamFromExcel(this)"
+                      style="display:block;margin-top:4px;font-size:13px;">
+                  </div>
+                </div>
+                <p id="onlineExamXlsxResult" style="font-size:12px;margin-top:8px;font-weight:bold;"></p>
+              </div>
+
               <!-- JSON Utility -->
               <div class="form-box">
                 <h3>นำเข้า / ส่งออก JSON</h3>
@@ -27190,7 +27218,7 @@ function receiptStatusText(status) {
     }
 
     function populateOnlineExamCourseSelects() {
-      const selects = ['onlineExamQuestionCourseSelect', 'onlineExamGradeCourseSelect', 'onlineExamAnalysisCourseSelect'];
+      const selects = ['onlineExamQuestionCourseSelect', 'onlineExamGradeCourseSelect', 'onlineExamAnalysisCourseSelect', 'onlineExamXlsxCourseSelect'];
       selects.forEach(function(id) {
         const el = getElement(id);
         if (!el) return;
@@ -27644,6 +27672,129 @@ function receiptStatusText(status) {
         addActivityLog('นำเข้า JSON คอร์สข้อสอบ Interactive', count + ' คอร์ส');
       } catch (e) {
         console.error('importOnlineExamJson error', e);
+        if (resultEl) { resultEl.style.color = '#dc2626'; resultEl.textContent = '❌ นำเข้าไม่สำเร็จ: ' + (e.message || ''); }
+      }
+    }
+
+    // ---- Excel Import / Template ----
+
+    async function downloadExamTemplate() {
+      const resultEl = getElement('onlineExamXlsxResult');
+      try {
+        const XLSX = await loadSheetJs();
+        const headers = ['ข้อที่', 'โจทย์ / คำถาม *', 'ตัวเลือก ก. *', 'ตัวเลือก ข. *', 'ตัวเลือก ค. *', 'ตัวเลือก ง. *', 'เฉลย (ก/ข/ค/ง) *', 'คะแนน', 'URL รูปโจทย์ (ไม่บังคับ)'];
+        const examples = [
+          [1, 'ข้อใดต่อไปนี้เป็นดาวเคราะห์ในระบบสุริยะ?', 'ดวงอาทิตย์', 'ดาวพฤหัสบดี', 'ดาวหาง', 'กาแล็กซี', 'ข', 1, ''],
+          [2, 'แรงโน้มถ่วงของโลกมีค่าประมาณกี่ m/s²?', '5', '9.8', '15', '20', 'ข', 1, ''],
+          [3, 'ภาษาอังกฤษ "Science" แปลว่าอะไร?', 'ศิลปะ', 'คณิตศาสตร์', 'วิทยาศาสตร์', 'ประวัติศาสตร์', 'ค', 1, ''],
+        ];
+        const rows = [headers].concat(examples);
+        const ws = XLSX.utils.aoa_to_sheet(rows);
+        ws['!cols'] = [{ wch: 6 }, { wch: 40 }, { wch: 18 }, { wch: 18 }, { wch: 18 }, { wch: 18 }, { wch: 12 }, { wch: 8 }, { wch: 36 }];
+        // ล็อก header row ให้ freeze
+        ws['!freeze'] = { xSplit: 0, ySplit: 1 };
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, 'ข้อสอบ');
+        XLSX.writeFile(wb, 'exam-template-idea-club.xlsx');
+        if (resultEl) { resultEl.style.color = '#16a34a'; resultEl.textContent = '✅ ดาวน์โหลด Template สำเร็จ'; }
+      } catch (e) {
+        console.error('downloadExamTemplate error:', e);
+        if (resultEl) { resultEl.style.color = '#dc2626'; resultEl.textContent = '❌ ดาวน์โหลดไม่สำเร็จ: ' + (e.message || ''); }
+      }
+    }
+
+    async function importExamFromExcel(input) {
+      const resultEl = getElement('onlineExamXlsxResult');
+      const file = input && input.files && input.files[0];
+      if (!file) return;
+      // reset file input เพื่อให้ upload ไฟล์เดิมซ้ำได้
+      input.value = '';
+
+      const courseId = (getElement('onlineExamXlsxCourseSelect') || {}).value || '';
+      if (!courseId) {
+        if (resultEl) { resultEl.style.color = '#dc2626'; resultEl.textContent = '❌ กรุณาเลือกชุดข้อสอบก่อน'; }
+        return;
+      }
+      if (!hasPermission('admin.onlineExams')) {
+        if (resultEl) { resultEl.style.color = '#dc2626'; resultEl.textContent = '❌ ไม่มีสิทธิ์ admin.onlineExams'; }
+        return;
+      }
+      if (resultEl) { resultEl.style.color = '#d97706'; resultEl.textContent = '⏳ กำลังอ่านไฟล์ Excel...'; }
+
+      try {
+        const XLSX = await loadSheetJs();
+        const buf = await file.arrayBuffer();
+        const wb = XLSX.read(buf, { type: 'array' });
+        const ws = wb.Sheets[wb.SheetNames[0]];
+        const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
+
+        if (rows.length < 2) {
+          if (resultEl) { resultEl.style.color = '#dc2626'; resultEl.textContent = '❌ ไฟล์ไม่มีข้อมูล — ต้องมีอย่างน้อย 1 แถวข้อมูลนอกจาก header'; }
+          return;
+        }
+
+        const answerMap = { 'ก': 0, 'ข': 1, 'ค': 2, 'ง': 3, 'a': 0, 'b': 1, 'c': 2, 'd': 3, '0': 0, '1': 1, '2': 2, '3': 3 };
+        const errors = [];
+        const newQuestions = [];
+
+        // เริ่มจาก row index 1 (ข้ามบรรทัด header)
+        rows.slice(1).forEach(function(row, i) {
+          const rowNum = i + 2;
+          if (!row || row.every(function(c) { return String(c).trim() === ''; })) return; // skip blank rows
+          const text   = String(row[1] || '').trim();
+          const choA   = String(row[2] || '').trim();
+          const choB   = String(row[3] || '').trim();
+          const choC   = String(row[4] || '').trim();
+          const choD   = String(row[5] || '').trim();
+          const ansRaw = String(row[6] || '').trim().toLowerCase();
+          const score  = Math.max(1, parseInt(row[7], 10) || 1);
+          const imgUrl = String(row[8] || '').trim();
+
+          if (!text)               { errors.push('แถว ' + rowNum + ': ไม่มีคำถาม'); return; }
+          if (!choA||!choB||!choC||!choD) { errors.push('แถว ' + rowNum + ': ตัวเลือกไม่ครบ 4 ข้อ'); return; }
+          if (!(ansRaw in answerMap)) { errors.push('แถว ' + rowNum + ': เฉลย "' + row[6] + '" ไม่ถูกต้อง — ต้องเป็น ก/ข/ค/ง'); return; }
+
+          newQuestions.push({
+            questionId: 'q_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6) + '_' + i,
+            text: text,
+            choices: [choA, choB, choC, choD],
+            choiceImages: [null, null, null, null],
+            correctIndex: answerMap[ansRaw],
+            score: score,
+            imageUrl: imgUrl ? parseDriveImageUrl(imgUrl) : null
+          });
+        });
+
+        if (errors.length) {
+          if (resultEl) { resultEl.style.color = '#dc2626'; resultEl.innerHTML = '❌ พบข้อผิดพลาด ' + errors.length + ' รายการ:<br>' + errors.slice(0, 5).map(escapeHtml).join('<br>') + (errors.length > 5 ? '<br>...และอีก ' + (errors.length - 5) + ' รายการ' : ''); }
+          return;
+        }
+        if (!newQuestions.length) {
+          if (resultEl) { resultEl.style.color = '#dc2626'; resultEl.textContent = '❌ ไม่พบข้อมูลที่ valid ในไฟล์'; }
+          return;
+        }
+
+        const course = onlineExamCourseCache.find(function(c) { return c.firebaseDocId === courseId; });
+        const existing = course ? (course.questions || []) : [];
+        const merged = existing.concat(newQuestions);
+        const totalScore = merged.reduce(function(sum, q) { return sum + (q.score || 1); }, 0);
+
+        if (!confirm('นำเข้า ' + newQuestions.length + ' ข้อสอบ เข้าชุด "' + (course ? course.title : courseId) + '"?\n(ข้อสอบเดิม ' + existing.length + ' ข้อจะยังอยู่ครบ)')) return;
+
+        if (resultEl) { resultEl.style.color = '#d97706'; resultEl.textContent = '⏳ กำลังบันทึกเข้า Firestore...'; }
+        await db.collection('onlineExamCourses').doc(courseId).set(
+          { questions: merged, totalScore: totalScore, updatedAt: firebase.firestore.FieldValue.serverTimestamp() },
+          { merge: true }
+        );
+        if (course) { course.questions = merged; course.totalScore = totalScore; }
+
+        if (resultEl) { resultEl.style.color = '#16a34a'; resultEl.textContent = '✅ นำเข้าสำเร็จ ' + newQuestions.length + ' ข้อ (รวมทั้งหมด ' + merged.length + ' ข้อ)'; }
+        addActivityLog('Import Excel ข้อสอบ', (course ? course.title : courseId) + ' +' + newQuestions.length + ' ข้อ');
+        renderOnlineExamQuestionList();
+        renderOnlineExamCourseList();
+        exportOnlineExamJson();
+      } catch (e) {
+        console.error('importExamFromExcel error:', e);
         if (resultEl) { resultEl.style.color = '#dc2626'; resultEl.textContent = '❌ นำเข้าไม่สำเร็จ: ' + (e.message || ''); }
       }
     }
