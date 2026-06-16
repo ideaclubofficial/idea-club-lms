@@ -4495,10 +4495,32 @@
                 <h3>ข้อสอบในชุดที่เลือก</h3>
                 <div class="form-row">
                   <div>
-                    <label>ชุดข้อสอบ</label>
-                    <select id="onlineExamQuestionCourseSelect" style="width:100%;" onchange="onOnlineExamQuestionCourseChange()">
-                      <option value="">-- เลือกชุดข้อสอบ --</option>
+                    <label>ระดับชั้น</label>
+                    <select id="onlineExamQuestionGradeSelect" style="width:100%;" onchange="onOnlineExamQuestionTargetChange()">
+                      <option value="">-- เลือกระดับชั้น --</option>
+                      <option value="ป.4">ป.4</option>
+                      <option value="ป.5">ป.5</option>
+                      <option value="ป.6">ป.6</option>
+                      <option value="ม.1">ม.1</option>
+                      <option value="ม.2">ม.2</option>
+                      <option value="ม.3">ม.3</option>
+                      <option value="ม.4">ม.4</option>
+                      <option value="ม.5">ม.5</option>
+                      <option value="ม.6">ม.6</option>
                     </select>
+                  </div>
+                  <div>
+                    <label>วิชา</label>
+                    <select id="onlineExamQuestionSubjectSelect" style="width:100%;" onchange="onOnlineExamQuestionTargetChange()">
+                      <option value="">-- เลือกวิชา --</option>
+                      <option>วิทยาศาสตร์</option>
+                      <option>คณิตศาสตร์</option>
+                      <option>ภาษาอังกฤษ</option>
+                      <option>ภาษาไทย</option>
+                      <option>สังคมศึกษา</option>
+                      <option>อื่นๆ</option>
+                    </select>
+                    <input type="hidden" id="onlineExamQuestionCourseSelect" value="">
                   </div>
                 </div>
                 <div id="onlineExamSelectedCourseSummary" style="margin-top:12px;"></div>
@@ -4509,7 +4531,7 @@
               <div class="form-box">
                 <h3>รายการข้อสอบ</h3>
                 <div id="onlineExamQuestionList">
-                  <p style="color:#9ca3af;font-size:13px;">เลือกชุดข้อสอบด้านบนเพื่อดูรายการข้อสอบ</p>
+                  <p style="color:#9ca3af;font-size:13px;">เลือกชั้นและวิชาด้านบนเพื่อดูรายการข้อสอบ</p>
                 </div>
               </div>
 
@@ -26878,6 +26900,8 @@ function receiptStatusText(status) {
       syncOnlineExamCourseTitleSuggestion();
       resetOnlineExamQuestionForm();
       setValue('onlineExamQuestionCourseSelect', '');
+      setValue('onlineExamQuestionGradeSelect', '');
+      setValue('onlineExamQuestionSubjectSelect', '');
       renderOnlineExamQuestionList();
       renderOnlineExamSelectedCourseSummary();
     }
@@ -26894,15 +26918,23 @@ function receiptStatusText(status) {
     function openOnlineExamCourseForQuestions(courseId) {
       resetOnlineExamQuestionForm();
       setValue('onlineExamQuestionCourseSelect', courseId || '');
+      const course = (onlineExamCourseCache || []).find(function(c) { return String(c.firebaseDocId || '') === String(courseId || ''); });
+      if (course) {
+        setValue('onlineExamQuestionGradeSelect', getOnlineExamCourseGrade(course) || '');
+        setValue('onlineExamQuestionSubjectSelect', course.subject || '');
+      }
       renderOnlineExamQuestionList();
       renderOnlineExamSelectedCourseSummary();
-      const questionBox = getElement('onlineExamQuestionCourseSelect');
+      const questionBox = getElement('onlineExamQuestionGradeSelect') || getElement('onlineExamQuestionSubjectSelect');
       if (questionBox) questionBox.scrollIntoView({ behavior: 'smooth', block: 'center' });
     }
 
     function onOnlineExamManageMonthChange() {
       resetOnlineExamCourseForm();
       resetOnlineExamQuestionForm();
+      setValue('onlineExamQuestionCourseSelect', '');
+      setValue('onlineExamQuestionGradeSelect', '');
+      setValue('onlineExamQuestionSubjectSelect', '');
       syncOnlineExamCourseMonthDisplay();
       syncOnlineExamCourseListMonthFilterToManageMonth();
       renderOnlineExamCourseList();
@@ -27125,7 +27157,7 @@ function receiptStatusText(status) {
       if (!firebaseReady || !db) { alert('Firebase ยังไม่พร้อม'); return; }
 
       const courseId = (getElement('onlineExamQuestionCourseSelect') || {}).value || '';
-      if (!courseId) { alert('กรุณาเลือกชุดข้อสอบก่อน'); return; }
+      if (!courseId) { alert('กรุณาเลือกชั้นและวิชาของชุดข้อสอบก่อน'); return; }
 
       const text = ((getElement('onlineExamQuestionText') || {}).value || '').trim();
       if (!text) { alert('กรุณาใส่คำถาม'); return; }
@@ -27214,7 +27246,7 @@ function receiptStatusText(status) {
 
     function openAddOnlineExamQuestionBubble() {
       const courseId = (getElement('onlineExamQuestionCourseSelect') || {}).value || '';
-      if (!courseId) { alert('กรุณาเลือกชุดข้อสอบก่อน'); return; }
+      if (!courseId) { alert('กรุณาเลือกชั้นและวิชาของชุดข้อสอบก่อน'); return; }
       openOnlineExamQuestionBubble(courseId, '');
     }
 
@@ -27545,7 +27577,7 @@ function receiptStatusText(status) {
     }
 
     function populateOnlineExamCourseSelects() {
-      const selects = ['onlineExamQuestionCourseSelect', 'onlineExamGradeCourseSelect', 'onlineExamAnalysisCourseSelect'];
+      const selects = ['onlineExamGradeCourseSelect', 'onlineExamAnalysisCourseSelect'];
       const onlineExamGradeOrder = ['ป.4', 'ป.5', 'ป.6', 'ม.1', 'ม.2', 'ม.3', 'ม.4', 'ม.5', 'ม.6'];
       const onlineExamSubjectOrder = ['วิทยาศาสตร์', 'คณิตศาสตร์', 'ภาษาอังกฤษ', 'ภาษาไทย', 'สังคมศึกษา', 'อื่นๆ'];
       function onlineExamQuestionCourseSort(a, b) {
@@ -27577,14 +27609,7 @@ function receiptStatusText(status) {
         if (!el) return;
         const current = el.value;
         const selectedMonth = getSelectedOnlineExamManageMonth();
-        const items = id === 'onlineExamQuestionCourseSelect'
-          ? (onlineExamCourseCache || []).filter(function(c) { return selectedMonth && (c.examMonth || '') === selectedMonth; })
-          : (onlineExamCourseCache || []);
-        if (id === 'onlineExamQuestionCourseSelect') items.sort(onlineExamQuestionCourseSort);
-        if (id === 'onlineExamQuestionCourseSelect' && !items.length) {
-          el.innerHTML = '<option value="">-- ยังไม่มีชุดข้อสอบในเดือนนี้ --</option>';
-          return;
-        }
+        const items = (onlineExamCourseCache || []);
         el.innerHTML = id === 'onlineExamGradeCourseSelect'
           ? '<option value="">-- ทุกชุดข้อสอบ --</option>'
           : '<option value="">-- เลือกชุดข้อสอบ --</option>';
@@ -27599,8 +27624,14 @@ function receiptStatusText(status) {
       });
     }
 
-    function onOnlineExamQuestionCourseChange() {
-      const courseId = (getElement('onlineExamQuestionCourseSelect') || {}).value || '';
+    function onOnlineExamQuestionTargetChange() {
+      const examMonth = getSelectedOnlineExamManageMonth();
+      const grade = (getElement('onlineExamQuestionGradeSelect') || {}).value || '';
+      const subject = (getElement('onlineExamQuestionSubjectSelect') || {}).value || '';
+      const course = examMonth && grade && subject
+        ? findOnlineExamCourseByMonthGradeSubject(examMonth, grade, subject)
+        : null;
+      setValue('onlineExamQuestionCourseSelect', course ? (course.firebaseDocId || '') : '');
       renderOnlineExamSelectedCourseSummary();
       renderOnlineExamQuestionList();
     }
@@ -27610,7 +27641,15 @@ function receiptStatusText(status) {
       if (!container) return;
       const courseId = (getElement('onlineExamQuestionCourseSelect') || {}).value || '';
       if (!courseId) {
-        container.innerHTML = '<div style="padding:12px;border:1px dashed #cbd5e1;border-radius:8px;background:#f8fafc;color:#64748b;font-size:13px;">เลือกชุดข้อสอบจาก dropdown หรือกด “เลือก” จากตารางรายการชุดข้อสอบ</div>';
+        const examMonth = getSelectedOnlineExamManageMonth();
+        const grade = (getElement('onlineExamQuestionGradeSelect') || {}).value || '';
+        const subject = (getElement('onlineExamQuestionSubjectSelect') || {}).value || '';
+        const message = !examMonth
+          ? 'เลือกเดือนสอบก่อน แล้วเลือกชั้นและวิชา'
+          : (!grade || !subject
+              ? 'เลือกชั้นและวิชาเพื่อจัดการข้อสอบในชุด'
+              : 'ไม่พบชุดข้อสอบของ ' + examMonth + ' · ' + grade + ' · ' + subject + ' กรุณาสร้างชุดข้อสอบก่อน');
+        container.innerHTML = '<div style="padding:12px;border:1px dashed #cbd5e1;border-radius:8px;background:#f8fafc;color:#64748b;font-size:13px;">' + escapeHtml(message) + '</div>';
         return;
       }
       const course = (onlineExamCourseCache || []).find(function(c) { return c.firebaseDocId === courseId; });
@@ -27642,7 +27681,7 @@ function receiptStatusText(status) {
       if (!container) return;
       const courseId = (getElement('onlineExamQuestionCourseSelect') || {}).value || '';
       if (!courseId) {
-        container.innerHTML = '<p style="color:#9ca3af;font-size:13px;">เลือกชุดข้อสอบด้านบนเพื่อดูรายการข้อสอบ</p>';
+        container.innerHTML = '<p style="color:#9ca3af;font-size:13px;">เลือกชั้นและวิชาด้านบนเพื่อดูรายการข้อสอบ</p>';
         return;
       }
       const course = onlineExamCourseCache.find(function(c) { return c.firebaseDocId === courseId; });
