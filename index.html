@@ -26833,6 +26833,11 @@ function receiptStatusText(status) {
         if (btnScore) btnScore.style.cssText = activeStyle;
         safeRun(renderOnlineExamGradingSelectors, 'online-exam-grading-selectors');
         safeRun(function() {
+          var statusEl = getElement('onlineExamGradeStatusFilter');
+          if (statusEl && !statusEl.value) statusEl.value = 'submitted';
+          renderOnlineExamGradingReport();
+        }, 'online-exam-grading-auto-load');
+        safeRun(function() {
           loadOnlineExamCourses().then(function() {
             renderAdminScoreFilters();
             renderAdminScoreAdjustTable();
@@ -27841,12 +27846,6 @@ function receiptStatusText(status) {
       const reportEl = getElement('onlineExamGradingReport');
       if (!reportEl) return;
 
-      if (!courseId && !studentUid) {
-        reportEl.style.display = '';
-        reportEl.innerHTML = '<div style="padding:16px;color:#6b7280;font-size:13px;">กรุณาเลือกชุดข้อสอบหรือนักเรียนก่อน แล้วกดค้นหา</div>';
-        return;
-      }
-
       reportEl.style.display = '';
       reportEl.innerHTML = '<div style="padding:16px;color:#d97706;">⏳ กำลังโหลดรายงาน...</div>';
 
@@ -27926,6 +27925,7 @@ function receiptStatusText(status) {
         const usedMin = r.usedSeconds ? Math.ceil(r.usedSeconds / 60) : (r.timeTakenSeconds ? Math.ceil(r.timeTakenSeconds / 60) : '-');
 
         return '<tr style="border-bottom:1px solid #f1f5f9;font-size:12px;">' +
+          '<td style="padding:8px 10px;text-align:center;"><input type="checkbox" class="onlineExamGradeRowCheck" value="' + r._docId + '"' + (rStatus === 'published' ? ' disabled' : '') + ' style="cursor:pointer;width:14px;height:14px;"></td>' +
           '<td style="padding:8px 10px;">' + escapeHtml(r.studentName || '') +
             (r.studentId ? '<br><span style="color:#9ca3af;font-size:10px;">' + escapeHtml(r.studentId) + '</span>' : '') + '</td>' +
           '<td style="padding:8px 10px;">' + escapeHtml(r.courseTitle || '') + '</td>' +
@@ -27945,6 +27945,8 @@ function receiptStatusText(status) {
         '</tr>';
       }).join('');
 
+      const pendingCount = results.filter(function(r) { return (r.resultStatus || 'submitted') === 'submitted'; }).length;
+
       let paginationHtml = '';
       if (totalPages > 1) {
         paginationHtml = '<div style="padding:10px 12px;display:flex;gap:6px;align-items:center;flex-wrap:wrap;border-top:1px solid #f1f5f9;">' +
@@ -27955,10 +27957,14 @@ function receiptStatusText(status) {
       }
 
       reportEl.innerHTML =
-        '<div style="padding:8px 12px;font-size:12px;color:#6b7280;border-bottom:1px solid #f1f5f9;">พบ ' + total + ' รายการ</div>' +
+        '<div style="padding:8px 12px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid #f1f5f9;flex-wrap:wrap;gap:6px;">' +
+          '<span style="font-size:12px;color:#6b7280;">พบ ' + total + ' รายการ' + (pendingCount ? ' · <span style="color:#d97706;font-weight:700;">รอประกาศผล ' + pendingCount + ' รายการ</span>' : '') + '</span>' +
+          (pendingCount ? '<button class="btn btn-green" onclick="bulkPublishOnlineExamResults()" style="font-size:11px;padding:4px 12px;">✅ ประกาศผลที่เลือก</button>' : '') +
+        '</div>' +
         '<div style="overflow-x:auto;">' +
         '<table style="width:100%;border-collapse:collapse;">' +
           '<thead><tr style="background:#f1f5f9;font-size:11px;font-weight:700;color:#374151;">' +
+            '<th style="padding:8px 10px;text-align:center;"><input type="checkbox" id="onlineExamGradeSelectAll" onchange="onlineExamGradeToggleAll(this)" style="cursor:pointer;width:14px;height:14px;"></th>' +
             '<th style="padding:8px 10px;text-align:left;white-space:nowrap;">ชื่อนักเรียน</th>' +
             '<th style="padding:8px 10px;text-align:left;white-space:nowrap;">คอร์ส</th>' +
             '<th style="padding:8px 10px;text-align:center;white-space:nowrap;">จำนวน</th>' +
@@ -27988,7 +27994,37 @@ function receiptStatusText(status) {
           await syncOnlineExamScoreToRecords(r);
         }
         renderOnlineExamGradingPage(onlineExamGradePage);
+        safeRun(function() { renderAdminScoreAdjustTable(); renderAdminScoreStatsTable(); }, 'admin-score-refresh-after-publish');
       } catch(e) { alert('ประกาศผลไม่สำเร็จ: ' + (e.message || e)); }
+    }
+
+    function onlineExamGradeToggleAll(checkbox) {
+      var checks = document.querySelectorAll('.onlineExamGradeRowCheck:not(:disabled)');
+      checks.forEach(function(c) { c.checked = checkbox.checked; });
+    }
+
+    async function bulkPublishOnlineExamResults() {
+      if (!hasPermission('admin.onlineExams')) { alert('ไม่มีสิทธิ์'); return; }
+      var checks = document.querySelectorAll('.onlineExamGradeRowCheck:checked:not(:disabled)');
+      if (!checks.length) { alert('กรุณาเลือกรายการที่ต้องการประกาศผลก่อน'); return; }
+      if (!confirm('ประกาศผลสอบ ' + checks.length + ' รายการ?')) return;
+      var docIds = Array.from(checks).map(function(c) { return c.value; });
+      var count = 0;
+      for (var i = 0; i < docIds.length; i++) {
+        try {
+          await db.collection('onlineExamResults').doc(docIds[i]).set(
+            { resultStatus: 'published', publishedAt: firebase.firestore.FieldValue.serverTimestamp() },
+            { merge: true }
+          );
+          var r = onlineExamGradeAllResults.find(function(x) { return x._docId === docIds[i]; });
+          if (r) { r.resultStatus = 'published'; await syncOnlineExamScoreToRecords(r); }
+          count++;
+        } catch(e) { console.warn('bulk publish error', docIds[i], e); }
+      }
+      addActivityLog('ประกาศผลข้อสอบ bulk', count + ' รายการ');
+      renderOnlineExamGradingPage(onlineExamGradePage);
+      safeRun(function() { renderAdminScoreAdjustTable(); renderAdminScoreStatsTable(); }, 'admin-score-refresh-after-bulk-publish');
+      alert('ประกาศผลสำเร็จ ' + count + ' รายการ');
     }
 
     async function syncOnlineExamScoreToRecords(r) {
