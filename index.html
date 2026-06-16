@@ -4443,13 +4443,33 @@
               <div class="form-box">
                 <h3>นำเข้าข้อสอบจาก Excel</h3>
                 <p style="font-size:12px;color:#6b7280;margin-bottom:12px;">
-                  ดาวน์โหลด Template แล้วกรอกข้อสอบ จากนั้นอัปโหลดไฟล์เพื่อเพิ่มเข้าชุดข้อสอบที่เลือก
+                  ดาวน์โหลด Template แล้วกรอกข้อสอบ จากนั้นเลือกชั้นและวิชาเพื่อเพิ่มเข้าชุดข้อสอบของเดือนที่กำลังจัดการ
                 </p>
                 <div class="form-row" style="margin-bottom:10px;">
                   <div>
-                    <label>ชุดข้อสอบที่ต้องการนำเข้า</label>
-                    <select id="onlineExamXlsxCourseSelect" style="width:100%;">
-                      <option value="">-- เลือกชุดข้อสอบ --</option>
+                    <label>ระดับชั้น</label>
+                    <select id="onlineExamXlsxGradeSelect" style="width:100%;">
+                      <option value="ป.4">ป.4</option>
+                      <option value="ป.5" selected>ป.5</option>
+                      <option value="ป.6">ป.6</option>
+                      <option value="ม.1">ม.1</option>
+                      <option value="ม.2">ม.2</option>
+                      <option value="ม.3">ม.3</option>
+                      <option value="ม.4">ม.4</option>
+                      <option value="ม.5">ม.5</option>
+                      <option value="ม.6">ม.6</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label>วิชา</label>
+                    <select id="onlineExamXlsxSubjectSelect" style="width:100%;">
+                      <option value="">-- เลือกวิชา --</option>
+                      <option>วิทยาศาสตร์</option>
+                      <option>คณิตศาสตร์</option>
+                      <option>ภาษาอังกฤษ</option>
+                      <option>ภาษาไทย</option>
+                      <option>สังคมศึกษา</option>
+                      <option>อื่นๆ</option>
                     </select>
                   </div>
                   <div style="align-self:flex-end;">
@@ -27519,7 +27539,7 @@ function receiptStatusText(status) {
     }
 
     function populateOnlineExamCourseSelects() {
-      const selects = ['onlineExamQuestionCourseSelect', 'onlineExamGradeCourseSelect', 'onlineExamAnalysisCourseSelect', 'onlineExamXlsxCourseSelect'];
+      const selects = ['onlineExamQuestionCourseSelect', 'onlineExamGradeCourseSelect', 'onlineExamAnalysisCourseSelect'];
       const onlineExamGradeOrder = ['ป.4', 'ป.5', 'ป.6', 'ม.1', 'ม.2', 'ม.3', 'ม.4', 'ม.5', 'ม.6'];
       const onlineExamSubjectOrder = ['วิทยาศาสตร์', 'คณิตศาสตร์', 'ภาษาอังกฤษ', 'ภาษาไทย', 'สังคมศึกษา', 'อื่นๆ'];
       function onlineExamQuestionCourseSort(a, b) {
@@ -27575,8 +27595,6 @@ function receiptStatusText(status) {
 
     function onOnlineExamQuestionCourseChange() {
       const courseId = (getElement('onlineExamQuestionCourseSelect') || {}).value || '';
-      const xlsxSelect = getElement('onlineExamXlsxCourseSelect');
-      if (xlsxSelect && courseId) xlsxSelect.value = courseId;
       renderOnlineExamSelectedCourseSummary();
       renderOnlineExamQuestionList();
     }
@@ -28093,11 +28111,30 @@ function receiptStatusText(status) {
       // reset file input เพื่อให้ upload ไฟล์เดิมซ้ำได้
       input.value = '';
 
-      const courseId = (getElement('onlineExamXlsxCourseSelect') || {}).value || '';
-      if (!courseId) {
-        if (resultEl) { resultEl.style.color = '#dc2626'; resultEl.textContent = '❌ กรุณาเลือกชุดข้อสอบก่อน'; }
+      const examMonth = getSelectedOnlineExamManageMonth();
+      const selectedGrade = (getElement('onlineExamXlsxGradeSelect') || {}).value || '';
+      const selectedSubject = (getElement('onlineExamXlsxSubjectSelect') || {}).value || '';
+      if (!examMonth) {
+        if (resultEl) { resultEl.style.color = '#dc2626'; resultEl.textContent = '❌ กรุณาเลือกเดือนสอบก่อน'; }
         return;
       }
+      if (!selectedGrade) {
+        if (resultEl) { resultEl.style.color = '#dc2626'; resultEl.textContent = '❌ กรุณาเลือกระดับชั้นก่อน'; }
+        return;
+      }
+      if (!selectedSubject) {
+        if (resultEl) { resultEl.style.color = '#dc2626'; resultEl.textContent = '❌ กรุณาเลือกวิชาก่อน'; }
+        return;
+      }
+      const targetCourse = findOnlineExamCourseByMonthGradeSubject(examMonth, selectedGrade, selectedSubject);
+      if (!targetCourse) {
+        if (resultEl) {
+          resultEl.style.color = '#dc2626';
+          resultEl.textContent = '❌ ไม่พบชุดข้อสอบของ ' + examMonth + ' · ' + selectedGrade + ' · ' + selectedSubject + ' กรุณาสร้างชุดข้อสอบก่อน';
+        }
+        return;
+      }
+      const courseId = targetCourse.firebaseDocId || '';
       if (!hasPermission('admin.onlineExams')) {
         if (resultEl) { resultEl.style.color = '#dc2626'; resultEl.textContent = '❌ ไม่มีสิทธิ์ admin.onlineExams'; }
         return;
@@ -28166,7 +28203,7 @@ function receiptStatusText(status) {
           return;
         }
 
-        const course = onlineExamCourseCache.find(function(c) { return c.firebaseDocId === courseId; });
+        const course = onlineExamCourseCache.find(function(c) { return c.firebaseDocId === courseId; }) || targetCourse;
         const existing = course ? (course.questions || []) : [];
         const merged = existing.concat(newQuestions);
         const totalScore = merged.reduce(function(sum, q) { return sum + (q.score || 1); }, 0);
@@ -28182,6 +28219,7 @@ function receiptStatusText(status) {
 
         if (resultEl) { resultEl.style.color = '#16a34a'; resultEl.textContent = '✅ นำเข้าสำเร็จ ' + newQuestions.length + ' ข้อ (รวมทั้งหมด ' + merged.length + ' ข้อ)'; }
         addActivityLog('Import Excel ข้อสอบ', (course ? course.title : courseId) + ' +' + newQuestions.length + ' ข้อ');
+        setValue('onlineExamQuestionCourseSelect', courseId);
         renderOnlineExamQuestionList();
         renderOnlineExamCourseList();
         renderOnlineExamSelectedCourseSummary();
