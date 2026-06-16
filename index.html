@@ -27159,15 +27159,18 @@ function receiptStatusText(status) {
       const courseId = (getElement('onlineExamQuestionCourseSelect') || {}).value || '';
       if (!courseId) { alert('กรุณาเลือกชั้นและวิชาของชุดข้อสอบก่อน'); return; }
 
-      const text = ((getElement('onlineExamQuestionText') || {}).value || '').trim();
+      const textRich = normalizeOnlineExamRichInput((getElement('onlineExamQuestionText') || {}).value || '');
+      const text = textRich.text;
       if (!text) { alert('กรุณาใส่คำถาม'); return; }
 
-      const choices = [
-        ((getElement('onlineExamChoice0') || {}).value || '').trim(),
-        ((getElement('onlineExamChoice1') || {}).value || '').trim(),
-        ((getElement('onlineExamChoice2') || {}).value || '').trim(),
-        ((getElement('onlineExamChoice3') || {}).value || '').trim()
+      const choiceRichs = [
+        normalizeOnlineExamRichInput((getElement('onlineExamChoice0') || {}).value || ''),
+        normalizeOnlineExamRichInput((getElement('onlineExamChoice1') || {}).value || ''),
+        normalizeOnlineExamRichInput((getElement('onlineExamChoice2') || {}).value || ''),
+        normalizeOnlineExamRichInput((getElement('onlineExamChoice3') || {}).value || '')
       ];
+      const choices = choiceRichs.map(function(item) { return item.text; });
+      const choiceHtmls = choiceRichs.map(function(item) { return item.html || null; });
       if (choices.some(function(c) { return !c; })) { alert('กรุณาใส่ตัวเลือกให้ครบ 4 ข้อ'); return; }
 
       const correctIndex = parseInt((getElement('onlineExamCorrectIndex') || {}).value || '0', 10);
@@ -27194,9 +27197,10 @@ function receiptStatusText(status) {
             const existingQuestion = questions[idx];
             questions[idx] = Object.assign(existingQuestion, {
               text,
-              textHtml: text === (existingQuestion.text || '') ? (existingQuestion.textHtml || null) : null,
+              textHtml: textRich.html || (text === (existingQuestion.text || '') ? (existingQuestion.textHtml || null) : null),
               choices,
               choiceHtmls: choices.map(function(choice, choiceIdx) {
+                if (choiceHtmls[choiceIdx]) return choiceHtmls[choiceIdx];
                 return choice === ((existingQuestion.choices || [])[choiceIdx] || '')
                   ? ((existingQuestion.choiceHtmls || [])[choiceIdx] || null)
                   : null;
@@ -27209,7 +27213,7 @@ function receiptStatusText(status) {
           }
         } else {
           const newQId = 'q_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7);
-          questions.push({ questionId: newQId, text, textHtml: null, choices, choiceHtmls: [null, null, null, null], choiceImages, correctIndex, score, imageUrl: imageUrl || null });
+          questions.push({ questionId: newQId, text, textHtml: textRich.html || null, choices, choiceHtmls, choiceImages, correctIndex, score, imageUrl: imageUrl || null });
         }
 
         const totalScore = questions.reduce(function(sum, q) { return sum + (q.score || 1); }, 0);
@@ -27277,21 +27281,26 @@ function receiptStatusText(status) {
         : { choices: [], choiceImages: [], correctIndex: 0, score: 1 };
       if (!q) return;
       const choices = q.choices || [];
+      const choiceHtmls = q.choiceHtmls || [];
       const choiceImages = q.choiceImages || [];
       const correctIndex = Number(q.correctIndex || 0);
       openEditBubble(isEditing ? 'แก้ไขข้อสอบ' : 'เพิ่มข้อสอบ',
         '<div class="edit-bubble-note" style="margin-bottom:12px;">ชุดข้อสอบ: ' + escapeHtml(course.title || courseId) + '</div>' +
         '<label>คำถาม / โจทย์</label>' +
-        '<textarea id="bubbleOnlineExamQuestionText" rows="3" placeholder="ระบุเนื้อหาโจทย์...">' + escapeHtml(q.text || '') + '</textarea>' +
+        '<div style="display:flex;gap:6px;margin:4px 0 6px;flex-wrap:wrap;">' +
+          '<button class="btn" type="button" onclick="insertOnlineExamRichTag(\'bubbleOnlineExamQuestionText\',\'sup\')" style="font-size:11px;padding:3px 8px;">x²</button>' +
+          '<button class="btn" type="button" onclick="insertOnlineExamRichTag(\'bubbleOnlineExamQuestionText\',\'sub\')" style="font-size:11px;padding:3px 8px;">x₂</button>' +
+        '</div>' +
+        '<textarea id="bubbleOnlineExamQuestionText" rows="3" placeholder="ระบุเนื้อหาโจทย์...">' + escapeHtml(q.textHtml || q.text || '') + '</textarea>' +
         '<label style="margin-top:10px;">URL รูปภาพประกอบ (ถ้ามี)</label>' +
         '<input id="bubbleOnlineExamQuestionImageUrl" type="url" value="' + escapeHtml(q.imageUrl || '') + '" placeholder="วางลิงก์ Google Drive หรือ URL รูปภาพโดยตรง" onblur="this.value=parseDriveImageUrl(this.value)" onpaste="setTimeout(()=>{this.value=parseDriveImageUrl(this.value)},50)">' +
         '<div class="form-row" style="margin-top:10px;">' +
-          '<div><label>ตัวเลือก 1</label><input id="bubbleOnlineExamChoice0" type="text" value="' + escapeHtml(choices[0] || '') + '"><input id="bubbleOnlineExamChoiceImage0" type="url" value="' + escapeHtml(choiceImages[0] || '') + '" placeholder="ลิงก์รูป 1" style="margin-top:4px;font-size:11px;" onblur="this.value=parseDriveImageUrl(this.value)" onpaste="setTimeout(()=>{this.value=parseDriveImageUrl(this.value)},50)"></div>' +
-          '<div><label>ตัวเลือก 2</label><input id="bubbleOnlineExamChoice1" type="text" value="' + escapeHtml(choices[1] || '') + '"><input id="bubbleOnlineExamChoiceImage1" type="url" value="' + escapeHtml(choiceImages[1] || '') + '" placeholder="ลิงก์รูป 2" style="margin-top:4px;font-size:11px;" onblur="this.value=parseDriveImageUrl(this.value)" onpaste="setTimeout(()=>{this.value=parseDriveImageUrl(this.value)},50)"></div>' +
+          '<div><label>ตัวเลือก 1</label><div style="display:flex;gap:4px;margin:3px 0 5px;"><button class="btn" type="button" onclick="insertOnlineExamRichTag(\'bubbleOnlineExamChoice0\',\'sup\')" style="font-size:10px;padding:2px 7px;">x²</button><button class="btn" type="button" onclick="insertOnlineExamRichTag(\'bubbleOnlineExamChoice0\',\'sub\')" style="font-size:10px;padding:2px 7px;">x₂</button></div><input id="bubbleOnlineExamChoice0" type="text" value="' + escapeHtml(choiceHtmls[0] || choices[0] || '') + '"><input id="bubbleOnlineExamChoiceImage0" type="url" value="' + escapeHtml(choiceImages[0] || '') + '" placeholder="ลิงก์รูป 1" style="margin-top:4px;font-size:11px;" onblur="this.value=parseDriveImageUrl(this.value)" onpaste="setTimeout(()=>{this.value=parseDriveImageUrl(this.value)},50)"></div>' +
+          '<div><label>ตัวเลือก 2</label><div style="display:flex;gap:4px;margin:3px 0 5px;"><button class="btn" type="button" onclick="insertOnlineExamRichTag(\'bubbleOnlineExamChoice1\',\'sup\')" style="font-size:10px;padding:2px 7px;">x²</button><button class="btn" type="button" onclick="insertOnlineExamRichTag(\'bubbleOnlineExamChoice1\',\'sub\')" style="font-size:10px;padding:2px 7px;">x₂</button></div><input id="bubbleOnlineExamChoice1" type="text" value="' + escapeHtml(choiceHtmls[1] || choices[1] || '') + '"><input id="bubbleOnlineExamChoiceImage1" type="url" value="' + escapeHtml(choiceImages[1] || '') + '" placeholder="ลิงก์รูป 2" style="margin-top:4px;font-size:11px;" onblur="this.value=parseDriveImageUrl(this.value)" onpaste="setTimeout(()=>{this.value=parseDriveImageUrl(this.value)},50)"></div>' +
         '</div>' +
         '<div class="form-row" style="margin-top:10px;">' +
-          '<div><label>ตัวเลือก 3</label><input id="bubbleOnlineExamChoice2" type="text" value="' + escapeHtml(choices[2] || '') + '"><input id="bubbleOnlineExamChoiceImage2" type="url" value="' + escapeHtml(choiceImages[2] || '') + '" placeholder="ลิงก์รูป 3" style="margin-top:4px;font-size:11px;" onblur="this.value=parseDriveImageUrl(this.value)" onpaste="setTimeout(()=>{this.value=parseDriveImageUrl(this.value)},50)"></div>' +
-          '<div><label>ตัวเลือก 4</label><input id="bubbleOnlineExamChoice3" type="text" value="' + escapeHtml(choices[3] || '') + '"><input id="bubbleOnlineExamChoiceImage3" type="url" value="' + escapeHtml(choiceImages[3] || '') + '" placeholder="ลิงก์รูป 4" style="margin-top:4px;font-size:11px;" onblur="this.value=parseDriveImageUrl(this.value)" onpaste="setTimeout(()=>{this.value=parseDriveImageUrl(this.value)},50)"></div>' +
+          '<div><label>ตัวเลือก 3</label><div style="display:flex;gap:4px;margin:3px 0 5px;"><button class="btn" type="button" onclick="insertOnlineExamRichTag(\'bubbleOnlineExamChoice2\',\'sup\')" style="font-size:10px;padding:2px 7px;">x²</button><button class="btn" type="button" onclick="insertOnlineExamRichTag(\'bubbleOnlineExamChoice2\',\'sub\')" style="font-size:10px;padding:2px 7px;">x₂</button></div><input id="bubbleOnlineExamChoice2" type="text" value="' + escapeHtml(choiceHtmls[2] || choices[2] || '') + '"><input id="bubbleOnlineExamChoiceImage2" type="url" value="' + escapeHtml(choiceImages[2] || '') + '" placeholder="ลิงก์รูป 3" style="margin-top:4px;font-size:11px;" onblur="this.value=parseDriveImageUrl(this.value)" onpaste="setTimeout(()=>{this.value=parseDriveImageUrl(this.value)},50)"></div>' +
+          '<div><label>ตัวเลือก 4</label><div style="display:flex;gap:4px;margin:3px 0 5px;"><button class="btn" type="button" onclick="insertOnlineExamRichTag(\'bubbleOnlineExamChoice3\',\'sup\')" style="font-size:10px;padding:2px 7px;">x²</button><button class="btn" type="button" onclick="insertOnlineExamRichTag(\'bubbleOnlineExamChoice3\',\'sub\')" style="font-size:10px;padding:2px 7px;">x₂</button></div><input id="bubbleOnlineExamChoice3" type="text" value="' + escapeHtml(choiceHtmls[3] || choices[3] || '') + '"><input id="bubbleOnlineExamChoiceImage3" type="url" value="' + escapeHtml(choiceImages[3] || '') + '" placeholder="ลิงก์รูป 4" style="margin-top:4px;font-size:11px;" onblur="this.value=parseDriveImageUrl(this.value)" onpaste="setTimeout(()=>{this.value=parseDriveImageUrl(this.value)},50)"></div>' +
         '</div>' +
         '<div class="form-row" style="margin-top:10px;">' +
           '<div><label>เฉลยข้อที่ถูก</label><select id="bubbleOnlineExamCorrectIndex">' +
@@ -27305,13 +27314,16 @@ function receiptStatusText(status) {
         async function() {
           if (!hasPermission('admin.onlineExams')) { alert('ไม่มีสิทธิ์'); return; }
           if (!firebaseReady || !db) { alert('Firebase ยังไม่พร้อม'); return; }
-          const text = bubbleValue('bubbleOnlineExamQuestionText');
-          const updatedChoices = [
-            bubbleValue('bubbleOnlineExamChoice0'),
-            bubbleValue('bubbleOnlineExamChoice1'),
-            bubbleValue('bubbleOnlineExamChoice2'),
-            bubbleValue('bubbleOnlineExamChoice3')
+          const textRich = normalizeOnlineExamRichInput(bubbleValue('bubbleOnlineExamQuestionText'));
+          const text = textRich.text;
+          const choiceRichs = [
+            normalizeOnlineExamRichInput(bubbleValue('bubbleOnlineExamChoice0')),
+            normalizeOnlineExamRichInput(bubbleValue('bubbleOnlineExamChoice1')),
+            normalizeOnlineExamRichInput(bubbleValue('bubbleOnlineExamChoice2')),
+            normalizeOnlineExamRichInput(bubbleValue('bubbleOnlineExamChoice3'))
           ];
+          const updatedChoices = choiceRichs.map(function(item) { return item.text; });
+          const updatedChoiceHtmls = choiceRichs.map(function(item) { return item.html || null; });
           const resultEl = getElement('editBubbleResult');
           if (!text) {
             if (resultEl) { resultEl.style.color = '#dc2626'; resultEl.textContent = 'กรุณาใส่คำถาม'; }
@@ -27338,9 +27350,10 @@ function receiptStatusText(status) {
             questionId: 'q_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7)
           }, {
             text: text,
-            textHtml: isEditing && text === (questions[idx].text || '') ? (questions[idx].textHtml || null) : null,
+            textHtml: textRich.html || (isEditing && text === (questions[idx].text || '') ? (questions[idx].textHtml || null) : null),
             choices: updatedChoices,
             choiceHtmls: updatedChoices.map(function(choice, choiceIdx) {
+              if (updatedChoiceHtmls[choiceIdx]) return updatedChoiceHtmls[choiceIdx];
               return isEditing && choice === ((questions[idx].choices || [])[choiceIdx] || '')
                 ? ((questions[idx].choiceHtmls || [])[choiceIdx] || null)
                 : null;
@@ -28111,6 +28124,40 @@ function receiptStatusText(status) {
     function onlineExamRichTextHtml(text, richHtml) {
       const sanitized = sanitizeOnlineExamRichHtml(richHtml || '');
       return sanitized || escapeHtml(text || '');
+    }
+
+    function onlineExamRichTextPlainText(html) {
+      if (!html || typeof document === 'undefined') return String(html || '');
+      const template = document.createElement('template');
+      template.innerHTML = String(html).replace(/<br\s*\/?>/gi, '\n');
+      return (template.content.textContent || '').trim();
+    }
+
+    function normalizeOnlineExamRichInput(rawValue) {
+      const raw = String(rawValue || '').trim();
+      const hasRichTags = /<\/?(sup|sub|strong|b|em|i|u|br|span)\b/i.test(raw);
+      if (!hasRichTags) return { text: raw, html: '' };
+      const html = sanitizeOnlineExamRichHtml(raw);
+      return { text: onlineExamRichTextPlainText(html), html: html };
+    }
+
+    function insertOnlineExamRichTag(inputId, tagName) {
+      const el = getElement(inputId);
+      if (!el) return;
+      const tag = tagName === 'sub' ? 'sub' : 'sup';
+      const start = el.selectionStart || 0;
+      const end = el.selectionEnd || start;
+      const selected = el.value.slice(start, end);
+      const open = '<' + tag + '>';
+      const close = '</' + tag + '>';
+      const insert = open + selected + close;
+      el.value = el.value.slice(0, start) + insert + el.value.slice(end);
+      el.focus();
+      if (selected) {
+        el.setSelectionRange(start, start + insert.length);
+      } else {
+        el.setSelectionRange(start + open.length, start + open.length);
+      }
     }
 
     function readOnlineExamXlsxCell(ws, rowIndex, colIndex) {
