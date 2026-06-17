@@ -28216,7 +28216,7 @@ function receiptStatusText(status) {
       return '<div class="exam-print-doc">' +
         '<style>' +
           '.exam-print-doc{width:794px;background:#fff;color:#111827;font-family:Tahoma,Arial,sans-serif;font-size:14px;line-height:1.55;letter-spacing:0;padding:42px 48px;box-sizing:border-box;}' +
-          '.exam-print-doc *{box-sizing:border-box;letter-spacing:0;max-width:100%;overflow-wrap:anywhere;}' +
+          '.exam-print-doc *{box-sizing:border-box;letter-spacing:0;max-width:100%;min-width:0;overflow-wrap:anywhere;}' +
           '.exam-print-header{border-bottom:2px solid #111827;padding-bottom:14px;margin-bottom:16px;page-break-inside:avoid;break-inside:avoid;}' +
           '.exam-print-brand{font-size:12px;font-weight:800;color:#1d4ed8;text-transform:uppercase;margin-bottom:4px;}' +
           '.exam-print-title{font-size:24px;font-weight:800;color:#111827;line-height:1.25;margin:0 0 6px;}' +
@@ -28229,7 +28229,7 @@ function receiptStatusText(status) {
           '.exam-print-question-title{font-size:14px;font-weight:800;color:#1d4ed8;margin-bottom:5px;}' +
           '.exam-print-question-text{font-size:15px;font-weight:600;color:#111827;white-space:pre-wrap;margin-bottom:8px;}' +
           '.exam-print-question-image{display:block;max-height:230px;max-width:100%;object-fit:contain;border:1px solid #d1d5db;margin:8px 0;background:#fff;}' +
-          '.exam-print-choices{display:grid;grid-template-columns:1fr 1fr;gap:8px 18px;margin-top:8px;}' +
+          '.exam-print-choices{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:8px 18px;margin-top:8px;}' +
           '.exam-print-choice{display:grid;grid-template-columns:18px 1fr;gap:7px;align-items:start;min-height:28px;page-break-inside:avoid;break-inside:avoid;}' +
           '.exam-print-choice-mark{width:15px;height:15px;border:1.6px solid #111827;border-radius:50%;margin-top:4px;display:inline-block;}' +
           '.exam-print-choice-label{font-weight:800;color:#111827;}' +
@@ -28269,14 +28269,16 @@ function receiptStatusText(status) {
     async function exportOnlineExamCoursePdf(courseId, btn) {
       const course = (onlineExamCourseCache || []).find(function(c) { return String(c.firebaseDocId || '') === String(courseId || ''); });
       if (!course) { alert('ไม่พบชุดข้อสอบที่ต้องการ Export'); return; }
-      if (!window.html2pdf) {
+      const html2canvasLib = window.html2canvas;
+      const JsPdfClass = window.jspdf && window.jspdf.jsPDF;
+      if (!html2canvasLib || !JsPdfClass) {
         alert('โหลด PDF library ไม่ครบ กรุณารีเฟรชหน้าแล้วลองใหม่');
         return;
       }
       const originalText = btn ? btn.textContent : '';
       if (btn) { btn.disabled = true; btn.textContent = 'กำลังสร้าง...'; }
       const tempDiv = document.createElement('div');
-      tempDiv.style.cssText = 'position:absolute;left:0;top:-10000px;width:794px;background:#fff;z-index:-9999;';
+      tempDiv.style.cssText = 'position:fixed;left:-10000px;top:0;width:794px;background:#fff;z-index:-9999;';
       tempDiv.innerHTML = buildOnlineExamPrintableHtml(course);
       document.body.appendChild(tempDiv);
       try {
@@ -28305,14 +28307,39 @@ function receiptStatusText(status) {
           }, 5000);
         });
         const filename = 'IDEACLUB-Exam-' + getSafeFileName([course.examMonth, getOnlineExamCourseGrade(course), course.subject, course.title].filter(Boolean).join('-')) + '.pdf';
-        await window.html2pdf().set({
-          margin: 0,
-          filename: filename,
-          image: { type: 'jpeg', quality: 0.98 },
-          html2canvas: { scale: 2, useCORS: true, backgroundColor: '#ffffff', windowWidth: 794 },
-          jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
-          pagebreak: { mode: ['css', 'legacy'], avoid: ['.exam-print-question', '.exam-print-choice'] }
-        }).from(tempDiv.querySelector('.exam-print-doc')).save();
+        const target = tempDiv.querySelector('.exam-print-doc');
+        const canvas = await html2canvasLib(target, {
+          scale: 2,
+          useCORS: true,
+          backgroundColor: '#ffffff',
+          width: 794,
+          height: target.scrollHeight,
+          windowWidth: 794,
+          windowHeight: target.scrollHeight
+        });
+        const pdf = new JsPdfClass({ unit: 'mm', format: 'a4', orientation: 'portrait' });
+        const pageWidth = 210;
+        const pageHeight = 297;
+        const pageCanvasHeight = Math.ceil(canvas.width * pageHeight / pageWidth);
+        let sourceY = 0;
+        let pageIndex = 0;
+        while (sourceY < canvas.height) {
+          const remainingHeight = canvas.height - sourceY;
+          if (remainingHeight <= 4) break;
+          const sliceHeight = Math.min(pageCanvasHeight, remainingHeight);
+          const pageCanvas = document.createElement('canvas');
+          pageCanvas.width = canvas.width;
+          pageCanvas.height = sliceHeight;
+          const ctx = pageCanvas.getContext('2d');
+          ctx.fillStyle = '#ffffff';
+          ctx.fillRect(0, 0, pageCanvas.width, pageCanvas.height);
+          ctx.drawImage(canvas, 0, sourceY, canvas.width, sliceHeight, 0, 0, canvas.width, sliceHeight);
+          if (pageIndex > 0) pdf.addPage();
+          pdf.addImage(pageCanvas.toDataURL('image/jpeg', 0.98), 'JPEG', 0, 0, pageWidth, Math.min(pageHeight, sliceHeight * pageWidth / canvas.width));
+          sourceY += sliceHeight;
+          pageIndex += 1;
+        }
+        pdf.save(filename);
       } catch (e) {
         console.error('exportOnlineExamCoursePdf error', e);
         alert('Export PDF ไม่สำเร็จ: ' + (e.message || e));
