@@ -27237,15 +27237,42 @@ function receiptStatusText(status) {
     async function loadOnlineExamCourses() {
       if (!firebaseReady || !db) return;
       try {
-        const snap = await db.collection('onlineExamCourses')
-          .where('deleted', '!=', true)
-          .get()
-          .catch(function() {
-            return db.collection('onlineExamCourses').get();
-          });
-        onlineExamCourseCache = snap.docs
-          .map(function(d) { return Object.assign({ firebaseDocId: d.id }, d.data()); })
-          .filter(function(c) { return !c.deleted; });
+        const buildCourses = function(snap) {
+          return snap.docs
+            .map(function(d) { return Object.assign({ firebaseDocId: d.id }, d.data()); })
+            .filter(function(c) { return !c.deleted; });
+        };
+        if (isCurrentStudentSession()) {
+          const byId = {};
+          const addSnap = function(snap) {
+            buildCourses(snap).forEach(function(c) {
+              if (!c.firebaseDocId) return;
+              if (c.isActive === false || c.status === 'inactive') return;
+              byId[c.firebaseDocId] = c;
+            });
+          };
+          const activeSnap = await db.collection('onlineExamCourses')
+            .where('status', '==', 'active')
+            .get();
+          addSnap(activeSnap);
+          const publishedSnap = await db.collection('onlineExamCourses')
+            .where('publishStatus', '==', 'published')
+            .get()
+            .catch(function(e) {
+              console.warn('loadOnlineExamCourses published query skipped', e);
+              return { docs: [] };
+            });
+          addSnap(publishedSnap);
+          onlineExamCourseCache = Object.keys(byId).map(function(id) { return byId[id]; });
+        } else {
+          const snap = await db.collection('onlineExamCourses')
+            .where('deleted', '!=', true)
+            .get()
+            .catch(function() {
+              return db.collection('onlineExamCourses').get();
+            });
+          onlineExamCourseCache = buildCourses(snap);
+        }
       } catch (e) {
         console.error('loadOnlineExamCourses error', e);
         onlineExamCourseCache = [];
