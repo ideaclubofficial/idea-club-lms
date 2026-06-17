@@ -30867,6 +30867,33 @@ function receiptStatusText(status) {
       return (grade ? grade + ' · ' : '') + name;
     }
 
+    function tfNormalizeCenterText(value) {
+      return String(value || '')
+        .toLowerCase()
+        .replace(/idea\s*club/g, '')
+        .replace(/ศูนย์/g, '')
+        .replace(/[🏬🏫📍]/g, '')
+        .replace(/\s+/g, '')
+        .trim();
+    }
+
+    function tfCenterTextMatches(value, selectedCenter) {
+      const selected = tfNormalizeCenterText(selectedCenter);
+      if (!selected || selected === 'all') return true;
+      const actual = tfNormalizeCenterText(value);
+      if (!actual) return false;
+      return actual === selected || actual.includes(selected) || selected.includes(actual);
+    }
+
+    function tfGetCourseCenterText(course) {
+      if (!course) return '';
+      return course.location || course.center || course.branch || course.courseLocation || course.preferredLocation || '';
+    }
+
+    function tfCourseMatchesCenter(course, selectedCenter) {
+      return tfCenterTextMatches(tfGetCourseCenterText(course), selectedCenter);
+    }
+
     // --- TF helper: get element ---
     function tfEl(id) { return document.getElementById(id); }
 
@@ -31001,7 +31028,7 @@ function receiptStatusText(status) {
         const prevCourse = courseSel.value;
         const filteredCourses = tfGetCourses().filter(function(c) {
           if (!tfCenterFilter || tfCenterFilter === 'all') return true;
-          return String(c.location || '').trim() === tfCenterFilter;
+          return tfCourseMatchesCenter(c, tfCenterFilter);
         });
         courseSel.innerHTML = '<option value="all">คอร์สทั้งหมด</option>' +
           filteredCourses.map(function(c) {
@@ -31097,7 +31124,7 @@ function receiptStatusText(status) {
       const courseId = tfEl('tf-filter-course') ? tfEl('tf-filter-course').value : 'all';
       return scheds.filter(function(s) {
         const centerOk = tfCenterFilter === 'all' ||
-          (s.center && s.center === tfCenterFilter) ||
+          tfCenterTextMatches(s.center || s.courseLocation || '', tfCenterFilter) ||
           (tfCenterFilter === 'nongchang' && s.center && s.center.includes('หนองฉาง')) ||
           (tfCenterFilter === 'nakhonsawan' && s.center && (s.center.includes('นครสวรรค์') || s.center.includes('นครสวรรค')));
         const fmtOk = fmt === 'all' || s.format === fmt;
@@ -31335,19 +31362,40 @@ function receiptStatusText(status) {
       tfRenderCourseSyncSummary(course, slot);
     }
 
+    function tfPopulateSchedCourses(selectedCourseId) {
+      const courseSel = tfEl('tf-sched-course');
+      if (!courseSel) return;
+      const current = selectedCourseId !== undefined ? selectedCourseId : courseSel.value;
+      const selectedCenter = tfEl('tf-sched-center') ? tfEl('tf-sched-center').value : '';
+      const filteredCourses = tfGetCourses().filter(function(c) {
+        return !selectedCenter || tfCourseMatchesCenter(c, selectedCenter);
+      });
+      courseSel.innerHTML = '<option value="">เลือกคอร์ส</option>' +
+        filteredCourses.map(function(c) {
+          const id = tfGetCourseId(c);
+          return '<option value="' + escapeHtml(id) + '">' + escapeHtml(tfCourseOptionLabel(c)) + '</option>';
+        }).join('');
+      courseSel.value = filteredCourses.some(function(c) { return String(tfGetCourseId(c)) === String(current || ''); }) ? current : '';
+    }
+
+    function tfOnScheduleCenterChange() {
+      tfPopulateSchedCourses();
+      if (!((tfEl('tf-sched-course') || {}).value)) {
+        tfRenderCourseSyncSummary(null, null);
+      } else {
+        tfSyncScheduleFormFromCourse();
+      }
+    }
+
     // --- Open schedule modal ---
     function tfOpenScheduleModal(prefillDate) {
       const modal = tfEl('tf-schedule-modal');
       if (!modal) return;
-      // Populate course select
-      const courseSel = tfEl('tf-sched-course');
-      if (courseSel) {
-        courseSel.innerHTML = '<option value="">เลือกคอร์ส</option>' +
-          tfGetCourses().map(function(c) {
-            const id = tfGetCourseId(c);
-            return '<option value="' + escapeHtml(id) + '">' + escapeHtml(tfCourseOptionLabel(c)) + '</option>';
-          }).join('');
+      const centerSelect = tfEl('tf-sched-center');
+      if (centerSelect && tfCenterFilter && tfCenterFilter !== 'all') {
+        centerSelect.value = tfCenterFilter;
       }
+      tfPopulateSchedCourses('');
       // Populate tutor select
       tfPopulateSchedTutors();
       // Pre-fill date
@@ -31632,7 +31680,7 @@ function receiptStatusText(status) {
         <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div>
             <label class="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">สาขา/ศูนย์ *</label>
-            <select id="tf-sched-center" required class="w-full bg-slate-50 border border-slate-300 text-slate-900 rounded-xl p-2.5 font-medium text-sm">
+            <select id="tf-sched-center" onchange="tfOnScheduleCenterChange()" required class="w-full bg-slate-50 border border-slate-300 text-slate-900 rounded-xl p-2.5 font-medium text-sm">
               <option value="IDEA CLUB ศูนย์ หนองฉาง">🏬 ศูนย์หนองฉาง</option>
               <option value="IDEA CLUB ศูนย์ นครสวรรค์">🏫 ศูนย์นครสวรรค์</option>
             </select>
