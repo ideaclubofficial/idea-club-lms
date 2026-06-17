@@ -2894,7 +2894,12 @@
               </div>
 
               <div class="teacher-mobile-card">
-                <h3>รายชื่อนักเรียน</h3>
+                <h3>คอร์สที่มีเรียนวันนี้</h3>
+                <div id="attendanceMobileTodayCourses"></div>
+              </div>
+
+              <div class="teacher-mobile-card">
+                <h3>รายชื่อนักเรียนทั้งหมด</h3>
                 <div id="teacherMobilePickupList" class="teacher-mobile-list"></div>
               </div>
             </div>
@@ -2910,12 +2915,14 @@
                 <div class="stat"><h4>ไม่มา / ยังไม่เช็ค</h4><p id="pickupWaitingCount">0 คน</p></div>
               </div>
 
+              <div id="attendanceTodayCourses" style="margin-top:16px;margin-bottom:8px;"></div>
+
               <br />
 
               <div class="form-row">
                 <div>
                   <label>วันที่เช็คชื่อ</label>
-                  <input id="pickupDate" type="date" value="2026-05-10" />
+                  <input id="pickupDate" type="date" value="2026-05-10" onchange="pickupCurrentPage=1; renderPickupList()" />
                 </div>
                 <div>
                   <label>คอร์ส</label>
@@ -10098,6 +10105,97 @@
       setTeacherMobileText('teacherMobilePickupWaiting', absent + '');
     }
 
+    function renderAttendanceByCourse() {
+      const desktopEl = getElement('attendanceTodayCourses');
+      const mobileEl = getElement('attendanceMobileTodayCourses');
+      if (!desktopEl && !mobileEl) return;
+
+      const teacherCourseNames = getTeacherVisibleCourses().map(function(c) { return c.name; });
+      const todayStudents = pickupList.filter(function(item) {
+        return item.hasClassToday && (!teacherCourseNames.length || teacherCourseNames.includes(item.course) || (currentTeacher && currentTeacher.role === 'Admin'));
+      });
+
+      const courseMap = {};
+      todayStudents.forEach(function(item) {
+        const cn = item.course || 'ไม่ระบุคอร์ส';
+        if (!courseMap[cn]) courseMap[cn] = [];
+        courseMap[cn].push(item);
+      });
+
+      const courseNames = Object.keys(courseMap).sort();
+
+      if (!courseNames.length) {
+        const msg = '<div style="padding:10px 0;color:#6b7280;font-size:13px;">ไม่มีคอร์สที่มีเรียนในวันที่เลือก</div>';
+        if (desktopEl) desktopEl.innerHTML = msg;
+        if (mobileEl) mobileEl.innerHTML = msg;
+        return;
+      }
+
+      function courseSummaryHtml(students) {
+        const present = students.filter(function(s) { return s.status === 'มาเรียน' || s.status === 'ผู้ปกครองมาส่ง' || s.status === 'รถรับส่ง'; }).length;
+        const waiting = students.filter(function(s) { return s.status === 'ยังไม่เช็คชื่อ'; }).length;
+        const absent = students.filter(function(s) { return s.status === 'ไม่มา'; }).length;
+        return students.length + ' คน · มา ' + present + ' · รอ ' + waiting + ' · ไม่มา ' + absent;
+      }
+
+      function pickupBtnsHtml(id) {
+        var sid = jsArg(id);
+        return '<button class="btn btn-green" type="button" onclick="setPickupStatus(\'' + sid + '\', \'มาเรียน\')">มาเรียน</button>' +
+          '<button class="btn btn-green" type="button" onclick="setPickupStatus(\'' + sid + '\', \'รถรับส่ง\')">รถรับส่ง</button>' +
+          '<button class="btn btn-dark" type="button" onclick="setPickupStatus(\'' + sid + '\', \'ผู้ปกครองมาส่ง\')">ผู้ปกครองมาส่ง</button>' +
+          '<button class="btn btn-red" type="button" onclick="setPickupStatus(\'' + sid + '\', \'ไม่มา\')">ไม่มา</button>';
+      }
+
+      if (desktopEl) {
+        desktopEl.innerHTML = '<h3 style="margin:0 0 12px;font-size:15px;color:#1e40af;">คอร์สที่มีเรียนวันนี้</h3>' +
+          courseNames.map(function(cn) {
+            const students = courseMap[cn];
+            const rows = students.map(function(item) {
+              return '<tr>' +
+                '<td class="student-name">' + escapeHtml(item.name) + '</td>' +
+                '<td>' + escapeHtml(item.nickname) + '</td>' +
+                '<td>' + escapeHtml(item.grade) + '</td>' +
+                '<td><span class="' + getPickupStatusClass(item.status) + '">' + escapeHtml(item.status) + '</span></td>' +
+                '<td><div class="pickup-actions-mobile">' + pickupBtnsHtml(item.id) + '</div></td>' +
+              '</tr>';
+            }).join('');
+            return '<div style="border:1px solid #dbeafe;border-radius:12px;margin-bottom:14px;overflow:hidden;">' +
+              '<div style="background:#eff6ff;padding:10px 16px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid #dbeafe;">' +
+                '<strong style="color:#1e40af;font-size:14px;">📚 ' + escapeHtml(cn) + '</strong>' +
+                '<span style="font-size:12px;color:#6b7280;">' + courseSummaryHtml(students) + '</span>' +
+              '</div>' +
+              '<div class="table-wrap" style="margin:0;">' +
+                '<table>' +
+                  '<thead><tr><th>นักเรียน</th><th>ชื่อเล่น</th><th>ระดับชั้น</th><th>สถานะ</th><th>เช็คด่วน</th></tr></thead>' +
+                  '<tbody>' + rows + '</tbody>' +
+                '</table>' +
+              '</div>' +
+            '</div>';
+          }).join('');
+      }
+
+      if (mobileEl) {
+        mobileEl.innerHTML = courseNames.map(function(cn) {
+          const students = courseMap[cn];
+          const cards = students.map(function(item) {
+            return '<div class="teacher-mobile-attendance-card" style="border-left:3px solid #3b82f6;margin-bottom:8px;">' +
+              '<strong>' + escapeHtml(item.name) + '</strong>' +
+              '<div class="teacher-mobile-muted">ชื่อเล่น: ' + escapeHtml(item.nickname) + ' · ระดับชั้น: ' + escapeHtml(item.grade) + '</div>' +
+              '<div class="teacher-mobile-card-row"><span class="' + getPickupStatusClass(item.status) + '">' + escapeHtml(item.status) + '</span></div>' +
+              '<div class="teacher-mobile-quick-grid">' + pickupBtnsHtml(item.id) + '</div>' +
+            '</div>';
+          }).join('');
+          return '<div style="margin-bottom:14px;">' +
+            '<div style="background:#eff6ff;padding:9px 12px;border-radius:10px 10px 0 0;border:1px solid #dbeafe;border-bottom:none;">' +
+              '<strong style="color:#1e40af;font-size:14px;">📚 ' + escapeHtml(cn) + '</strong>' +
+              '<div style="font-size:12px;color:#6b7280;margin-top:2px;">' + courseSummaryHtml(students) + '</div>' +
+            '</div>' +
+            '<div style="border:1px solid #dbeafe;border-radius:0 0 10px 10px;padding:8px;">' + cards + '</div>' +
+          '</div>';
+        }).join('');
+      }
+    }
+
     function renderPickupList() {
       const tbody = getElement('teacherPickupTableBody');
       if (!tbody) return;
@@ -10132,6 +10230,7 @@
 
       updatePickupSummary(filtered);
       renderPickupPagination(filtered.length, totalPages);
+      safeRun(renderAttendanceByCourse, 'attendance-by-course');
       safeRun(renderTeacherMobileAttendance, 'teacher-mobile-attendance');
     }
 
