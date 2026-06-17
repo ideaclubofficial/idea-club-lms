@@ -9531,6 +9531,20 @@
       });
     }
 
+    function isStudentInTeacherCourseList(student, courseList) {
+      if (currentTeacher && currentTeacher.role === 'Admin') return true;
+      const allowedCourses = Array.isArray(courseList) ? courseList : [];
+      if (!student || !allowedCourses.length) return false;
+      const course = getCourseByStudentOrName(student, student.course);
+      const allowedIds = allowedCourses.map(function(c) { return String(c.id || c.firebaseDocId || ''); }).filter(Boolean);
+      if (course) {
+        const courseId = String(course.id || course.firebaseDocId || '');
+        if (courseId && allowedIds.includes(courseId)) return true;
+      }
+      const allowedNames = allowedCourses.map(function(c) { return String(c.name || ''); }).filter(Boolean);
+      return !student.courseId && !!student.course && allowedNames.includes(String(student.course));
+    }
+
     function renderTeacherCourseOptions() {
       const teacherCourses = getTeacherVisibleCourses();
       const selects = ['teacherCourseFilter', 'teacherMobileCourseFilter'];
@@ -9551,9 +9565,9 @@
       if (!tbody) return;
       const courseFilter = getElement('teacherCourseFilter') ? getElement('teacherCourseFilter').value : 'ทั้งหมด';
       const keyword = getElement('teacherStudentSearch') ? getElement('teacherStudentSearch').value.trim().toLowerCase() : '';
-      const teacherCourseNames = getTeacherVisibleCourses().map(function(c) { return c.name; });
+      const teacherCourses = getTeacherVisibleCourses();
       const filtered = students.filter(function(s) {
-        const courseMatchedByTeacher = !teacherCourseNames.length || teacherCourseNames.includes(s.course) || (currentTeacher && (currentTeacher.role === 'Admin'));
+        const courseMatchedByTeacher = isStudentInTeacherCourseList(s, teacherCourses);
         const courseMatched = courseFilter === 'ทั้งหมด' || s.course === courseFilter;
         const text = [s.name, s.nickname, s.phone, s.memberId, s.grade, s.course].join(' ').toLowerCase();
         const keywordMatched = !keyword || text.indexOf(keyword) !== -1;
@@ -9577,11 +9591,11 @@
     }
 
     function changeTeacherStudentsPage(direction) {
-      const teacherCourseNames = getTeacherVisibleCourses().map(function(c) { return c.name; });
+      const teacherCourses = getTeacherVisibleCourses();
       const courseFilter = getElement('teacherCourseFilter') ? getElement('teacherCourseFilter').value : 'ทั้งหมด';
       const keyword = getElement('teacherStudentSearch') ? getElement('teacherStudentSearch').value.trim().toLowerCase() : '';
       const filtered = students.filter(function(s) {
-        const courseMatchedByTeacher = !teacherCourseNames.length || teacherCourseNames.includes(s.course) || (currentTeacher && currentTeacher.role === 'Admin');
+        const courseMatchedByTeacher = isStudentInTeacherCourseList(s, teacherCourses);
         const courseMatched = courseFilter === 'ทั้งหมด' || s.course === courseFilter;
         const text = [s.name, s.nickname, s.phone, s.memberId, s.grade, s.course].join(' ').toLowerCase();
         return courseMatchedByTeacher && courseMatched && (!keyword || text.indexOf(keyword) !== -1);
@@ -9604,9 +9618,9 @@
     function getTeacherFilteredStudentsForMobile() {
       const courseFilter = getElement('teacherCourseFilter') ? getElement('teacherCourseFilter').value : 'ทั้งหมด';
       const keyword = getElement('teacherStudentSearch') ? getElement('teacherStudentSearch').value.trim().toLowerCase() : '';
-      const teacherCourseNames = getTeacherVisibleCourses().map(function(c) { return c.name; });
+      const teacherCourses = getTeacherVisibleCourses();
       return students.filter(function(s) {
-        const courseMatchedByTeacher = !teacherCourseNames.length || teacherCourseNames.includes(s.course) || (currentTeacher && currentTeacher.role === 'Admin');
+        const courseMatchedByTeacher = isStudentInTeacherCourseList(s, teacherCourses);
         const courseMatched = courseFilter === 'ทั้งหมด' || s.course === courseFilter;
         const text = [s.name, s.nickname, s.phone, s.memberId, s.grade, s.course].join(' ').toLowerCase();
         const keywordMatched = !keyword || text.indexOf(keyword) !== -1;
@@ -9888,12 +9902,14 @@
 
     function renderTeacherDashboardSummary() {
       const teacherCourses = getTeacherVisibleCourses();
-      const teacherCourseNames = teacherCourses.map(function(c) { return c.name; });
+      const teacherAttendanceCourses = getTeacherAttendanceCourses();
       const relatedStudents = students.filter(function(s) {
-        return !teacherCourseNames.length || teacherCourseNames.includes(s.course) || (currentTeacher && currentTeacher.role === 'Admin');
+        return isStudentInTeacherCourseList(s, teacherCourses);
       });
       const todayText = getLocalDateString();
-      const todayClassStudents = relatedStudents.filter(function(s) { return isStudentClassOnDate(s, todayText); });
+      const todayClassStudents = students.filter(function(s) {
+        return isStudentInTeacherCourseList(s, teacherAttendanceCourses) && isStudentEligibleForAttendance(s, todayText);
+      });
       const absentCount = todayClassStudents.filter(function(s) { return getStudentAttendanceDisplayStatus(s, todayText) === 'ไม่มา' || getStudentAttendanceDisplayStatus(s, todayText) === 'ยังไม่เช็คชื่อ'; }).length;
       const todayPrivateLessons = getTeacherPrivateLessonSessions().filter(function(session) {
         return getMonthlySessionDate(session) === todayText && !session.lessonCompleted;
@@ -9931,9 +9947,9 @@
     }
 
     function getTeacherRelatedStudentsForMobile(teacherCourses) {
-      const teacherCourseNames = (teacherCourses || getTeacherVisibleCourses()).map(function(c) { return c.name; });
+      const visibleCourses = teacherCourses || getTeacherVisibleCourses();
       return students.filter(function(s) {
-        return !teacherCourseNames.length || teacherCourseNames.includes(s.course) || (currentTeacher && currentTeacher.role === 'Admin');
+        return isStudentInTeacherCourseList(s, visibleCourses);
       });
     }
 
@@ -10029,9 +10045,12 @@
     function updateTeacherMobileHomeFromExistingData() {
       if (!getElement('teacherMobileHome')) return;
       const teacherCourses = getTeacherVisibleCourses();
+      const teacherAttendanceCourses = getTeacherAttendanceCourses();
       const relatedStudents = getTeacherRelatedStudentsForMobile(teacherCourses);
       const todayText = getLocalDateString();
-      const todayClassStudents = relatedStudents.filter(function(s) { return isStudentClassOnDate(s, todayText); });
+      const todayClassStudents = students.filter(function(s) {
+        return isStudentInTeacherCourseList(s, teacherAttendanceCourses) && isStudentEligibleForAttendance(s, todayText);
+      });
       const absentCount = todayClassStudents.filter(function(s) {
         const status = getStudentAttendanceDisplayStatus(s, todayText);
         return status === 'ไม่มา' || status === 'ยังไม่เช็คชื่อ';
@@ -10165,6 +10184,31 @@
       return courseDays.includes(getThaiDayFromDate(dateText));
     }
 
+    function isAttendanceCourseEnabled(course) {
+      return !!(course && courseFeatureEnabled(course, 'attendance'));
+    }
+
+    function getStudentAttendanceCourse(student) {
+      return getCourseByStudentOrName(student, student && student.course);
+    }
+
+    function getTeacherAttendanceCourses() {
+      return getTeacherVisibleCourses().filter(isAttendanceCourseEnabled);
+    }
+
+    function teacherCanAccessAttendanceCourse(course) {
+      if (!course || !isAttendanceCourseEnabled(course)) return false;
+      if (currentTeacher && currentTeacher.role === 'Admin') return true;
+      const allowedIds = getTeacherAttendanceCourses().map(function(c) { return String(c.id || c.firebaseDocId || ''); });
+      const courseId = String(course.id || course.firebaseDocId || '');
+      return !!courseId && allowedIds.includes(courseId);
+    }
+
+    function isStudentEligibleForAttendance(student, dateText) {
+      const course = getStudentAttendanceCourse(student);
+      return !!(course && isAttendanceCourseEnabled(course) && isStudentClassOnDate(student, dateText));
+    }
+
     function getStudentAttendanceDisplayStatus(student, dateText) {
       const targetDate = dateText || getPickupDateValue();
       if (!isStudentClassOnDate(student, targetDate)) return 'ไม่มีเรียน';
@@ -10176,15 +10220,16 @@
       const selectedDate = getPickupDateValue();
       pickupList.length = 0;
       students.forEach(function(student, index) {
-        const hasClassToday = isStudentClassOnDate(student, selectedDate);
-        const course = getCourseByStudentOrName(student, student.course);
+        const course = getStudentAttendanceCourse(student);
+        const hasClassToday = isStudentEligibleForAttendance(student, selectedDate);
         const isOnsite = isOnsiteCourse(course);
         pickupList.push({
           id: student.id || index + 1,
+          courseId: course ? String(course.id || course.firebaseDocId || '') : '',
           name: student.name || '-',
           nickname: student.nickname || '-',
           grade: student.grade || '-',
-          course: student.course || '-',
+          course: course ? (course.name || student.course || '-') : (student.course || '-'),
           hasClassToday: hasClassToday,
           isOnsite: isOnsite,
           pickupDate: selectedDate,
@@ -10197,10 +10242,11 @@
       syncPickupListFromStudents();
       const grade = getElement('pickupGradeFilter') ? getElement('pickupGradeFilter').value : 'ทั้งหมด';
       const status = getElement('pickupStatusFilter') ? getElement('pickupStatusFilter').value : 'ทั้งหมด';
-      const teacherCourseNames = getTeacherVisibleCourses().map(function(c) { return c.name; });
+      const teacherCourses = getTeacherAttendanceCourses();
+      const teacherCourseIds = teacherCourses.map(function(c) { return String(c.id || c.firebaseDocId || ''); });
       return pickupList.filter(function(item) {
         if (!item.isOnsite || !item.hasClassToday) return false;
-        const teacherMatched = !teacherCourseNames.length || teacherCourseNames.includes(item.course) || (currentTeacher && currentTeacher.role === 'Admin');
+        const teacherMatched = (currentTeacher && currentTeacher.role === 'Admin') || (!!item.courseId && teacherCourseIds.includes(String(item.courseId)));
         const gradeMatched = grade === 'ทั้งหมด' || item.grade === grade;
         const statusMatched = status === 'ทั้งหมด' || item.status === status;
         return teacherMatched && gradeMatched && statusMatched;
@@ -10302,9 +10348,11 @@
       const mobileEl = getElement('attendanceMobileTodayCourses');
       if (!desktopEl && !mobileEl) return;
 
-      const teacherCourseNames = getTeacherVisibleCourses().map(function(c) { return c.name; });
+      syncPickupListFromStudents();
+      const teacherCourses = getTeacherAttendanceCourses();
+      const teacherCourseIds = teacherCourses.map(function(c) { return String(c.id || c.firebaseDocId || ''); });
       const todayStudents = pickupList.filter(function(item) {
-        return item.hasClassToday && (!teacherCourseNames.length || teacherCourseNames.includes(item.course) || (currentTeacher && currentTeacher.role === 'Admin'));
+        return item.hasClassToday && ((currentTeacher && currentTeacher.role === 'Admin') || (!!item.courseId && teacherCourseIds.includes(String(item.courseId))));
       });
 
       const courseMap = {};
@@ -10462,6 +10510,16 @@
         if (result) {
           result.textContent = (student.name || '-') + ' ไม่มีเรียนในวันที่เลือก จึงไม่ต้องเช็คชื่อ';
           result.style.color = '#6b7280';
+        }
+        renderPickupList();
+        return;
+      }
+
+      const attendanceCourse = student ? getStudentAttendanceCourse(student) : null;
+      if (student && !teacherCanAccessAttendanceCourse(attendanceCourse)) {
+        if (result) {
+          result.textContent = (student.name || '-') + ' ไม่มีสิทธิ์เช็คชื่อในคอร์สนี้';
+          result.style.color = '#dc2626';
         }
         renderPickupList();
         return;
