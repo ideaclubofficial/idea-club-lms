@@ -30769,17 +30769,29 @@ function receiptStatusText(status) {
         id: s.id || s.firebaseDocId || '',
         courseId: s.courseId || '',
         tutorId: s.teacherId || '',
-        format: s.type || 'onsite',
-        center: s.center || '',
-        date: s.date || s.sessionDate || '',
-        start: s.timeStart || s.sessionTime || '',
-        end: s.timeEnd || '',
+        format: s.type || s.format || 'onsite',
+        center: s.center || s.courseLocation || '',
+        date: tfGetSessionDateText(s),
+        start: tfGetSessionStartText(s),
+        end: tfGetSessionEndText(s),
         location: s.location || s.roomName || '',
         notes: s.notes || '',
         completed: s.status === 'done' || s.status === 'completed',
         report: s.teacherReport || s.report || '',
         status: s.status || 'draft'
       };
+    }
+
+    function tfGetSessionDateText(session) {
+      return String((session && (session.date || session.sessionDate)) || '').trim();
+    }
+
+    function tfGetSessionStartText(session) {
+      return String((session && (session.timeStart || session.start || session.sessionTime)) || '').trim();
+    }
+
+    function tfGetSessionEndText(session) {
+      return String((session && (session.timeEnd || session.end)) || '').trim();
     }
 
     // --- Data bridge: map TF schedule back to Firebase session ---
@@ -30821,7 +30833,7 @@ function receiptStatusText(status) {
       const m = tfCalDate.getMonth();
       const monthKey = y + '-' + String(m + 1).padStart(2, '0');
       return (monthlyPlanSessions || []).filter(function(s) {
-        const d = s.date || s.sessionDate || '';
+        const d = tfGetSessionDateText(s);
         return d.startsWith(monthKey) && s.deleted !== true && s.status !== 'cancelled';
       }).map(tfSessionToSched);
     }
@@ -31134,6 +31146,30 @@ function receiptStatusText(status) {
       });
     }
 
+    function tfScheduleMatchesCurrentFilters(s) {
+      const fmt = tfEl('tf-filter-format') ? tfEl('tf-filter-format').value : 'all';
+      const tutId = tfEl('tf-filter-tutor') ? tfEl('tf-filter-tutor').value : 'all';
+      const courseId = tfEl('tf-filter-course') ? tfEl('tf-filter-course').value : 'all';
+      const centerOk = tfCenterFilter === 'all' || tfCenterTextMatches(s.center || s.courseLocation || '', tfCenterFilter);
+      const fmtOk = fmt === 'all' || s.format === fmt || s.type === fmt;
+      const tutOk = tutId === 'all' || s.tutorId === tutId || s.teacherId === tutId;
+      const courseOk = courseId === 'all' || String(s.courseId || '') === String(courseId);
+      return centerOk && fmtOk && tutOk && courseOk;
+    }
+
+    function tfClearScheduleFiltersWithoutRender() {
+      const fmt = tfEl('tf-filter-format');
+      const tut = tfEl('tf-filter-tutor');
+      const course = tfEl('tf-filter-course');
+      const center = tfEl('tf-filter-center');
+      if (fmt) fmt.value = 'all';
+      if (tut) tut.value = 'all';
+      if (course) course.value = 'all';
+      if (center) center.value = 'all';
+      tfCenterFilter = 'all';
+      tfPopulateFilters();
+    }
+
     // --- Render schedule (grid or list) ---
     function tfRenderSchedule() {
       if (tfCurrentView === 'grid') tfRenderGrid();
@@ -31157,31 +31193,29 @@ function receiptStatusText(status) {
       let html = '';
       for (let i = 0; i < firstDay; i++) {
         const day = prevDays - firstDay + 1 + i;
-        html += '<div class="min-h-16 p-1 rounded-lg bg-slate-50/50 text-slate-300">' +
+        html += '<div class="min-h-28 p-1 rounded-lg bg-slate-50/50 text-slate-300">' +
           '<span class="text-xs font-bold block text-right p-1">' + day + '</span></div>';
       }
       for (let d = 1; d <= totalDays; d++) {
         const dateStr = year + '-' + String(month + 1).padStart(2, '0') + '-' + String(d).padStart(2, '0');
-        const dayScheds = scheds.filter(function(s) { return s.date === dateStr; });
+        const dayScheds = scheds.filter(function(s) { return tfGetSessionDateText(s) === dateStr; });
         const isToday = dateStr === todayStr;
         const isSun = new Date(year, month, d).getDay() === 0;
         const isSat = new Date(year, month, d).getDay() === 6;
         const dayClass = isToday ? 'border-indigo-400 bg-indigo-50' : 'border-slate-200 bg-white hover:bg-slate-50';
-        html += '<div onclick="tfShowDayDetail(\'' + dateStr + '\')" class="min-h-16 p-1.5 rounded-lg border ' + dayClass + ' cursor-pointer transition-colors">' +
+        html += '<div onclick="tfShowDayDetail(\'' + dateStr + '\')" class="min-h-28 p-1.5 rounded-lg border ' + dayClass + ' cursor-pointer transition-colors flex flex-col overflow-hidden">' +
           '<span class="text-xs font-bold block text-right p-0.5 ' + (isToday ? 'text-indigo-600 bg-indigo-100 rounded-full w-5 h-5 flex items-center justify-center ml-auto' : isSun ? 'text-rose-500' : isSat ? 'text-indigo-600' : 'text-slate-600') + '">' + d + '</span>' +
-          '<div class="space-y-0.5 mt-0.5">';
-        dayScheds.slice(0, 3).forEach(function(s) {
+          '<div class="space-y-0.5 mt-0.5 flex-1 overflow-y-auto pr-0.5">';
+        dayScheds.sort(function(a, b) { return tfGetSessionStartText(a).localeCompare(tfGetSessionStartText(b)); }).forEach(function(s) {
           const colorCls = TF_FORMAT_COLORS[s.format] || 'bg-slate-100 text-slate-700';
-          const tname = tfGetTutorName(s.tutorId);
-          html += '<div class="' + colorCls + ' text-xs rounded px-1 py-0.5 truncate font-medium leading-tight">' +
-            escapeHtml((s.start || '') + ' ' + (tfGetCourseName(s.courseId) || '').slice(0, 10)) + '</div>';
+          html += '<div class="' + colorCls + ' text-[10px] rounded px-1 py-0.5 font-medium leading-tight whitespace-normal break-words">' +
+            escapeHtml((tfGetSessionStartText(s) || '') + ' ' + (tfGetCourseName(s.courseId) || '')) + '</div>';
         });
-        if (dayScheds.length > 3) html += '<div class="text-xs text-slate-400 font-bold">+' + (dayScheds.length - 3) + ' คาบ</div>';
         html += '</div></div>';
       }
       const remaining = (7 - (firstDay + totalDays) % 7) % 7;
       for (let i = 1; i <= remaining; i++) {
-        html += '<div class="min-h-16 p-1 rounded-lg bg-slate-50/50 text-slate-300"><span class="text-xs font-bold block text-right p-1">' + i + '</span></div>';
+        html += '<div class="min-h-28 p-1 rounded-lg bg-slate-50/50 text-slate-300"><span class="text-xs font-bold block text-right p-1">' + i + '</span></div>';
       }
       grid.innerHTML = html;
     }
@@ -31190,14 +31224,18 @@ function receiptStatusText(status) {
     function tfRenderList() {
       const container = tfEl('tf-list-view');
       if (!container) return;
-      const scheds = tfGetFiltered().sort(function(a, b) { return a.date.localeCompare(b.date) || a.start.localeCompare(b.start); });
+      const scheds = tfGetFiltered().sort(function(a, b) { return tfGetSessionDateText(a).localeCompare(tfGetSessionDateText(b)) || tfGetSessionStartText(a).localeCompare(tfGetSessionStartText(b)); });
       if (!scheds.length) {
         container.innerHTML = '<div class="text-center py-12 text-slate-400"><i data-lucide="calendar-x" class="w-12 h-12 mx-auto mb-3 opacity-30"></i><p class="text-sm font-medium">ไม่มีตารางสอนในช่วงที่เลือก</p></div>';
         if (typeof lucide !== 'undefined') lucide.createIcons();
         return;
       }
       const groups = {};
-      scheds.forEach(function(s) { (groups[s.date] = groups[s.date] || []).push(s); });
+      scheds.forEach(function(s) {
+        const dateKey = tfGetSessionDateText(s);
+        if (!dateKey) return;
+        (groups[dateKey] = groups[dateKey] || []).push(s);
+      });
       container.innerHTML = Object.keys(groups).sort().map(function(date) {
         const d = new Date(date + 'T00:00:00');
         const dayNames = ['อาทิตย์','จันทร์','อังคาร','พุธ','พฤหัสบดี','ศุกร์','เสาร์'];
@@ -31208,7 +31246,7 @@ function receiptStatusText(status) {
             '<span class="' + colorCls + ' text-xs font-bold px-2 py-1 rounded-lg flex-shrink-0 mt-0.5">' + escapeHtml(TF_FORMAT_LABELS[s.format] || s.format) + '</span>' +
             '<div class="min-w-0">' +
             '<p class="font-semibold text-sm text-slate-900">' + escapeHtml(tfGetCourseName(s.courseId)) + '</p>' +
-            '<p class="text-xs text-slate-500">' + escapeHtml((s.start || '') + ' – ' + (s.end || '') + ' · ' + tfGetTutorName(s.tutorId)) + '</p>' +
+            '<p class="text-xs text-slate-500">' + escapeHtml((tfGetSessionStartText(s) || '') + ' – ' + (tfGetSessionEndText(s) || '') + ' · ' + tfGetTutorName(s.tutorId)) + '</p>' +
             (s.center ? '<p class="text-xs text-slate-400">' + escapeHtml(s.center) + '</p>' : '') + '</div>' +
             '<div class="ml-auto flex-shrink-0">' + (s.completed ? '<span class="text-xs font-bold text-emerald-600 bg-emerald-50 px-2 py-1 rounded-lg">✓ สอนแล้ว</span>' : '<span class="text-xs text-slate-400">รอสอน</span>') + '</div></div>';
         }).join('');
@@ -31227,11 +31265,11 @@ function receiptStatusText(status) {
       const dayNames = ['อาทิตย์','จันทร์','อังคาร','พุธ','พฤหัสบดี','ศุกร์','เสาร์'];
       if (label) label.textContent = 'วัน' + dayNames[d.getDay()] + ' ที่ ' + d.getDate() + ' ' + TF_MONTH_NAMES[d.getMonth()] + ' ' + (d.getFullYear() + 543);
 
-      const all = tfGetMonthSchedules().filter(function(s) { return s.date === dateStr; });
+      const all = tfGetMonthSchedules().filter(function(s) { return tfGetSessionDateText(s) === dateStr; });
       if (!all.length) {
         content.innerHTML = '<p class="text-xs text-slate-400 text-center py-4">ไม่มีคาบเรียนวันนี้ <button onclick="tfOpenScheduleModal(\'' + dateStr + '\')" class="text-indigo-300 hover:text-indigo-200 font-bold underline bg-transparent border-0 cursor-pointer ml-1">+ เพิ่มคาบ</button></p>';
       } else {
-        content.innerHTML = all.sort(function(a, b) { return a.start.localeCompare(b.start); }).map(function(s) {
+        content.innerHTML = all.sort(function(a, b) { return tfGetSessionStartText(a).localeCompare(tfGetSessionStartText(b)); }).map(function(s) {
           const colorCls = TF_FORMAT_COLORS[s.format] || 'bg-slate-600';
           const sessionId = s.id;
           return '<div class="bg-slate-800 rounded-xl p-3 space-y-1.5">' +
@@ -31239,7 +31277,7 @@ function receiptStatusText(status) {
             '<div><span class="' + colorCls + ' text-xs font-bold px-2 py-0.5 rounded-md">' + escapeHtml(TF_FORMAT_LABELS[s.format] || s.format) + '</span></div>' +
             '<button onclick="tfDeleteSession(\'' + sessionId + '\')" class="text-slate-400 hover:text-rose-400 text-xs cursor-pointer bg-transparent border-0">ลบ</button></div>' +
             '<p class="font-bold text-sm">' + escapeHtml(tfGetCourseName(s.courseId)) + '</p>' +
-            '<p class="text-xs text-slate-400">' + escapeHtml((s.start || '') + ' – ' + (s.end || '')) + ' · ' + escapeHtml(tfGetTutorName(s.tutorId)) + '</p>' +
+            '<p class="text-xs text-slate-400">' + escapeHtml((tfGetSessionStartText(s) || '') + ' – ' + (tfGetSessionEndText(s) || '')) + ' · ' + escapeHtml(tfGetTutorName(s.tutorId)) + '</p>' +
             (s.center ? '<p class="text-xs text-slate-400">📍 ' + escapeHtml(s.center) + '</p>' : '') +
             (s.location ? '<p class="text-xs text-slate-400">🚪 ' + escapeHtml(s.location) + '</p>' : '') +
             (s.notes ? '<p class="text-xs text-slate-500 italic">' + escapeHtml(s.notes) + '</p>' : '') +
@@ -31525,6 +31563,9 @@ function receiptStatusText(status) {
           monthlyPlanSessions.push(session);
         }
         tfCloseScheduleModal();
+        if (!tfScheduleMatchesCurrentFilters(tfSessionToSched(session))) {
+          tfClearScheduleFiltersWithoutRender();
+        }
         tfRenderSchedule();
         tfToast('บันทึกตารางสอนสำเร็จ', 'success');
         safeRun(renderStudentMonthlyPlanSummary, 'student-plan-summary-refresh');
@@ -31603,13 +31644,15 @@ function receiptStatusText(status) {
       const y = tfCalDate.getFullYear();
       const m = tfCalDate.getMonth();
       const monthKey = y + '-' + String(m + 1).padStart(2, '0');
-      const thisMonth = myScheds.filter(function(s) { return (s.date || s.sessionDate || '').startsWith(monthKey); });
+      const thisMonth = myScheds.filter(function(s) { return tfGetSessionDateText(s).startsWith(monthKey); });
       const done = thisMonth.filter(function(s) { return s.status === 'done' || s.status === 'completed'; }).length;
       let hours = 0;
       myScheds.forEach(function(s) {
-        if (!s.timeStart || !s.timeEnd) return;
-        const [sh, sm] = s.timeStart.split(':').map(Number);
-        const [eh, em] = s.timeEnd.split(':').map(Number);
+        const startText = tfGetSessionStartText(s);
+        const endText = tfGetSessionEndText(s);
+        if (!startText || !endText) return;
+        const [sh, sm] = startText.split(':').map(Number);
+        const [eh, em] = endText.split(':').map(Number);
         hours += ((eh * 60 + em) - (sh * 60 + sm)) / 60;
       });
       const set = function(id, v) { const e = tfEl(id); if (e) e.textContent = v; };
@@ -31630,7 +31673,7 @@ function receiptStatusText(status) {
       const monthKey = year + '-' + String(month + 1).padStart(2, '0');
       const myScheds = (monthlyPlanSessions || []).filter(function(s) {
         return (s.teacherId || '') === tfActiveTutorId && !s.deleted && s.status !== 'cancelled' &&
-          (s.date || s.sessionDate || '').startsWith(monthKey);
+          tfGetSessionDateText(s).startsWith(monthKey);
       });
       const today = new Date();
       const todayStr = today.getFullYear() + '-' + String(today.getMonth() + 1).padStart(2, '0') + '-' + String(today.getDate()).padStart(2, '0');
@@ -31641,15 +31684,14 @@ function receiptStatusText(status) {
       }
       for (let d = 1; d <= totalDays; d++) {
         const dateStr = year + '-' + String(month + 1).padStart(2, '0') + '-' + String(d).padStart(2, '0');
-        const daySch = myScheds.filter(function(s) { return (s.date || s.sessionDate || '') === dateStr; });
+        const daySch = myScheds.filter(function(s) { return tfGetSessionDateText(s) === dateStr; });
         const isToday = dateStr === todayStr;
         html += '<div onclick="tfPortalSelectDay(\'' + dateStr + '\')" class="min-h-12 p-1.5 rounded-lg border ' + (isToday ? 'border-indigo-400 bg-indigo-50' : 'border-slate-200 bg-white hover:bg-slate-50') + ' cursor-pointer transition-colors">' +
           '<span class="text-xs font-bold block text-right mb-0.5 ' + (isToday ? 'text-indigo-600' : 'text-slate-600') + '">' + d + '</span>';
-        daySch.slice(0, 2).forEach(function(s) {
+        daySch.sort(function(a, b) { return tfGetSessionStartText(a).localeCompare(tfGetSessionStartText(b)); }).forEach(function(s) {
           const colorCls = TF_FORMAT_COLORS[s.type] || 'bg-indigo-100 text-indigo-800';
-          html += '<div class="' + colorCls + ' text-xs rounded px-1 py-0.5 truncate font-medium leading-tight">' + escapeHtml(s.timeStart || '') + '</div>';
+          html += '<div class="' + colorCls + ' text-[10px] rounded px-1 py-0.5 font-medium leading-tight whitespace-normal break-words">' + escapeHtml(tfGetSessionStartText(s) || '') + '</div>';
         });
-        if (daySch.length > 2) html += '<div class="text-xs text-slate-400">+' + (daySch.length - 2) + '</div>';
         html += '</div>';
       }
       const rem = (7 - (firstDay + totalDays) % 7) % 7;
@@ -31666,8 +31708,8 @@ function receiptStatusText(status) {
       const monthKey = tfCalDate.getFullYear() + '-' + String(tfCalDate.getMonth() + 1).padStart(2, '0');
       const daySch = (monthlyPlanSessions || []).filter(function(s) {
         return (s.teacherId || '') === tfActiveTutorId && !s.deleted && s.status !== 'cancelled' &&
-          (s.date || s.sessionDate || '') === dateStr;
-      }).sort(function(a, b) { return (a.timeStart || '').localeCompare(b.timeStart || ''); });
+          tfGetSessionDateText(s) === dateStr;
+      }).sort(function(a, b) { return tfGetSessionStartText(a).localeCompare(tfGetSessionStartText(b)); });
       if (!daySch.length) {
         info.innerHTML = '<div class="p-4 bg-slate-50 rounded-xl border border-slate-200 text-center py-6 text-slate-400"><p class="text-xs">ไม่มีคาบเรียนในวันที่เลือก</p></div>';
         return;
@@ -31685,7 +31727,7 @@ function receiptStatusText(status) {
             (sched.completed ? '<span class="text-xs font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-md">✓ สอนแล้ว</span>' : '<button onclick="tfMarkDone(\'' + sessionId + '\')" class="text-xs text-emerald-600 hover:text-emerald-700 font-bold cursor-pointer bg-transparent border-0">✓ มาร์กสอนแล้ว</button>') +
             '</div>' +
             '<p class="font-bold text-sm">' + escapeHtml(tfGetCourseName(s.courseId)) + '</p>' +
-            '<p class="text-xs text-slate-500">' + escapeHtml((s.timeStart || '') + ' – ' + (s.timeEnd || '')) + '</p>' +
+            '<p class="text-xs text-slate-500">' + escapeHtml((tfGetSessionStartText(s) || '') + ' – ' + (tfGetSessionEndText(s) || '')) + '</p>' +
             (s.location || s.roomName ? '<p class="text-xs text-slate-400">📍 ' + escapeHtml(s.location || s.roomName || '') + '</p>' : '') +
             (s.notes ? '<p class="text-xs text-slate-400 italic">' + escapeHtml(s.notes) + '</p>' : '') +
             (sched.completed && sched.report ? '<div class="bg-emerald-50 p-2 rounded-lg"><p class="text-xs font-bold text-emerald-700 mb-1">บันทึกผลการสอน:</p><p class="text-xs text-emerald-600">' + escapeHtml(sched.report) + '</p></div>' : '') +
