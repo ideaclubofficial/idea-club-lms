@@ -28010,6 +28010,7 @@ function receiptStatusText(status) {
           '<td style="' + nowrapCellStyle + 'font-size:11px;color:#475569;">' + schedule + '</td>' +
           '<td style="' + nowrapCellStyle + '">' +
             '<button class="btn btn-green" onclick="openOnlineExamCourseForQuestions(\'' + courseId + '\')" style="font-size:11px;padding:4px 8px;">เลือก</button> ' +
+            '<button class="btn btn-dark" onclick="exportOnlineExamCoursePdf(\'' + courseId + '\', this)" style="font-size:11px;padding:4px 8px;">PDF</button> ' +
             '<button class="btn btn-blue" onclick="editOnlineExamCourse(\'' + courseId + '\')" style="font-size:11px;padding:4px 8px;">แก้ไข</button> ' +
             '<button class="btn btn-red" onclick="deleteOnlineExamCourse(\'' + courseId + '\')" style="font-size:11px;padding:4px 8px;">ลบ</button>' +
           '</td>' +
@@ -28121,6 +28122,7 @@ function receiptStatusText(status) {
           '</div>' +
           '<div style="display:flex;gap:8px;flex-wrap:wrap;">' +
             '<button class="btn btn-green" type="button" onclick="openAddOnlineExamQuestionBubble()">➕ เพิ่มข้อสอบ</button>' +
+            '<button class="btn btn-blue" type="button" onclick="exportOnlineExamCoursePdf(\'' + jsArg(courseId) + '\', this)">Export PDF</button>' +
             '<button class="btn btn-dark" type="button" onclick="editOnlineExamCourse(\'' + jsArg(courseId) + '\')">แก้ไขชุด</button>' +
           '</div>' +
         '</div>';
@@ -28166,6 +28168,156 @@ function receiptStatusText(status) {
           choicesList +
         '</div>';
       }).join('');
+    }
+
+    function buildOnlineExamPrintableHtml(course) {
+      const questions = (course && course.questions) ? course.questions : [];
+      const grade = getOnlineExamCourseGrade(course) || '-';
+      const subject = course.subject || '-';
+      const examMonth = course.examMonth || '-';
+      const duration = course.durationMinutes || 15;
+      const title = course.title || 'ชุดข้อสอบ';
+      const metaText = [examMonth, grade, subject, questions.length + ' ข้อ', duration + ' นาที'].join(' · ');
+      const generatedText = new Date().toLocaleDateString('th-TH', { year: 'numeric', month: 'long', day: 'numeric' });
+
+      const questionHtml = questions.map(function(q, idx) {
+        const questionImageHtml = q.imageUrl
+          ? '<img class="exam-print-question-image" src="' + escapeHtml(parseDriveImageUrl(q.imageUrl)) + '" crossorigin="anonymous" onerror="this.style.display=\'none\'" alt="รูปประกอบข้อ ' + (idx + 1) + '">'
+          : '';
+        const choiceHtml = (q.choices || []).map(function(ch, ci) {
+          const choiceImage = (q.choiceImages || [])[ci];
+          const choiceImageHtml = choiceImage
+            ? '<img class="exam-print-choice-image" src="' + escapeHtml(parseDriveImageUrl(choiceImage)) + '" crossorigin="anonymous" onerror="this.style.display=\'none\'" alt="รูปตัวเลือก ' + onlineExamChoiceLabel(ci) + '">'
+            : '';
+          return '<div class="exam-print-choice">' +
+            '<span class="exam-print-choice-mark"></span>' +
+            '<div class="exam-print-choice-body">' +
+              '<span class="exam-print-choice-label">' + onlineExamChoiceLabel(ci) + '</span> ' +
+              '<span>' + onlineExamRichTextHtml(ch, (q.choiceHtmls || [])[ci]) + '</span>' +
+              choiceImageHtml +
+            '</div>' +
+          '</div>';
+        }).join('');
+        return '<section class="exam-print-question">' +
+          '<div class="exam-print-question-title">ข้อ ' + (idx + 1) + '</div>' +
+          '<div class="exam-print-question-text">' + onlineExamRichTextHtml(q.text || '', q.textHtml) + '</div>' +
+          questionImageHtml +
+          '<div class="exam-print-choices">' + choiceHtml + '</div>' +
+        '</section>';
+      }).join('');
+
+      const answerCells = questions.map(function(q, idx) {
+        const answer = q.correctIndex !== undefined && q.correctIndex !== null ? onlineExamChoiceLabel(q.correctIndex).replace('.', '') : '-';
+        return '<div class="exam-print-answer-cell"><strong>' + (idx + 1) + '</strong><span>' + escapeHtml(answer) + '</span></div>';
+      }).join('');
+
+      return '<div class="exam-print-doc">' +
+        '<style>' +
+          '.exam-print-doc{width:794px;background:#fff;color:#111827;font-family:Tahoma,Arial,sans-serif;font-size:14px;line-height:1.55;letter-spacing:0;padding:42px 48px;box-sizing:border-box;}' +
+          '.exam-print-doc *{box-sizing:border-box;letter-spacing:0;max-width:100%;overflow-wrap:anywhere;}' +
+          '.exam-print-header{border-bottom:2px solid #111827;padding-bottom:14px;margin-bottom:16px;page-break-inside:avoid;break-inside:avoid;}' +
+          '.exam-print-brand{font-size:12px;font-weight:800;color:#1d4ed8;text-transform:uppercase;margin-bottom:4px;}' +
+          '.exam-print-title{font-size:24px;font-weight:800;color:#111827;line-height:1.25;margin:0 0 6px;}' +
+          '.exam-print-meta{font-size:13px;color:#475569;}' +
+          '.exam-print-student-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px 18px;border:1px solid #cbd5e1;padding:10px 12px;margin:12px 0 18px;page-break-inside:avoid;break-inside:avoid;}' +
+          '.exam-print-line{display:grid;grid-template-columns:auto 1fr;gap:8px;align-items:end;font-size:13px;color:#374151;}' +
+          '.exam-print-line span{border-bottom:1px dotted #94a3b8;min-height:22px;}' +
+          '.exam-print-instruction{background:#f8fafc;border:1px solid #e2e8f0;padding:10px 12px;margin-bottom:16px;font-size:13px;color:#334155;page-break-inside:avoid;break-inside:avoid;}' +
+          '.exam-print-question{padding:13px 0 15px;border-bottom:1px solid #e5e7eb;page-break-inside:avoid;break-inside:avoid;}' +
+          '.exam-print-question-title{font-size:14px;font-weight:800;color:#1d4ed8;margin-bottom:5px;}' +
+          '.exam-print-question-text{font-size:15px;font-weight:600;color:#111827;white-space:pre-wrap;margin-bottom:8px;}' +
+          '.exam-print-question-image{display:block;max-height:230px;max-width:100%;object-fit:contain;border:1px solid #d1d5db;margin:8px 0;background:#fff;}' +
+          '.exam-print-choices{display:grid;grid-template-columns:1fr 1fr;gap:8px 18px;margin-top:8px;}' +
+          '.exam-print-choice{display:grid;grid-template-columns:18px 1fr;gap:7px;align-items:start;min-height:28px;page-break-inside:avoid;break-inside:avoid;}' +
+          '.exam-print-choice-mark{width:15px;height:15px;border:1.6px solid #111827;border-radius:50%;margin-top:4px;display:inline-block;}' +
+          '.exam-print-choice-label{font-weight:800;color:#111827;}' +
+          '.exam-print-choice-image{display:block;max-height:120px;max-width:220px;object-fit:contain;border:1px solid #d1d5db;margin:5px 0;background:#fff;}' +
+          '.exam-print-answer-page{page-break-before:always;break-before:page;padding-top:4px;}' +
+          '.exam-print-answer-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:8px;margin-top:12px;}' +
+          '.exam-print-answer-cell{border:1px solid #cbd5e1;display:flex;justify-content:space-between;align-items:center;padding:7px 9px;font-size:13px;}' +
+          '.exam-print-answer-cell strong{color:#1d4ed8;}' +
+          '.math-frac{display:inline-grid;grid-template-rows:auto auto;vertical-align:middle;text-align:center;line-height:1.05;margin:0 2px;}' +
+          '.math-frac span:first-child{border-bottom:1px solid currentColor;padding:0 3px;}' +
+          '.math-root:before{content:"√";font-weight:700;margin-right:1px;}' +
+        '</style>' +
+        '<div class="exam-print-header">' +
+          '<div class="exam-print-brand">IDEA CLUB</div>' +
+          '<h1 class="exam-print-title">' + escapeHtml(title) + '</h1>' +
+          '<div class="exam-print-meta">' + escapeHtml(metaText) + ' · สร้างเมื่อ ' + escapeHtml(generatedText) + '</div>' +
+        '</div>' +
+        '<div class="exam-print-student-grid">' +
+          '<div class="exam-print-line">ชื่อ-นามสกุล <span></span></div>' +
+          '<div class="exam-print-line">รหัสนักเรียน <span></span></div>' +
+          '<div class="exam-print-line">วันที่สอบ <span></span></div>' +
+          '<div class="exam-print-line">คะแนน <span></span></div>' +
+        '</div>' +
+        '<div class="exam-print-instruction">คำชี้แจง: เลือกคำตอบที่ถูกต้องที่สุดเพียง 1 คำตอบต่อข้อ และทำเครื่องหมายในวงกลมหน้าตัวเลือก</div>' +
+        (questionHtml || '<p style="color:#64748b;">ยังไม่มีข้อสอบในชุดนี้</p>') +
+        '<section class="exam-print-answer-page">' +
+          '<div class="exam-print-header">' +
+            '<div class="exam-print-brand">Answer Key</div>' +
+            '<h1 class="exam-print-title">เฉลย: ' + escapeHtml(title) + '</h1>' +
+            '<div class="exam-print-meta">' + escapeHtml(metaText) + '</div>' +
+          '</div>' +
+          '<div class="exam-print-answer-grid">' + (answerCells || '<p style="color:#64748b;">ยังไม่มีเฉลย</p>') + '</div>' +
+        '</section>' +
+      '</div>';
+    }
+
+    async function exportOnlineExamCoursePdf(courseId, btn) {
+      const course = (onlineExamCourseCache || []).find(function(c) { return String(c.firebaseDocId || '') === String(courseId || ''); });
+      if (!course) { alert('ไม่พบชุดข้อสอบที่ต้องการ Export'); return; }
+      if (!window.html2pdf) {
+        alert('โหลด PDF library ไม่ครบ กรุณารีเฟรชหน้าแล้วลองใหม่');
+        return;
+      }
+      const originalText = btn ? btn.textContent : '';
+      if (btn) { btn.disabled = true; btn.textContent = 'กำลังสร้าง...'; }
+      const tempDiv = document.createElement('div');
+      tempDiv.style.cssText = 'position:fixed;left:-10000px;top:0;width:794px;background:#fff;z-index:-9999;';
+      tempDiv.innerHTML = buildOnlineExamPrintableHtml(course);
+      document.body.appendChild(tempDiv);
+      try {
+        await new Promise(function(resolve) {
+          const imgs = tempDiv.querySelectorAll('img');
+          if (!imgs.length) { resolve(); return; }
+          var done = 0;
+          var settled = false;
+          function next() {
+            done++;
+            if (!settled && done >= imgs.length) {
+              settled = true;
+              resolve();
+            }
+          }
+          Array.from(imgs).forEach(function(img) {
+            if (img.complete) { next(); return; }
+            img.onload = next;
+            img.onerror = next;
+          });
+          setTimeout(function() {
+            if (!settled) {
+              settled = true;
+              resolve();
+            }
+          }, 5000);
+        });
+        const filename = 'IDEACLUB-Exam-' + getSafeFileName([course.examMonth, getOnlineExamCourseGrade(course), course.subject, course.title].filter(Boolean).join('-')) + '.pdf';
+        await window.html2pdf().set({
+          margin: 0,
+          filename: filename,
+          image: { type: 'jpeg', quality: 0.98 },
+          html2canvas: { scale: 2, useCORS: true, backgroundColor: '#ffffff', windowWidth: 794 },
+          jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
+          pagebreak: { mode: ['css', 'legacy'], avoid: ['.exam-print-question', '.exam-print-choice'] }
+        }).from(tempDiv.querySelector('.exam-print-doc')).save();
+      } catch (e) {
+        console.error('exportOnlineExamCoursePdf error', e);
+        alert('Export PDF ไม่สำเร็จ: ' + (e.message || e));
+      } finally {
+        try { document.body.removeChild(tempDiv); } catch (ex) {}
+        if (btn) { btn.disabled = false; btn.textContent = originalText || 'Export PDF'; }
+      }
     }
 
     // ---- Grading view ----
