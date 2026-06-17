@@ -31442,8 +31442,44 @@ function receiptStatusText(status) {
         tfGetTutors().map(function(t) {
           const id = t.id || t.firebaseDocId || '';
           return '<option value="' + escapeHtml(id) + '">' + escapeHtml(t.name || t.displayName || id) + '</option>';
-        }).join('');
+      }).join('');
       if (prev) sel.value = prev;
+    }
+
+    function tfNormalizeScheduleTime(value) {
+      return String(value || '').trim().replace(/\s+/g, '').replace(/[.]/g, ':');
+    }
+
+    function tfNormalizeScheduleType(value) {
+      const raw = String(value || '').trim();
+      if (raw === 'oneOnOne') return 'oneOnOne';
+      return raw || 'onsite';
+    }
+
+    function tfFindDuplicateScheduleSession(candidate, ignoreId) {
+      const candidateCourseId = String(candidate.courseId || '').trim();
+      const candidateDate = String(candidate.date || candidate.sessionDate || '').trim();
+      const candidateType = tfNormalizeScheduleType(candidate.type || candidate.format);
+      const candidateCenter = tfNormalizeCenterText(candidate.center || candidate.courseLocation || '');
+      const candidateStart = tfNormalizeScheduleTime(candidate.timeStart || candidate.start || candidate.sessionTime || '');
+      const candidateEnd = tfNormalizeScheduleTime(candidate.timeEnd || candidate.end || '');
+      return (monthlyPlanSessions || []).find(function(session) {
+        const sessionId = String(session.id || session.firebaseDocId || '');
+        if (ignoreId && sessionId === String(ignoreId)) return false;
+        if (session.deleted === true || session.status === 'cancelled') return false;
+        const sessionCourseId = String(session.courseId || '').trim();
+        const sessionDate = String(session.date || session.sessionDate || '').trim();
+        const sessionType = tfNormalizeScheduleType(session.type || session.format);
+        const sessionCenter = tfNormalizeCenterText(session.center || session.courseLocation || '');
+        const sessionStart = tfNormalizeScheduleTime(session.timeStart || session.start || session.sessionTime || '');
+        const sessionEnd = tfNormalizeScheduleTime(session.timeEnd || session.end || '');
+        return sessionCourseId === candidateCourseId &&
+          sessionDate === candidateDate &&
+          sessionType === candidateType &&
+          sessionCenter === candidateCenter &&
+          sessionStart === candidateStart &&
+          sessionEnd === candidateEnd;
+      }) || null;
     }
 
     // --- Save schedule to Firebase ---
@@ -31469,6 +31505,16 @@ function receiptStatusText(status) {
       const existing = monthlyPlanSessions.find(function(s) { return (s.id || s.firebaseDocId || '') === docId; }) || null;
       const sch = { id: docId, courseId, tutorId, format, center, date, start, end, location, notes, completed: false, report: '' };
       const session = tfSchedToSession(sch, existing);
+      const duplicate = tfFindDuplicateScheduleSession(session, editingId);
+      if (duplicate) {
+        const dupTime = [duplicate.timeStart || duplicate.sessionTime || '', duplicate.timeEnd || ''].filter(Boolean).join(' - ');
+        if (errEl) {
+          errEl.textContent = 'พบตารางซ้ำแล้ว: ' + tfGetCourseName(duplicate.courseId) + ' วันที่ ' + (duplicate.date || duplicate.sessionDate || '-') + (dupTime ? ' เวลา ' + dupTime : '') + ' กรุณาเลือกวัน/เวลาอื่น';
+          errEl.classList.remove('hidden');
+        }
+        tfToast('พบตารางซ้ำ ยังไม่ได้บันทึก', 'error');
+        return;
+      }
       try {
         await setFirebaseDocument('monthlyPlanSessions', session);
         if (existing) {
