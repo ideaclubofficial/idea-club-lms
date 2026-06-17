@@ -3670,10 +3670,15 @@
               <h3>เอกสาร Online รายครั้ง</h3>
               <p style="margin-bottom:18px; color:#6b7280;">เพิ่มเอกสารตามวันที่เรียน เช่น ชีทเรียน การบ้าน หรือเฉลย โดยใช้ลิงก์ Google Drive</p>
               <input id="editingOnlineDocId" type="hidden" value="" />
+              <input id="editingOnlineDocCourseId" type="hidden" value="" />
               <div class="form-row">
                 <div>
-                  <label>เลือกคอร์ส</label>
-                  <select id="onlineDocCourseSelect" onchange="loadOnlineDocCourse()"></select>
+                  <label>ศูนย์</label>
+                  <select id="onlineDocLocationSelect" onchange="loadOnlineDocTarget()"></select>
+                </div>
+                <div>
+                  <label>ระดับชั้น</label>
+                  <select id="onlineDocGradeSelect" onchange="loadOnlineDocTarget()"></select>
                 </div>
                 <div>
                   <label>วันที่เรียน</label>
@@ -3709,7 +3714,7 @@
                 <thead>
                   <tr>
                     <th>วันที่</th>
-                    <th>คอร์ส</th>
+                    <th>ศูนย์ / ระดับชั้น</th>
                     <th>หัวข้อ</th>
                     <th>ไฟล์</th>
                     <th>สถานะ</th>
@@ -11716,6 +11721,15 @@
       }).join('');
     }
 
+    function locationOptionsHtml(selected) {
+      const defaults = ['IDEA CLUB ศูนย์ นครสวรรค์', 'IDEA CLUB ศูนย์ หนองฉาง'];
+      const locations = defaults.concat((courses || []).map(function(c) { return String(c.location || '').trim(); }))
+        .filter(function(location, index, arr) { return location && arr.indexOf(location) === index; });
+      return locations.map(function(location) {
+        return '<option value="' + escapeHtml(location) + '"' + (location === selected ? ' selected' : '') + '>' + escapeHtml(location) + '</option>';
+      }).join('');
+    }
+
     function subjectOptionsHtml(selected) {
       const subjects = ['คณิตศาสตร์', 'วิทยาศาสตร์', 'ภาษาอังกฤษ', 'ภาษาไทย', 'สังคมศึกษา'];
       return subjects.map(function(subject) {
@@ -12772,7 +12786,8 @@
 
     function renderOnlineClassCourseSelect() {
       const select = getElement('adminOnlineClassCourseSelect');
-      const docSelect = getElement('onlineDocCourseSelect');
+      const docLocationSelect = getElement('onlineDocLocationSelect');
+      const docGradeSelect = getElement('onlineDocGradeSelect');
       const current = select ? (select.value || String(currentStudentCourseId || (courses[0] ? courses[0].id : ''))) : String(courses[0] ? courses[0].id : '');
       const optionsHtml = courses.length ? sortCoursesByGrade(courses).map(function(c) {
         return '<option value="' + c.id + '">' + c.grade + ' · ' + c.name + '</option>';
@@ -12782,10 +12797,17 @@
         select.innerHTML = optionsHtml;
         if (courses.length) select.value = courses.some(function(c) { return String(c.id) === String(current); }) ? current : String(courses[0].id);
       }
-      if (docSelect) {
-        const docCurrent = docSelect.value || (select ? select.value : current);
-        docSelect.innerHTML = optionsHtml;
-        if (courses.length) docSelect.value = courses.some(function(c) { return String(c.id) === String(docCurrent); }) ? docCurrent : String(courses[0].id);
+      if (docLocationSelect) {
+        const selectedCourse = courses.find(function(c) { return String(c.id) === String(select ? select.value : current); }) || courses[0];
+        const currentLocation = docLocationSelect.value || (selectedCourse ? selectedCourse.location : '');
+        docLocationSelect.innerHTML = locationOptionsHtml(currentLocation);
+        if (currentLocation) docLocationSelect.value = currentLocation;
+      }
+      if (docGradeSelect) {
+        const selectedCourseForGrade = courses.find(function(c) { return String(c.id) === String(select ? select.value : current); }) || courses[0];
+        const currentGrade = docGradeSelect.value || (selectedCourseForGrade ? selectedCourseForGrade.grade : '');
+        docGradeSelect.innerHTML = gradeOptionsHtml(currentGrade);
+        if (currentGrade) docGradeSelect.value = currentGrade;
       }
       renderOnlineDocTable();
     }
@@ -12814,7 +12836,8 @@
       getElement('adminOnlineClassTime').value = c.onlineClassTime || onlineDefaults.time;
       getElement('adminOnlineClassRoomId').value = c.roomId || '';
       getElement('adminOnlineClassPassword').value = c.roomPassword || '';
-      if (getElement('onlineDocCourseSelect')) getElement('onlineDocCourseSelect').value = String(c.id);
+      if (getElement('onlineDocLocationSelect')) getElement('onlineDocLocationSelect').value = c.location || '';
+      if (getElement('onlineDocGradeSelect')) getElement('onlineDocGradeSelect').value = c.grade || '';
       renderOnlineDocTable();
     }
 
@@ -12937,11 +12960,57 @@
       window.open(url, '_blank');
     }
 
-function getCourseOnlineDocs(course, includeInactive) {
-      const docs = Array.isArray(course && course.onlineDocs) ? course.onlineDocs.slice() : [];
-      return docs.filter(function(doc) {
-        return includeInactive || (doc.status || 'active') === 'active';
-      }).sort(function(a, b) {
+    function getOnlineDocLocation(doc, ownerCourse) {
+      return String((doc && (doc.location || doc.center)) || (ownerCourse && ownerCourse.location) || '').trim();
+    }
+
+    function getOnlineDocGrade(doc, ownerCourse) {
+      return String((doc && doc.grade) || (ownerCourse && ownerCourse.grade) || '').trim();
+    }
+
+    function getOnlineDocTargetCourse(location, grade) {
+      return sortCoursesByGrade(courses).find(function(c) {
+        return String(c.location || '').trim() === String(location || '').trim() && String(c.grade || '').trim() === String(grade || '').trim();
+      });
+    }
+
+    function getSelectedOnlineDocTarget() {
+      return {
+        location: getElement('onlineDocLocationSelect') ? getElement('onlineDocLocationSelect').value : '',
+        grade: getElement('onlineDocGradeSelect') ? getElement('onlineDocGradeSelect').value : ''
+      };
+    }
+
+    function onlineDocMatchesCourse(doc, ownerCourse, course) {
+      if (!doc || !course) return false;
+      const docLocation = getOnlineDocLocation(doc, ownerCourse);
+      const docGrade = getOnlineDocGrade(doc, ownerCourse);
+      const courseLocation = String(course.location || '').trim();
+      const courseGrade = String(course.grade || '').trim();
+      if (docLocation || docGrade) {
+        return (!docLocation || docLocation === courseLocation) && (!docGrade || docGrade === courseGrade);
+      }
+      return ownerCourse && String(ownerCourse.id) === String(course.id);
+    }
+
+    function getCourseOnlineDocs(course, includeInactive) {
+      const seen = {};
+      const docs = [];
+      (courses || []).forEach(function(ownerCourse) {
+        (Array.isArray(ownerCourse && ownerCourse.onlineDocs) ? ownerCourse.onlineDocs : []).forEach(function(doc) {
+          if (!onlineDocMatchesCourse(doc, ownerCourse, course)) return;
+          if (!includeInactive && (doc.status || 'active') !== 'active') return;
+          const key = String(ownerCourse.id || '') + ':' + String(doc.id || '');
+          if (seen[key]) return;
+          seen[key] = true;
+          docs.push(Object.assign({}, doc, {
+            _ownerCourseId: ownerCourse.id,
+            _targetLocation: getOnlineDocLocation(doc, ownerCourse),
+            _targetGrade: getOnlineDocGrade(doc, ownerCourse)
+          }));
+        });
+      });
+      return docs.sort(function(a, b) {
         return String(b.classDate || '').localeCompare(String(a.classDate || ''));
       });
     }
@@ -13167,7 +13236,7 @@ function getCourseOnlineDocs(course, includeInactive) {
       if (clearMessage !== false) getElement('videoSaveResult').textContent = '';
     }
 
-    function loadOnlineDocCourse() {
+    function loadOnlineDocTarget() {
       if (!getElement('editingOnlineDocId')) return;
       if (!getElement('editingOnlineDocId').value) {
         clearOnlineDocForm(true);
@@ -13175,26 +13244,26 @@ function getCourseOnlineDocs(course, includeInactive) {
       renderOnlineDocTable();
     }
 
-    function getSelectedOnlineDocCourse() {
-      const select = getElement('onlineDocCourseSelect');
-      return select ? courses.find(function(c) { return String(c.id) === String(select.value); }) : null;
-    }
-
-    function clearOnlineDocForm(keepCourse) {
+    function clearOnlineDocForm(keepTarget) {
       if (getElement('editingOnlineDocId')) getElement('editingOnlineDocId').value = '';
+      if (getElement('editingOnlineDocCourseId')) getElement('editingOnlineDocCourseId').value = '';
       if (getElement('onlineDocDate')) getElement('onlineDocDate').value = '';
       if (getElement('onlineDocTopic')) getElement('onlineDocTopic').value = '';
       if (getElement('onlineDocFiles')) getElement('onlineDocFiles').value = '';
       if (getElement('onlineDocStatus')) getElement('onlineDocStatus').value = 'active';
-      if (!keepCourse && getElement('onlineDocCourseSelect') && courses[0]) getElement('onlineDocCourseSelect').value = String(courses[0].id);
+      if (!keepTarget && courses[0]) {
+        if (getElement('onlineDocLocationSelect')) getElement('onlineDocLocationSelect').value = courses[0].location || '';
+        if (getElement('onlineDocGradeSelect')) getElement('onlineDocGradeSelect').value = courses[0].grade || '';
+      }
       if (getElement('onlineDocResult')) getElement('onlineDocResult').textContent = '';
     }
 
     async function saveOnlineClassDocument() {
-      const course = getSelectedOnlineDocCourse();
+      const target = getSelectedOnlineDocTarget();
+      const course = getOnlineDocTargetCourse(target.location, target.grade);
       const result = getElement('onlineDocResult');
       if (!course) {
-        if (result) { result.textContent = 'กรุณาเลือกคอร์ส'; result.style.color = '#dc2626'; }
+        if (result) { result.textContent = 'ไม่พบคอร์สของศูนย์และระดับชั้นที่เลือก กรุณาตั้งคอร์สให้ตรงก่อน'; result.style.color = '#dc2626'; }
         return;
       }
       const classDate = getElement('onlineDocDate') ? getElement('onlineDocDate').value : '';
@@ -13202,6 +13271,7 @@ function getCourseOnlineDocs(course, includeInactive) {
       const files = parsePdfFilesFromText(getElement('onlineDocFiles') ? getElement('onlineDocFiles').value : '');
       const status = getElement('onlineDocStatus') ? getElement('onlineDocStatus').value : 'active';
       const editingId = getElement('editingOnlineDocId') ? getElement('editingOnlineDocId').value : '';
+      const editingCourseId = getElement('editingOnlineDocCourseId') ? getElement('editingOnlineDocCourseId').value : '';
 
       if (!classDate || !topic || !files.length) {
         if (result) {
@@ -13212,22 +13282,37 @@ function getCourseOnlineDocs(course, includeInactive) {
       }
 
       course.onlineDocs = Array.isArray(course.onlineDocs) ? course.onlineDocs : [];
+      const updatedDoc = { id: editingId || Date.now(), classDate: classDate, topic: topic, files: files, status: status, location: target.location, grade: target.grade };
       if (editingId) {
-        const doc = course.onlineDocs.find(function(item) { return String(item.id) === String(editingId); });
-        if (doc) {
-          Object.assign(doc, { classDate: classDate, topic: topic, files: files, status: status });
+        const ownerCourse = courses.find(function(c) { return String(c.id) === String(editingCourseId); }) || course;
+        ownerCourse.onlineDocs = Array.isArray(ownerCourse.onlineDocs) ? ownerCourse.onlineDocs : [];
+        const oldDoc = ownerCourse.onlineDocs.find(function(item) { return String(item.id) === String(editingId); });
+        if (String(ownerCourse.id) === String(course.id)) {
+          const doc = course.onlineDocs.find(function(item) { return String(item.id) === String(editingId); });
+          if (doc) {
+            Object.assign(doc, updatedDoc);
+          } else {
+            course.onlineDocs.push(updatedDoc);
+          }
+        } else {
+          ownerCourse.onlineDocs = ownerCourse.onlineDocs.filter(function(item) { return String(item.id) !== String(editingId); });
+          course.onlineDocs.push(Object.assign({}, oldDoc || {}, updatedDoc));
         }
       } else {
-        course.onlineDocs.push({ id: Date.now(), classDate: classDate, topic: topic, files: files, status: status });
+        course.onlineDocs.push(updatedDoc);
       }
 
       try {
+        if (editingId && editingCourseId && String(editingCourseId) !== String(course.id)) {
+          const ownerCourseToSave = courses.find(function(c) { return String(c.id) === String(editingCourseId); });
+          if (ownerCourseToSave) await setFirebaseDocument('courses', ownerCourseToSave);
+        }
         await setFirebaseDocument('courses', course);
         if (result) {
           result.textContent = 'บันทึกเอกสาร Online รายครั้งเรียบร้อย';
           result.style.color = '#16a34a';
         }
-        addActivityLog('บันทึกเอกสาร Online', (course.name || '-') + ' · ' + classDate + ' · ' + topic);
+        addActivityLog('บันทึกเอกสาร Online', (target.location || '-') + ' · ' + (target.grade || '-') + ' · ' + classDate + ' · ' + topic);
         clearOnlineDocForm(true);
         renderOnlineDocTable();
         renderTeacherOnlineClasses();
@@ -13245,8 +13330,10 @@ function getCourseOnlineDocs(course, includeInactive) {
       if (!course) return;
       const doc = (course.onlineDocs || []).find(function(item) { return String(item.id) === String(docId); });
       if (!doc) return;
-      if (getElement('onlineDocCourseSelect')) getElement('onlineDocCourseSelect').value = String(course.id);
+      if (getElement('onlineDocLocationSelect')) getElement('onlineDocLocationSelect').value = getOnlineDocLocation(doc, course);
+      if (getElement('onlineDocGradeSelect')) getElement('onlineDocGradeSelect').value = getOnlineDocGrade(doc, course);
       if (getElement('editingOnlineDocId')) getElement('editingOnlineDocId').value = doc.id;
+      if (getElement('editingOnlineDocCourseId')) getElement('editingOnlineDocCourseId').value = course.id;
       if (getElement('onlineDocDate')) getElement('onlineDocDate').value = doc.classDate || '';
       if (getElement('onlineDocTopic')) getElement('onlineDocTopic').value = doc.topic || '';
       if (getElement('onlineDocFiles')) getElement('onlineDocFiles').value = pdfFilesToText(doc.files || []);
@@ -13271,18 +13358,24 @@ function getCourseOnlineDocs(course, includeInactive) {
     function renderOnlineDocTable() {
       const tbody = getElement('onlineDocTableBody');
       if (!tbody) return;
-      const selectedCourseId = getElement('onlineDocCourseSelect') ? getElement('onlineDocCourseSelect').value : '';
+      const selectedTarget = getSelectedOnlineDocTarget();
       const rows = [];
       courses.forEach(function(course) {
-        if (selectedCourseId && String(course.id) !== String(selectedCourseId)) return;
-        getCourseOnlineDocs(course, true).forEach(function(doc) {
-          rows.push({ course: course, doc: doc });
+        (Array.isArray(course && course.onlineDocs) ? course.onlineDocs : []).forEach(function(doc) {
+          const docLocation = getOnlineDocLocation(doc, course);
+          const docGrade = getOnlineDocGrade(doc, course);
+          if (selectedTarget.location && docLocation !== selectedTarget.location) return;
+          if (selectedTarget.grade && docGrade !== selectedTarget.grade) return;
+          rows.push({ course: course, doc: doc, location: docLocation, grade: docGrade });
         });
+      });
+      rows.sort(function(a, b) {
+        return String(b.doc.classDate || '').localeCompare(String(a.doc.classDate || ''));
       });
       tbody.innerHTML = rows.length ? rows.map(function(row) {
         const fileCount = Array.isArray(row.doc.files) ? row.doc.files.filter(function(file) { return file && file.url; }).length : 0;
         const statusText = (row.doc.status || 'active') === 'active' ? '<span class="status-paid">เปิดแสดง</span>' : '<span class="status-waiting">ปิดไว้ก่อน</span>';
-        return '<tr><td>' + onlineDocDateText(row.doc.classDate) + '</td><td>' + (row.course.grade || '-') + ' · ' + (row.course.name || '-') + '</td><td>' + (row.doc.topic || '-') + '</td><td>' + (fileCount ? fileCount + ' ไฟล์' : '-') + '</td><td>' + statusText + '</td><td><button class="btn btn-blue" type="button" onclick="editOnlineClassDocument(\'' + jsArg(row.course.id) + '\', \'' + jsArg(row.doc.id) + '\')">แก้ไข</button><button class="btn btn-red" type="button" onclick="deleteOnlineClassDocument(\'' + jsArg(row.course.id) + '\', \'' + jsArg(row.doc.id) + '\')">ลบ</button></td></tr>';
+        return '<tr><td>' + onlineDocDateText(row.doc.classDate) + '</td><td>' + escapeHtml(row.location || '-') + ' · ' + escapeHtml(row.grade || '-') + '</td><td>' + escapeHtml(row.doc.topic || '-') + '</td><td>' + (fileCount ? fileCount + ' ไฟล์' : '-') + '</td><td>' + statusText + '</td><td><button class="btn btn-blue" type="button" onclick="editOnlineClassDocument(\'' + jsArg(row.course.id) + '\', \'' + jsArg(row.doc.id) + '\')">แก้ไข</button><button class="btn btn-red" type="button" onclick="deleteOnlineClassDocument(\'' + jsArg(row.course.id) + '\', \'' + jsArg(row.doc.id) + '\')">ลบ</button></td></tr>';
       }).join('') : '<tr><td colspan="6">ยังไม่มีเอกสาร Online รายครั้ง</td></tr>';
     }
 
