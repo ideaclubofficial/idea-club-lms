@@ -5001,6 +5001,12 @@
                 <h3>ตรวจผลสอบรายคน</h3>
                 <div class="form-row">
                   <div>
+                    <label>เดือนสอบ</label>
+                    <select id="onlineExamGradeMonthFilter" onchange="onlineExamGradeFilterChange()" style="width:100%;">
+                      <option value="">-- ทุกเดือน --</option>
+                    </select>
+                  </div>
+                  <div>
                     <label>วิชา</label>
                     <select id="onlineExamGradeSubjectFilter" onchange="onlineExamGradeFilterChange()" style="width:100%;">
                       <option value="">-- ทุกวิชา --</option>
@@ -5040,6 +5046,7 @@
                       <option value="submitted">รอประกาศผล</option>
                       <option value="published">ประกาศผลแล้ว</option>
                       <option value="hidden">ซ่อนผล</option>
+                      <option value="not_submitted">ยังไม่ทำข้อสอบ</option>
                     </select>
                   </div>
                 </div>
@@ -7494,6 +7501,8 @@
     let onlineExamStartedAt = null;
     let onlineExamGradeAllResults = [];
     let onlineExamGradePage = 1;
+    let onlineExamGradeMissingHtml = '';
+    let onlineExamGradeMissingOnly = false;
     const ONLINE_EXAM_GRADE_PAGE_SIZE = 20;
     let onlineExamQuestionOrder = [];    // questionIds in display order (shuffled or natural)
     let onlineExamChoiceOrder = {};      // {questionId: [origIdx0, origIdx1, origIdx2, origIdx3]}
@@ -28615,10 +28624,111 @@ function receiptStatusText(status) {
              (!gradeFilter || grade === gradeFilter);
     }
 
+    function populateOnlineExamGradeMonthSelect() {
+      const sel = getElement('onlineExamGradeMonthFilter');
+      if (!sel) return;
+      const current = sel.value;
+      const months = getOnlineExamMonthOptions ? getOnlineExamMonthOptions() : [];
+      sel.innerHTML = '<option value="">-- ทุกเดือน --</option>' + months.map(function(month) {
+        return '<option value="' + escapeHtml(month) + '">' + escapeHtml(month) + '</option>';
+      }).join('');
+      if (current && months.includes(current)) sel.value = current;
+      else if (!current && months.length) {
+        const defaultMonth = getOnlineExamDefaultMonth ? getOnlineExamDefaultMonth() : months[0];
+        sel.value = months.includes(defaultMonth) ? defaultMonth : months[0];
+      }
+    }
+
+    function getOnlineExamGradingTargetCourses(monthFilter, subjectFilter, gradeFilter) {
+      return (onlineExamCourseCache || []).filter(function(course) {
+        if (!course || course.deleted || course.status === 'inactive' || course.isActive === false) return false;
+        const monthMatched = !monthFilter || (course.examMonth || '') === monthFilter;
+        const subjectMatched = !subjectFilter || (course.subject || '') === subjectFilter;
+        const gradeMatched = !gradeFilter || getOnlineExamCourseGrade(course) === gradeFilter;
+        return monthMatched && subjectMatched && gradeMatched;
+      });
+    }
+
+    function getOnlineExamExpectedStudents(gradeFilter) {
+      return (students || []).filter(function(student) {
+        if (!student || !isActiveStudentForDashboard(student)) return false;
+        if (gradeFilter && student.grade !== gradeFilter) return false;
+        return true;
+      }).slice().sort(function(a, b) {
+        return String(a.memberId || a.studentId || '').localeCompare(String(b.memberId || b.studentId || ''), undefined, { numeric: true, sensitivity: 'base' });
+      });
+    }
+
+    function getStudentOnlineExamIdentitySet(student) {
+      const values = [student && student.authUid, student && student.uid, student && student.memberId, student && student.studentId, student && student.id, student && student.firebaseDocId]
+        .map(function(value) { return String(value || '').trim(); })
+        .filter(Boolean);
+      return values;
+    }
+
+    function isOnlineExamResultForStudent(result, student) {
+      if (!result || !student) return false;
+      const studentKeys = getStudentOnlineExamIdentitySet(student);
+      const resultKeys = [result.studentUid, result.authUid, result.studentId, result.memberId, result.studentMemberId]
+        .map(function(value) { return String(value || '').trim(); })
+        .filter(Boolean);
+      if (resultKeys.some(function(value) { return studentKeys.includes(value); })) return true;
+      return !!result.studentName && String(result.studentName || '').trim() === String(student.name || '').trim();
+    }
+
+    function getOnlineExamMissingStudents(targetCourses, expectedStudents, allResults) {
+      const targetCourseIds = (targetCourses || []).map(function(course) { return String(course.firebaseDocId || ''); }).filter(Boolean);
+      if (!targetCourseIds.length || !expectedStudents.length) return [];
+      return expectedStudents.map(function(student) {
+        const submittedCourseIds = {};
+        (allResults || []).forEach(function(result) {
+          const courseId = String(result.courseId || '');
+          if (!targetCourseIds.includes(courseId)) return;
+          if (isOnlineExamResultForStudent(result, student)) submittedCourseIds[courseId] = true;
+        });
+        const missingCourses = targetCourses.filter(function(course) {
+          return !submittedCourseIds[String(course.firebaseDocId || '')];
+        });
+        return { student: student, missingCourses: missingCourses };
+      }).filter(function(item) {
+        return item.missingCourses.length > 0;
+      });
+    }
+
+    function renderOnlineExamMissingStudentsHtml(missingItems, targetCourses, expectedCount) {
+      const totalTargets = (targetCourses || []).length;
+      if (!totalTargets) {
+        return '<div class="notice" style="margin:12px;"><strong>ยังไม่พบชุดข้อสอบเป้าหมาย</strong><p>เลือกเดือนสอบ วิชา และระดับชั้นให้ตรงกับชุดข้อสอบที่ต้องการตรวจ</p></div>';
+      }
+      const missingCount = missingItems.length;
+      const doneCount = Math.max(0, expectedCount - missingCount);
+      const rows = missingItems.map(function(item, index) {
+        const student = item.student || {};
+        const missingText = item.missingCourses.map(function(course) {
+          return escapeHtml([course.examMonth || '', getOnlineExamCourseGrade(course) || '', course.subject || '', course.title || ''].filter(Boolean).join(' · '));
+        }).join('<br>');
+        return '<tr>' +
+          '<td>' + (index + 1) + '</td>' +
+          '<td>' + escapeHtml(student.memberId || student.studentId || '-') + '</td>' +
+          '<td class="student-name">' + escapeHtml(student.name || '-') + '<br><span class="mini-muted">' + escapeHtml(student.nickname || '-') + '</span></td>' +
+          '<td>' + escapeHtml(student.grade || '-') + '</td>' +
+          '<td>' + missingText + '</td>' +
+        '</tr>';
+      }).join('');
+      return '<div style="padding:12px;border-bottom:1px solid #f1f5f9;background:#fff7ed;">' +
+          '<strong style="color:#9a3412;">ยังไม่ทำข้อสอบ ' + missingCount + ' คน</strong>' +
+          '<span style="color:#6b7280;font-size:12px;margin-left:8px;">ทำครบแล้ว ' + doneCount + ' คน · นักเรียนเป้าหมาย ' + expectedCount + ' คน · ชุดข้อสอบ ' + totalTargets + ' ชุด</span>' +
+        '</div>' +
+        (missingCount
+          ? '<div class="table-wrap" style="margin:0;"><table><thead><tr><th>ลำดับ</th><th>Member ID</th><th>นักเรียน</th><th>ระดับชั้น</th><th>ชุดที่ยังไม่ทำ</th></tr></thead><tbody>' + rows + '</tbody></table></div>'
+          : '<div style="padding:16px;color:#16a34a;font-weight:700;">นักเรียนเป้าหมายทำข้อสอบครบแล้ว</div>');
+    }
+
     async function populateOnlineExamStudentSelect() {
       if (!firebaseReady || !db) return;
       const subjectFilter = (getElement('onlineExamGradeSubjectFilter') || {}).value || '';
       const gradeFilter = (getElement('onlineExamGradeLevelFilter') || {}).value || '';
+      const monthFilter = (getElement('onlineExamGradeMonthFilter') || {}).value || '';
       const studentSel = getElement('onlineExamGradeStudentSelect');
       if (!studentSel) return;
       const currentStudentUid = studentSel.value || '';
@@ -28638,6 +28748,11 @@ function receiptStatusText(status) {
         snap.docs.forEach(function(d) {
           const data = Object.assign({ _docId: d.id }, d.data());
           if (!onlineExamGradingResultMatchesFilters(data, subjectFilter, gradeFilter)) return;
+          if (monthFilter) {
+            const course = getOnlineExamResultCourse(data);
+            const resultMonth = (course && course.examMonth) || getThaiMonthYearFromText(data.submittedAtText || '');
+            if (resultMonth !== monthFilter) return;
+          }
           if (!seen[data.studentUid]) {
             seen[data.studentUid] = true;
             const opt = document.createElement('option');
@@ -28653,7 +28768,9 @@ function receiptStatusText(status) {
     }
 
     async function renderOnlineExamGradingSelectors() {
+      populateOnlineExamGradeMonthSelect();
       populateOnlineExamCourseSelects();
+      safeRun(populateOnlineExamStudentSelect, 'online-exam-grade-student-select-init');
     }
 
     function onlineExamGradeFilterChange() {
@@ -28666,6 +28783,7 @@ function receiptStatusText(status) {
 
       const subjectFilter = (getElement('onlineExamGradeSubjectFilter') || {}).value || '';
       const gradeFilter = (getElement('onlineExamGradeLevelFilter') || {}).value || '';
+      const monthFilter = (getElement('onlineExamGradeMonthFilter') || {}).value || '';
       const studentUid = (getElement('onlineExamGradeStudentSelect') || {}).value || '';
       const statusFilter = (getElement('onlineExamGradeStatusFilter') || {}).value || '';
       const dateFrom = (getElement('onlineExamGradeDateFrom') || {}).value || '';
@@ -28681,19 +28799,29 @@ function receiptStatusText(status) {
         let q = db.collection('onlineExamResults');
         if (studentUid) q = q.where('studentUid', '==', studentUid);
 
-        const snap = await q.orderBy('submittedAt', 'desc').limit(300).get().catch(function() {
+        const snap = await q.orderBy('submittedAt', 'desc').limit(1000).get().catch(function() {
           let q2 = db.collection('onlineExamResults');
           if (studentUid) q2 = q2.where('studentUid', '==', studentUid);
-          return q2.limit(300).get();
+          return q2.limit(1000).get();
         });
 
-        let results = snap.docs.map(function(d) { return Object.assign({ _docId: d.id }, d.data()); });
+        let allResults = snap.docs.map(function(d) { return Object.assign({ _docId: d.id }, d.data()); });
+        let results = allResults.slice();
 
         results = results.filter(function(r) {
           return onlineExamGradingResultMatchesFilters(r, subjectFilter, gradeFilter);
         });
+        if (monthFilter) {
+          results = results.filter(function(r) {
+            const course = getOnlineExamResultCourse(r);
+            const resultMonth = (course && course.examMonth) || getThaiMonthYearFromText(r.submittedAtText || '');
+            return resultMonth === monthFilter;
+          });
+        }
         if (statusFilter) {
-          results = results.filter(function(r) { return (r.resultStatus || 'submitted') === statusFilter; });
+          results = statusFilter === 'not_submitted'
+            ? []
+            : results.filter(function(r) { return (r.resultStatus || 'submitted') === statusFilter; });
         }
         if (dateFrom) {
           const from = new Date(dateFrom + 'T00:00:00');
@@ -28710,7 +28838,17 @@ function receiptStatusText(status) {
           });
         }
 
+        const targetCourses = getOnlineExamGradingTargetCourses(monthFilter, subjectFilter, gradeFilter);
+        let expectedStudents = getOnlineExamExpectedStudents(gradeFilter);
+        if (studentUid) {
+          expectedStudents = expectedStudents.filter(function(student) {
+            return String(student.authUid || student.uid || '') === String(studentUid);
+          });
+        }
+        const missingStudents = getOnlineExamMissingStudents(targetCourses, expectedStudents, allResults);
         onlineExamGradeAllResults = results;
+        onlineExamGradeMissingHtml = renderOnlineExamMissingStudentsHtml(missingStudents, targetCourses, expectedStudents.length);
+        onlineExamGradeMissingOnly = statusFilter === 'not_submitted';
         onlineExamGradePage = 1;
         renderOnlineExamGradingPage(1);
       } catch (e) {
@@ -28734,8 +28872,13 @@ function receiptStatusText(status) {
       page = Math.max(1, Math.min(page, totalPages));
       onlineExamGradePage = page;
 
+      if (onlineExamGradeMissingOnly) {
+        reportEl.innerHTML = onlineExamGradeMissingHtml || '<div style="padding:16px;color:#6b7280;">ไม่พบข้อมูลนักเรียนที่ยังไม่ทำข้อสอบ</div>';
+        return;
+      }
+
       if (!total) {
-        reportEl.innerHTML = '<div style="padding:16px;color:#6b7280;">ไม่พบข้อมูลการส่งสอบ</div>';
+        reportEl.innerHTML = (onlineExamGradeMissingHtml || '') + '<div style="padding:16px;color:#6b7280;">ไม่พบข้อมูลการส่งสอบ</div>';
         return;
       }
 
@@ -28792,6 +28935,7 @@ function receiptStatusText(status) {
       }
 
       reportEl.innerHTML =
+        (onlineExamGradeMissingHtml || '') +
         '<div style="padding:8px 12px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid #f1f5f9;flex-wrap:wrap;gap:6px;">' +
           '<span style="font-size:12px;color:#6b7280;">พบ ' + total + ' รายการ' + (pendingCount ? ' · <span style="color:#d97706;font-weight:700;">รอประกาศผล ' + pendingCount + ' รายการ</span>' : '') + '</span>' +
           (pendingCount ? '<button class="btn btn-green" onclick="bulkPublishOnlineExamResults()" style="font-size:11px;padding:4px 12px;">✅ ประกาศผลที่เลือก</button>' : '') +
