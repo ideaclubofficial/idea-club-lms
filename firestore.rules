@@ -204,7 +204,11 @@ service cloud.firestore {
     match /students/{docId} {
       allow read: if isAdmin() || hasAdminPermission('admin.full') || isTeacher() || ownsExistingDoc();
       allow create: if isAdmin() || ownsIncomingDoc();
-      allow update: if isAdmin() || (ownsExistingDoc() && ownsIncomingDoc());
+      // Teacher can update attendance fields; student can update own doc but NOT attendance fields
+      allow update: if isAdmin()
+                    || isTeacher()
+                    || (ownsExistingDoc() && ownsIncomingDoc()
+                        && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['pickupStatus', 'pickupDate']));
       allow delete: if isAdmin();
     }
 

@@ -9911,6 +9911,19 @@
     let pickupCurrentPage = 1;
     const pickupPerPage = 20;
     const pickupHistory = [];
+    let attendanceSaving = false; // double-submit guard
+
+    const VALID_PICKUP_STATUSES = ['มาเรียน', 'รถรับส่ง', 'ผู้ปกครองมาส่ง', 'ไม่มา', 'ยังไม่เช็คชื่อ', 'ไม่มีเรียน'];
+
+    function validateAttendanceDate(dateStr) {
+      if (!dateStr) return false;
+      const today = getLocalDateString();
+      if (dateStr > today) {
+        alert('ไม่สามารถเช็คชื่อล่วงหน้าได้ กรุณาเลือกวันที่ไม่เกินวันนี้');
+        return false;
+      }
+      return true;
+    }
 
     function getLocalDateString(date) {
       const target = date ? new Date(date) : new Date();
@@ -10142,7 +10155,10 @@
     }
 
     async function setPickupStatus(id, status) {
+      if (!hasPermission('teacher.attendance')) { alert('ไม่มีสิทธิ์'); return; }
+      if (!VALID_PICKUP_STATUSES.includes(status)) { return; }
       const selectedDate = getPickupDateValue();
+      if (!validateAttendanceDate(selectedDate)) return;
       const item = pickupList.find(function(student) { return String(student.id) === String(id); });
       const student = students.find(function(s) { return String(s.id) === String(id); });
       const result = getElement('teacherAttendanceResult');
@@ -10211,7 +10227,10 @@
     }
 
     async function markAllPickup(status) {
+      if (!hasPermission('teacher.attendance')) { alert('ไม่มีสิทธิ์'); return; }
+      if (!VALID_PICKUP_STATUSES.includes(status)) return;
       const selectedDate = getPickupDateValue();
+      if (!validateAttendanceDate(selectedDate)) return;
       const filteredIds = getFilteredPickupList()
         .filter(function(item) { return item.hasClassToday; })
         .map(function(item) { return String(item.id); });
@@ -10264,6 +10283,15 @@
     }
 
     function teacherSaveAttendance() {
+      if (!hasPermission('teacher.attendance')) { alert('ไม่มีสิทธิ์'); return; }
+      if (attendanceSaving) return;
+      const selectedDate = getElement('pickupDate') ? getElement('pickupDate').value : '';
+      if (!validateAttendanceDate(selectedDate)) return;
+
+      attendanceSaving = true;
+      const saveBtn = document.querySelector('[onclick="teacherSaveAttendance()"]');
+      if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = 'กำลังบันทึก...'; }
+
       const filtered = getFilteredPickupList().filter(function(item) { return item.hasClassToday; });
       const present = filtered.filter(function(item) { return item.status === 'มาเรียน' || item.status === 'ผู้ปกครองมาส่ง' || item.status === 'รถรับส่ง'; }).length;
       const parent = filtered.filter(function(item) { return item.status === 'ผู้ปกครองมาส่ง' || item.status === 'รถรับส่ง'; }).length;
@@ -10275,23 +10303,26 @@
       const historyItem = {
         id: historyId,
         firebaseDocId: historyId,
-        date: getElement('pickupDate').value,
+        date: selectedDate,
         courseScope: 'คอร์ส: ' + selectedCourse + ' / ระดับชั้น: ' + selectedGrade,
         total: filtered.length,
         present: present,
         parent: parent,
         absent: absent,
-        teacher: getElement('profileName').textContent
+        teacher: getElement('profileName') ? getElement('profileName').textContent : ''
       };
       pickupHistory.push(historyItem);
-      setFirebaseDocument('attendanceHistory', historyItem).catch(function(error) { console.error('attendance firebase error:', error); });
+      setFirebaseDocument('attendanceHistory', historyItem).catch(function(error) { console.error('attendance firebase error:', error); }).finally(function() {
+        attendanceSaving = false;
+        if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = 'บันทึกเช็คชื่อ'; }
+      });
 
       renderPickupHistory();
       renderTeacherDashboardSummary();
       renderAdminDashboard();
       if (currentStudent) updateStudentPickupStatus(currentStudent);
-      getElement('teacherAttendanceResult').textContent = 'บันทึกเช็คชื่อเรียบร้อย และเพิ่มลงประวัติย้อนหลังแล้ว';
-      getElement('teacherAttendanceResult').style.color = '#16a34a';
+      var resultEl = getElement('teacherAttendanceResult');
+      if (resultEl) { resultEl.textContent = 'บันทึกเช็คชื่อเรียบร้อย และเพิ่มลงประวัติย้อนหลังแล้ว'; resultEl.style.color = '#16a34a'; }
     }
 
     function showAdminPanel(skipCheck) {
