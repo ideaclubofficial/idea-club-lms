@@ -2855,12 +2855,6 @@
                     <input id="teacherMobilePickupDate" type="date" onchange="syncTeacherMobileAttendanceFilters()" />
                   </div>
                   <div>
-                    <label>คอร์ส</label>
-                    <select id="teacherMobileAttendanceCourseFilter" onchange="syncTeacherMobileAttendanceFilters()">
-                      <option value="ทั้งหมด">ทั้งหมด</option>
-                    </select>
-                  </div>
-                  <div>
                     <label>ระดับชั้น</label>
                     <select id="teacherMobilePickupGradeFilter" onchange="syncTeacherMobileAttendanceFilters()">
                       <option value="ทั้งหมด">ทั้งหมด</option>
@@ -2922,13 +2916,7 @@
               <div class="form-row">
                 <div>
                   <label>วันที่เช็คชื่อ</label>
-                  <input id="pickupDate" type="date" value="2026-05-10" onchange="pickupCurrentPage=1; renderPickupList()" />
-                </div>
-                <div>
-                  <label>คอร์ส</label>
-                  <select id="teacherAttendanceCourseFilter" onchange="pickupCurrentPage=1; renderPickupList();">
-                    <option value="ทั้งหมด">ทั้งหมด</option>
-                  </select>
+                  <input id="pickupDate" type="date" onchange="pickupCurrentPage=1; renderPickupList()" />
                 </div>
                 <div>
                   <label>ระดับชั้น</label>
@@ -9332,7 +9320,7 @@
       if (tabId === 'teacher-dashboard') { renderTodayTeachingList(); renderTeacherDashboardSummary(); }
       if (tabId === 'teacher-online') renderTeacherOnlineClasses();
       if (tabId === 'teacher-private-lessons') renderTeacherPrivateLessons();
-      if (tabId === 'teacher-attendance') renderPickupList();
+      if (tabId === 'teacher-attendance') { initAttendanceDateToToday(); renderPickupList(); }
       if (tabId === 'teacher-profile') renderProfileSettingsForRole('teacher');
       safeRun(renderTeacherMobileHome, 'teacher-mobile-home-tab');
       safeRun(renderTeacherMobileAttendance, 'teacher-mobile-attendance-tab');
@@ -9358,7 +9346,7 @@
 
     function renderTeacherCourseOptions() {
       const teacherCourses = getTeacherVisibleCourses();
-      const selects = ['teacherCourseFilter', 'teacherAttendanceCourseFilter', 'teacherMobileCourseFilter', 'teacherMobileAttendanceCourseFilter'];
+      const selects = ['teacherCourseFilter', 'teacherMobileCourseFilter'];
       selects.forEach(function(id) {
         const select = getElement(id);
         if (!select) return;
@@ -9948,6 +9936,21 @@
         : getLocalDateString();
     }
 
+    function initAttendanceDateToToday() {
+      const today = getLocalDateString();
+      ['pickupDate', 'teacherMobilePickupDate'].forEach(function(id) {
+        const el = getElement(id);
+        if (el && !el.value) el.value = today;
+      });
+    }
+
+    function isOnsiteCourse(course) {
+      if (!course) return true;
+      const hasDays = Array.isArray(course.days) && course.days.length > 0;
+      if (hasDays) return true;
+      return !course.onlineLink && !course.roomId;
+    }
+
     function getThaiDayFromDate(dateText) {
       const days = ['อาทิตย์', 'จันทร์', 'อังคาร', 'พุธ', 'พฤหัสบดี', 'ศุกร์', 'เสาร์'];
       const date = dateText ? new Date(dateText + 'T00:00:00') : new Date();
@@ -9987,6 +9990,8 @@
       pickupList.length = 0;
       students.forEach(function(student, index) {
         const hasClassToday = isStudentClassOnDate(student, selectedDate);
+        const course = getCourseByStudentOrName(student, student.course);
+        const isOnsite = isOnsiteCourse(course);
         pickupList.push({
           id: student.id || index + 1,
           name: student.name || '-',
@@ -9994,6 +9999,7 @@
           grade: student.grade || '-',
           course: student.course || '-',
           hasClassToday: hasClassToday,
+          isOnsite: isOnsite,
           pickupDate: selectedDate,
           status: getStudentAttendanceDisplayStatus(student, selectedDate)
         });
@@ -10003,15 +10009,14 @@
     function getFilteredPickupList() {
       syncPickupListFromStudents();
       const grade = getElement('pickupGradeFilter') ? getElement('pickupGradeFilter').value : 'ทั้งหมด';
-      const course = getElement('teacherAttendanceCourseFilter') ? getElement('teacherAttendanceCourseFilter').value : 'ทั้งหมด';
       const status = getElement('pickupStatusFilter') ? getElement('pickupStatusFilter').value : 'ทั้งหมด';
       const teacherCourseNames = getTeacherVisibleCourses().map(function(c) { return c.name; });
       return pickupList.filter(function(item) {
+        if (!item.isOnsite || !item.hasClassToday) return false;
         const teacherMatched = !teacherCourseNames.length || teacherCourseNames.includes(item.course) || (currentTeacher && currentTeacher.role === 'Admin');
         const gradeMatched = grade === 'ทั้งหมด' || item.grade === grade;
-        const courseMatched = course === 'ทั้งหมด' || item.course === course;
         const statusMatched = status === 'ทั้งหมด' || item.status === status;
-        return teacherMatched && gradeMatched && courseMatched && statusMatched;
+        return teacherMatched && gradeMatched && statusMatched;
       }).sort(function(a, b) {
         const statusPriority = { 'ยังไม่เช็คชื่อ': 0, 'ไม่มา': 1, 'ผู้ปกครองมาส่ง': 2, 'รถรับส่ง': 3, 'มาเรียน': 4, 'ไม่มีเรียน': 5 };
         const priorityA = statusPriority[a.status] !== undefined ? statusPriority[a.status] : 9;
@@ -10036,7 +10041,6 @@
     function syncTeacherMobileAttendanceFilters() {
       const map = [
         ['teacherMobilePickupDate', 'pickupDate'],
-        ['teacherMobileAttendanceCourseFilter', 'teacherAttendanceCourseFilter'],
         ['teacherMobilePickupGradeFilter', 'pickupGradeFilter'],
         ['teacherMobilePickupStatusFilter', 'pickupStatusFilter']
       ];
@@ -10052,7 +10056,6 @@
     function updateTeacherMobileAttendanceFromExistingData() {
       const map = [
         ['pickupDate', 'teacherMobilePickupDate'],
-        ['teacherAttendanceCourseFilter', 'teacherMobileAttendanceCourseFilter'],
         ['pickupGradeFilter', 'teacherMobilePickupGradeFilter'],
         ['pickupStatusFilter', 'teacherMobilePickupStatusFilter']
       ];
@@ -10397,7 +10400,6 @@
       const present = filtered.filter(function(item) { return item.status === 'มาเรียน' || item.status === 'ผู้ปกครองมาส่ง' || item.status === 'รถรับส่ง'; }).length;
       const parent = filtered.filter(function(item) { return item.status === 'ผู้ปกครองมาส่ง' || item.status === 'รถรับส่ง'; }).length;
       const absent = filtered.filter(function(item) { return item.status === 'ไม่มา' || item.status === 'ยังไม่เช็คชื่อ'; }).length;
-      const selectedCourse = getElement('teacherAttendanceCourseFilter') ? getElement('teacherAttendanceCourseFilter').value : 'ทั้งหมด';
       const selectedGrade = getElement('pickupGradeFilter') ? getElement('pickupGradeFilter').value : 'ทั้งหมด';
 
       const historyId = createFirebaseDocId('attendanceHistory');
@@ -10405,7 +10407,7 @@
         id: historyId,
         firebaseDocId: historyId,
         date: selectedDate,
-        courseScope: 'คอร์ส: ' + selectedCourse + ' / ระดับชั้น: ' + selectedGrade,
+        courseScope: 'ระดับชั้น: ' + selectedGrade,
         total: filtered.length,
         present: present,
         parent: parent,
