@@ -18725,6 +18725,7 @@ function receiptStatusText(status) {
           month: selectedMonth,
           grade: selectedGrade,
           studentId: student.id || '',
+          memberId: student.memberId || student.studentId || '',
           authUid: student.authUid || '',
           student: student.name || '-',
           nickname: student.nickname || '-',
@@ -19463,13 +19464,44 @@ function receiptStatusText(status) {
       select.value = months.includes(current) ? current : (months[0] || '');
     }
 
+    function findStudentForScoreRecord(record) {
+      if (!record) return null;
+      return students.find(function(student) {
+        if (!student || student.deleted === true) return false;
+        const ids = [student.id, student.firebaseDocId, student.memberId, student.studentId, student.authUid].map(function(value) {
+          return String(value || '').trim();
+        });
+        const recordIds = [record.studentId, record.memberId, record.studentMemberId, record.authUid].map(function(value) {
+          return String(value || '').trim();
+        }).filter(Boolean);
+        if (recordIds.some(function(id) { return ids.includes(id); })) return true;
+        return !!record.student && String(record.student || '').trim() === String(student.name || '').trim();
+      }) || null;
+    }
+
+    function getScoreRecordMemberId(record) {
+      const direct = String((record && (record.memberId || record.studentMemberId)) || '').trim();
+      if (direct) return direct;
+      const student = findStudentForScoreRecord(record);
+      if (student) return String(student.memberId || student.studentId || '').trim();
+      return String((record && record.studentId) || '').trim();
+    }
+
+    function compareScoreRecordsByMemberId(a, b) {
+      const idA = getScoreRecordMemberId(a);
+      const idB = getScoreRecordMemberId(b);
+      const idDiff = idA.localeCompare(idB, undefined, { numeric: true, sensitivity: 'base' });
+      if (idDiff !== 0) return idDiff;
+      return String(a && a.student || '').localeCompare(String(b && b.student || ''), 'th');
+    }
+
     function getSelectedAdminScoreRecords() {
       const selectedMonth = getElement('adminScoreTestSetFilter') ? getElement('adminScoreTestSetFilter').value : '';
       const selectedGrade = getElement('adminScoreGradeFilter') ? getElement('adminScoreGradeFilter').value : '';
       if (!selectedMonth || !selectedGrade) return [];
       return adminScoreRecords.filter(function(record) {
         return record.month === selectedMonth && record.grade === selectedGrade;
-      });
+      }).slice().sort(compareScoreRecordsByMemberId);
     }
 
     function scoreStatusText(status) {
@@ -19540,6 +19572,7 @@ function receiptStatusText(status) {
               id: newId, firebaseDocId: newId,
               month: selectedMonth, grade: selectedGrade,
               studentId: r.studentId || '', authUid: r.studentUid || '',
+              memberId: r.memberId || r.studentMemberId || r.studentId || '',
               student: r.studentName || '-', nickname: '-',
               scores: {}, status: 'draft'
             };
@@ -28853,6 +28886,7 @@ function receiptStatusText(status) {
           month: month,
           grade: grade,
           studentId: r.studentId || '',
+          memberId: r.memberId || r.studentMemberId || r.studentId || '',
           authUid: r.studentUid || '',
           student: r.studentName || '-',
           nickname: '-',
