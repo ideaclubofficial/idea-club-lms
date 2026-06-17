@@ -31207,9 +31207,7 @@ function receiptStatusText(status) {
           '<span class="text-xs font-bold block text-right p-0.5 ' + (isToday ? 'text-indigo-600 bg-indigo-100 rounded-full w-5 h-5 flex items-center justify-center ml-auto' : isSun ? 'text-rose-500' : isSat ? 'text-indigo-600' : 'text-slate-600') + '">' + d + '</span>' +
           '<div class="space-y-0.5 mt-0.5 flex-1 overflow-y-auto pr-0.5">';
         dayScheds.sort(function(a, b) { return tfGetSessionStartText(a).localeCompare(tfGetSessionStartText(b)); }).forEach(function(s) {
-          const colorCls = TF_FORMAT_COLORS[s.format] || 'bg-slate-100 text-slate-700';
-          html += '<div class="' + colorCls + ' text-[10px] rounded px-1 py-0.5 font-medium leading-tight whitespace-normal break-words">' +
-            escapeHtml((tfGetSessionStartText(s) || '') + ' ' + (tfGetCourseName(s.courseId) || '')) + '</div>';
+          html += tfScheduleCalendarCardHtml(s, false);
         });
         html += '</div></div>';
       }
@@ -31300,6 +31298,53 @@ function receiptStatusText(status) {
     function tfGetCourseName(courseId) {
       const c = (courses || []).find(function(c) { return (c.id || c.firebaseDocId || '') === courseId; });
       return c ? (c.name || c.title || courseId) : (courseId || '—');
+    }
+
+    function tfGetCourseGradeSubjectLabel(courseId) {
+      const c = tfFindCourseById(courseId);
+      const courseName = c ? (c.name || c.title || '') : tfGetCourseName(courseId);
+      const grade = c ? (c.grade || c.level || '') : '';
+      let subject = c ? (c.subject || c.onDemandSubject || '') : '';
+      if (!subject) {
+        const text = String(courseName || '');
+        if (text.includes('วิทยาศาสตร์')) subject = 'วิทยาศาสตร์';
+        else if (text.includes('คณิต')) subject = 'คณิตศาสตร์';
+        else if (text.includes('English') || text.includes('ภาษาอังกฤษ')) subject = 'ภาษาอังกฤษ';
+        else if (text.includes('ภาษาไทย')) subject = 'ภาษาไทย';
+        else if (text.includes('สังคม')) subject = 'สังคมศึกษา';
+      }
+      const shortSubject = subject
+        .replace('คณิตศาสตร์', 'คณิต')
+        .replace('วิทยาศาสตร์', 'วิทย์')
+        .replace('ภาษาอังกฤษ', 'อังกฤษ')
+        .replace('ภาษาไทย', 'ไทย')
+        .replace('สังคมศึกษา', 'สังคม');
+      return [grade, shortSubject].filter(Boolean).join(' ') || (courseName ? courseName.slice(0, 16) : '-');
+    }
+
+    function tfGetCenterShortLabel(centerText) {
+      const normalized = tfNormalizeCenterText(centerText || '');
+      if (normalized.includes('นครสวรรค์') || normalized.includes('นครสวรรค')) return 'นว.';
+      if (normalized.includes('หนองฉาง')) return 'นฉ.';
+      return centerText ? String(centerText).replace('IDEA CLUB ศูนย์ ', '').trim() : '';
+    }
+
+    function tfGetTutorShortName(tutorId) {
+      const name = tfGetTutorName(tutorId);
+      if (!name || name === '—') return '';
+      return name.length > 12 ? name.slice(0, 12) : name;
+    }
+
+    function tfScheduleCalendarCardHtml(s, compact) {
+      const colorCls = TF_FORMAT_COLORS[s.format || s.type] || 'bg-slate-100 text-slate-700';
+      const timeText = [tfGetSessionStartText(s), tfGetSessionEndText(s)].filter(Boolean).join('-');
+      const courseText = tfGetCourseGradeSubjectLabel(s.courseId);
+      const metaParts = [tfGetTutorShortName(s.tutorId || s.teacherId), tfGetCenterShortLabel(s.center || s.courseLocation)].filter(Boolean);
+      return '<div class="' + colorCls + ' rounded px-1 py-0.5 font-medium leading-tight whitespace-normal break-words ' + (compact ? 'text-[10px]' : 'text-[11px]') + '">' +
+        '<div class="font-bold">' + escapeHtml(timeText || '-') + '</div>' +
+        '<div>' + escapeHtml(courseText) + '</div>' +
+        (metaParts.length ? '<div class="opacity-80">' + escapeHtml(metaParts.join(' / ')) + '</div>' : '') +
+      '</div>';
     }
 
     // --- Helper: get tutor name ---
@@ -31680,23 +31725,22 @@ function receiptStatusText(status) {
 
       let html = '';
       for (let i = 0; i < firstDay; i++) {
-        html += '<div class="min-h-12 p-1 rounded-lg bg-slate-50/50 text-slate-300"><span class="text-xs block text-right">' + (prevDays - firstDay + 1 + i) + '</span></div>';
+        html += '<div class="min-h-24 p-1 rounded-lg bg-slate-50/50 text-slate-300"><span class="text-xs block text-right">' + (prevDays - firstDay + 1 + i) + '</span></div>';
       }
       for (let d = 1; d <= totalDays; d++) {
         const dateStr = year + '-' + String(month + 1).padStart(2, '0') + '-' + String(d).padStart(2, '0');
         const daySch = myScheds.filter(function(s) { return tfGetSessionDateText(s) === dateStr; });
         const isToday = dateStr === todayStr;
-        html += '<div onclick="tfPortalSelectDay(\'' + dateStr + '\')" class="min-h-12 p-1.5 rounded-lg border ' + (isToday ? 'border-indigo-400 bg-indigo-50' : 'border-slate-200 bg-white hover:bg-slate-50') + ' cursor-pointer transition-colors">' +
-          '<span class="text-xs font-bold block text-right mb-0.5 ' + (isToday ? 'text-indigo-600' : 'text-slate-600') + '">' + d + '</span>';
+        html += '<div onclick="tfPortalSelectDay(\'' + dateStr + '\')" class="min-h-24 p-1.5 rounded-lg border ' + (isToday ? 'border-indigo-400 bg-indigo-50' : 'border-slate-200 bg-white hover:bg-slate-50') + ' cursor-pointer transition-colors flex flex-col overflow-hidden">' +
+          '<span class="text-xs font-bold block text-right mb-0.5 ' + (isToday ? 'text-indigo-600' : 'text-slate-600') + '">' + d + '</span><div class="space-y-0.5 flex-1 overflow-y-auto pr-0.5">';
         daySch.sort(function(a, b) { return tfGetSessionStartText(a).localeCompare(tfGetSessionStartText(b)); }).forEach(function(s) {
-          const colorCls = TF_FORMAT_COLORS[s.type] || 'bg-indigo-100 text-indigo-800';
-          html += '<div class="' + colorCls + ' text-[10px] rounded px-1 py-0.5 font-medium leading-tight whitespace-normal break-words">' + escapeHtml(tfGetSessionStartText(s) || '') + '</div>';
+          html += tfScheduleCalendarCardHtml(tfSessionToSched(s), true);
         });
-        html += '</div>';
+        html += '</div></div>';
       }
       const rem = (7 - (firstDay + totalDays) % 7) % 7;
       for (let i = 1; i <= rem; i++) {
-        html += '<div class="min-h-12 p-1 rounded-lg bg-slate-50/50 text-slate-300"><span class="text-xs block text-right">' + i + '</span></div>';
+        html += '<div class="min-h-24 p-1 rounded-lg bg-slate-50/50 text-slate-300"><span class="text-xs block text-right">' + i + '</span></div>';
       }
       grid.innerHTML = html;
     }
