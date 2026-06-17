@@ -31346,9 +31346,6 @@ function receiptStatusText(status) {
       }
 
       if (tfEl('tf-sched-center') && course.location) tfEl('tf-sched-center').value = course.location;
-      if (slot && formatEl && (!options.keepFormat || !currentFormat || currentFormat !== slot.format)) {
-        formatEl.value = slot.format || currentFormat || 'onsite';
-      }
       const finalFormat = formatEl ? formatEl.value : (slot ? slot.format : 'onsite');
       if (slot) {
         if (tfEl('tf-sched-start')) tfEl('tf-sched-start').value = slot.startTime || slot.publishTime || '';
@@ -31367,8 +31364,13 @@ function receiptStatusText(status) {
       if (!courseSel) return;
       const current = selectedCourseId !== undefined ? selectedCourseId : courseSel.value;
       const selectedCenter = tfEl('tf-sched-center') ? tfEl('tf-sched-center').value : '';
+      if (!selectedCenter) {
+        courseSel.innerHTML = '<option value="">เลือกศูนย์ก่อน</option>';
+        courseSel.value = '';
+        return;
+      }
       const filteredCourses = tfGetCourses().filter(function(c) {
-        return !selectedCenter || tfCourseMatchesCenter(c, selectedCenter);
+        return tfCourseMatchesCenter(c, selectedCenter);
       });
       courseSel.innerHTML = '<option value="">เลือกคอร์ส</option>' +
         filteredCourses.map(function(c) {
@@ -31392,12 +31394,12 @@ function receiptStatusText(status) {
       const modal = tfEl('tf-schedule-modal');
       if (!modal) return;
       const centerSelect = tfEl('tf-sched-center');
-      if (centerSelect && tfCenterFilter && tfCenterFilter !== 'all') {
-        centerSelect.value = tfCenterFilter;
-      }
+      if (centerSelect) centerSelect.value = '';
+      if (tfEl('tf-sched-format')) tfEl('tf-sched-format').value = '';
       tfPopulateSchedCourses('');
       // Populate tutor select
       tfPopulateSchedTutors();
+      if (tfEl('tf-sched-tutor')) tfEl('tf-sched-tutor').value = '';
       // Pre-fill date
       if (prefillDate && tfEl('tf-sched-date')) tfEl('tf-sched-date').value = prefillDate;
       else if (tfEl('tf-sched-date')) tfEl('tf-sched-date').value = '';
@@ -31493,12 +31495,12 @@ function receiptStatusText(status) {
       const date = tfEl('tf-sched-date') ? tfEl('tf-sched-date').value : '';
       const start = tfEl('tf-sched-start') ? tfEl('tf-sched-start').value : '';
       const end = tfEl('tf-sched-end') ? tfEl('tf-sched-end').value : '';
-      const format = tfEl('tf-sched-format') ? tfEl('tf-sched-format').value : 'onsite';
+      const format = tfEl('tf-sched-format') ? tfEl('tf-sched-format').value : '';
       const center = tfEl('tf-sched-center') ? tfEl('tf-sched-center').value : '';
       const location = tfEl('tf-sched-location') ? tfEl('tf-sched-location').value.trim() : '';
       const notes = tfEl('tf-sched-notes') ? tfEl('tf-sched-notes').value.trim() : '';
-      if (!courseId || !date || !start || !end) {
-        if (errEl) { errEl.textContent = 'กรุณากรอกข้อมูลที่จำเป็นให้ครบ (คอร์ส, วันที่, เวลา)'; errEl.classList.remove('hidden'); }
+      if (!center || !courseId || !format || !date || !start || !end) {
+        if (errEl) { errEl.textContent = 'กรุณากรอกข้อมูลที่จำเป็นให้ครบ (ศูนย์, คอร์ส, รูปแบบ, วันที่, เวลา)'; errEl.classList.remove('hidden'); }
         return;
       }
       const docId = editingId || createFirebaseDocId('monthlyPlanSessions');
@@ -31727,6 +31729,7 @@ function receiptStatusText(status) {
           <div>
             <label class="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">สาขา/ศูนย์ *</label>
             <select id="tf-sched-center" onchange="tfOnScheduleCenterChange()" required class="w-full bg-slate-50 border border-slate-300 text-slate-900 rounded-xl p-2.5 font-medium text-sm">
+              <option value="">เลือกศูนย์</option>
               <option value="IDEA CLUB ศูนย์ หนองฉาง">🏬 ศูนย์หนองฉาง</option>
               <option value="IDEA CLUB ศูนย์ นครสวรรค์">🏫 ศูนย์นครสวรรค์</option>
             </select>
@@ -31734,6 +31737,7 @@ function receiptStatusText(status) {
           <div>
             <label class="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">รูปแบบการสอน *</label>
             <select id="tf-sched-format" onchange="tfOnFormatChange()" required class="w-full bg-slate-50 border border-slate-300 text-slate-900 rounded-xl p-2.5 font-medium text-sm">
+              <option value="">เลือกรูปแบบการสอน</option>
               <option value="onsite">🏫 Onsite</option>
               <option value="online">💻 Online</option>
               <option value="ondemand">🎥 Ondemand</option>
