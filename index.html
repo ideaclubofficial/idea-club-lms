@@ -14987,11 +14987,23 @@
     function renderTodayTeachingList() {
       const box = getElement('todayTeachingList');
       if (!box) return;
-      const today = getThaiDayName(new Date());
-      const todayCourses = courses.filter(function(c) { return c.status === 'open' && Array.isArray(c.days) && c.days.includes(today); });
-      box.innerHTML = todayCourses.length ? todayCourses.map(function(c) {
-        return '<p><strong>' + c.grade + '</strong> — ' + c.name + '<br><span style="color:#6b7280;">' + c.location + '</span></p>';
-      }).join('') : '<p>วันนี้ยังไม่มีคอร์สที่ระบุวันเรียนไว้</p>';
+      const todayItems = getTeacherMobileScheduleItems('today');
+      if (!todayItems.length) {
+        box.innerHTML = '<p>วันนี้ยังไม่มีคาบสอน</p>';
+        return;
+      }
+      box.innerHTML = todayItems.map(function(item) {
+        const isOneOnOne = item.type === 'oneOnOne';
+        const sessionId = item.id || '';
+        const actionBtn = isOneOnOne && sessionId
+          ? '<button class="btn btn-green" style="margin-top:6px;" type="button" onclick="' + (item.raw && item.raw.actualStartTime && !item.raw.lessonCompleted ? actionCall('completePrivateLessonSession', sessionId) : actionCall('startPrivateLessonSession', sessionId)) + '">' + (item.raw && item.raw.actualStartTime && !item.raw.lessonCompleted ? 'จบการสอน' : 'บันทึกชั่วโมง') + '</button>'
+          : (item.courseId ? '<button class="btn btn-blue" style="margin-top:6px;" type="button" onclick="' + actionCall('openOnlineClassByCourseId', item.courseId) + '">เข้าห้อง Online</button>' : '');
+        return '<div style="border-bottom:1px solid #f3f4f6; padding-bottom:8px; margin-bottom:8px;">' +
+          '<p><strong>[' + escapeHtml(item.typeText || '-') + '] ' + escapeHtml(item.courseName || '-') + '</strong></p>' +
+          '<p><span style="color:#6b7280;">' + escapeHtml(item.time || '-') + ' · วิชา: ' + escapeHtml(item.subject || '-') + '</span></p>' +
+          actionBtn +
+          '</div>';
+      }).join('');
     }
 
     function paymentActionButtons(status, paymentId) {
