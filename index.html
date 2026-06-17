@@ -14491,11 +14491,6 @@
     }
 
     function studentMobileGoToOnlineExam() {
-      const selectedCourse = getCurrentStudentCourse ? getCurrentStudentCourse() : null;
-      if (selectedCourse && courseFeatureEnabled(selectedCourse, 'exams') === false) {
-        alert('คอร์สของคุณยังไม่เปิดฟีเจอร์ข้อสอบออนไลน์');
-        return;
-      }
       document.body.classList.add('student-mobile-online-exam-open');
       studentMobileGo('student-monthly-test');
       var el = getElement('desktopOnlineExamWrapper') || getElement('onlineExamCourseGrid');
@@ -14504,13 +14499,10 @@
 
     function getPublishedOnlineExamCoursesForStudent(options) {
       const opts = options || {};
-      const selectedCourse = getCurrentStudentCourse ? getCurrentStudentCourse() : null;
-      if (selectedCourse && courseFeatureEnabled(selectedCourse, 'exams') === false) return [];
       const grade = currentStudent && currentStudent.grade ? currentStudent.grade : getProfileGrade();
       return (onlineExamCourseCache || []).filter(function(c) {
         if (!c) return false;
-        if (c.isActive === false || c.status === 'inactive') return false;
-        if (getOnlineExamScheduleStatus(c).state !== 'open') return false;
+        if (c.status === 'inactive') return false;
         if (opts.exactGradeOnly) return !!grade && c.grade === grade;
         return !c.grade || !grade || c.grade === grade;
       });
@@ -14522,21 +14514,19 @@
 
     function updateStudentInWebExamUx() {
       const selectedCourse = getCurrentStudentCourse ? getCurrentStudentCourse() : null;
-      const isApproved = !!(currentStudent && currentStudent.courseId && selectedCourse && isCourseStatusApproved(currentStudent.courseStatus || ''));
-      safeRun(function() { updateStudentMobileOnlineExamCard(isApproved, selectedCourse ? normalizeCourseFeatures(selectedCourse) : {}); }, 'student-mobile-online-exam-card');
+      safeRun(function() { updateStudentMobileOnlineExamCard(!!currentStudent, selectedCourse ? normalizeCourseFeatures(selectedCourse) : {}); }, 'student-mobile-online-exam-card');
       safeRun(renderStudentMobileExam, 'student-mobile-score-ux');
     }
 
     function updateStudentMobileOnlineExamCard(isApproved, selectedFeatures) {
       const card = getElement('studentMobileOnlineExamCard');
       if (!card) return;
-      const features = selectedFeatures || {};
-      const canUseExams = !!(isApproved && features.exams !== false);
+      const canUseExams = !!isApproved;
       const count = canUseExams ? getStudentOnlineExamCount() : 0;
       card.style.display = isApproved ? '' : 'none';
       if (getElement('studentMobileOnlineExamCardDesc')) {
         getElement('studentMobileOnlineExamCardDesc').textContent = !canUseExams
-          ? 'คอร์สของคุณยังไม่เปิดฟีเจอร์ข้อสอบออนไลน์'
+          ? 'กรุณาเข้าสู่ระบบนักเรียนก่อน'
           : (count ? ('มีข้อสอบออนไลน์ ' + count + ' ชุดสำหรับชั้นเรียนของคุณ') : 'ยังไม่มีข้อสอบออนไลน์ที่เผยแพร่');
       }
       if (getElement('studentMobileOnlineExamTag')) {
@@ -14606,7 +14596,7 @@
           getElement('studentPaymentLocked').innerHTML = '<h3>ชำระเงิน</h3><p style="color:#6b7280;">คอร์สนี้ยังปิดเมนูชำระเงินไว้ หากต้องการชำระเงิน กรุณาติดต่อเจ้าหน้าที่</p>';
         }
       }
-      safeRun(function() { updateStudentMobileOnlineExamCard(isCourseApproved, selectedFeatures); }, 'student-mobile-online-exam-card');
+      safeRun(function() { updateStudentMobileOnlineExamCard(!!currentStudent, selectedFeatures); }, 'student-mobile-online-exam-card');
       if (getElement('studentExamContent')) getElement('studentExamContent').classList.toggle('hidden', !canUseExamArea);
       if (getElement('studentExamLocked')) {
         getElement('studentExamLocked').classList.toggle('hidden', canUseExamArea);
@@ -29136,21 +29126,10 @@ function receiptStatusText(status) {
       const locked = getElement('onlineExamStudentLocked');
       const content = getElement('onlineExamStudentContent');
       if (!locked || !content) return;
-      const selectedCourse = getCurrentStudentCourse ? getCurrentStudentCourse() : null;
-
-      // Reuse the isCourseApproved logic already used in updateStudentCourseDisplay
-      const approved = currentStudent && (
-        currentStudent.courseStatus === 'active' ||
-        currentStudent.paymentStatus === 'paid' ||
-        currentStudent.isApproved === true
-      );
-
-      if (!approved || (selectedCourse && courseFeatureEnabled(selectedCourse, 'exams') === false)) {
+      if (!currentStudent) {
         locked.style.display = '';
         content.style.display = 'none';
-        locked.innerHTML = selectedCourse && courseFeatureEnabled(selectedCourse, 'exams') === false
-          ? '<div style="text-align:center;padding:32px 16px;color:#9ca3af;"><div style="font-size:48px;margin-bottom:12px;">🔒</div><p style="font-size:14px;font-weight:600;color:#374151;">คอร์สของคุณยังไม่เปิดฟีเจอร์ข้อสอบออนไลน์</p></div>'
-          : '<div style="text-align:center;padding:32px 16px;color:#9ca3af;"><div style="font-size:48px;margin-bottom:12px;">🔒</div><p style="font-size:14px;font-weight:600;color:#374151;">ยังไม่สามารถใช้งานได้</p><p style="font-size:13px;margin-top:6px;">กรุณาสมัครและรับการอนุมัติคอร์สก่อน จึงจะเข้าทำข้อสอบออนไลน์ได้</p></div>';
+        locked.innerHTML = '<div style="text-align:center;padding:32px 16px;color:#9ca3af;"><div style="font-size:48px;margin-bottom:12px;">🔒</div><p style="font-size:14px;font-weight:600;color:#374151;">กรุณาเข้าสู่ระบบนักเรียนก่อน</p></div>';
         return;
       }
       locked.style.display = 'none';
