@@ -28226,6 +28226,7 @@ function receiptStatusText(status) {
           '.exam-print-question-image{display:block;max-height:230px;max-width:100%;object-fit:contain;border:1px solid #d1d5db;margin:8px 0;background:#fff;}' +
           '.exam-print-choices{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:8px 18px;margin-top:8px;}' +
           '.exam-print-choice{display:grid;grid-template-columns:18px 1fr;gap:7px;align-items:start;min-height:28px;page-break-inside:avoid;break-inside:avoid;}' +
+          '.exam-print-page-spacer{display:block;width:100%;height:0;break-after:auto;page-break-after:auto;border:0;margin:0;padding:0;}' +
           '.exam-print-choice-mark{width:15px;height:15px;border:1.6px solid #111827;border-radius:50%;margin-top:4px;display:inline-block;}' +
           '.exam-print-choice-label{font-weight:800;color:#111827;}' +
           '.exam-print-choice-image{display:block;max-height:120px;max-width:220px;object-fit:contain;border:1px solid #d1d5db;margin:5px 0;background:#fff;}' +
@@ -28247,6 +28248,30 @@ function receiptStatusText(status) {
         '<div class="exam-print-instruction">คำชี้แจง: เลือกคำตอบที่ถูกต้องที่สุดเพียง 1 คำตอบต่อข้อ และทำเครื่องหมายในวงกลมหน้าตัวเลือก</div>' +
         (questionHtml || '<p style="color:#64748b;">ยังไม่มีข้อสอบในชุดนี้</p>') +
       '</div>';
+    }
+
+    function applyOnlineExamPdfSoftPageBreaks(target) {
+      if (!target) return;
+      const pageHeightPx = 1123;
+      const bottomGuardPx = 28;
+      Array.from(target.querySelectorAll('.exam-print-page-spacer')).forEach(function(spacer) {
+        try { spacer.parentNode.removeChild(spacer); } catch (e) {}
+      });
+      const questions = Array.from(target.querySelectorAll('.exam-print-question'));
+      questions.forEach(function(question) {
+        const top = question.offsetTop;
+        const height = question.offsetHeight;
+        const pageTop = Math.floor(top / pageHeightPx) * pageHeightPx;
+        const pageBottom = pageTop + pageHeightPx;
+        const remaining = pageBottom - top;
+        if (height >= pageHeightPx - 120) return;
+        if (top > pageTop + 70 && height + bottomGuardPx > remaining) {
+          const spacer = document.createElement('div');
+          spacer.className = 'exam-print-page-spacer';
+          spacer.style.height = Math.max(0, remaining + 1) + 'px';
+          question.parentNode.insertBefore(spacer, question);
+        }
+      });
     }
 
     async function exportOnlineExamCoursePdf(courseId, btn) {
@@ -28291,6 +28316,8 @@ function receiptStatusText(status) {
         });
         const filename = 'IDEACLUB-Exam-' + getSafeFileName([course.examMonth, getOnlineExamCourseGrade(course), course.subject, course.title].filter(Boolean).join('-')) + '.pdf';
         const target = tempDiv.querySelector('.exam-print-doc');
+        applyOnlineExamPdfSoftPageBreaks(target);
+        await new Promise(function(resolve) { requestAnimationFrame(function() { resolve(); }); });
         const canvas = await html2canvasLib(target, {
           scale: 2,
           useCORS: true,
