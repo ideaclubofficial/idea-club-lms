@@ -5085,13 +5085,12 @@
                   <div class="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm space-y-4">
                     <div class="flex flex-col md:flex-row gap-4 items-start md:items-center justify-between">
                       <div class="flex flex-wrap items-center gap-2">
-                        <span class="text-xs font-bold text-slate-400 uppercase tracking-wider">สาขา:</span>
-                        <button onclick="tfFilterByCenter('all')" id="tf-btn-center-all"
-                          class="px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all border border-indigo-600 bg-indigo-50 text-indigo-700 shadow-sm cursor-pointer">ทั้งหมด</button>
-                        <button onclick="tfFilterByCenter('nongchang')" id="tf-btn-center-nc"
-                          class="px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all border border-slate-200 bg-slate-50 text-slate-700 hover:bg-slate-100 cursor-pointer">🏬 หนองฉาง</button>
-                        <button onclick="tfFilterByCenter('nakhonsawan')" id="tf-btn-center-ns"
-                          class="px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all border border-slate-200 bg-slate-50 text-slate-700 hover:bg-slate-100 cursor-pointer">🏫 นครสวรรค์</button>
+                        <span class="text-xs font-bold text-slate-400 uppercase tracking-wider">ศูนย์:</span>
+                        <select id="tf-filter-center" onchange="tfFilterByCenter(this.value)" class="bg-slate-50 border border-slate-200 text-slate-700 text-xs rounded-xl p-2.5 font-medium cursor-pointer min-w-[180px]">
+                          <option value="all">ทุกศูนย์</option>
+                          <option value="IDEA CLUB ศูนย์ หนองฉาง">IDEA CLUB ศูนย์ หนองฉาง</option>
+                          <option value="IDEA CLUB ศูนย์ นครสวรรค์">IDEA CLUB ศูนย์ นครสวรรค์</option>
+                        </select>
                       </div>
                       <div class="bg-slate-100 p-1 rounded-xl flex items-center border border-slate-200">
                         <button id="tf-btn-view-grid" onclick="tfSwitchView('grid')"
@@ -5116,6 +5115,9 @@
                       </select>
                       <select id="tf-filter-tutor" onchange="tfRenderSchedule()" class="bg-slate-50 border border-slate-200 text-slate-700 text-xs rounded-xl p-2.5 font-medium cursor-pointer">
                         <option value="all">ผู้สอนทุกคน</option>
+                      </select>
+                      <select id="tf-filter-course" onchange="tfRenderSchedule()" class="bg-slate-50 border border-slate-200 text-slate-700 text-xs rounded-xl p-2.5 font-medium cursor-pointer min-w-[220px]">
+                        <option value="all">คอร์สทั้งหมด</option>
                       </select>
                       <button onclick="tfResetFilters()" class="text-xs text-rose-600 hover:text-rose-800 font-bold flex items-center gap-1 ml-auto cursor-pointer bg-transparent border-0">
                         <i data-lucide="refresh-cw" class="w-3.5 h-3.5"></i> ล้างตัวกรอง
@@ -30794,7 +30796,38 @@ function receiptStatusText(status) {
 
     // --- Active courses ---
     function tfGetCourses() {
-      return (courses || []).filter(function(c) { return c && !c.deleted && c.status !== 'closed' && c.status !== 'archived'; });
+      return tfSortCoursesForSchedule((courses || []).filter(function(c) { return c && !c.deleted && c.status !== 'closed' && c.status !== 'archived'; }));
+    }
+
+    function tfGetCourseId(course) {
+      return course ? (course.id || course.firebaseDocId || '') : '';
+    }
+
+    function tfGetCourseGradeForSort(course) {
+      return String((course && (course.grade || course.level)) || '').trim();
+    }
+
+    function tfGetCourseSortIndex(course) {
+      const order = ['ป.4','ป.5','ป.6','ม.1','ม.2','ม.3','ม.4','ม.5','ม.6'];
+      const idx = order.indexOf(tfGetCourseGradeForSort(course));
+      return idx >= 0 ? idx : 99;
+    }
+
+    function tfSortCoursesForSchedule(courseArr) {
+      return (courseArr || []).slice().sort(function(a, b) {
+        const gradeDiff = tfGetCourseSortIndex(a) - tfGetCourseSortIndex(b);
+        if (gradeDiff) return gradeDiff;
+        const nameA = String((a && (a.name || a.title)) || '');
+        const nameB = String((b && (b.name || b.title)) || '');
+        return nameA.localeCompare(nameB, 'th') || String(tfGetCourseId(a)).localeCompare(String(tfGetCourseId(b)), 'th');
+      });
+    }
+
+    function tfCourseOptionLabel(course) {
+      const id = tfGetCourseId(course);
+      const grade = tfGetCourseGradeForSort(course);
+      const name = (course && (course.name || course.title)) || id;
+      return (grade ? grade + ' · ' : '') + name;
     }
 
     // --- TF helper: get element ---
@@ -30881,9 +30914,9 @@ function receiptStatusText(status) {
       const coursesArr = tfGetCourses();
       if (!coursesArr.length) { box.innerHTML = '<p class="text-xs text-slate-400 text-center py-4">ยังไม่มีคอร์สเรียน</p>'; return; }
       box.innerHTML = coursesArr.map(function(c) {
-        const id = c.id || c.firebaseDocId || '';
+        const id = tfGetCourseId(c);
         const name = c.name || c.title || id;
-        const grade = c.grade || c.level || '';
+        const grade = tfGetCourseGradeForSort(c);
         const scheduleText = getCourseDisplaySchedule(c);
         return '<div class="flex items-center gap-2 p-2 bg-slate-50 rounded-lg border border-slate-200">' +
           '<div class="w-2 h-2 rounded-full bg-indigo-400 flex-shrink-0"></div>' +
@@ -30926,11 +30959,23 @@ function receiptStatusText(status) {
           }).join('');
         if (prev) tutorSel.value = prev;
       }
+      const courseSel = tfEl('tf-filter-course');
+      if (courseSel) {
+        const prevCourse = courseSel.value;
+        courseSel.innerHTML = '<option value="all">คอร์สทั้งหมด</option>' +
+          tfGetCourses().map(function(c) {
+            const id = tfGetCourseId(c);
+            return '<option value="' + escapeHtml(id) + '">' + escapeHtml(tfCourseOptionLabel(c)) + '</option>';
+          }).join('');
+        courseSel.value = Array.prototype.some.call(courseSel.options || [], function(opt) { return opt.value === prevCourse; }) ? prevCourse : 'all';
+      }
     }
 
     // --- Filter by center ---
     function tfFilterByCenter(center) {
-      tfCenterFilter = center;
+      tfCenterFilter = center || 'all';
+      const centerSel = tfEl('tf-filter-center');
+      if (centerSel) centerSel.value = tfCenterFilter;
       const btns = { all: 'tf-btn-center-all', nongchang: 'tf-btn-center-nc', nakhonsawan: 'tf-btn-center-ns' };
       Object.keys(btns).forEach(function(k) {
         const btn = tfEl(btns[k]);
@@ -30964,8 +31009,12 @@ function receiptStatusText(status) {
     function tfResetFilters() {
       const fmt = tfEl('tf-filter-format');
       const tut = tfEl('tf-filter-tutor');
+      const course = tfEl('tf-filter-course');
+      const center = tfEl('tf-filter-center');
       if (fmt) fmt.value = 'all';
       if (tut) tut.value = 'all';
+      if (course) course.value = 'all';
+      if (center) center.value = 'all';
       tfCenterFilter = 'all';
       tfFilterByCenter('all');
     }
@@ -31003,13 +31052,16 @@ function receiptStatusText(status) {
       const scheds = tfGetMonthSchedules();
       const fmt = tfEl('tf-filter-format') ? tfEl('tf-filter-format').value : 'all';
       const tutId = tfEl('tf-filter-tutor') ? tfEl('tf-filter-tutor').value : 'all';
+      const courseId = tfEl('tf-filter-course') ? tfEl('tf-filter-course').value : 'all';
       return scheds.filter(function(s) {
         const centerOk = tfCenterFilter === 'all' ||
+          (s.center && s.center === tfCenterFilter) ||
           (tfCenterFilter === 'nongchang' && s.center && s.center.includes('หนองฉาง')) ||
           (tfCenterFilter === 'nakhonsawan' && s.center && (s.center.includes('นครสวรรค์') || s.center.includes('นครสวรรค')));
         const fmtOk = fmt === 'all' || s.format === fmt;
         const tutOk = tutId === 'all' || s.tutorId === tutId;
-        return centerOk && fmtOk && tutOk;
+        const courseOk = courseId === 'all' || String(s.courseId || '') === String(courseId);
+        return centerOk && fmtOk && tutOk && courseOk;
       });
     }
 
@@ -31250,8 +31302,8 @@ function receiptStatusText(status) {
       if (courseSel) {
         courseSel.innerHTML = '<option value="">เลือกคอร์ส</option>' +
           tfGetCourses().map(function(c) {
-            const id = c.id || c.firebaseDocId || '';
-            return '<option value="' + escapeHtml(id) + '">' + escapeHtml((c.grade || '') + (c.grade ? ' · ' : '') + (c.name || c.title || id)) + '</option>';
+            const id = tfGetCourseId(c);
+            return '<option value="' + escapeHtml(id) + '">' + escapeHtml(tfCourseOptionLabel(c)) + '</option>';
           }).join('');
       }
       // Populate tutor select
