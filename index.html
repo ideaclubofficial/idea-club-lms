@@ -3049,8 +3049,8 @@
               </div>
 
               <div class="teacher-mobile-card">
-                <h3>รายชื่อนักเรียนทั้งหมด</h3>
-                <div id="teacherMobilePickupList" class="teacher-mobile-list"></div>
+                <h3>คอร์สที่มีเรียนวันนี้</h3>
+                <div id="attendanceMobileTodayCourses"></div>
               </div>
             </div>
 
@@ -3064,6 +3064,10 @@
                 <div class="stat"><h4>วิธีมาเรียน</h4><p id="pickupParentCount">0 คน</p></div>
                 <div class="stat"><h4>ไม่มา / ยังไม่เช็ค</h4><p id="pickupWaitingCount">0 คน</p></div>
               </div>
+
+              <div id="attendanceTodayCourses" style="margin-top:16px;margin-bottom:8px;"></div>
+
+              <br />
 
               <div class="form-row">
                 <div>
@@ -3106,26 +3110,6 @@
                 <button class="btn btn-blue" type="button" onclick="teacherSaveAttendance()">บันทึกเช็คชื่อ</button>
               </div>
 
-              <br />
-
-              <div class="table-wrap teacher-pickup-table">
-                <table>
-                  <thead>
-                    <tr>
-                      <th>ลำดับ</th>
-                      <th>นักเรียน</th>
-                      <th>ชื่อเล่น</th>
-                      <th>ระดับชั้น</th>
-                      <th>คอร์ส</th>
-                      <th>สถานะ</th>
-                      <th>เช็คด่วน</th>
-                    </tr>
-                  </thead>
-                  <tbody id="teacherPickupTableBody"></tbody>
-                </table>
-              </div>
-
-              <div id="pickupPagination" class="test-actions"></div>
               <p id="teacherAttendanceResult" style="margin-top:14px; font-weight:bold;"></p>
 
               <br />
@@ -10303,36 +10287,10 @@
       });
     }
 
-    function renderTeacherMobileAttendanceCard(item) {
-      const statusClass = getPickupStatusClass(item.status);
-      const actionHtml = item.hasClassToday
-        ? '<div class="teacher-mobile-quick-grid">' +
-            '<button class="btn btn-green" type="button" onclick="setPickupStatus(\'' + jsArg(item.id) + '\', \'มาเรียน\')">มาเรียน</button>' +
-            '<button class="btn btn-dark" type="button" onclick="setPickupStatus(\'' + jsArg(item.id) + '\', \'ผู้ปกครองมาส่ง\')">ผู้ปกครองมาส่ง</button>' +
-            '<button class="btn btn-blue" type="button" onclick="setPickupStatus(\'' + jsArg(item.id) + '\', \'รถรับส่ง\')">รถรับส่ง</button>' +
-            '<button class="btn btn-red" type="button" onclick="setPickupStatus(\'' + jsArg(item.id) + '\', \'ไม่มา\')">ไม่มา</button>' +
-          '</div>'
-        : '<div class="teacher-mobile-muted">ไม่มีเรียนในวันที่เลือก</div>';
-      return '<div class="teacher-mobile-attendance-card">' +
-        '<strong>' + escapeHtml(item.name || '-') + '</strong>' +
-        '<div class="teacher-mobile-muted">ชื่อเล่น: ' + escapeHtml(item.nickname || '-') + ' · ระดับชั้น: ' + escapeHtml(item.grade || '-') + '</div>' +
-        '<div class="teacher-mobile-muted">คอร์ส: ' + escapeHtml(item.course || '-') + '</div>' +
-        '<div class="teacher-mobile-card-row"><span class="' + statusClass + '">' + escapeHtml(item.status || '-') + '</span></div>' +
-        actionHtml +
-      '</div>';
-    }
-
     function renderTeacherMobileAttendance() {
       if (!getElement('teacherMobileAttendance')) return;
       updateTeacherMobileAttendanceFromExistingData();
-      const filtered = getFilteredPickupList();
-      updateTeacherMobileAttendanceSummary(filtered);
-      const listBox = getElement('teacherMobilePickupList');
-      if (listBox) {
-        listBox.innerHTML = filtered.length
-          ? filtered.map(renderTeacherMobileAttendanceCard).join('')
-          : '<div class="teacher-mobile-attendance-card"><strong>ไม่พบรายชื่อนักเรียน</strong><p class="teacher-mobile-muted">ลองเปลี่ยนวันที่ คอร์ส ระดับชั้น หรือสถานะ</p></div>';
-      }
+      updateTeacherMobileAttendanceSummary(getFilteredPickupList());
     }
 
     function updateTeacherMobileAttendanceSummary(list) {
@@ -10347,60 +10305,104 @@
       setTeacherMobileText('teacherMobilePickupWaiting', absent + '');
     }
 
+    function renderAttendanceByCourse() {
+      const desktopEl = getElement('attendanceTodayCourses');
+      const mobileEl = getElement('attendanceMobileTodayCourses');
+      if (!desktopEl && !mobileEl) return;
+
+      syncPickupListFromStudents();
+      const teacherCourses = getTeacherAttendanceCourses();
+      const teacherCourseIds = teacherCourses.map(function(c) { return String(c.id || c.firebaseDocId || ''); });
+      const todayStudents = pickupList.filter(function(item) {
+        return item.hasClassToday && ((currentTeacher && currentTeacher.role === 'Admin') || (!!item.courseId && teacherCourseIds.includes(String(item.courseId))));
+      });
+
+      const courseMap = {};
+      todayStudents.forEach(function(item) {
+        const cn = item.course || 'ไม่ระบุคอร์ส';
+        if (!courseMap[cn]) courseMap[cn] = [];
+        courseMap[cn].push(item);
+      });
+
+      const courseNames = Object.keys(courseMap).sort();
+
+      if (!courseNames.length) {
+        const msg = '<div style="padding:10px 0;color:#6b7280;font-size:13px;">ไม่มีคอร์สที่มีเรียนในวันที่เลือก</div>';
+        if (desktopEl) desktopEl.innerHTML = msg;
+        if (mobileEl) mobileEl.innerHTML = msg;
+        return;
+      }
+
+      function courseSummaryHtml(students) {
+        const present = students.filter(function(s) { return s.status === 'มาเรียน' || s.status === 'ผู้ปกครองมาส่ง' || s.status === 'รถรับส่ง'; }).length;
+        const waiting = students.filter(function(s) { return s.status === 'ยังไม่เช็คชื่อ'; }).length;
+        const absent = students.filter(function(s) { return s.status === 'ไม่มา'; }).length;
+        return students.length + ' คน · มา ' + present + ' · รอ ' + waiting + ' · ไม่มา ' + absent;
+      }
+
+      function pickupBtnsHtml(id) {
+        var sid = jsArg(id);
+        return '<button class="btn btn-green" type="button" onclick="setPickupStatus(\'' + sid + '\', \'มาเรียน\')">มาเรียน</button>' +
+          '<button class="btn btn-green" type="button" onclick="setPickupStatus(\'' + sid + '\', \'รถรับส่ง\')">รถรับส่ง</button>' +
+          '<button class="btn btn-dark" type="button" onclick="setPickupStatus(\'' + sid + '\', \'ผู้ปกครองมาส่ง\')">ผู้ปกครองมาส่ง</button>' +
+          '<button class="btn btn-red" type="button" onclick="setPickupStatus(\'' + sid + '\', \'ไม่มา\')">ไม่มา</button>';
+      }
+
+      if (desktopEl) {
+        desktopEl.innerHTML = '<h3 style="margin:0 0 12px;font-size:15px;color:#1e40af;">คอร์สที่มีเรียนวันนี้</h3>' +
+          courseNames.map(function(cn) {
+            const students = courseMap[cn];
+            const rows = students.map(function(item) {
+              return '<tr>' +
+                '<td class="student-name">' + escapeHtml(item.name) + '</td>' +
+                '<td>' + escapeHtml(item.nickname) + '</td>' +
+                '<td>' + escapeHtml(item.grade) + '</td>' +
+                '<td><span class="' + getPickupStatusClass(item.status) + '">' + escapeHtml(item.status) + '</span></td>' +
+                '<td><div class="pickup-actions-mobile">' + pickupBtnsHtml(item.id) + '</div></td>' +
+              '</tr>';
+            }).join('');
+            return '<div style="border:1px solid #dbeafe;border-radius:12px;margin-bottom:14px;overflow:hidden;">' +
+              '<div style="background:#eff6ff;padding:10px 16px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid #dbeafe;">' +
+                '<strong style="color:#1e40af;font-size:14px;">📚 ' + escapeHtml(cn) + '</strong>' +
+                '<span style="font-size:12px;color:#6b7280;">' + courseSummaryHtml(students) + '</span>' +
+              '</div>' +
+              '<div class="table-wrap" style="margin:0;">' +
+                '<table>' +
+                  '<thead><tr><th>นักเรียน</th><th>ชื่อเล่น</th><th>ระดับชั้น</th><th>สถานะ</th><th>เช็คด่วน</th></tr></thead>' +
+                  '<tbody>' + rows + '</tbody>' +
+                '</table>' +
+              '</div>' +
+            '</div>';
+          }).join('');
+      }
+
+      if (mobileEl) {
+        mobileEl.innerHTML = courseNames.map(function(cn) {
+          const students = courseMap[cn];
+          const cards = students.map(function(item) {
+            return '<div class="teacher-mobile-attendance-card" style="border-left:3px solid #3b82f6;margin-bottom:8px;">' +
+              '<strong>' + escapeHtml(item.name) + '</strong>' +
+              '<div class="teacher-mobile-muted">ชื่อเล่น: ' + escapeHtml(item.nickname) + ' · ระดับชั้น: ' + escapeHtml(item.grade) + '</div>' +
+              '<div class="teacher-mobile-card-row"><span class="' + getPickupStatusClass(item.status) + '">' + escapeHtml(item.status) + '</span></div>' +
+              '<div class="teacher-mobile-quick-grid">' + pickupBtnsHtml(item.id) + '</div>' +
+            '</div>';
+          }).join('');
+          return '<div style="margin-bottom:14px;">' +
+            '<div style="background:#eff6ff;padding:9px 12px;border-radius:10px 10px 0 0;border:1px solid #dbeafe;border-bottom:none;">' +
+              '<strong style="color:#1e40af;font-size:14px;">📚 ' + escapeHtml(cn) + '</strong>' +
+              '<div style="font-size:12px;color:#6b7280;margin-top:2px;">' + courseSummaryHtml(students) + '</div>' +
+            '</div>' +
+            '<div style="border:1px solid #dbeafe;border-radius:0 0 10px 10px;padding:8px;">' + cards + '</div>' +
+          '</div>';
+        }).join('');
+      }
+    }
+
     function renderPickupList() {
-      const tbody = getElement('teacherPickupTableBody');
-      if (!tbody) return;
-
       const filtered = getFilteredPickupList();
-      const totalPages = Math.max(1, Math.ceil(filtered.length / pickupPerPage));
-      if (pickupCurrentPage > totalPages) pickupCurrentPage = totalPages;
-
-      const start = (pickupCurrentPage - 1) * pickupPerPage;
-      const pageItems = filtered.slice(start, start + pickupPerPage);
-
-      tbody.innerHTML = pageItems.length ? pageItems.map(function(item, index) {
-        const statusClass = getPickupStatusClass(item.status);
-        const actionHtml = item.hasClassToday
-          ? '<div class="pickup-actions-mobile">' +
-              '<button class="btn btn-green" type="button" onclick="setPickupStatus(\'' + jsArg(item.id) + '\', \'มาเรียน\')">มาเรียน</button>' +
-              '<button class="btn btn-green" type="button" onclick="setPickupStatus(\'' + jsArg(item.id) + '\', \'รถรับส่ง\')">รถรับส่ง</button>' +
-              '<button class="btn btn-dark" type="button" onclick="setPickupStatus(\'' + jsArg(item.id) + '\', \'ผู้ปกครองมาส่ง\')">ผู้ปกครองมาส่ง</button>' +
-              '<button class="btn btn-red" type="button" onclick="setPickupStatus(\'' + jsArg(item.id) + '\', \'ไม่มา\')">ไม่มา</button>' +
-            '</div>'
-          : '<span class="status-no-class">ไม่มีเรียนวันนี้</span>';
-        return '<tr>' +
-          '<td data-label="ลำดับ">' + (start + index + 1) + '</td>' +
-          '<td data-label="นักเรียน" class="student-name">' + item.name + '</td>' +
-          '<td data-label="ชื่อเล่น">' + item.nickname + '</td>' +
-          '<td data-label="ระดับชั้น">' + item.grade + '</td>' +
-          '<td data-label="คอร์ส">' + (item.course || '-') + '</td>' +
-          '<td data-label="สถานะ"><span class="' + statusClass + '">' + item.status + '</span></td>' +
-          '<td data-label="เช็คด่วน">' + actionHtml + '</td>' +
-        '</tr>';
-      }).join('') : '<tr><td colspan="7">ไม่พบรายชื่อนักเรียนในเงื่อนไขที่เลือก</td></tr>';
-
       updatePickupSummary(filtered);
-      renderPickupPagination(filtered.length, totalPages);
+      safeRun(renderAttendanceByCourse, 'attendance-by-course');
       safeRun(renderTeacherMobileAttendance, 'teacher-mobile-attendance');
-    }
-
-    function renderPickupPagination(totalItems, totalPages) {
-      const box = getElement('pickupPagination');
-      if (!box) return;
-
-      box.innerHTML = '';
-      if (totalItems <= pickupPerPage) return;
-
-      box.innerHTML = '<button class="btn btn-dark" type="button" onclick="changePickupPage(-1)">ก่อนหน้า</button>' +
-        '<span style="align-self:center; font-weight:bold; padding:10px;">หน้า ' + pickupCurrentPage + ' / ' + totalPages + ' · แสดงหน้าละ 20 รายการ</span>' +
-        '<button class="btn btn-dark" type="button" onclick="changePickupPage(1)">ถัดไป</button>';
-    }
-
-    function changePickupPage(direction) {
-      const filtered = getFilteredPickupList();
-      const totalPages = Math.max(1, Math.ceil(filtered.length / pickupPerPage));
-      pickupCurrentPage = Math.min(Math.max(1, pickupCurrentPage + direction), totalPages);
-      renderPickupList();
     }
 
     async function setPickupStatus(id, status) {
