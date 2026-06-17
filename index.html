@@ -7263,6 +7263,7 @@
     let onlineExamChoiceOrder = {};      // {questionId: [origIdx0, origIdx1, origIdx2, origIdx3]}
     let onlineExamAutosaveHandle = null; // autosave interval handle
     let onlineExamSaveDraftTimeout = null; // debounce for per-answer save
+    let onlineExamSubmitting = false; // double-submission guard
     let onlineExamAnalysisData = [];     // per-question stats for analysis tab
     const monthlyPlanSessions = [];
     const holidays = [];
@@ -28888,6 +28889,8 @@ function receiptStatusText(status) {
         }
       } catch(e) {
         console.error('startOnlineExam duplicate check error', e);
+        alert('ไม่สามารถตรวจสอบสถานะการสอบได้ กรุณาลองใหม่');
+        return;
       }
 
       // Try to load existing in-progress draft (Firestore first, localStorage fallback)
@@ -29156,9 +29159,11 @@ function receiptStatusText(status) {
     }
 
     async function submitOnlineExamResult() {
+      if (onlineExamSubmitting) return;
+      onlineExamSubmitting = true;
       if (onlineExamTimerHandle) { clearInterval(onlineExamTimerHandle); onlineExamTimerHandle = null; }
-      if (!firebaseReady || !db) { alert('Firebase ยังไม่พร้อม'); return; }
-      if (!firebaseUser) { alert('กรุณาเข้าสู่ระบบก่อน'); return; }
+      if (!firebaseReady || !db) { onlineExamSubmitting = false; alert('Firebase ยังไม่พร้อม'); return; }
+      if (!firebaseUser) { onlineExamSubmitting = false; alert('กรุณาเข้าสู่ระบบก่อน'); return; }
 
       const course = onlineExamCourseCache.find(function(c) { return c.firebaseDocId === onlineExamActiveCourseId; });
       if (!course) return;
@@ -29218,9 +29223,12 @@ function receiptStatusText(status) {
         addActivityLog('ส่งข้อสอบ Interactive', (course.title || '') + ' — ' + (currentStudent ? currentStudent.name : '') + ' คะแนน ' + onlineExamFormatScore50(correctCount, questions.length));
       } catch (e) {
         console.error('submitOnlineExamResult write error', e);
+        onlineExamSubmitting = false;
         alert('บันทึกผลสอบไม่สำเร็จ: ' + (e.message || e));
         return;
       }
+
+      onlineExamSubmitting = false;
 
       // Stop autosave and delete draft (Firestore + localStorage)
       onlineExamStopAutosave();
@@ -29236,6 +29244,7 @@ function receiptStatusText(status) {
     }
 
     function backToOnlineExamCourseGrid() {
+      onlineExamSubmitting = false;
       if (onlineExamTimerHandle) { clearInterval(onlineExamTimerHandle); onlineExamTimerHandle = null; }
       onlineExamStopAutosave();
       if (onlineExamActiveCourseId) onlineExamDeleteDraft(onlineExamActiveCourseId);
