@@ -28590,6 +28590,9 @@ function receiptStatusText(status) {
             '<button class="btn btn-blue" onclick="showOnlineExamResultDetail(\'' + r._docId + '\',\'' + (r.courseId || '') + '\')" style="font-size:10px;padding:3px 7px;margin:1px;" title="ดูรายละเอียด">📋</button>' +
             (rStatus !== 'published' ? '<button class="btn btn-green" onclick="publishOnlineExamResult(\'' + r._docId + '\')" style="font-size:10px;padding:3px 7px;margin:1px;">ประกาศผล</button>' : '') +
             (rStatus === 'published' ? '<button class="btn btn-dark" onclick="hideOnlineExamResult(\'' + r._docId + '\')" style="font-size:10px;padding:3px 7px;margin:1px;">ซ่อนผล</button>' : '') +
+            (r.allowRetake
+              ? '<button class="btn btn-dark" onclick="setOnlineExamResultRetake(\'' + r._docId + '\',false)" style="font-size:10px;padding:3px 7px;margin:1px;">ปิดทำใหม่</button>'
+              : '<button class="btn btn-blue" onclick="setOnlineExamResultRetake(\'' + r._docId + '\',true)" style="font-size:10px;padding:3px 7px;margin:1px;">ให้ทำใหม่</button>') +
             '<button class="btn btn-red" onclick="deleteOnlineExamResult(\'' + r._docId + '\')" style="font-size:10px;padding:3px 7px;margin:1px;">ลบ/ทำใหม่</button>' +
           '</td>' +
         '</tr>';
@@ -28730,6 +28733,39 @@ function receiptStatusText(status) {
         if (r) r.resultStatus = 'hidden';
         renderOnlineExamGradingPage(onlineExamGradePage);
       } catch(e) { alert('ซ่อนผลไม่สำเร็จ: ' + (e.message || e)); }
+    }
+
+    async function setOnlineExamResultRetake(resultDocId, allowRetake) {
+      if (!hasPermission('admin.onlineExams')) { alert('ไม่มีสิทธิ์'); return; }
+      const result = onlineExamGradeAllResults.find(function(x) { return x._docId === resultDocId; });
+      const studentName = result ? (result.studentName || result.studentId || '-') : '-';
+      const courseTitle = result ? (result.courseTitle || getOnlineExamResultSubject(result) || '-') : '-';
+      const message = allowRetake
+        ? 'อนุญาตให้ ' + studentName + ' ทำข้อสอบ "' + courseTitle + '" ใหม่?\nผลสอบเดิมจะยังอยู่ แต่เด็กจะกดทำใหม่ได้'
+        : 'ปิดสิทธิ์ทำข้อสอบใหม่ของ ' + studentName + '?';
+      if (!confirm(message)) return;
+      try {
+        const updateData = {
+          allowRetake: !!allowRetake,
+          retakeUpdatedAt: firebase.firestore.FieldValue.serverTimestamp(),
+          retakeUpdatedBy: firebaseUser ? firebaseUser.uid : '',
+          retakeUpdatedByName: (firebaseUserProfile && (firebaseUserProfile.name || firebaseUserProfile.displayName || firebaseUserProfile.email)) || ''
+        };
+        if (allowRetake) {
+          updateData.retakeEnabledAt = firebase.firestore.FieldValue.serverTimestamp();
+        } else {
+          updateData.retakeDisabledAt = firebase.firestore.FieldValue.serverTimestamp();
+        }
+        await db.collection('onlineExamResults').doc(resultDocId).set(updateData, { merge: true });
+        addActivityLog(allowRetake ? 'เปิดทำข้อสอบใหม่รายคน' : 'ปิดทำข้อสอบใหม่รายคน', studentName + ' · ' + courseTitle);
+        if (result) {
+          result.allowRetake = !!allowRetake;
+          result.retakeUpdatedBy = updateData.retakeUpdatedBy;
+        }
+        renderOnlineExamGradingPage(onlineExamGradePage);
+      } catch(e) {
+        alert('อัปเดตสิทธิ์ทำใหม่ไม่สำเร็จ: ' + (e.message || e));
+      }
     }
 
     async function deleteOnlineExamResult(resultDocId) {
