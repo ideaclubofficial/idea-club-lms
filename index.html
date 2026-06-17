@@ -19496,12 +19496,35 @@ function receiptStatusText(status) {
       return String((record && record.studentId) || '').trim();
     }
 
+    function getScoreRecordMemberSortParts(record) {
+      const raw = getScoreRecordMemberId(record);
+      const match = raw.match(/^(.*?)(\d+)$/);
+      return {
+        raw: raw,
+        prefix: match ? match[1] : raw,
+        number: match ? Number(match[2]) : Number.MAX_SAFE_INTEGER
+      };
+    }
+
     function compareScoreRecordsByMemberId(a, b) {
-      const idA = getScoreRecordMemberId(a);
-      const idB = getScoreRecordMemberId(b);
-      const idDiff = idA.localeCompare(idB, undefined, { numeric: true, sensitivity: 'base' });
-      if (idDiff !== 0) return idDiff;
+      const partA = getScoreRecordMemberSortParts(a);
+      const partB = getScoreRecordMemberSortParts(b);
+      const prefixDiff = partA.prefix.localeCompare(partB.prefix, undefined, { sensitivity: 'base' });
+      if (prefixDiff !== 0) return prefixDiff;
+      if (partA.number !== partB.number) return partA.number - partB.number;
+      const rawDiff = partA.raw.localeCompare(partB.raw, undefined, { numeric: true, sensitivity: 'base' });
+      if (rawDiff !== 0) return rawDiff;
       return String(a && a.student || '').localeCompare(String(b && b.student || ''), 'th');
+    }
+
+    function renderScoreRecordStudentCell(record) {
+      const student = findStudentForScoreRecord(record);
+      const displayName = (record && record.student) || (student && student.name) || '-';
+      const nickname = (record && record.nickname && record.nickname !== '-') ? record.nickname : (student && student.nickname);
+      const memberId = getScoreRecordMemberId(record);
+      return '<strong>' + escapeHtml(displayName) + '</strong>' +
+        (nickname ? '<br><span class="mini-muted">ชื่อเล่น: ' + escapeHtml(nickname) + '</span>' : '') +
+        (memberId ? '<br><span class="mini-muted">Member ID: ' + escapeHtml(memberId) + '</span>' : '');
     }
 
     function getSelectedAdminScoreRecords() {
@@ -19659,7 +19682,7 @@ function receiptStatusText(status) {
       const colCount = subjects.length + 4;
       tbody.innerHTML = records.length ? records.map(function(record) {
         return '<tr data-score-id="' + record.id + '">' +
-          '<td>' + escapeHtml(record.student) + '</td>' +
+          '<td>' + renderScoreRecordStudentCell(record) + '</td>' +
           subjects.map(function(s) {
             const maxQ = subjectMaxQ[s];
             const stored50 = Number(record.scores[s] || 0);
