@@ -4865,9 +4865,30 @@
                 <h3>ตรวจผลสอบรายคน</h3>
                 <div class="form-row">
                   <div>
-                    <label>ชุดข้อสอบ</label>
-                    <select id="onlineExamGradeCourseSelect" onchange="onlineExamGradeFilterChange()" style="width:100%;">
-                      <option value="">-- ทุกชุดข้อสอบ --</option>
+                    <label>วิชา</label>
+                    <select id="onlineExamGradeSubjectFilter" onchange="onlineExamGradeFilterChange()" style="width:100%;">
+                      <option value="">-- ทุกวิชา --</option>
+                      <option value="วิทยาศาสตร์">วิทยาศาสตร์</option>
+                      <option value="คณิตศาสตร์">คณิตศาสตร์</option>
+                      <option value="ภาษาอังกฤษ">ภาษาอังกฤษ</option>
+                      <option value="ภาษาไทย">ภาษาไทย</option>
+                      <option value="สังคมศึกษา">สังคมศึกษา</option>
+                      <option value="อื่นๆ">อื่นๆ</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label>ระดับชั้น</label>
+                    <select id="onlineExamGradeLevelFilter" onchange="onlineExamGradeFilterChange()" style="width:100%;">
+                      <option value="">-- ทุกระดับชั้น --</option>
+                      <option value="ป.4">ป.4</option>
+                      <option value="ป.5">ป.5</option>
+                      <option value="ป.6">ป.6</option>
+                      <option value="ม.1">ม.1</option>
+                      <option value="ม.2">ม.2</option>
+                      <option value="ม.3">ม.3</option>
+                      <option value="ม.4">ม.4</option>
+                      <option value="ม.5">ม.5</option>
+                      <option value="ม.6">ม.6</option>
                     </select>
                   </div>
                   <div>
@@ -19352,7 +19373,7 @@ function receiptStatusText(status) {
         let created = 0;
         for (var i = 0; i < allResults.length; i++) {
           const r = allResults[i];
-          const subject = (r.courseTitle || '').trim() || (r.courseId || '');
+          const subject = getOnlineExamResultSubject(r) || (r.courseId || '');
           if (!subject) continue;
           const score50val = r.score50 !== undefined ? r.score50 : onlineExamGetScore50Value(r.correctCount, r.totalQ);
 
@@ -28060,7 +28081,7 @@ function receiptStatusText(status) {
     }
 
     function populateOnlineExamCourseSelects() {
-      const selects = ['onlineExamGradeCourseSelect', 'onlineExamAnalysisCourseSelect'];
+      const selects = ['onlineExamAnalysisCourseSelect'];
       const onlineExamGradeOrder = ['ป.4', 'ป.5', 'ป.6', 'ม.1', 'ม.2', 'ม.3', 'ม.4', 'ม.5', 'ม.6'];
       const onlineExamSubjectOrder = ['วิทยาศาสตร์', 'คณิตศาสตร์', 'ภาษาอังกฤษ', 'ภาษาไทย', 'สังคมศึกษา', 'อื่นๆ'];
       function onlineExamQuestionCourseSort(a, b) {
@@ -28093,10 +28114,7 @@ function receiptStatusText(status) {
         const current = el.value;
         const selectedMonth = getSelectedOnlineExamManageMonth();
         const items = (onlineExamCourseCache || []);
-        el.innerHTML = id === 'onlineExamGradeCourseSelect'
-          ? '<option value="">-- ทุกชุดข้อสอบ --</option>'
-          : '<option value="">-- เลือกชุดข้อสอบ --</option>';
-        if (id === 'onlineExamAnalysisCourseSelect') el.innerHTML = '<option value="">-- เลือกชุดข้อสอบ --</option>';
+        el.innerHTML = '<option value="">-- เลือกชุดข้อสอบ --</option>';
         items.forEach(function(c) {
           const opt = document.createElement('option');
           opt.value = c.firebaseDocId;
@@ -28391,27 +28409,53 @@ function receiptStatusText(status) {
 
     // ---- Grading view ----
 
+    function getOnlineExamResultCourse(result) {
+      if (!result) return null;
+      return onlineExamCourseCache.find(function(c) {
+        return String(c.firebaseDocId || '') === String(result.courseId || '');
+      }) || null;
+    }
+
+    function getOnlineExamResultSubject(result) {
+      const course = getOnlineExamResultCourse(result);
+      return (result && result.subject) || (course && course.subject) || '';
+    }
+
+    function getOnlineExamResultGrade(result) {
+      const course = getOnlineExamResultCourse(result);
+      return (result && result.grade) || getOnlineExamCourseGrade(course) || '';
+    }
+
+    function onlineExamGradingResultMatchesFilters(result, subjectFilter, gradeFilter) {
+      const subject = getOnlineExamResultSubject(result);
+      const grade = getOnlineExamResultGrade(result);
+      return (!subjectFilter || subject === subjectFilter) &&
+             (!gradeFilter || grade === gradeFilter);
+    }
+
     async function populateOnlineExamStudentSelect() {
       if (!firebaseReady || !db) return;
-      const courseId = (getElement('onlineExamGradeCourseSelect') || {}).value || '';
+      const subjectFilter = (getElement('onlineExamGradeSubjectFilter') || {}).value || '';
+      const gradeFilter = (getElement('onlineExamGradeLevelFilter') || {}).value || '';
       const studentSel = getElement('onlineExamGradeStudentSelect');
       if (!studentSel) return;
+      const currentStudentUid = studentSel.value || '';
       studentSel.innerHTML = '<option value="">-- ทุกคน --</option>';
-      if (!courseId) return;
 
       try {
+        if (!onlineExamCourseCache.length) await loadOnlineExamCourses();
         const snap = await db.collection('onlineExamResults')
-          .where('courseId', '==', courseId)
           .orderBy('submittedAt', 'desc')
           .limit(500)
           .get()
           .catch(function() {
-            return db.collection('onlineExamResults').where('courseId', '==', courseId).get();
+            return db.collection('onlineExamResults').limit(500).get();
           });
 
         const seen = {};
         snap.docs.forEach(function(d) {
-          const data = d.data();
+          const data = Object.assign({ _docId: d.id }, d.data());
+          if (!onlineExamGradingResultMatchesFilters(data, subjectFilter, gradeFilter)) return;
           if (!seen[data.studentUid]) {
             seen[data.studentUid] = true;
             const opt = document.createElement('option');
@@ -28420,6 +28464,7 @@ function receiptStatusText(status) {
             studentSel.appendChild(opt);
           }
         });
+        if (currentStudentUid && seen[currentStudentUid]) studentSel.value = currentStudentUid;
       } catch (e) {
         console.error('populateOnlineExamStudentSelect error', e);
       }
@@ -28437,7 +28482,8 @@ function receiptStatusText(status) {
       if (!hasPermission('admin.onlineExams')) return;
       if (!firebaseReady || !db) return;
 
-      const courseId = (getElement('onlineExamGradeCourseSelect') || {}).value || '';
+      const subjectFilter = (getElement('onlineExamGradeSubjectFilter') || {}).value || '';
+      const gradeFilter = (getElement('onlineExamGradeLevelFilter') || {}).value || '';
       const studentUid = (getElement('onlineExamGradeStudentSelect') || {}).value || '';
       const statusFilter = (getElement('onlineExamGradeStatusFilter') || {}).value || '';
       const dateFrom = (getElement('onlineExamGradeDateFrom') || {}).value || '';
@@ -28449,19 +28495,21 @@ function receiptStatusText(status) {
       reportEl.innerHTML = '<div style="padding:16px;color:#d97706;">⏳ กำลังโหลดรายงาน...</div>';
 
       try {
+        if (!onlineExamCourseCache.length) await loadOnlineExamCourses();
         let q = db.collection('onlineExamResults');
-        if (courseId) q = q.where('courseId', '==', courseId);
         if (studentUid) q = q.where('studentUid', '==', studentUid);
 
         const snap = await q.orderBy('submittedAt', 'desc').limit(300).get().catch(function() {
           let q2 = db.collection('onlineExamResults');
-          if (courseId) q2 = q2.where('courseId', '==', courseId);
           if (studentUid) q2 = q2.where('studentUid', '==', studentUid);
           return q2.limit(300).get();
         });
 
         let results = snap.docs.map(function(d) { return Object.assign({ _docId: d.id }, d.data()); });
 
+        results = results.filter(function(r) {
+          return onlineExamGradingResultMatchesFilters(r, subjectFilter, gradeFilter);
+        });
         if (statusFilter) {
           results = results.filter(function(r) { return (r.resultStatus || 'submitted') === statusFilter; });
         }
@@ -28513,7 +28561,9 @@ function receiptStatusText(status) {
       const pageResults = results.slice(start, start + ONLINE_EXAM_GRADE_PAGE_SIZE);
 
       const rows = pageResults.map(function(r) {
-        const course = onlineExamCourseCache.find(function(c) { return c.firebaseDocId === r.courseId; });
+        const course = getOnlineExamResultCourse(r);
+        const subject = getOnlineExamResultSubject(r) || '-';
+        const grade = getOnlineExamResultGrade(r) || '-';
         const questions = course ? (course.questions || []) : [];
         const totalQ = questions.length || r.totalQ || r.scoreTotal || '-';
         const answered = r.answers ? Object.keys(r.answers).length : '-';
@@ -28527,7 +28577,8 @@ function receiptStatusText(status) {
           '<td style="padding:8px 10px;text-align:center;"><input type="checkbox" class="onlineExamGradeRowCheck" value="' + r._docId + '"' + (rStatus === 'published' ? ' disabled' : '') + ' style="cursor:pointer;width:14px;height:14px;"></td>' +
           '<td style="padding:8px 10px;">' + escapeHtml(r.studentName || '') +
             (r.studentId ? '<br><span style="color:#9ca3af;font-size:10px;">' + escapeHtml(r.studentId) + '</span>' : '') + '</td>' +
-          '<td style="padding:8px 10px;">' + escapeHtml(r.courseTitle || '') + '</td>' +
+          '<td style="padding:8px 10px;">' + escapeHtml(subject) + '</td>' +
+          '<td style="padding:8px 10px;text-align:center;white-space:nowrap;">' + escapeHtml(grade) + '</td>' +
           '<td style="padding:8px 10px;text-align:center;">' + totalQ + '</td>' +
           '<td style="padding:8px 10px;text-align:center;">' + answered + '</td>' +
           '<td style="padding:8px 10px;text-align:center;color:#16a34a;font-weight:700;">' + correctCnt + '</td>' +
@@ -28565,7 +28616,8 @@ function receiptStatusText(status) {
           '<thead><tr style="background:#f1f5f9;font-size:11px;font-weight:700;color:#374151;">' +
             '<th style="padding:8px 10px;text-align:center;"><input type="checkbox" id="onlineExamGradeSelectAll" onchange="onlineExamGradeToggleAll(this)" style="cursor:pointer;width:14px;height:14px;"></th>' +
             '<th style="padding:8px 10px;text-align:left;white-space:nowrap;">ชื่อนักเรียน</th>' +
-            '<th style="padding:8px 10px;text-align:left;white-space:nowrap;">คอร์ส</th>' +
+            '<th style="padding:8px 10px;text-align:left;white-space:nowrap;">วิชา</th>' +
+            '<th style="padding:8px 10px;text-align:center;white-space:nowrap;">ระดับชั้น</th>' +
             '<th style="padding:8px 10px;text-align:center;white-space:nowrap;">จำนวน</th>' +
             '<th style="padding:8px 10px;text-align:center;white-space:nowrap;">ตอบ</th>' +
             '<th style="padding:8px 10px;text-align:center;white-space:nowrap;">ถูก</th>' +
@@ -28627,8 +28679,8 @@ function receiptStatusText(status) {
     }
 
     async function syncOnlineExamScoreToRecords(r) {
-      const subject = (r.courseTitle || '').trim();
-      const grade = (r.grade || '').trim();
+      const subject = getOnlineExamResultSubject(r);
+      const grade = getOnlineExamResultGrade(r);
       if (!subject || !grade) return;
       const month = getThaiMonthYearFromText(r.submittedAtText);
       const score50val = r.score50 !== undefined ? r.score50 : onlineExamGetScore50Value(r.correctCount, r.totalQ);
@@ -29679,6 +29731,7 @@ function receiptStatusText(status) {
         grade: currentStudent ? (currentStudent.grade || '') : '',
         courseId: onlineExamActiveCourseId,
         courseTitle: course.title || '',
+        subject: course.subject || '',
         answers: onlineExamStudentAnswers,
         questionOrder: onlineExamQuestionOrder,
         choiceOrder: onlineExamChoiceOrder,
