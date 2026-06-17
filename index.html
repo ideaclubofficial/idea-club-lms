@@ -10155,7 +10155,7 @@
     }
 
     async function setPickupStatus(id, status) {
-      if (!hasPermission('teacher.attendance')) { alert('ไม่มีสิทธิ์'); return; }
+      if (isCurrentStudentSession()) { alert('ไม่มีสิทธิ์'); return; }
       if (!VALID_PICKUP_STATUSES.includes(status)) { return; }
       const selectedDate = getPickupDateValue();
       if (!validateAttendanceDate(selectedDate)) return;
@@ -10227,7 +10227,7 @@
     }
 
     async function markAllPickup(status) {
-      if (!hasPermission('teacher.attendance')) { alert('ไม่มีสิทธิ์'); return; }
+      if (isCurrentStudentSession()) { alert('ไม่มีสิทธิ์'); return; }
       if (!VALID_PICKUP_STATUSES.includes(status)) return;
       const selectedDate = getPickupDateValue();
       if (!validateAttendanceDate(selectedDate)) return;
@@ -10283,7 +10283,7 @@
     }
 
     function teacherSaveAttendance() {
-      if (!hasPermission('teacher.attendance')) { alert('ไม่มีสิทธิ์'); return; }
+      if (isCurrentStudentSession()) { alert('ไม่มีสิทธิ์'); return; }
       if (attendanceSaving) return;
       const selectedDate = getElement('pickupDate') ? getElement('pickupDate').value : '';
       if (!validateAttendanceDate(selectedDate)) return;
@@ -30501,13 +30501,20 @@ function receiptStatusText(status) {
       base.firebaseDocId = sch.id;
       base.courseId = sch.courseId;
       base.courseName = courseObj ? (courseObj.name || courseObj.title || '') : (existing ? existing.courseName : '');
+      base.course = base.courseName;
+      base.courseGrade = courseObj ? (courseObj.grade || '') : (existing ? existing.courseGrade : '');
+      base.courseLocation = courseObj ? (courseObj.location || '') : (existing ? existing.courseLocation : '');
+      base.courseScheduleText = courseObj ? (getCourseDisplaySchedule(courseObj) || '') : (existing ? existing.courseScheduleText : '');
       base.teacherId = sch.tutorId;
+      base.teacherUid = teacherObj ? (teacherObj.authUid || teacherObj.teacherUid || '') : (existing ? existing.teacherUid : '');
       base.teacherName = teacherObj ? (teacherObj.name || teacherObj.displayName || '') : (existing ? existing.teacherName : '');
+      base.subject = existing && existing.subject ? existing.subject : (courseObj ? guessSubjectFromCourse(courseObj.name || courseObj.title || '') : '');
       base.type = sch.format;
       base.center = sch.center;
       base.date = sch.date;
       base.sessionDate = sch.date;
       base.month = sch.date ? sch.date.slice(0, 7) : '';
+      base.monthKey = base.month;
       base.timeStart = sch.start;
       base.timeEnd = sch.end;
       base.sessionTime = sch.start;
@@ -30626,10 +30633,12 @@ function receiptStatusText(status) {
         const id = c.id || c.firebaseDocId || '';
         const name = c.name || c.title || id;
         const grade = c.grade || c.level || '';
+        const scheduleText = getCourseDisplaySchedule(c);
         return '<div class="flex items-center gap-2 p-2 bg-slate-50 rounded-lg border border-slate-200">' +
           '<div class="w-2 h-2 rounded-full bg-indigo-400 flex-shrink-0"></div>' +
           '<div class="min-w-0"><p class="text-xs font-semibold text-slate-800 truncate">' + escapeHtml(name) + '</p>' +
-          (grade ? '<p class="text-xs text-slate-400">' + escapeHtml(grade) + '</p>' : '') + '</div></div>';
+          '<p class="text-xs text-slate-400">' + escapeHtml([grade, c.location || ''].filter(Boolean).join(' · ') || '-') + '</p>' +
+          '<p class="text-[10px] text-slate-400 truncate">' + escapeHtml(scheduleText || 'ยังไม่ได้ตั้งเวลาเรียน') + '</p></div></div>';
       }).join('');
     }
 
@@ -30889,6 +30898,98 @@ function receiptStatusText(status) {
       return t ? (t.name || t.displayName || tutorId) : (tutorId || '—');
     }
 
+    function tfFindCourseById(courseId) {
+      return (courses || []).find(function(c) {
+        return String(c.id || c.firebaseDocId || '') === String(courseId || '');
+      }) || null;
+    }
+
+    function tfFormatDayFromDate(dateText) {
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(String(dateText || ''))) return '';
+      return getMonthlyPlanDayKey(new Date(dateText + 'T00:00:00'));
+    }
+
+    function tfGetCourseSlotCandidates(course) {
+      const schedule = getCourseScheduleDefaults(course);
+      return []
+        .concat(schedule.onsiteSlots.map(function(slot) { return Object.assign({ format: 'onsite' }, slot); }))
+        .concat(schedule.onlineSlots.map(function(slot) { return Object.assign({ format: 'online' }, slot); }))
+        .concat(schedule.ondemandSlots.map(function(slot) {
+          return { format: 'ondemand', day: slot.day, startTime: slot.publishTime, endTime: minutesToTimeText((parseTimeToMinutes(slot.publishTime) || 0) + 60), publishTime: slot.publishTime };
+        }));
+    }
+
+    function tfGetBestCourseSlot(course, dateText, preferredFormat) {
+      const slots = tfGetCourseSlotCandidates(course);
+      const dayKey = tfFormatDayFromDate(dateText);
+      if (!slots.length) return null;
+      return slots.find(function(slot) { return dayKey && slot.day === dayKey && (!preferredFormat || slot.format === preferredFormat); }) ||
+        slots.find(function(slot) { return dayKey && slot.day === dayKey; }) ||
+        slots.find(function(slot) { return preferredFormat && slot.format === preferredFormat; }) ||
+        slots[0];
+    }
+
+    function tfGetCourseLocationForFormat(course, format) {
+      if (!course) return '';
+      if (format === 'online') {
+        const meeting = [course.roomId || '', course.roomPassword ? 'Passcode: ' + course.roomPassword : ''].filter(Boolean).join(' · ');
+        return course.onlineLink || meeting || 'Online';
+      }
+      if (format === 'ondemand') return course.onDemandLink || course.onDemandTitle || 'On-demand';
+      return course.location || '';
+    }
+
+    function tfRenderCourseSyncSummary(course, slot) {
+      const box = tfEl('tf-course-sync-summary');
+      if (!box) return;
+      if (!course) {
+        box.innerHTML = '<div class="rounded-xl border border-dashed border-slate-200 bg-slate-50 p-3 text-xs text-slate-500">เลือกคอร์สเพื่อซิงก์ศูนย์ รูปแบบ และเวลาเรียนจากข้อมูลคอร์สอัตโนมัติ</div>';
+        return;
+      }
+      const scheduleText = getCourseDisplaySchedule(course) || 'ยังไม่ได้ตั้งเวลาเรียนของคอร์ส';
+      const slotText = slot
+        ? getCourseScheduleTypeLabel(slot.format) + ' · ' + getCourseScheduleDayText(slot.day) + ' · ' + (slot.startTime || '-') + (slot.endTime ? '-' + slot.endTime : '')
+        : 'ยังไม่พบ slot ที่ตรงกับวันที่เลือก';
+      box.innerHTML =
+        '<div class="rounded-xl border border-indigo-100 bg-indigo-50/70 p-3 text-xs text-slate-700 leading-relaxed">' +
+          '<div class="font-bold text-indigo-800 mb-1">ซิงก์ข้อมูลจากคอร์สแล้ว</div>' +
+          '<div><strong>คอร์ส:</strong> ' + escapeHtml((course.grade || '') + (course.grade ? ' · ' : '') + (course.name || course.title || '-')) + '</div>' +
+          '<div><strong>ศูนย์:</strong> ' + escapeHtml(course.location || '-') + '</div>' +
+          '<div><strong>เวลาเรียนตั้งต้น:</strong> ' + escapeHtml(scheduleText) + '</div>' +
+          '<div><strong>ใช้กับคาบนี้:</strong> ' + escapeHtml(slotText) + '</div>' +
+        '</div>';
+    }
+
+    function tfSyncScheduleFormFromCourse(options) {
+      options = options || {};
+      const courseId = tfEl('tf-sched-course') ? tfEl('tf-sched-course').value : '';
+      const course = tfFindCourseById(courseId);
+      const formatEl = tfEl('tf-sched-format');
+      const currentFormat = formatEl ? formatEl.value : '';
+      const dateText = tfEl('tf-sched-date') ? tfEl('tf-sched-date').value : '';
+      const slot = tfGetBestCourseSlot(course, dateText, currentFormat);
+      if (!course) {
+        tfRenderCourseSyncSummary(null, null);
+        return;
+      }
+
+      if (tfEl('tf-sched-center') && course.location) tfEl('tf-sched-center').value = course.location;
+      if (slot && formatEl && (!options.keepFormat || !currentFormat || currentFormat !== slot.format)) {
+        formatEl.value = slot.format || currentFormat || 'onsite';
+      }
+      const finalFormat = formatEl ? formatEl.value : (slot ? slot.format : 'onsite');
+      if (slot) {
+        if (tfEl('tf-sched-start')) tfEl('tf-sched-start').value = slot.startTime || slot.publishTime || '';
+        if (tfEl('tf-sched-end')) tfEl('tf-sched-end').value = slot.endTime || '';
+      }
+      if (tfEl('tf-sched-location')) tfEl('tf-sched-location').value = tfGetCourseLocationForFormat(course, finalFormat);
+      if (tfEl('tf-sched-notes') && !tfEl('tf-sched-notes').value.trim()) {
+        tfEl('tf-sched-notes').value = 'ซิงก์จากคอร์ส: ' + (course.name || course.title || '');
+      }
+      tfOnFormatChange({ skipSync: true });
+      tfRenderCourseSyncSummary(course, slot);
+    }
+
     // --- Open schedule modal ---
     function tfOpenScheduleModal(prefillDate) {
       const modal = tfEl('tf-schedule-modal');
@@ -30907,11 +31008,16 @@ function receiptStatusText(status) {
       // Pre-fill date
       if (prefillDate && tfEl('tf-sched-date')) tfEl('tf-sched-date').value = prefillDate;
       else if (tfEl('tf-sched-date')) tfEl('tf-sched-date').value = '';
+      if (tfEl('tf-sched-start')) tfEl('tf-sched-start').value = '';
+      if (tfEl('tf-sched-end')) tfEl('tf-sched-end').value = '';
+      if (tfEl('tf-sched-location')) tfEl('tf-sched-location').value = '';
+      if (tfEl('tf-sched-notes')) tfEl('tf-sched-notes').value = '';
       // Reset editing id
       if (tfEl('tf-schedule-editing-id')) tfEl('tf-schedule-editing-id').value = '';
       // Reset error
       const errEl = tfEl('tf-sched-error');
       if (errEl) errEl.classList.add('hidden');
+      tfRenderCourseSyncSummary(null, null);
       modal.classList.remove('hidden');
       if (typeof lucide !== 'undefined') lucide.createIcons();
     }
@@ -30923,7 +31029,8 @@ function receiptStatusText(status) {
       if (form) form.reset();
     }
 
-    function tfOnFormatChange() {
+    function tfOnFormatChange(options) {
+      options = options || {};
       const fmt = tfEl('tf-sched-format') ? tfEl('tf-sched-format').value : '';
       const locLabel = tfEl('tf-sched-location-label');
       if (locLabel) {
@@ -30931,6 +31038,7 @@ function receiptStatusText(status) {
         else locLabel.textContent = 'ห้องเรียน / สถานที่';
       }
       tfPopulateSchedTutors(fmt);
+      if (!options.skipSync) tfSyncScheduleFormFromCourse({ keepFormat: true });
     }
 
     function tfPopulateSchedTutors(fmt) {
@@ -31195,17 +31303,20 @@ function receiptStatusText(status) {
           </div>
         </div>
         <div>
-          <label class="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">คอร์สเรียน *</label>
-          <select id="tf-sched-course" required class="w-full bg-slate-50 border border-slate-300 text-slate-900 rounded-xl p-2.5 font-medium text-sm"></select>
+          <label class="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">คอร์สเรียน * <span class="font-normal normal-case text-indigo-500">ซิงก์ศูนย์/เวลาอัตโนมัติ</span></label>
+          <select id="tf-sched-course" onchange="tfSyncScheduleFormFromCourse()" required class="w-full bg-slate-50 border border-slate-300 text-slate-900 rounded-xl p-2.5 font-medium text-sm"></select>
+        </div>
+        <div id="tf-course-sync-summary">
+          <div class="rounded-xl border border-dashed border-slate-200 bg-slate-50 p-3 text-xs text-slate-500">เลือกคอร์สเพื่อซิงก์ศูนย์ รูปแบบ และเวลาเรียนจากข้อมูลคอร์สอัตโนมัติ</div>
         </div>
         <div>
-          <label class="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">ผู้สอน *</label>
+          <label class="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">ผู้สอน * <span class="font-normal normal-case text-slate-400">แอดมินเลือกครู</span></label>
           <select id="tf-sched-tutor" required class="w-full bg-slate-50 border border-slate-300 text-slate-900 rounded-xl p-2.5 font-medium text-sm"></select>
         </div>
         <div class="grid grid-cols-3 gap-3">
           <div>
-            <label class="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">วันที่ *</label>
-            <input type="date" id="tf-sched-date" required class="w-full bg-slate-50 border border-slate-300 text-slate-900 rounded-xl p-2 font-medium text-sm" />
+            <label class="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">วันที่ * <span class="font-normal normal-case text-slate-400">เลือกวันสอน</span></label>
+            <input type="date" id="tf-sched-date" onchange="tfSyncScheduleFormFromCourse()" required class="w-full bg-slate-50 border border-slate-300 text-slate-900 rounded-xl p-2 font-medium text-sm" />
           </div>
           <div>
             <label class="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">เวลาเริ่ม *</label>
