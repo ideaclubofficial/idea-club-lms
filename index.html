@@ -10152,6 +10152,10 @@
 
     function isOnsiteCourse(course) {
       if (!course) return true;
+      const schedule = getCourseScheduleDefaults(course);
+      if (schedule.onsiteSlots.length || schedule.onlineSlots.length || schedule.ondemandSlots.length) {
+        return schedule.onsiteSlots.length > 0;
+      }
       const hasDays = Array.isArray(course.days) && course.days.length > 0;
       if (hasDays) return true;
       return !course.onlineLink && !course.roomId;
@@ -10165,6 +10169,13 @@
 
     function getCourseDayList(course) {
       if (!course) return [];
+      const schedule = getCourseScheduleDefaults(course);
+      if (schedule.onsiteSlots.length) {
+        return schedule.onsiteSlots.map(function(slot) { return getCourseScheduleDayText(slot.day); }).filter(function(day, index, arr) {
+          return day && arr.indexOf(day) === index;
+        });
+      }
+      if (schedule.onlineSlots.length || schedule.ondemandSlots.length) return [];
       let dayText = '';
       if (Array.isArray(course.days)) dayText += ' ' + course.days.join(' ');
       if (course.onlineClassDay) dayText += ' ' + course.onlineClassDay;
@@ -10180,6 +10191,8 @@
       const course = getCourseByStudentOrName(student, student.course);
       if (!course) return false;
       const courseDays = getCourseDayList(course);
+      const schedule = getCourseScheduleDefaults(course);
+      if (!courseDays.length && (schedule.onlineSlots.length || schedule.ondemandSlots.length)) return false;
       if (!courseDays.length) return true;
       return courseDays.includes(getThaiDayFromDate(dateText));
     }
