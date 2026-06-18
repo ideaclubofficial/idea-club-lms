@@ -28719,6 +28719,47 @@ function receiptStatusText(status) {
       return !!result.studentName && String(result.studentName || '').trim() === String(student.name || '').trim();
     }
 
+    function findStudentForOnlineExamResult(result) {
+      if (!result) return null;
+      return (students || []).find(function(student) {
+        if (!student || student.deleted === true) return false;
+        return isOnlineExamResultForStudent(result, student);
+      }) || null;
+    }
+
+    function getOnlineExamResultMemberId(result) {
+      const direct = String((result && (result.memberId || result.studentMemberId || result.studentId)) || '').trim();
+      if (direct) return direct;
+      const student = findStudentForOnlineExamResult(result);
+      return student ? String(student.memberId || student.studentId || '').trim() : '';
+    }
+
+    function getOnlineExamResultMemberSortParts(result) {
+      const raw = getOnlineExamResultMemberId(result);
+      const match = raw.match(/^(.*?)(\d+)$/);
+      return {
+        raw: raw,
+        prefix: match ? match[1] : raw,
+        number: match ? Number(match[2]) : Number.MAX_SAFE_INTEGER
+      };
+    }
+
+    function compareOnlineExamResultsByMemberId(a, b) {
+      const partA = getOnlineExamResultMemberSortParts(a);
+      const partB = getOnlineExamResultMemberSortParts(b);
+      if (!!partA.raw !== !!partB.raw) return partA.raw ? -1 : 1;
+      const prefixDiff = partA.prefix.localeCompare(partB.prefix, undefined, { sensitivity: 'base' });
+      if (prefixDiff !== 0) return prefixDiff;
+      if (partA.number !== partB.number) return partA.number - partB.number;
+      const rawDiff = partA.raw.localeCompare(partB.raw, undefined, { numeric: true, sensitivity: 'base' });
+      if (rawDiff !== 0) return rawDiff;
+      const nameDiff = String(a && a.studentName || '').localeCompare(String(b && b.studentName || ''), 'th');
+      if (nameDiff !== 0) return nameDiff;
+      const timeA = a && a.submittedAt && a.submittedAt.toMillis ? a.submittedAt.toMillis() : 0;
+      const timeB = b && b.submittedAt && b.submittedAt.toMillis ? b.submittedAt.toMillis() : 0;
+      return timeB - timeA;
+    }
+
     function getOnlineExamMissingStudents(targetCourses, expectedStudents, allResults) {
       const targetCourseIds = (targetCourses || []).map(function(course) { return String(course.firebaseDocId || ''); }).filter(Boolean);
       if (!targetCourseIds.length || !expectedStudents.length) return [];
@@ -28894,6 +28935,7 @@ function receiptStatusText(status) {
           });
         }
         const missingStudents = getOnlineExamMissingStudents(targetCourses, expectedStudents, allResults);
+        results = results.slice().sort(compareOnlineExamResultsByMemberId);
         onlineExamGradeAllResults = results;
         onlineExamGradeMissingHtml = renderOnlineExamMissingStudentsHtml(missingStudents, targetCourses, expectedStudents.length);
         onlineExamGradeMissingOnly = statusFilter === 'not_submitted';
@@ -28945,11 +28987,12 @@ function receiptStatusText(status) {
           : (r.correctCount !== undefined ? r.correctCount : '-');
         const rStatus = r.resultStatus || 'submitted';
         const usedMin = r.usedSeconds ? Math.ceil(r.usedSeconds / 60) : (r.timeTakenSeconds ? Math.ceil(r.timeTakenSeconds / 60) : '-');
+        const memberId = getOnlineExamResultMemberId(r);
 
         return '<tr style="border-bottom:1px solid #f1f5f9;font-size:12px;">' +
           '<td style="padding:8px 10px;text-align:center;"><input type="checkbox" class="onlineExamGradeRowCheck" value="' + r._docId + '"' + (rStatus === 'published' ? ' disabled' : '') + ' style="cursor:pointer;width:14px;height:14px;"></td>' +
           '<td style="padding:8px 10px;">' + escapeHtml(r.studentName || '') +
-            (r.studentId ? '<br><span style="color:#9ca3af;font-size:10px;">' + escapeHtml(r.studentId) + '</span>' : '') + '</td>' +
+            (memberId ? '<br><span style="color:#9ca3af;font-size:10px;">' + escapeHtml(memberId) + '</span>' : '') + '</td>' +
           '<td style="padding:8px 10px;">' + escapeHtml(subject) + '</td>' +
           '<td style="padding:8px 10px;text-align:center;white-space:nowrap;">' + escapeHtml(grade) + '</td>' +
           '<td style="padding:8px 10px;text-align:center;">' + totalQ + '</td>' +
