@@ -3046,11 +3046,17 @@
                 <div class="teacher-mobile-actions">
                   <button class="btn btn-blue" type="button" onclick="teacherSaveAttendance()">บันทึกเช็คชื่อ</button>
                 </div>
+                <p id="teacherMobileAttendanceResult" style="margin-top:10px; font-weight:bold;"></p>
               </div>
 
               <div class="teacher-mobile-card">
                 <h3>คอร์สที่มีเรียนวันนี้</h3>
                 <div id="attendanceMobileTodayCourses"></div>
+              </div>
+
+              <div class="teacher-mobile-card">
+                <h3>ประวัติการเช็คชื่อ</h3>
+                <div id="teacherMobilePickupHistoryList" class="teacher-mobile-list"></div>
               </div>
             </div>
 
@@ -3126,6 +3132,7 @@
                       <th>ผู้ปกครองมาส่ง / รถรับส่ง</th>
                       <th>ไม่มา</th>
                       <th>ผู้บันทึก</th>
+                      <th>จัดการ</th>
                     </tr>
                   </thead>
                   <tbody id="pickupHistoryTableBody"></tbody>
@@ -6838,6 +6845,7 @@
         getFirebaseCollection('holidays'),
         getFirebaseCollection('scoreReports'),
         getFirebaseCollection('adminScoreRecords'),
+        getFirebaseCollection('attendanceHistory'),
         getFirebaseCollection('announcements'),
         getFirebaseCollection('activityLogs'),
         getFirebaseCollection('settings')
@@ -6860,9 +6868,10 @@
       replaceArray(holidays, results[14]);
       replaceArray(scoreReports, results[15]);
       replaceArray(adminScoreRecords, results[16]);
-      replaceArray(announcements, results[17]);
-      replaceArray(activityLogs, results[18]);
-      const settingsItems = results[19];
+      replaceArray(pickupHistory, results[17]);
+      replaceArray(announcements, results[18]);
+      replaceArray(activityLogs, results[19]);
+      const settingsItems = results[20];
       const mainSettings = settingsItems.find(function(item) { return item.id === 'main' || item.firebaseDocId === 'main'; });
       if (mainSettings) systemSettings = Object.assign(systemSettings, mainSettings);
       // Sync pre-repair: fix in-memory status immediately so first render is correct
@@ -9494,7 +9503,7 @@
       if (tabId === 'teacher-dashboard') { renderTodayTeachingList(); renderTeacherDashboardSummary(); }
       if (tabId === 'teacher-online') renderTeacherOnlineClasses();
       if (tabId === 'teacher-private-lessons') renderTeacherPrivateLessons();
-      if (tabId === 'teacher-attendance') { initAttendanceDateToToday(); renderPickupList(); }
+      if (tabId === 'teacher-attendance') { initAttendanceDateToToday(); renderPickupList(); renderPickupHistory(); }
       if (tabId === 'teacher-profile') renderProfileSettingsForRole('teacher');
       safeRun(renderTeacherMobileHome, 'teacher-mobile-home-tab');
       safeRun(renderTeacherMobileAttendance, 'teacher-mobile-attendance-tab');
@@ -10102,6 +10111,7 @@
     const pickupPerPage = 20;
     const pickupHistory = [];
     let attendanceSaving = false; // double-submit guard
+    let attendanceEditHistoryId = '';
 
     const VALID_PICKUP_STATUSES = ['มาเรียน', 'รถรับส่ง', 'ผู้ปกครองมาส่ง', 'ไม่มา', 'ยังไม่เช็คชื่อ', 'ไม่มีเรียน'];
 
@@ -10127,6 +10137,51 @@
       return getElement('pickupDate') && getElement('pickupDate').value
         ? getElement('pickupDate').value
         : getLocalDateString();
+    }
+
+    function getSelectedAttendanceGrade() {
+      return getElement('pickupGradeFilter') ? (getElement('pickupGradeFilter').value || 'ทั้งหมด') : 'ทั้งหมด';
+    }
+
+    function getAttendanceCourseScope(grade) {
+      return 'ระดับชั้น: ' + (grade || 'ทั้งหมด');
+    }
+
+    function findAttendanceHistoryFor(dateText, grade) {
+      const scope = getAttendanceCourseScope(grade);
+      return pickupHistory.find(function(item) {
+        if (!item || item.date !== dateText) return false;
+        if (item.courseScope === scope) return true;
+        if (grade !== 'ทั้งหมด' && item.courseScope === getAttendanceCourseScope('ทั้งหมด')) return true;
+        return false;
+      }) || null;
+    }
+
+    function isAttendanceEditModeFor(dateText, grade) {
+      if (!attendanceEditHistoryId) return false;
+      const history = findAttendanceHistoryFor(dateText, grade);
+      return !!(history && String(history.id || history.firebaseDocId || '') === String(attendanceEditHistoryId));
+    }
+
+    function isAttendanceLockedFor(dateText, grade) {
+      return !!findAttendanceHistoryFor(dateText, grade) && !isAttendanceEditModeFor(dateText, grade);
+    }
+
+    function setAttendanceResult(message, color) {
+      ['teacherAttendanceResult', 'teacherMobileAttendanceResult'].forEach(function(id) {
+        const el = getElement(id);
+        if (el) {
+          el.textContent = message || '';
+          el.style.color = color || '#6b7280';
+        }
+      });
+    }
+
+    function setAttendanceSaveButtons(disabled, text) {
+      document.querySelectorAll('[onclick="teacherSaveAttendance()"]').forEach(function(btn) {
+        btn.disabled = !!disabled;
+        btn.textContent = text || 'บันทึกเช็คชื่อ';
+      });
     }
 
     function initAttendanceDateToToday() {
@@ -10353,6 +10408,9 @@
       }
 
       function pickupBtnsHtml(id) {
+        if (isAttendanceLockedFor(getPickupDateValue(), getSelectedAttendanceGrade())) {
+          return '<button class="btn btn-dark" type="button" disabled style="opacity:.65;cursor:not-allowed;">บันทึกแล้ว</button>';
+        }
         var sid = jsArg(id);
         return '<button class="btn btn-green" type="button" onclick="setPickupStatus(\'' + sid + '\', \'มาเรียน\')">มาเรียน</button>' +
           '<button class="btn btn-green" type="button" onclick="setPickupStatus(\'' + sid + '\', \'รถรับส่ง\')">รถรับส่ง</button>' +
@@ -10422,29 +10480,28 @@
       if (!VALID_PICKUP_STATUSES.includes(status)) { return; }
       const selectedDate = getPickupDateValue();
       if (!validateAttendanceDate(selectedDate)) return;
+      const selectedGrade = getSelectedAttendanceGrade();
+      if (isAttendanceLockedFor(selectedDate, selectedGrade)) {
+        setAttendanceResult('ชุดเช็คชื่อนี้บันทึกแล้ว หากต้องการแก้ไขให้กดปุ่ม "แก้ไข" จากประวัติการเช็คชื่อก่อน', '#dc2626');
+        renderPickupList();
+        return;
+      }
       const item = pickupList.find(function(student) { return String(student.id) === String(id); });
       const student = students.find(function(s) { return String(s.id) === String(id); });
-      const result = getElement('teacherAttendanceResult');
       if (!item && !student) {
-        if (result) { result.textContent = 'ไม่พบข้อมูลนักเรียนที่ต้องการเช็คชื่อ'; result.style.color = '#dc2626'; }
+        setAttendanceResult('ไม่พบข้อมูลนักเรียนที่ต้องการเช็คชื่อ', '#dc2626');
         return;
       }
 
       if (student && !isStudentClassOnDate(student, selectedDate)) {
-        if (result) {
-          result.textContent = (student.name || '-') + ' ไม่มีเรียนในวันที่เลือก จึงไม่ต้องเช็คชื่อ';
-          result.style.color = '#6b7280';
-        }
+        setAttendanceResult((student.name || '-') + ' ไม่มีเรียนในวันที่เลือก จึงไม่ต้องเช็คชื่อ', '#6b7280');
         renderPickupList();
         return;
       }
 
       const attendanceCourse = student ? getStudentAttendanceCourse(student) : null;
       if (student && !teacherCanAccessAttendanceCourse(attendanceCourse)) {
-        if (result) {
-          result.textContent = (student.name || '-') + ' ไม่มีสิทธิ์เช็คชื่อในคอร์สนี้';
-          result.style.color = '#dc2626';
-        }
+        setAttendanceResult((student.name || '-') + ' ไม่มีสิทธิ์เช็คชื่อในคอร์สนี้', '#dc2626');
         renderPickupList();
         return;
       }
@@ -10456,16 +10513,10 @@
         student.pickupDate = selectedDate;
         try {
           await setFirebaseDocument('students', student);
-          if (result) {
-            result.textContent = 'บันทึกสถานะ "' + status + '" ของ ' + (student.name || '-') + ' เรียบร้อย';
-            result.style.color = '#16a34a';
-          }
+          setAttendanceResult('บันทึกสถานะ "' + status + '" ของ ' + (student.name || '-') + ' เรียบร้อย', '#16a34a');
         } catch (error) {
           console.error('pickup firebase error:', error);
-          if (result) {
-            result.textContent = 'บันทึกเช็คชื่อไม่สำเร็จ: ' + (error.message || error.code || 'ไม่ทราบสาเหตุ');
-            result.style.color = '#dc2626';
-          }
+          setAttendanceResult('บันทึกเช็คชื่อไม่สำเร็จ: ' + (error.message || error.code || 'ไม่ทราบสาเหตุ'), '#dc2626');
         }
       }
 
@@ -10504,6 +10555,12 @@
       if (!VALID_PICKUP_STATUSES.includes(status)) return;
       const selectedDate = getPickupDateValue();
       if (!validateAttendanceDate(selectedDate)) return;
+      const selectedGrade = getSelectedAttendanceGrade();
+      if (isAttendanceLockedFor(selectedDate, selectedGrade)) {
+        setAttendanceResult('ชุดเช็คชื่อนี้บันทึกแล้ว หากต้องการแก้ไขให้กดปุ่ม "แก้ไข" จากประวัติการเช็คชื่อก่อน', '#dc2626');
+        renderPickupList();
+        return;
+      }
       const filteredIds = getFilteredPickupList()
         .filter(function(item) { return item.hasClassToday; })
         .map(function(item) { return String(item.id); });
@@ -10548,53 +10605,116 @@
 
     function renderPickupHistory() {
       const tbody = getElement('pickupHistoryTableBody');
-      if (!tbody) return;
+      const mobileList = getElement('teacherMobilePickupHistoryList');
+      if (!tbody && !mobileList) return;
 
-      tbody.innerHTML = pickupHistory.length ? pickupHistory.map(function(item) {
-        return '<tr><td>' + item.date + '</td><td>' + (item.courseScope || '-') + '</td><td>' + item.total + ' คน</td><td>' + item.present + ' คน</td><td>' + item.parent + ' คน</td><td>' + item.absent + ' คน</td><td>' + item.teacher + '</td></tr>';
-      }).reverse().join('') : '<tr><td colspan="7">ยังไม่มีประวัติการบันทึก</td></tr>';
+      const sortedHistory = pickupHistory.slice().reverse();
+      const rows = sortedHistory.map(function(item) {
+        const id = String(item.id || item.firebaseDocId || '');
+        const isEditing = attendanceEditHistoryId && String(attendanceEditHistoryId) === id;
+        return '<tr>' +
+          '<td>' + escapeHtml(item.date || '-') + '</td>' +
+          '<td>' + escapeHtml(item.courseScope || '-') + '</td>' +
+          '<td>' + escapeHtml(item.total || 0) + ' คน</td>' +
+          '<td>' + escapeHtml(item.present || 0) + ' คน</td>' +
+          '<td>' + escapeHtml(item.parent || 0) + ' คน</td>' +
+          '<td>' + escapeHtml(item.absent || 0) + ' คน</td>' +
+          '<td>' + escapeHtml(item.teacher || '-') + '</td>' +
+          '<td><button class="btn ' + (isEditing ? 'btn-green' : 'btn-blue') + '" type="button" style="font-size:12px;padding:4px 10px;" onclick="editAttendanceHistory(\'' + jsArg(id) + '\')">' + (isEditing ? 'กำลังแก้ไข' : 'แก้ไข') + '</button></td>' +
+        '</tr>';
+      }).join('');
+      if (tbody) {
+        tbody.innerHTML = rows || '<tr><td colspan="8">ยังไม่มีประวัติการบันทึก</td></tr>';
+      }
+      if (mobileList) {
+        mobileList.innerHTML = sortedHistory.length ? sortedHistory.map(function(item) {
+          const id = String(item.id || item.firebaseDocId || '');
+          const isEditing = attendanceEditHistoryId && String(attendanceEditHistoryId) === id;
+          return '<div class="teacher-mobile-attendance-card">' +
+            '<strong>' + escapeHtml(item.date || '-') + '</strong>' +
+            '<div class="teacher-mobile-muted">' + escapeHtml(item.courseScope || '-') + ' · ทั้งหมด ' + escapeHtml(item.total || 0) + ' คน</div>' +
+            '<div class="teacher-mobile-muted">มา ' + escapeHtml(item.present || 0) + ' · วิธีมาเรียน ' + escapeHtml(item.parent || 0) + ' · ไม่มา ' + escapeHtml(item.absent || 0) + '</div>' +
+            '<div class="teacher-mobile-actions" style="margin-top:8px;"><button class="btn ' + (isEditing ? 'btn-green' : 'btn-blue') + '" type="button" onclick="editAttendanceHistory(\'' + jsArg(id) + '\')">' + (isEditing ? 'กำลังแก้ไข' : 'แก้ไข') + '</button></div>' +
+          '</div>';
+        }).join('') : '<div class="teacher-mobile-attendance-card"><strong>ยังไม่มีประวัติการบันทึก</strong></div>';
+      }
     }
 
-    function teacherSaveAttendance() {
+    function editAttendanceHistory(historyId) {
+      const item = pickupHistory.find(function(record) {
+        return String(record.id || record.firebaseDocId || '') === String(historyId);
+      });
+      if (!item) {
+        setAttendanceResult('ไม่พบประวัติการเช็คชื่อที่ต้องการแก้ไข', '#dc2626');
+        return;
+      }
+      attendanceEditHistoryId = String(item.id || item.firebaseDocId || '');
+      const gradeMatch = String(item.courseScope || '').match(/^ระดับชั้น:\s*(.+)$/);
+      const grade = gradeMatch ? gradeMatch[1] : 'ทั้งหมด';
+      [['pickupDate', item.date], ['teacherMobilePickupDate', item.date], ['pickupGradeFilter', grade], ['teacherMobilePickupGradeFilter', grade]].forEach(function(pair) {
+        const el = getElement(pair[0]);
+        if (el) el.value = pair[1] || '';
+      });
+      pickupCurrentPage = 1;
+      renderPickupList();
+      renderPickupHistory();
+      setAttendanceResult('เปิดโหมดแก้ไขประวัติ ' + (item.date || '-') + ' · ' + (item.courseScope || '-') + ' แล้ว แก้สถานะแล้วกดบันทึกอีกครั้ง', '#d97706');
+    }
+
+    async function teacherSaveAttendance() {
       if (isCurrentStudentSession()) { alert('ไม่มีสิทธิ์'); return; }
       if (attendanceSaving) return;
-      const selectedDate = getElement('pickupDate') ? getElement('pickupDate').value : '';
+      const selectedDate = getPickupDateValue();
       if (!validateAttendanceDate(selectedDate)) return;
+      const selectedGrade = getSelectedAttendanceGrade();
+      const existingHistory = findAttendanceHistoryFor(selectedDate, selectedGrade);
+      if (existingHistory && !isAttendanceEditModeFor(selectedDate, selectedGrade)) {
+        setAttendanceResult('ชุดเช็คชื่อนี้บันทึกแล้ว หากต้องการแก้ไขให้กดปุ่ม "แก้ไข" จากประวัติการเช็คชื่อก่อน', '#dc2626');
+        renderPickupList();
+        return;
+      }
 
       attendanceSaving = true;
-      const saveBtn = document.querySelector('[onclick="teacherSaveAttendance()"]');
-      if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = 'กำลังบันทึก...'; }
+      setAttendanceSaveButtons(true, 'กำลังบันทึก...');
 
       const filtered = getFilteredPickupList().filter(function(item) { return item.hasClassToday; });
       const present = filtered.filter(function(item) { return item.status === 'มาเรียน' || item.status === 'ผู้ปกครองมาส่ง' || item.status === 'รถรับส่ง'; }).length;
       const parent = filtered.filter(function(item) { return item.status === 'ผู้ปกครองมาส่ง' || item.status === 'รถรับส่ง'; }).length;
       const absent = filtered.filter(function(item) { return item.status === 'ไม่มา' || item.status === 'ยังไม่เช็คชื่อ'; }).length;
-      const selectedGrade = getElement('pickupGradeFilter') ? getElement('pickupGradeFilter').value : 'ทั้งหมด';
 
-      const historyId = createFirebaseDocId('attendanceHistory');
+      const historyId = existingHistory ? (existingHistory.id || existingHistory.firebaseDocId) : createFirebaseDocId('attendanceHistory');
       const historyItem = {
         id: historyId,
         firebaseDocId: historyId,
         date: selectedDate,
-        courseScope: 'ระดับชั้น: ' + selectedGrade,
+        courseScope: getAttendanceCourseScope(selectedGrade),
         total: filtered.length,
         present: present,
         parent: parent,
         absent: absent,
         teacher: getElement('profileName') ? getElement('profileName').textContent : ''
       };
-      pickupHistory.push(historyItem);
-      setFirebaseDocument('attendanceHistory', historyItem).catch(function(error) { console.error('attendance firebase error:', error); }).finally(function() {
+      try {
+        await setFirebaseDocument('attendanceHistory', historyItem);
+        if (existingHistory) {
+          Object.assign(existingHistory, historyItem);
+        } else {
+          pickupHistory.push(historyItem);
+        }
+        attendanceEditHistoryId = '';
+        renderPickupHistory();
+        renderPickupList();
+        renderTeacherDashboardSummary();
+        renderAdminDashboard();
+        if (currentStudent) updateStudentPickupStatus(currentStudent);
+        setAttendanceResult(existingHistory ? 'บันทึกการแก้ไขเช็คชื่อเรียบร้อยแล้ว' : 'บันทึกเช็คชื่อเรียบร้อย และเพิ่มลงประวัติย้อนหลังแล้ว', '#16a34a');
+      } catch (error) {
+        console.error('attendance firebase error:', error);
+        setAttendanceResult('บันทึกเช็คชื่อไม่สำเร็จ: ' + (error.message || error.code || 'ไม่ทราบสาเหตุ'), '#dc2626');
+      } finally {
         attendanceSaving = false;
-        if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = 'บันทึกเช็คชื่อ'; }
-      });
-
-      renderPickupHistory();
-      renderTeacherDashboardSummary();
-      renderAdminDashboard();
-      if (currentStudent) updateStudentPickupStatus(currentStudent);
-      var resultEl = getElement('teacherAttendanceResult');
-      if (resultEl) { resultEl.textContent = 'บันทึกเช็คชื่อเรียบร้อย และเพิ่มลงประวัติย้อนหลังแล้ว'; resultEl.style.color = '#16a34a'; }
+        setAttendanceSaveButtons(false, 'บันทึกเช็คชื่อ');
+      }
     }
 
     function showAdminPanel(skipCheck) {
