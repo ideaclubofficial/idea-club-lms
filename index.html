@@ -7503,6 +7503,7 @@
     let onlineExamGradePage = 1;
     let onlineExamGradeMissingHtml = '';
     let onlineExamGradeMissingOnly = false;
+    let onlineExamGradeMissingItems = [];
     const ONLINE_EXAM_GRADE_PAGE_SIZE = 20;
     const ONLINE_EXAM_SUBJECT_ORDER = ['คณิตศาสตร์', 'วิทยาศาสตร์', 'ภาษาอังกฤษ', 'ภาษาไทย', 'สังคมศึกษา', 'อื่นๆ'];
     let onlineExamQuestionOrder = [];    // questionIds in display order (shuffled or natural)
@@ -19522,6 +19523,29 @@ function receiptStatusText(status) {
     }
 
     function getOnlineExamSubjectOrderIndex(subject) {
+      const normalized = String(subject || '').trim().replace(/\s+/g, '');
+      const aliasOrder = {
+        'คณิตศาสตร์': 0,
+        'คณิต': 0,
+        'math': 0,
+        'mathematics': 0,
+        'วิทยาศาสตร์': 1,
+        'วิทย์': 1,
+        'science': 1,
+        'ภาษาอังกฤษ': 2,
+        'อังกฤษ': 2,
+        'english': 2,
+        'eng': 2,
+        'ภาษาไทย': 3,
+        'ไทย': 3,
+        'สังคมศึกษา': 4,
+        'สังคม': 4,
+        'อื่นๆ': 5,
+        'อื่น ๆ': 5
+      };
+      const lower = normalized.toLowerCase();
+      if (aliasOrder.hasOwnProperty(normalized)) return aliasOrder[normalized];
+      if (aliasOrder.hasOwnProperty(lower)) return aliasOrder[lower];
       const idx = ONLINE_EXAM_SUBJECT_ORDER.indexOf(String(subject || ''));
       return idx >= 0 ? idx : ONLINE_EXAM_SUBJECT_ORDER.length;
     }
@@ -28777,11 +28801,29 @@ function receiptStatusText(status) {
         });
         const missingCourses = studentTargetCourses.filter(function(course) {
           return !submittedCourseIds[String(course.firebaseDocId || '')];
+        }).sort(function(a, b) {
+          const monthDiff = compareThaiMonthYear(a.examMonth || '', b.examMonth || '');
+          if (monthDiff !== 0) return monthDiff;
+          const gradeDiff = String(getOnlineExamCourseGrade(a) || '').localeCompare(String(getOnlineExamCourseGrade(b) || ''), 'th', { numeric: true });
+          if (gradeDiff !== 0) return gradeDiff;
+          const subjectDiff = compareOnlineExamSubjects(a.subject || '', b.subject || '');
+          if (subjectDiff !== 0) return subjectDiff;
+          return String(a.title || '').localeCompare(String(b.title || ''), 'th', { numeric: true });
         });
         return { student: student, missingCourses: missingCourses };
       }).filter(function(item) {
         return item.missingCourses.length > 0;
       });
+    }
+
+    function showOnlineExamMissingCourses(index) {
+      const item = onlineExamGradeMissingItems[Number(index)];
+      if (!item) return;
+      const student = item.student || {};
+      const lines = (item.missingCourses || []).map(function(course, i) {
+        return (i + 1) + '. ' + [course.examMonth || '', getOnlineExamCourseGrade(course) || '', course.subject || '', course.title || ''].filter(Boolean).join(' · ');
+      });
+      alert('ชุดข้อสอบที่ยังไม่ได้ทำของ ' + (student.name || '-') + '\n\n' + (lines.join('\n') || 'ไม่พบรายการ'));
     }
 
     function renderOnlineExamMissingStudentsHtml(missingItems, targetCourses, expectedCount) {
@@ -28793,15 +28835,13 @@ function receiptStatusText(status) {
       const doneCount = Math.max(0, expectedCount - missingCount);
       const rows = missingItems.map(function(item, index) {
         const student = item.student || {};
-        const missingText = item.missingCourses.map(function(course) {
-          return escapeHtml([course.examMonth || '', getOnlineExamCourseGrade(course) || '', course.subject || '', course.title || ''].filter(Boolean).join(' · '));
-        }).join('<br>');
+        const missingCountText = (item.missingCourses || []).length + ' ชุด';
         return '<tr>' +
           '<td>' + (index + 1) + '</td>' +
           '<td>' + escapeHtml(student.memberId || student.studentId || '-') + '</td>' +
           '<td class="student-name">' + escapeHtml(student.name || '-') + '<br><span class="mini-muted">' + escapeHtml(student.nickname || '-') + '</span></td>' +
           '<td>' + escapeHtml(student.grade || '-') + '</td>' +
-          '<td>' + missingText + '</td>' +
+          '<td><button class="btn btn-blue" type="button" style="font-size:11px;padding:4px 10px;" onclick="showOnlineExamMissingCourses(' + index + ')">ดูชุดที่ไม่ได้ทำ (' + escapeHtml(missingCountText) + ')</button></td>' +
         '</tr>';
       }).join('');
       return '<div style="padding:12px;border-bottom:1px solid #f1f5f9;background:#fff7ed;">' +
@@ -28935,6 +28975,7 @@ function receiptStatusText(status) {
           });
         }
         const missingStudents = getOnlineExamMissingStudents(targetCourses, expectedStudents, allResults);
+        onlineExamGradeMissingItems = missingStudents;
         results = results.slice().sort(compareOnlineExamResultsByMemberId);
         onlineExamGradeAllResults = results;
         onlineExamGradeMissingHtml = renderOnlineExamMissingStudentsHtml(missingStudents, targetCourses, expectedStudents.length);
