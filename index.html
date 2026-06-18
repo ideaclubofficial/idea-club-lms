@@ -5171,6 +5171,7 @@
                 <p id="scoreAdjustResult" style="margin-top:14px; font-weight:bold;"></p>
                 </div>
               </div>
+              <div id="adminScoreStatsChartCard" class="form-box" style="display:none;"></div>
               <div id="onlineExamGradingReport" class="form-box" style="display:none;padding:0;overflow:hidden;"></div>
             </div>
             <!-- end score tab -->
@@ -19080,23 +19081,11 @@ function receiptStatusText(status) {
     }
 
     function getAdminScorePublishFilterScope() {
-      const visibleMonthSelect = getElement('onlineExamGradeMonthFilter');
-      const visibleGradeSelect = getElement('onlineExamGradeLevelFilter');
-      const hiddenMonth = getElement('adminScoreTestSetFilter') ? getElement('adminScoreTestSetFilter').value : '';
-      const visibleMonth = visibleMonthSelect ? visibleMonthSelect.value : hiddenMonth;
-      const visibleGrade = visibleGradeSelect ? visibleGradeSelect.value : '';
-      return {
-        month: visibleMonth || '',
-        grade: visibleGrade || ''
-      };
+      return getAdminScoreVisibleFilterScope();
     }
 
     function getAdminScoreRecordsForPublishScope(scope) {
-      if (!scope || !scope.month) return [];
-      return adminScoreRecords.filter(function(record) {
-        if (record.month !== scope.month) return false;
-        return scope.grade ? record.grade === scope.grade : !!record.grade;
-      }).slice().sort(compareScoreRecordsByMemberId);
+      return getAdminScoreRecordsForScope(scope);
     }
 
     async function publishAllScoreSetsByCurrentFilters() {
@@ -19789,6 +19778,111 @@ function receiptStatusText(status) {
       box.textContent = 'ใบคะแนน: ' + selectedMonth + ' · ' + selectedGrade + ' · ' + list.length + ' รายการ' + (list.length ? ' · ประกาศแล้ว ' + published + ' รายการ' : '');
     }
 
+    function getAdminScoreVisibleFilterScope() {
+      const visibleMonthSelect = getElement('onlineExamGradeMonthFilter');
+      const visibleGradeSelect = getElement('onlineExamGradeLevelFilter');
+      const hiddenMonth = getElement('adminScoreTestSetFilter') ? getElement('adminScoreTestSetFilter').value : '';
+      return {
+        month: visibleMonthSelect ? (visibleMonthSelect.value || '') : hiddenMonth,
+        grade: visibleGradeSelect ? (visibleGradeSelect.value || '') : ''
+      };
+    }
+
+    function getAdminScoreRecordsForScope(scope) {
+      if (!scope || !scope.month) return [];
+      return adminScoreRecords.filter(function(record) {
+        if (record.month !== scope.month) return false;
+        return scope.grade ? record.grade === scope.grade : !!record.grade;
+      }).slice().sort(function(a, b) {
+        const gradeDiff = gradeOrder(a.grade || '') - gradeOrder(b.grade || '');
+        return gradeDiff || compareScoreRecordsByMemberId(a, b);
+      });
+    }
+
+    function renderScoreStatsBar(label, value, color) {
+      const safeValue = Math.max(0, Math.min(50, Number(value || 0)));
+      const width = Math.round((safeValue / 50) * 1000) / 10;
+      return '<div style="display:grid;grid-template-columns:48px 1fr 44px;align-items:center;gap:8px;margin:5px 0;">' +
+        '<span style="font-size:11px;color:#4b5563;white-space:nowrap;">' + escapeHtml(label) + '</span>' +
+        '<div style="height:8px;background:#e5e7eb;border-radius:99px;overflow:hidden;">' +
+          '<div style="height:100%;width:' + width + '%;background:' + color + ';border-radius:99px;"></div>' +
+        '</div>' +
+        '<strong style="font-size:11px;text-align:right;color:#111827;">' + safeValue.toFixed(1).replace(/\.0$/, '') + '</strong>' +
+      '</div>';
+    }
+
+    function renderAdminScoreStatsChartCard(precomputedRecords) {
+      const card = getElement('adminScoreStatsChartCard');
+      if (!card) return;
+      const scope = getAdminScoreVisibleFilterScope();
+      const records = precomputedRecords || getAdminScoreRecordsForScope(scope);
+
+      if (!scope.month) {
+        card.style.display = 'none';
+        card.innerHTML = '';
+        return;
+      }
+
+      const gradeSet = {};
+      records.forEach(function(record) {
+        if (record.grade) gradeSet[record.grade] = true;
+      });
+      const grades = Object.keys(gradeSet).sort(function(a, b) {
+        return gradeOrder(a) - gradeOrder(b);
+      });
+
+      if (!records.length || !grades.length) {
+        card.style.display = '';
+        card.innerHTML =
+          '<h3 style="margin-bottom:6px;">สถิติคะแนนตามระดับชั้น</h3>' +
+          '<p class="mini-muted" style="margin:0;">ยังไม่มีข้อมูลคะแนนสำหรับ ' + escapeHtml(scope.month) + (scope.grade ? ' · ' + escapeHtml(scope.grade) : ' · ทุกระดับชั้น') + '</p>';
+        return;
+      }
+
+      const gradeCards = grades.map(function(grade) {
+        const gradeRecords = records.filter(function(record) { return record.grade === grade; });
+        const subjectSet = {};
+        gradeRecords.forEach(function(record) {
+          Object.keys(record.scores || {}).forEach(function(subject) {
+            subjectSet[subject] = true;
+          });
+        });
+        const subjects = Object.keys(subjectSet).length
+          ? sortOnlineExamSubjects(Object.keys(subjectSet))
+          : ['คณิตศาสตร์', 'วิทยาศาสตร์', 'ภาษาอังกฤษ'];
+        const subjectRows = subjects.map(function(subject) {
+          const stat = calculateSubjectStats(gradeRecords, subject);
+          return '<div style="padding:10px 0;border-top:1px solid #edf2f7;">' +
+            '<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:4px;">' +
+              '<strong style="font-size:12px;color:#0f4cbd;white-space:nowrap;">' + escapeHtml(subject) + '</strong>' +
+              '<span class="mini-muted" style="white-space:nowrap;">' + gradeRecords.length + ' คน</span>' +
+            '</div>' +
+            renderScoreStatsBar('สูงสุด', stat.max, '#16a34a') +
+            renderScoreStatsBar('เฉลี่ย', stat.avg, '#0f4cbd') +
+            renderScoreStatsBar('ต่ำสุด', stat.min, '#dc2626') +
+          '</div>';
+        }).join('');
+        return '<div style="border:1px solid #e5e7eb;border-radius:8px;padding:12px;background:#fff;">' +
+          '<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:2px;">' +
+            '<h4 style="margin:0;color:#111827;font-size:14px;">' + escapeHtml(grade) + '</h4>' +
+            '<span class="mini-muted">' + gradeRecords.length + ' รายการ</span>' +
+          '</div>' +
+          subjectRows +
+        '</div>';
+      }).join('');
+
+      card.style.display = '';
+      card.innerHTML =
+        '<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:12px;">' +
+          '<div>' +
+            '<h3 style="margin-bottom:4px;">สถิติคะแนนตามระดับชั้น</h3>' +
+            '<p class="mini-muted" style="margin:0;">สูงสุด / ต่ำสุด / เฉลี่ย จากใบคะแนน ' + escapeHtml(scope.month) + (scope.grade ? ' · ' + escapeHtml(scope.grade) : ' · ทุกระดับชั้น') + '</p>' +
+          '</div>' +
+          '<span class="mini-muted" style="white-space:nowrap;">คะแนนเต็ม 50</span>' +
+        '</div>' +
+        '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px;">' + gradeCards + '</div>';
+    }
+
     function renderAdminScoreFilters() {
       const select = getElement('adminScoreTestSetFilter');
       if (!select) return;
@@ -19931,6 +20025,7 @@ function receiptStatusText(status) {
       syncAdminScoreFiltersFromOnlineExamFilters();
       const shared = getSelectedAdminScoreRecords();
       renderAdminScoreToolbarSummary(shared);
+      renderAdminScoreStatsChartCard(getAdminScoreRecordsForScope(getAdminScoreVisibleFilterScope()));
       renderAdminScoreAdjustTable(shared);
       renderAdminScoreStatsTable(shared);
     }
