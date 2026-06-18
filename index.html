@@ -28688,10 +28688,14 @@ function receiptStatusText(status) {
       });
     }
 
-    function getOnlineExamExpectedStudents(gradeFilter) {
+    function getOnlineExamExpectedStudents(gradeFilter, targetCourses) {
+      const targetGrades = Array.from(new Set((targetCourses || []).map(function(course) {
+        return getOnlineExamCourseGrade(course);
+      }).filter(Boolean)));
       return (students || []).filter(function(student) {
         if (!student || !isActiveStudentForDashboard(student)) return false;
         if (gradeFilter && student.grade !== gradeFilter) return false;
+        if (!gradeFilter && targetGrades.length && !targetGrades.includes(student.grade || '')) return false;
         return true;
       }).slice().sort(function(a, b) {
         return String(a.memberId || a.studentId || '').localeCompare(String(b.memberId || b.studentId || ''), undefined, { numeric: true, sensitivity: 'base' });
@@ -28719,13 +28723,18 @@ function receiptStatusText(status) {
       const targetCourseIds = (targetCourses || []).map(function(course) { return String(course.firebaseDocId || ''); }).filter(Boolean);
       if (!targetCourseIds.length || !expectedStudents.length) return [];
       return expectedStudents.map(function(student) {
+        const studentTargetCourses = (targetCourses || []).filter(function(course) {
+          const courseGrade = getOnlineExamCourseGrade(course);
+          return !courseGrade || !student.grade || courseGrade === student.grade;
+        });
+        const studentTargetCourseIds = studentTargetCourses.map(function(course) { return String(course.firebaseDocId || ''); }).filter(Boolean);
         const submittedCourseIds = {};
         (allResults || []).forEach(function(result) {
           const courseId = String(result.courseId || '');
-          if (!targetCourseIds.includes(courseId)) return;
+          if (!studentTargetCourseIds.includes(courseId)) return;
           if (isOnlineExamResultForStudent(result, student)) submittedCourseIds[courseId] = true;
         });
-        const missingCourses = targetCourses.filter(function(course) {
+        const missingCourses = studentTargetCourses.filter(function(course) {
           return !submittedCourseIds[String(course.firebaseDocId || '')];
         });
         return { student: student, missingCourses: missingCourses };
@@ -28878,7 +28887,7 @@ function receiptStatusText(status) {
         }
 
         const targetCourses = getOnlineExamGradingTargetCourses(monthFilter, subjectFilter, gradeFilter);
-        let expectedStudents = getOnlineExamExpectedStudents(gradeFilter);
+        let expectedStudents = getOnlineExamExpectedStudents(gradeFilter, targetCourses);
         if (studentUid) {
           expectedStudents = expectedStudents.filter(function(student) {
             return String(student.authUid || student.uid || '') === String(studentUid);
