@@ -20079,12 +20079,22 @@ function receiptStatusText(status) {
 
       const colCount = subjects.length + 4;
       tbody.innerHTML = records.length ? records.map(function(record) {
+        const recordSubjects = sortOnlineExamSubjects(Object.keys(record.scores || {}).filter(Boolean));
+        const delSelectId = 'del_' + String(record.id).replace(/[^a-zA-Z0-9]/g, '_');
+        const subjectOptions = recordSubjects.map(function(s) {
+          return '<option value="' + escapeHtml(s) + '">' + escapeHtml(s) + '</option>';
+        }).join('');
+        const deleteCell = '<td style="white-space:nowrap;">' +
+          '<select id="' + delSelectId + '" style="font-size:11px;padding:3px 4px;border-radius:4px;border:1px solid #d1d5db;max-width:115px;margin-bottom:3px;">' +
+            '<option value="">ลบทั้งหมด</option>' + subjectOptions +
+          '</select>' +
+          '<button class="btn btn-red" style="padding:3px 8px;font-size:12px;display:block;" onclick="deleteScoreRecord(\'' + jsArg(record.id) + '\', document.getElementById(\'' + delSelectId + '\').value)">ลบ</button>' +
+        '</td>';
         return '<tr data-score-id="' + record.id + '">' +
           '<td>' + renderScoreRecordStudentCell(record) + '</td>' +
           subjects.map(function(s) {
             const maxQ = subjectMaxQ[s];
             const stored50 = Number(record.scores[s] || 0);
-            // back-convert stored 50-pt value to raw question count for display
             const displayVal = (maxQ !== 50 && stored50 > 0)
               ? Math.round(stored50 / 50 * maxQ * 10) / 10
               : stored50;
@@ -20092,27 +20102,51 @@ function receiptStatusText(status) {
           }).join('') +
           '<td>50</td>' +
           '<td>' + scoreStatusText(record.status) + '</td>' +
-          '<td><button class="btn btn-red" style="padding:3px 8px;font-size:12px;" onclick="deleteScoreRecord(\'' + record.id + '\')">ยกเลิก</button></td>' +
+          deleteCell +
         '</tr>';
       }).join('') : '<tr><td colspan="' + colCount + '">ยังไม่มีข้อมูลคะแนนของชุดข้อสอบและระดับชั้นที่เลือก</td></tr>';
     }
 
-    async function deleteScoreRecord(recordId) {
+    async function deleteScoreRecord(recordId, subject) {
       const idx = adminScoreRecords.findIndex(function(r) { return String(r.id) === String(recordId); });
       if (idx === -1) return;
       const record = adminScoreRecords[idx];
-      if (!confirm('ยืนยันยกเลิกคะแนนของ "' + (record.student || '-') + '"?')) return;
-      adminScoreRecords.splice(idx, 1);
-      renderAdminScoreTables();
       const result = getElement('scoreAdjustResult');
-      try {
-        await deleteFirebaseDocument('adminScoreRecords', record);
-        if (result) { result.textContent = 'ยกเลิกคะแนนของ ' + (record.student || '-') + ' แล้ว'; result.style.color = '#d97706'; }
-      } catch (e) {
-        console.error('deleteScoreRecord error:', e);
-        adminScoreRecords.splice(idx, 0, record);
+
+      if (subject) {
+        if (!confirm('ยืนยันลบคะแนนวิชา "' + subject + '" ของ "' + (record.student || '-') + '"?')) return;
+        const backupScore = record.scores[subject];
+        delete record.scores[subject];
+        const isEmpty = Object.keys(record.scores).length === 0;
+        if (isEmpty) adminScoreRecords.splice(idx, 1);
         renderAdminScoreTables();
-        if (result) { result.textContent = 'ยกเลิกไม่สำเร็จ: ' + (e.message || e.code); result.style.color = '#dc2626'; }
+        try {
+          if (isEmpty) {
+            await deleteFirebaseDocument('adminScoreRecords', record);
+          } else {
+            await setFirebaseDocument('adminScoreRecords', record);
+          }
+          if (result) { result.textContent = 'ลบคะแนนวิชา ' + subject + ' ของ ' + (record.student || '-') + ' แล้ว'; result.style.color = '#d97706'; }
+        } catch (e) {
+          console.error('deleteScoreRecord subject error:', e);
+          record.scores[subject] = backupScore;
+          if (isEmpty) adminScoreRecords.splice(idx, 0, record);
+          renderAdminScoreTables();
+          if (result) { result.textContent = 'ลบไม่สำเร็จ: ' + (e.message || e.code); result.style.color = '#dc2626'; }
+        }
+      } else {
+        if (!confirm('ยืนยันยกเลิกคะแนนทั้งหมดของ "' + (record.student || '-') + '"?')) return;
+        adminScoreRecords.splice(idx, 1);
+        renderAdminScoreTables();
+        try {
+          await deleteFirebaseDocument('adminScoreRecords', record);
+          if (result) { result.textContent = 'ยกเลิกคะแนนของ ' + (record.student || '-') + ' แล้ว'; result.style.color = '#d97706'; }
+        } catch (e) {
+          console.error('deleteScoreRecord error:', e);
+          adminScoreRecords.splice(idx, 0, record);
+          renderAdminScoreTables();
+          if (result) { result.textContent = 'ยกเลิกไม่สำเร็จ: ' + (e.message || e.code); result.style.color = '#dc2626'; }
+        }
       }
     }
 
