@@ -5164,6 +5164,7 @@
                   <button class="btn btn-blue" type="button" onclick="createScoreRecordsForSelectedMonthGrade()">สร้างตารางคะแนนจากรายชื่อนักเรียน</button>
                   <button class="btn btn-green" type="button" onclick="saveAdjustedScores()">บันทึกคะแนนชุดนี้</button>
                   <button class="btn btn-dark" type="button" onclick="publishSelectedScoreSet()">ประกาศผลชุดนี้</button>
+                  <button class="btn btn-dark" type="button" onclick="publishAllScoreSetsByCurrentFilters()">ประกาศคะแนนทั้งหมดตามตัวกรอง</button>
                   <button class="btn btn-blue" type="button" onclick="exportScoresCsv()">ส่งออกคะแนน CSV</button>
                   <button class="btn btn-red" type="button" onclick="deleteAllScoreRecordsForSet()">ยกเลิกทั้งชุด</button>
                 </div>
@@ -19075,6 +19076,88 @@ function receiptStatusText(status) {
       if (result) {
         result.textContent = 'ประกาศผลชุด ' + selectedMonth + ' ระดับชั้น ' + selectedGrade + ' เรียบร้อย นักเรียนดูใบคะแนนย้อนหลังได้แล้ว';
         result.style.color = '#0f4cbd';
+      }
+    }
+
+    function getAdminScorePublishFilterScope() {
+      const visibleMonthSelect = getElement('onlineExamGradeMonthFilter');
+      const visibleGradeSelect = getElement('onlineExamGradeLevelFilter');
+      const hiddenMonth = getElement('adminScoreTestSetFilter') ? getElement('adminScoreTestSetFilter').value : '';
+      const visibleMonth = visibleMonthSelect ? visibleMonthSelect.value : hiddenMonth;
+      const visibleGrade = visibleGradeSelect ? visibleGradeSelect.value : '';
+      return {
+        month: visibleMonth || '',
+        grade: visibleGrade || ''
+      };
+    }
+
+    function getAdminScoreRecordsForPublishScope(scope) {
+      if (!scope || !scope.month) return [];
+      return adminScoreRecords.filter(function(record) {
+        if (record.month !== scope.month) return false;
+        return scope.grade ? record.grade === scope.grade : !!record.grade;
+      }).slice().sort(compareScoreRecordsByMemberId);
+    }
+
+    async function publishAllScoreSetsByCurrentFilters() {
+      syncAdminScoreFiltersFromOnlineExamFilters();
+      const scope = getAdminScorePublishFilterScope();
+      const result = getElement('scoreAdjustResult');
+
+      if (!scope.month) {
+        if (result) {
+          result.textContent = 'กรุณาเลือกเดือนสอบก่อนประกาศคะแนนทั้งหมด';
+          result.style.color = '#dc2626';
+        }
+        return;
+      }
+
+      const records = getAdminScoreRecordsForPublishScope(scope);
+      const gradeSet = {};
+      records.forEach(function(record) {
+        if (record.grade) gradeSet[record.grade] = true;
+      });
+      const grades = Object.keys(gradeSet).sort(function(a, b) {
+        return gradeOrder(a) - gradeOrder(b);
+      });
+      const scopeText = scope.grade ? ('ระดับชั้น ' + scope.grade) : 'ทุกระดับชั้น';
+
+      if (!records.length) {
+        if (result) {
+          result.textContent = 'ยังไม่มีคะแนนสำหรับประกาศผลใน ' + scope.month + ' · ' + scopeText;
+          result.style.color = '#dc2626';
+        }
+        return;
+      }
+
+      if (!confirm('ประกาศคะแนนทั้งหมดของ ' + scope.month + ' · ' + scopeText + ' (' + records.length + ' รายการ)?')) return;
+
+      let failed = 0;
+      for (let i = 0; i < records.length; i++) {
+        records[i].status = 'published';
+        try {
+          await setFirebaseDocument('adminScoreRecords', records[i]);
+        } catch (error) {
+          failed++;
+          console.error('publish all score record firebase error:', error);
+        }
+      }
+
+      for (let g = 0; g < grades.length; g++) {
+        try {
+          await syncScoreReportFromAdmin(scope.month, grades[g], 'published');
+        } catch (error) {
+          failed++;
+          console.error('publish all score report sync error:', error);
+        }
+      }
+
+      renderAdminScoreTables();
+      renderScoreHistoryByMonth();
+      renderStudentExamFilters();
+      if (result) {
+        result.textContent = 'ประกาศคะแนนทั้งหมด ' + scope.month + ' · ' + scopeText + ' แล้ว ' + (records.length - Math.min(failed, records.length)) + ' รายการ' + (failed ? ' · พบข้อผิดพลาด ' + failed + ' รายการ' : '');
+        result.style.color = failed ? '#d97706' : '#0f4cbd';
       }
     }
 
