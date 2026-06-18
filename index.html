@@ -28826,6 +28826,40 @@ function receiptStatusText(status) {
       alert('ชุดข้อสอบที่ยังไม่ได้ทำของ ' + (student.name || '-') + '\n\n' + (lines.join('\n') || 'ไม่พบรายการ'));
     }
 
+    function showOnlineExamMissingStudentList() {
+      const modal = getElement('onlineExamDetailModal');
+      const content = getElement('onlineExamDetailModalContent');
+      if (!modal || !content) return;
+      const missingItems = onlineExamGradeMissingItems || [];
+      const rows = missingItems.map(function(item, index) {
+        const student = item.student || {};
+        const missingCount = (item.missingCourses || []).length;
+        return '<tr>' +
+          '<td style="padding:8px 10px;border-bottom:1px solid #f1f5f9;">' + (index + 1) + '</td>' +
+          '<td style="padding:8px 10px;border-bottom:1px solid #f1f5f9;white-space:nowrap;">' + escapeHtml(student.memberId || student.studentId || '-') + '</td>' +
+          '<td style="padding:8px 10px;border-bottom:1px solid #f1f5f9;">' + escapeHtml(student.name || '-') + '<br><span class="mini-muted">' + escapeHtml(student.nickname || '-') + '</span></td>' +
+          '<td style="padding:8px 10px;border-bottom:1px solid #f1f5f9;text-align:center;white-space:nowrap;">' + escapeHtml(student.grade || '-') + '</td>' +
+          '<td style="padding:8px 10px;border-bottom:1px solid #f1f5f9;text-align:center;white-space:nowrap;">' + missingCount + ' ชุด</td>' +
+          '<td style="padding:8px 10px;border-bottom:1px solid #f1f5f9;text-align:center;white-space:nowrap;"><button class="btn btn-blue" type="button" style="font-size:11px;padding:4px 10px;" onclick="showOnlineExamMissingCourses(' + index + ')">ดูชุด</button></td>' +
+        '</tr>';
+      }).join('');
+      content.innerHTML =
+        '<h3 style="font-size:16px;margin-bottom:4px;">รายชื่อนักเรียนที่ยังไม่ได้ทำข้อสอบ</h3>' +
+        '<p style="font-size:12px;color:#6b7280;margin-bottom:12px;">ทั้งหมด ' + missingItems.length + ' คน · กดดูชุดเพื่อดูรายการข้อสอบที่ยังไม่ได้ทำรายคน</p>' +
+        (missingItems.length
+          ? '<div style="overflow-x:auto;"><table style="width:100%;border-collapse:collapse;">' +
+              '<thead><tr style="background:#f1f5f9;font-size:11px;font-weight:700;color:#374151;">' +
+                '<th style="padding:8px 10px;text-align:left;">ลำดับ</th>' +
+                '<th style="padding:8px 10px;text-align:left;">Member ID</th>' +
+                '<th style="padding:8px 10px;text-align:left;">นักเรียน</th>' +
+                '<th style="padding:8px 10px;text-align:center;">ระดับชั้น</th>' +
+                '<th style="padding:8px 10px;text-align:center;">ยังไม่ทำ</th>' +
+                '<th style="padding:8px 10px;text-align:center;">ชุดข้อสอบ</th>' +
+              '</tr></thead><tbody>' + rows + '</tbody></table></div>'
+          : '<div style="padding:16px;color:#16a34a;font-weight:700;">นักเรียนเป้าหมายทำข้อสอบครบแล้ว</div>');
+      modal.style.display = '';
+    }
+
     function renderOnlineExamMissingStudentsHtml(missingItems, targetCourses, expectedCount) {
       const totalTargets = (targetCourses || []).length;
       if (!totalTargets) {
@@ -28833,24 +28867,30 @@ function receiptStatusText(status) {
       }
       const missingCount = missingItems.length;
       const doneCount = Math.max(0, expectedCount - missingCount);
-      const rows = missingItems.map(function(item, index) {
-        const student = item.student || {};
-        const missingCountText = (item.missingCourses || []).length + ' ชุด';
-        return '<tr>' +
-          '<td>' + (index + 1) + '</td>' +
-          '<td>' + escapeHtml(student.memberId || student.studentId || '-') + '</td>' +
-          '<td class="student-name">' + escapeHtml(student.name || '-') + '<br><span class="mini-muted">' + escapeHtml(student.nickname || '-') + '</span></td>' +
-          '<td>' + escapeHtml(student.grade || '-') + '</td>' +
-          '<td><button class="btn btn-blue" type="button" style="font-size:11px;padding:4px 10px;" onclick="showOnlineExamMissingCourses(' + index + ')">ดูชุดที่ไม่ได้ทำ (' + escapeHtml(missingCountText) + ')</button></td>' +
-        '</tr>';
-      }).join('');
-      return '<div style="padding:12px;border-bottom:1px solid #f1f5f9;background:#fff7ed;">' +
-          '<strong style="color:#9a3412;">ยังไม่ทำข้อสอบ ' + missingCount + ' คน</strong>' +
-          '<span style="color:#6b7280;font-size:12px;margin-left:8px;">ทำครบแล้ว ' + doneCount + ' คน · นักเรียนเป้าหมาย ' + expectedCount + ' คน · ชุดข้อสอบ ' + totalTargets + ' ชุด</span>' +
+      const missingCourseCount = missingItems.reduce(function(sum, item) {
+        return sum + ((item.missingCourses || []).length);
+      }, 0);
+      const missingCardClass = missingCount ? 'stat clickable' : 'stat';
+      const missingCardAction = missingCount ? ' onclick="showOnlineExamMissingStudentList()"' : '';
+      return '<div style="padding:12px;border-bottom:1px solid #f1f5f9;background:#fff;">' +
+        '<div class="dashboard-grid" style="margin:0;">' +
+          '<div class="' + missingCardClass + '"' + missingCardAction + ' style="' + (missingCount ? 'border-color:#fed7aa;background:#fff7ed;' : 'border-color:#bbf7d0;background:#f0fdf4;') + '">' +
+            '<h4>' + (missingCount ? 'ยังไม่ได้ทำข้อสอบ' : 'ทำข้อสอบครบแล้ว') + '</h4>' +
+            '<p style="color:' + (missingCount ? '#c2410c' : '#16a34a') + ';">' + missingCount + ' คน</p>' +
+            '<small>' + (missingCount ? 'กดเพื่อดูรายชื่อและชุดที่ยังไม่ได้ทำ' : 'ไม่มีนักเรียนค้างทำข้อสอบ') + '</small>' +
+          '</div>' +
+          '<div class="stat">' +
+            '<h4>ทำครบแล้ว</h4>' +
+            '<p>' + doneCount + ' คน</p>' +
+            '<small>นักเรียนเป้าหมาย ' + expectedCount + ' คน</small>' +
+          '</div>' +
+          '<div class="stat">' +
+            '<h4>ชุดข้อสอบเป้าหมาย</h4>' +
+            '<p>' + totalTargets + ' ชุด</p>' +
+            '<small>ยังไม่ได้ทำรวม ' + missingCourseCount + ' รายการ</small>' +
+          '</div>' +
         '</div>' +
-        (missingCount
-          ? '<div class="table-wrap" style="margin:0;"><table><thead><tr><th>ลำดับ</th><th>Member ID</th><th>นักเรียน</th><th>ระดับชั้น</th><th>ชุดที่ยังไม่ทำ</th></tr></thead><tbody>' + rows + '</tbody></table></div>'
-          : '<div style="padding:16px;color:#16a34a;font-weight:700;">นักเรียนเป้าหมายทำข้อสอบครบแล้ว</div>');
+      '</div>';
     }
 
     async function populateOnlineExamStudentSelect() {
