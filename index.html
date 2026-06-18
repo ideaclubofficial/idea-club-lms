@@ -7549,6 +7549,7 @@
     let onlineExamTimeRemaining = 0;
     let onlineExamStartedAt = null;
     let onlineExamGradeAllResults = [];
+    let onlineExamGradeGroupedRows = [];
     let onlineExamGradePage = 1;
     let onlineExamGradeMissingHtml = '';
     let onlineExamGradeMissingOnly = false;
@@ -7558,6 +7559,7 @@
     const ONLINE_EXAM_GRADE_PAGE_SIZE = 20;
     const ONLINE_EXAM_GRADE_REFRESH_TIMEOUT_MS = 15000;
     const ONLINE_EXAM_SUBJECT_ORDER = ['คณิตศาสตร์', 'วิทยาศาสตร์', 'ภาษาอังกฤษ', 'ภาษาไทย', 'สังคมศึกษา', 'อื่นๆ'];
+    const ONLINE_EXAM_SCORE_SHEET_SUBJECTS = ['คณิตศาสตร์', 'วิทยาศาสตร์', 'ภาษาอังกฤษ'];
     let onlineExamQuestionOrder = [];    // questionIds in display order (shuffled or natural)
     let onlineExamChoiceOrder = {};      // {questionId: [origIdx0, origIdx1, origIdx2, origIdx3]}
     let onlineExamAutosaveHandle = null; // autosave interval handle
@@ -29131,6 +29133,325 @@ function receiptStatusText(status) {
       return timeB - timeA;
     }
 
+    function getOnlineExamResultMonth(result) {
+      const course = getOnlineExamResultCourse(result);
+      return (course && course.examMonth) || getThaiMonthYearFromText((result && result.submittedAtText) || '');
+    }
+
+    function getOnlineExamResultIdentityKey(result) {
+      return String(
+        getOnlineExamResultMemberId(result) ||
+        (result && (result.studentUid || result.authUid || result.studentId || result.memberId || result.studentMemberId || result.studentName)) ||
+        ''
+      ).trim();
+    }
+
+    function getOnlineExamResultTimeValue(result) {
+      if (result && result.submittedAt && typeof result.submittedAt.toMillis === 'function') return result.submittedAt.toMillis();
+      if (result && result.submittedAt && typeof result.submittedAt.toDate === 'function') return result.submittedAt.toDate().getTime();
+      return 0;
+    }
+
+    function getOnlineExamResultTotalQuestions(result) {
+      const course = getOnlineExamResultCourse(result);
+      const questions = course ? (course.questions || []) : [];
+      return Number(questions.length || (result && (result.totalQ || result.scoreTotal)) || 0) || 0;
+    }
+
+    function getOnlineExamResultCorrectCount(result) {
+      const course = getOnlineExamResultCourse(result);
+      const questions = course ? (course.questions || []) : [];
+      if (questions.length) {
+        return questions.filter(function(q) { return result.answers && result.answers[q.questionId] === q.correctIndex; }).length;
+      }
+      return Number(result && result.correctCount !== undefined ? result.correctCount : 0) || 0;
+    }
+
+    function findAdminScoreRecordForExamGroup(group) {
+      if (!group) return null;
+      return adminScoreRecords.find(function(record) {
+        if (!record || record.month !== group.month || record.grade !== group.grade) return false;
+        if (record.authUid && group.authUid && record.authUid === group.authUid) return true;
+        if (record.studentId && group.studentId && String(record.studentId) === String(group.studentId)) return true;
+        if (record.memberId && group.memberId && String(record.memberId) === String(group.memberId)) return true;
+        if (record.student && group.studentName && record.student === group.studentName) return true;
+        return false;
+      }) || null;
+    }
+
+    function getOnlineExamGroupSubjectData(group, subject) {
+      const result = group && group.resultsBySubject ? group.resultsBySubject[subject] : null;
+      if (!result) return null;
+      const total = getOnlineExamResultTotalQuestions(result);
+      const originalCorrect = getOnlineExamResultCorrectCount(result);
+      const record = findAdminScoreRecordForExamGroup(group);
+      const recordCorrect = record && record.correctCounts ? Number(record.correctCounts[subject]) : NaN;
+      const recordScore = record && record.scores ? Number(record.scores[subject]) : NaN;
+      const adjustedCorrect = isFinite(recordCorrect)
+        ? recordCorrect
+        : (isFinite(recordScore) && total ? Math.round(recordScore / 50 * total) : originalCorrect);
+      const correct = Math.max(0, Math.min(total || originalCorrect || 0, Number(adjustedCorrect || 0)));
+      return {
+        result: result,
+        total: total,
+        correct: correct,
+        score50: onlineExamGetScore50Value(correct, total),
+        adjusted: isFinite(recordCorrect)
+      };
+    }
+
+    function compareOnlineExamGroupsByMemberId(a, b) {
+      const partA = getOnlineExamResultMemberSortParts(a.primaryResult || {});
+      const partB = getOnlineExamResultMemberSortParts(b.primaryResult || {});
+      if (!!partA.raw !== !!partB.raw) return partA.raw ? -1 : 1;
+      const prefixDiff = partA.prefix.localeCompare(partB.prefix, undefined, { sensitivity: 'base' });
+      if (prefixDiff !== 0) return prefixDiff;
+      if (partA.number !== partB.number) return partA.number - partB.number;
+      const rawDiff = partA.raw.localeCompare(partB.raw, undefined, { numeric: true, sensitivity: 'base' });
+      if (rawDiff !== 0) return rawDiff;
+      return String(a.studentName || '').localeCompare(String(b.studentName || ''), 'th');
+    }
+
+    function buildOnlineExamGroupedRows(results) {
+      const groupMap = {};
+      (results || []).forEach(function(result) {
+        const subject = getOnlineExamResultSubject(result);
+        if (!ONLINE_EXAM_SCORE_SHEET_SUBJECTS.includes(subject)) return;
+        const grade = getOnlineExamResultGrade(result) || '';
+        const month = getOnlineExamResultMonth(result) || '';
+        const identityKey = getOnlineExamResultIdentityKey(result) || (result._docId || '');
+        const key = [identityKey, month, grade].join('|');
+        if (!groupMap[key]) {
+          groupMap[key] = {
+            key: key,
+            identityKey: identityKey,
+            month: month,
+            grade: grade,
+            studentName: result.studentName || '',
+            nickname: getOnlineExamResultNickname(result),
+            memberId: getOnlineExamResultMemberId(result),
+            studentId: result.studentId || '',
+            authUid: result.studentUid || result.authUid || '',
+            primaryResult: result,
+            results: [],
+            resultsBySubject: {},
+            latestTime: 0,
+            latestResult: result
+          };
+        }
+        const group = groupMap[key];
+        group.results.push(result);
+        const timeValue = getOnlineExamResultTimeValue(result);
+        if (!group.resultsBySubject[subject] || timeValue >= getOnlineExamResultTimeValue(group.resultsBySubject[subject])) {
+          group.resultsBySubject[subject] = result;
+        }
+        if (timeValue >= group.latestTime) {
+          group.latestTime = timeValue;
+          group.latestResult = result;
+        }
+      });
+      return Object.values(groupMap).sort(compareOnlineExamGroupsByMemberId);
+    }
+
+    function getOnlineExamGroupStatus(group) {
+      const statuses = (group && group.results || []).map(function(result) { return result.resultStatus || 'submitted'; });
+      if (!statuses.length) return 'submitted';
+      if (statuses.every(function(status) { return status === 'hidden'; })) return 'hidden';
+      if (statuses.some(function(status) { return status === 'submitted'; })) return 'submitted';
+      if (statuses.every(function(status) { return status === 'published'; })) return 'published';
+      return statuses.includes('published') ? 'published' : statuses[0];
+    }
+
+    function getOnlineExamGroupPendingResults(group) {
+      return (group && group.results || []).filter(function(result) {
+        return (result.resultStatus || 'submitted') === 'submitted';
+      });
+    }
+
+    function findOnlineExamGroupedRow(groupKey) {
+      return (onlineExamGradeGroupedRows || []).find(function(group) { return group.key === groupKey; }) || null;
+    }
+
+    function ensureAdminScoreRecordForExamGroup(group) {
+      let record = findAdminScoreRecordForExamGroup(group);
+      if (record) return record;
+      const newId = createFirebaseDocId('adminScoreRecords');
+      record = {
+        id: newId,
+        firebaseDocId: newId,
+        month: group.month,
+        grade: group.grade,
+        studentId: group.studentId || '',
+        memberId: group.memberId || '',
+        authUid: group.authUid || '',
+        student: group.studentName || '-',
+        nickname: group.nickname || '-',
+        scores: {},
+        correctCounts: {},
+        scoreTotals: {},
+        status: 'draft'
+      };
+      adminScoreRecords.push(record);
+      return record;
+    }
+
+    function renderOnlineExamGroupedSubjectCell(group, subject) {
+      const data = getOnlineExamGroupSubjectData(group, subject);
+      if (!data) {
+        return '<td style="padding:8px 10px;text-align:center;white-space:nowrap;color:#9ca3af;">-<br><span style="font-size:11px;">ยังไม่มีผลสอบ</span></td>';
+      }
+      const groupKey = jsArg(group.key);
+      const subjectArg = jsArg(subject);
+      const correctText = data.correct + '/' + (data.total || '-');
+      const scoreText = data.total ? (data.score50.toFixed(1).replace(/\.0$/, '') + '/50') : '-';
+      const adjustedBadge = data.adjusted ? '<span style="display:inline-block;margin-left:4px;color:#d97706;font-size:10px;">ปรับ</span>' : '';
+      return '<td style="padding:8px 10px;text-align:center;white-space:nowrap;">' +
+        '<div style="font-weight:700;color:#111827;">' + correctText + adjustedBadge + '</div>' +
+        '<div style="font-size:11px;color:#6b7280;margin:2px 0 4px;">' + scoreText + '</div>' +
+        '<button class="btn" type="button" style="font-size:11px;padding:2px 7px;margin:0 2px;" onclick="adjustOnlineExamGroupedSubjectCorrect(\'' + groupKey + '\',\'' + subjectArg + '\',-1)">-</button>' +
+        '<button class="btn btn-blue" type="button" style="font-size:11px;padding:2px 7px;margin:0 2px;" onclick="adjustOnlineExamGroupedSubjectCorrect(\'' + groupKey + '\',\'' + subjectArg + '\',1)">+</button>' +
+      '</td>';
+    }
+
+    function renderOnlineExamGroupedActionButtons(group) {
+      const subjectShortMap = {
+        'คณิตศาสตร์': 'คณิต',
+        'วิทยาศาสตร์': 'วิทย์',
+        'ภาษาอังกฤษ': 'อังกฤษ'
+      };
+      const detailButtons = ONLINE_EXAM_SCORE_SHEET_SUBJECTS.map(function(subject) {
+        const result = group.resultsBySubject[subject];
+        if (!result) return '';
+        const subjectShort = subjectShortMap[subject] || subject;
+        return '<button class="btn btn-blue" type="button" onclick="showOnlineExamResultDetail(\'' + jsArg(result._docId) + '\',\'' + jsArg(result.courseId || '') + '\')" style="font-size:10px;padding:3px 7px;margin:1px;" title="ดูรายละเอียด ' + escapeHtml(subject) + '">📋 ' + escapeHtml(subjectShort) + '</button>';
+      }).join('');
+      const pendingCount = getOnlineExamGroupPendingResults(group).length;
+      const hasPublished = group.results.some(function(result) { return (result.resultStatus || 'submitted') === 'published'; });
+      return detailButtons +
+        (pendingCount ? '<button class="btn btn-green" type="button" onclick="publishOnlineExamGroupedResults(\'' + jsArg(group.key) + '\')" style="font-size:10px;padding:3px 7px;margin:1px;">ประกาศผล</button>' : '') +
+        (hasPublished ? '<button class="btn btn-dark" type="button" onclick="hideOnlineExamGroupedResults(\'' + jsArg(group.key) + '\')" style="font-size:10px;padding:3px 7px;margin:1px;">ซ่อนผล</button>' : '') +
+        '<button class="btn btn-blue" type="button" onclick="setOnlineExamGroupedRetake(\'' + jsArg(group.key) + '\',true)" style="font-size:10px;padding:3px 7px;margin:1px;">ให้ทำใหม่</button>' +
+        '<button class="btn btn-red" type="button" onclick="deleteOnlineExamGroupedResults(\'' + jsArg(group.key) + '\')" style="font-size:10px;padding:3px 7px;margin:1px;">ลบ/ทำใหม่</button>';
+    }
+
+    async function adjustOnlineExamGroupedSubjectCorrect(groupKey, subject, delta) {
+      if (!hasPermission('admin.onlineExams') && !hasPermission('admin.exams')) { alert('ไม่มีสิทธิ์'); return; }
+      if (!firebaseReady || !db) { alert('Firebase ยังไม่พร้อม'); return; }
+      const group = findOnlineExamGroupedRow(groupKey);
+      const data = getOnlineExamGroupSubjectData(group, subject);
+      const resultEl = getElement('scoreAdjustResult');
+      if (!group || !data || !data.total) {
+        if (resultEl) { resultEl.textContent = 'ยังไม่มีผลสอบสำหรับปรับจำนวนข้อถูก'; resultEl.style.color = '#dc2626'; }
+        return;
+      }
+      const nextCorrect = Math.max(0, Math.min(data.total, Number(data.correct || 0) + Number(delta || 0)));
+      const record = ensureAdminScoreRecordForExamGroup(group);
+      record.scores = record.scores || {};
+      record.correctCounts = record.correctCounts || {};
+      record.scoreTotals = record.scoreTotals || {};
+      record.correctCounts[subject] = nextCorrect;
+      record.scoreTotals[subject] = data.total;
+      record.scores[subject] = onlineExamGetScore50Value(nextCorrect, data.total);
+      record.status = record.status || 'draft';
+      try {
+        await setFirebaseDocument('adminScoreRecords', record);
+        await syncScoreReportFromAdmin(group.month, group.grade, record.status || 'draft');
+        renderAdminScoreTables();
+        renderOnlineExamGradingPage(onlineExamGradePage);
+        renderScoreHistoryByMonth();
+        renderStudentExamFilters();
+        if (resultEl) {
+          resultEl.textContent = 'ปรับ ' + subject + ' ของ ' + (group.studentName || '-') + ' เป็นถูก ' + nextCorrect + '/' + data.total + ' แล้ว';
+          resultEl.style.color = '#16a34a';
+        }
+      } catch (error) {
+        console.error('adjustOnlineExamGroupedSubjectCorrect error:', error);
+        if (resultEl) { resultEl.textContent = 'ปรับจำนวนข้อถูกไม่สำเร็จ: ' + (error.message || error.code || error); resultEl.style.color = '#dc2626'; }
+      }
+    }
+
+    async function publishOnlineExamGroupedResults(groupKey) {
+      if (!hasPermission('admin.onlineExams')) { alert('ไม่มีสิทธิ์'); return; }
+      const group = findOnlineExamGroupedRow(groupKey);
+      const pending = getOnlineExamGroupPendingResults(group);
+      if (!group || !pending.length) return;
+      let count = 0;
+      for (var i = 0; i < pending.length; i++) {
+        try {
+          await db.collection('onlineExamResults').doc(pending[i]._docId).set(
+            { resultStatus: 'published', publishedAt: firebase.firestore.FieldValue.serverTimestamp() },
+            { merge: true }
+          );
+          pending[i].resultStatus = 'published';
+          await syncOnlineExamScoreToRecords(pending[i]);
+          count++;
+        } catch (e) {
+          console.warn('publish grouped result error', pending[i]._docId, e);
+        }
+      }
+      addActivityLog('ประกาศผลข้อสอบรายแถว', (group.studentName || '-') + ' · ' + count + ' วิชา');
+      renderOnlineExamGradingPage(onlineExamGradePage);
+      safeRun(renderAdminScoreTables, 'admin-score-refresh-after-group-publish');
+      return count;
+    }
+
+    async function hideOnlineExamGroupedResults(groupKey) {
+      if (!hasPermission('admin.onlineExams')) { alert('ไม่มีสิทธิ์'); return; }
+      const group = findOnlineExamGroupedRow(groupKey);
+      if (!group || !group.results.length) return;
+      for (var i = 0; i < group.results.length; i++) {
+        try {
+          await db.collection('onlineExamResults').doc(group.results[i]._docId).set({ resultStatus: 'hidden' }, { merge: true });
+          group.results[i].resultStatus = 'hidden';
+        } catch (e) {
+          console.warn('hide grouped result error', group.results[i]._docId, e);
+        }
+      }
+      addActivityLog('ซ่อนผลข้อสอบรายแถว', group.studentName || group.key);
+      renderOnlineExamGradingPage(onlineExamGradePage);
+    }
+
+    async function setOnlineExamGroupedRetake(groupKey, allowRetake) {
+      if (!hasPermission('admin.onlineExams')) { alert('ไม่มีสิทธิ์'); return; }
+      const group = findOnlineExamGroupedRow(groupKey);
+      if (!group || !group.results.length) return;
+      if (!confirm((allowRetake ? 'เปิดสิทธิ์ทำใหม่' : 'ปิดสิทธิ์ทำใหม่') + ' ให้ ' + (group.studentName || '-') + ' ทุกวิชาในแถวนี้?')) return;
+      for (var i = 0; i < group.results.length; i++) {
+        try {
+          await db.collection('onlineExamResults').doc(group.results[i]._docId).set({
+            allowRetake: !!allowRetake,
+            retakeUpdatedAt: firebase.firestore.FieldValue.serverTimestamp(),
+            retakeUpdatedBy: firebaseUser ? firebaseUser.uid : '',
+            retakeUpdatedByName: (firebaseUserProfile && (firebaseUserProfile.name || firebaseUserProfile.displayName || firebaseUserProfile.email)) || ''
+          }, { merge: true });
+          group.results[i].allowRetake = !!allowRetake;
+        } catch (e) {
+          console.warn('group retake error', group.results[i]._docId, e);
+        }
+      }
+      addActivityLog(allowRetake ? 'เปิดทำข้อสอบใหม่รายแถว' : 'ปิดทำข้อสอบใหม่รายแถว', group.studentName || group.key);
+      renderOnlineExamGradingPage(onlineExamGradePage);
+    }
+
+    async function deleteOnlineExamGroupedResults(groupKey) {
+      if (!hasPermission('admin.onlineExams')) { alert('ไม่มีสิทธิ์'); return; }
+      const group = findOnlineExamGroupedRow(groupKey);
+      if (!group || !group.results.length) return;
+      if (!confirm('ลบผลสอบของ "' + (group.studentName || '-') + '" ทุกวิชาในแถวนี้? นักเรียนจะสามารถทำข้อสอบใหม่ได้อีกครั้ง')) return;
+      const docIds = group.results.map(function(result) { return result._docId; });
+      for (var i = 0; i < docIds.length; i++) {
+        try {
+          await db.collection('onlineExamResults').doc(docIds[i]).delete();
+        } catch (e) {
+          console.warn('delete grouped result error', docIds[i], e);
+        }
+      }
+      addActivityLog('ลบผลสอบรายแถว / เปิดทำใหม่ Interactive', (group.studentName || '-') + ' · ' + docIds.length + ' วิชา');
+      onlineExamGradeAllResults = onlineExamGradeAllResults.filter(function(result) { return !docIds.includes(result._docId); });
+      onlineExamGradeGroupedRows = buildOnlineExamGroupedRows(onlineExamGradeAllResults);
+      renderOnlineExamGradingPage(onlineExamGradePage);
+    }
+
     function runOnlineExamGradeWithTimeout(promise, label) {
       return Promise.race([
         promise,
@@ -29410,6 +29731,7 @@ function receiptStatusText(status) {
         onlineExamGradeMissingItems = missingStudents;
         results = results.slice().sort(compareOnlineExamResultsByMemberId);
         onlineExamGradeAllResults = results;
+        onlineExamGradeGroupedRows = buildOnlineExamGroupedRows(results);
         onlineExamGradeMissingHtml = renderOnlineExamMissingStudentsHtml(missingStudents, targetCourses, expectedStudents.length);
         onlineExamGradeMissingOnly = statusFilter === 'not_submitted';
         onlineExamGradePage = 1;
@@ -29432,8 +29754,8 @@ function receiptStatusText(status) {
     function renderOnlineExamGradingPage(page) {
       const reportEl = getElement('onlineExamGradingReport');
       if (!reportEl) return;
-      const results = onlineExamGradeAllResults;
-      const total = results.length;
+      const groups = onlineExamGradeGroupedRows || [];
+      const total = groups.length;
       const totalPages = Math.max(1, Math.ceil(total / ONLINE_EXAM_GRADE_PAGE_SIZE));
       page = Math.max(1, Math.min(page, totalPages));
       onlineExamGradePage = page;
@@ -29449,54 +29771,37 @@ function receiptStatusText(status) {
       }
 
       const start = (page - 1) * ONLINE_EXAM_GRADE_PAGE_SIZE;
-      const pageResults = results.slice(start, start + ONLINE_EXAM_GRADE_PAGE_SIZE);
+      const pageGroups = groups.slice(start, start + ONLINE_EXAM_GRADE_PAGE_SIZE);
 
-      const rows = pageResults.map(function(r) {
-        const course = getOnlineExamResultCourse(r);
-        const subject = getOnlineExamResultSubject(r) || '-';
-        const grade = getOnlineExamResultGrade(r) || '-';
-        const questions = course ? (course.questions || []) : [];
-        const totalQ = questions.length || r.totalQ || r.scoreTotal || '-';
-        const answered = r.answers ? Object.keys(r.answers).length : '-';
-        const correctCnt = questions.length
-          ? questions.filter(function(q) { return r.answers && r.answers[q.questionId] === q.correctIndex; }).length
-          : (r.correctCount !== undefined ? r.correctCount : '-');
-        const rStatus = r.resultStatus || 'submitted';
-        const usedMin = r.usedSeconds ? Math.ceil(r.usedSeconds / 60) : (r.timeTakenSeconds ? Math.ceil(r.timeTakenSeconds / 60) : '-');
-        const memberId = getOnlineExamResultMemberId(r);
-        const nickname = getOnlineExamResultNickname(r);
-        const submittedShort = formatOnlineExamSubmittedAtShort(r);
+      const rows = pageGroups.map(function(group) {
+        const pendingCount = getOnlineExamGroupPendingResults(group).length;
+        const memberId = group.memberId || '';
+        const nickname = group.nickname || '';
+        const submittedShort = formatOnlineExamSubmittedAtShort(group.latestResult);
         const studentLine = [
-          r.studentName || '',
+          group.studentName || '',
           nickname ? 'ชื่อเล่น: ' + nickname : '',
           memberId || ''
         ].filter(Boolean).join(' · ');
 
         return '<tr style="border-bottom:1px solid #f1f5f9;font-size:12px;">' +
-          '<td style="padding:8px 10px;text-align:center;"><input type="checkbox" class="onlineExamGradeRowCheck" value="' + r._docId + '"' + (rStatus === 'published' ? ' disabled' : '') + ' style="cursor:pointer;width:14px;height:14px;"></td>' +
+          '<td style="padding:8px 10px;text-align:center;"><input type="checkbox" class="onlineExamGradeRowCheck" value="' + escapeHtml(group.key) + '"' + (!pendingCount ? ' disabled' : '') + ' style="cursor:pointer;width:14px;height:14px;"></td>' +
           '<td style="padding:8px 10px;white-space:nowrap;"><span style="font-weight:700;">' + escapeHtml(studentLine || '-') + '</span></td>' +
-          '<td style="padding:8px 10px;">' + escapeHtml(subject) + '</td>' +
-          '<td style="padding:8px 10px;text-align:center;white-space:nowrap;">' + escapeHtml(grade) + '</td>' +
-          '<td style="padding:8px 10px;text-align:center;">' + totalQ + '</td>' +
-          '<td style="padding:8px 10px;text-align:center;">' + answered + '</td>' +
-          '<td style="padding:8px 10px;text-align:center;color:#16a34a;font-weight:700;">' + correctCnt + '</td>' +
-          '<td style="padding:8px 10px;text-align:center;font-weight:700;">' + (r.correctCount !== undefined ? (r.scoreText || onlineExamFormatScore50(r.correctCount, r.totalQ || correctCnt)) + '<br><span style="font-weight:400;color:#6b7280;">(' + (r.scorePercent || 0) + '%)</span>' : '-') + '</td>' +
-          '<td style="padding:8px 10px;text-align:center;">' + (usedMin !== '-' ? usedMin + ' น.' : '-') + '</td>' +
+          '<td style="padding:8px 10px;text-align:center;white-space:nowrap;">' + escapeHtml(group.grade || '-') + '</td>' +
+          renderOnlineExamGroupedSubjectCell(group, 'คณิตศาสตร์') +
+          renderOnlineExamGroupedSubjectCell(group, 'วิทยาศาสตร์') +
+          renderOnlineExamGroupedSubjectCell(group, 'ภาษาอังกฤษ') +
           '<td style="padding:8px 10px;white-space:nowrap;">' + escapeHtml(submittedShort) + '</td>' +
-          '<td style="padding:8px 10px;text-align:center;">' + getOnlineExamResultStatusBadge(rStatus) + '</td>' +
+          '<td style="padding:8px 10px;text-align:center;">' + getOnlineExamResultStatusBadge(getOnlineExamGroupStatus(group)) + '</td>' +
           '<td style="padding:8px 10px;white-space:nowrap;text-align:center;">' +
-            '<button class="btn btn-blue" onclick="showOnlineExamResultDetail(\'' + r._docId + '\',\'' + (r.courseId || '') + '\')" style="font-size:10px;padding:3px 7px;margin:1px;" title="ดูรายละเอียด">📋</button>' +
-            (rStatus !== 'published' ? '<button class="btn btn-green" onclick="publishOnlineExamResult(\'' + r._docId + '\')" style="font-size:10px;padding:3px 7px;margin:1px;">ประกาศผล</button>' : '') +
-            (rStatus === 'published' ? '<button class="btn btn-dark" onclick="hideOnlineExamResult(\'' + r._docId + '\')" style="font-size:10px;padding:3px 7px;margin:1px;">ซ่อนผล</button>' : '') +
-            (r.allowRetake
-              ? '<button class="btn btn-dark" onclick="setOnlineExamResultRetake(\'' + r._docId + '\',false)" style="font-size:10px;padding:3px 7px;margin:1px;">ปิดทำใหม่</button>'
-              : '<button class="btn btn-blue" onclick="setOnlineExamResultRetake(\'' + r._docId + '\',true)" style="font-size:10px;padding:3px 7px;margin:1px;">ให้ทำใหม่</button>') +
-            '<button class="btn btn-red" onclick="deleteOnlineExamResult(\'' + r._docId + '\')" style="font-size:10px;padding:3px 7px;margin:1px;">ลบ/ทำใหม่</button>' +
+            renderOnlineExamGroupedActionButtons(group) +
           '</td>' +
         '</tr>';
       }).join('');
 
-      const pendingCount = results.filter(function(r) { return (r.resultStatus || 'submitted') === 'submitted'; }).length;
+      const pendingCount = groups.reduce(function(sum, group) {
+        return sum + getOnlineExamGroupPendingResults(group).length;
+      }, 0);
 
       let paginationHtml = '';
       if (totalPages > 1) {
@@ -29518,14 +29823,11 @@ function receiptStatusText(status) {
           '<thead><tr style="background:#f1f5f9;font-size:11px;font-weight:700;color:#374151;">' +
             '<th style="padding:8px 10px;text-align:center;"><input type="checkbox" id="onlineExamGradeSelectAll" onchange="onlineExamGradeToggleAll(this)" style="cursor:pointer;width:14px;height:14px;"></th>' +
             '<th style="padding:8px 10px;text-align:left;white-space:nowrap;">ชื่อนักเรียน</th>' +
-            '<th style="padding:8px 10px;text-align:left;white-space:nowrap;">วิชา</th>' +
             '<th style="padding:8px 10px;text-align:center;white-space:nowrap;">ระดับชั้น</th>' +
-            '<th style="padding:8px 10px;text-align:center;white-space:nowrap;">จำนวน</th>' +
-            '<th style="padding:8px 10px;text-align:center;white-space:nowrap;">ตอบ</th>' +
-            '<th style="padding:8px 10px;text-align:center;white-space:nowrap;">ถูก</th>' +
-            '<th style="padding:8px 10px;text-align:center;white-space:nowrap;">คะแนน/50</th>' +
-            '<th style="padding:8px 10px;text-align:center;white-space:nowrap;">เวลา</th>' +
-            '<th style="padding:8px 10px;text-align:left;white-space:nowrap;">วันที่สอบ</th>' +
+            '<th style="padding:8px 10px;text-align:center;white-space:nowrap;">คณิตศาสตร์</th>' +
+            '<th style="padding:8px 10px;text-align:center;white-space:nowrap;">วิทยาศาสตร์</th>' +
+            '<th style="padding:8px 10px;text-align:center;white-space:nowrap;">ภาษาอังกฤษ</th>' +
+            '<th style="padding:8px 10px;text-align:left;white-space:nowrap;">วันที่สอบล่าสุด</th>' +
             '<th style="padding:8px 10px;text-align:center;white-space:nowrap;">สถานะ</th>' +
             '<th style="padding:8px 10px;text-align:center;white-space:nowrap;">จัดการ</th>' +
           '</tr></thead>' +
@@ -29546,6 +29848,7 @@ function receiptStatusText(status) {
           r.resultStatus = 'published';
           await syncOnlineExamScoreToRecords(r);
         }
+        onlineExamGradeGroupedRows = buildOnlineExamGroupedRows(onlineExamGradeAllResults);
         renderOnlineExamGradingPage(onlineExamGradePage);
         safeRun(renderAdminScoreTables, 'admin-score-refresh-after-publish');
       } catch(e) { alert('ประกาศผลไม่สำเร็จ: ' + (e.message || e)); }
@@ -29561,18 +29864,13 @@ function receiptStatusText(status) {
       var checks = document.querySelectorAll('.onlineExamGradeRowCheck:checked:not(:disabled)');
       if (!checks.length) { alert('กรุณาเลือกรายการที่ต้องการประกาศผลก่อน'); return; }
       if (!confirm('ประกาศผลสอบ ' + checks.length + ' รายการ?')) return;
-      var docIds = Array.from(checks).map(function(c) { return c.value; });
+      var groupKeys = Array.from(checks).map(function(c) { return c.value; });
       var count = 0;
-      for (var i = 0; i < docIds.length; i++) {
+      for (var i = 0; i < groupKeys.length; i++) {
         try {
-          await db.collection('onlineExamResults').doc(docIds[i]).set(
-            { resultStatus: 'published', publishedAt: firebase.firestore.FieldValue.serverTimestamp() },
-            { merge: true }
-          );
-          var r = onlineExamGradeAllResults.find(function(x) { return x._docId === docIds[i]; });
-          if (r) { r.resultStatus = 'published'; await syncOnlineExamScoreToRecords(r); }
-          count++;
-        } catch(e) { console.warn('bulk publish error', docIds[i], e); }
+          var publishedCount = await publishOnlineExamGroupedResults(groupKeys[i]);
+          count += Number(publishedCount || 0);
+        } catch(e) { console.warn('bulk publish group error', groupKeys[i], e); }
       }
       addActivityLog('ประกาศผลข้อสอบ bulk', count + ' รายการ');
       renderOnlineExamGradingPage(onlineExamGradePage);
@@ -29584,8 +29882,10 @@ function receiptStatusText(status) {
       const subject = getOnlineExamResultSubject(r);
       const grade = getOnlineExamResultGrade(r);
       if (!subject || !grade) return;
-      const month = getThaiMonthYearFromText(r.submittedAtText);
-      const score50val = r.score50 !== undefined ? r.score50 : onlineExamGetScore50Value(r.correctCount, r.totalQ);
+      const month = getOnlineExamResultMonth(r);
+      const totalQ = getOnlineExamResultTotalQuestions(r);
+      const correctCount = getOnlineExamResultCorrectCount(r);
+      const score50val = r.score50 !== undefined ? r.score50 : onlineExamGetScore50Value(correctCount, totalQ);
       const nickname = getOnlineExamResultNickname(r) || '-';
 
       var record = adminScoreRecords.find(function(rec) {
@@ -29609,6 +29909,8 @@ function receiptStatusText(status) {
           student: r.studentName || '-',
           nickname: nickname,
           scores: {},
+          correctCounts: {},
+          scoreTotals: {},
           status: 'published'
         };
         adminScoreRecords.push(record);
@@ -29616,7 +29918,11 @@ function receiptStatusText(status) {
 
       record.nickname = (record.nickname && record.nickname !== '-') ? record.nickname : nickname;
       record.scores = record.scores || {};
+      record.correctCounts = record.correctCounts || {};
+      record.scoreTotals = record.scoreTotals || {};
       record.scores[subject] = score50val;
+      record.correctCounts[subject] = correctCount;
+      record.scoreTotals[subject] = totalQ;
       record.status = 'published';
 
       try {
@@ -29634,6 +29940,7 @@ function receiptStatusText(status) {
         addActivityLog('ซ่อนผลข้อสอบ Interactive', resultDocId);
         const r = onlineExamGradeAllResults.find(function(x) { return x._docId === resultDocId; });
         if (r) r.resultStatus = 'hidden';
+        onlineExamGradeGroupedRows = buildOnlineExamGroupedRows(onlineExamGradeAllResults);
         renderOnlineExamGradingPage(onlineExamGradePage);
       } catch(e) { alert('ซ่อนผลไม่สำเร็จ: ' + (e.message || e)); }
     }
@@ -29665,6 +29972,7 @@ function receiptStatusText(status) {
           result.allowRetake = !!allowRetake;
           result.retakeUpdatedBy = updateData.retakeUpdatedBy;
         }
+        onlineExamGradeGroupedRows = buildOnlineExamGroupedRows(onlineExamGradeAllResults);
         renderOnlineExamGradingPage(onlineExamGradePage);
       } catch(e) {
         alert('อัปเดตสิทธิ์ทำใหม่ไม่สำเร็จ: ' + (e.message || e));
@@ -29678,6 +29986,7 @@ function receiptStatusText(status) {
         await db.collection('onlineExamResults').doc(resultDocId).delete();
         addActivityLog('ลบผลสอบ / เปิดทำใหม่ Interactive', resultDocId);
         onlineExamGradeAllResults = onlineExamGradeAllResults.filter(function(x) { return x._docId !== resultDocId; });
+        onlineExamGradeGroupedRows = buildOnlineExamGroupedRows(onlineExamGradeAllResults);
         renderOnlineExamGradingPage(onlineExamGradePage);
       } catch(e) { alert('ลบไม่สำเร็จ: ' + (e.message || e)); }
     }
