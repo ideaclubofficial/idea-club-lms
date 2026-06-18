@@ -2169,6 +2169,15 @@
           <p id="studentMobileCourseMeta" class="student-mobile-muted">ยังไม่มีคอร์สที่สมัคร</p>
         </div>
 
+        <div id="studentMobileScheduleCard" class="student-mobile-card">
+          <h3>ปฏิทินตารางเรียน</h3>
+          <div class="student-schedule-toolbar">
+            <div id="studentMobileMonthlyPlanMeta" class="student-mobile-muted"></div>
+            <select id="studentMobileMonthlyPlanMonthFilter" onchange="syncStudentScheduleMonthFilter('mobile')"></select>
+          </div>
+          <div id="studentMobileMonthlyPlanList"></div>
+        </div>
+
         <div class="student-mobile-card">
           <div class="student-mobile-card-main">
             <div>
@@ -21678,47 +21687,79 @@ function receiptStatusText(status) {
       }).join('') + '</div>';
     }
 
+    function setStudentScheduleMonthSelect(select, months, selectedMonth) {
+      if (!select) return;
+      select.innerHTML = months.length
+        ? months.map(function(month) { return '<option value="' + escapeHtml(month) + '">' + escapeHtml(getThaiMonthLabel(month, false) || month) + '</option>'; }).join('')
+        : '<option value="">ยังไม่มีตารางเรียน</option>';
+      if (selectedMonth) select.value = selectedMonth;
+    }
+
+    function syncStudentScheduleMonthFilter(source) {
+      const desktopSelect = getElement('studentMonthlyPlanMonthFilter');
+      const mobileSelect = getElement('studentMobileMonthlyPlanMonthFilter');
+      const sourceSelect = source === 'mobile' ? mobileSelect : desktopSelect;
+      const targetSelect = source === 'mobile' ? desktopSelect : mobileSelect;
+      if (sourceSelect && targetSelect) targetSelect.value = sourceSelect.value;
+      renderStudentMonthlyPlanSummary();
+    }
+
     function renderStudentMonthlyPlanSummary() {
       const dashboard = getElement('studentDashboard');
       if (!dashboard || !currentStudent) return;
-      ensureElement(dashboard, 'studentMonthlyPlanPanel', '<div id="studentMonthlyPlanPanel" class="form-box"><h3>ปฏิทินตารางเรียน</h3><div class="student-schedule-toolbar"><div id="studentMonthlyPlanMeta" class="mini-muted"></div><select id="studentMonthlyPlanMonthFilter" onchange="renderStudentMonthlyPlanSummary()"></select></div><div id="studentMonthlyPlanList"></div></div>');
+      ensureElement(dashboard, 'studentMonthlyPlanPanel', '<div id="studentMonthlyPlanPanel" class="form-box"><h3>ปฏิทินตารางเรียน</h3><div class="student-schedule-toolbar"><div id="studentMonthlyPlanMeta" class="mini-muted"></div><select id="studentMonthlyPlanMonthFilter" onchange="syncStudentScheduleMonthFilter(\'desktop\')"></select></div><div id="studentMonthlyPlanList"></div></div>');
       const box = getElement('studentMonthlyPlanList');
       const monthSelect = getElement('studentMonthlyPlanMonthFilter');
       const meta = getElement('studentMonthlyPlanMeta');
-      if (!box || !monthSelect) return;
+      const mobileCard = getElement('studentMobileScheduleCard');
+      const mobileBox = getElement('studentMobileMonthlyPlanList');
+      const mobileMonthSelect = getElement('studentMobileMonthlyPlanMonthFilter');
+      const mobileMeta = getElement('studentMobileMonthlyPlanMeta');
+      if (!box && !mobileBox) return;
 
       const selectedCourse = getCurrentStudentCourse();
       if (!selectedCourse) {
         if (meta) meta.textContent = 'สมัครคอร์สก่อนจึงจะเห็นตารางเรียน';
-        monthSelect.innerHTML = '<option value="">ยังไม่มีคอร์ส</option>';
-        box.innerHTML = '<div class="notice">ยังไม่มีคอร์สที่ลงเรียน จึงยังไม่สามารถแสดงปฏิทินตารางเรียนได้</div>';
+        if (mobileMeta) mobileMeta.textContent = 'สมัครคอร์สก่อนจึงจะเห็นตารางเรียน';
+        if (monthSelect) monthSelect.innerHTML = '<option value="">ยังไม่มีคอร์ส</option>';
+        if (mobileMonthSelect) mobileMonthSelect.innerHTML = '<option value="">ยังไม่มีคอร์ส</option>';
+        const emptyHtml = '<div class="notice">ยังไม่มีคอร์สที่ลงเรียน จึงยังไม่สามารถแสดงปฏิทินตารางเรียนได้</div>';
+        if (box) box.innerHTML = emptyHtml;
+        if (mobileBox) mobileBox.innerHTML = emptyHtml;
+        if (mobileCard) mobileCard.classList.remove('hidden');
         return;
       }
 
       const sessions = getStudentMonthlyPlanSessionsForCalendar(selectedCourse);
       const months = getStudentScheduleMonthOptions(sessions);
-      const currentValue = monthSelect.value;
+      const currentValue = (monthSelect && monthSelect.value) || (mobileMonthSelect && mobileMonthSelect.value) || '';
       const currentMonth = getLocalDateString().slice(0, 7);
       const selectedMonth = months.includes(currentValue) ? currentValue : (months.includes(currentMonth) ? currentMonth : (months[0] || ''));
-      monthSelect.innerHTML = months.length
-        ? months.map(function(month) { return '<option value="' + escapeHtml(month) + '">' + escapeHtml(getThaiMonthLabel(month, false) || month) + '</option>'; }).join('')
-        : '<option value="">ยังไม่มีตารางเรียน</option>';
-      if (selectedMonth) monthSelect.value = selectedMonth;
+      setStudentScheduleMonthSelect(monthSelect, months, selectedMonth);
+      setStudentScheduleMonthSelect(mobileMonthSelect, months, selectedMonth);
+      const metaText = [
+        currentStudent.grade || selectedCourse.grade || '-',
+        currentStudent.preferredLocation || selectedCourse.location || '-',
+        selectedCourse.name || currentStudent.course || '-'
+      ].join(' · ');
       if (meta) {
-        meta.textContent = [
-          currentStudent.grade || selectedCourse.grade || '-',
-          currentStudent.preferredLocation || selectedCourse.location || '-',
-          selectedCourse.name || currentStudent.course || '-'
-        ].join(' · ');
+        meta.textContent = metaText;
       }
+      if (mobileMeta) mobileMeta.textContent = metaText;
       if (!sessions.length || !selectedMonth) {
-        box.innerHTML = '<div class="notice">ยังไม่มีตารางเรียนสำหรับระดับชั้น ศูนย์ และคอร์สนี้</div>';
+        const noScheduleHtml = '<div class="notice">ยังไม่มีตารางเรียนสำหรับระดับชั้น ศูนย์ และคอร์สนี้</div>';
+        if (box) box.innerHTML = noScheduleHtml;
+        if (mobileBox) mobileBox.innerHTML = noScheduleHtml;
+        if (mobileCard) mobileCard.classList.remove('hidden');
         return;
       }
       const monthSessions = sessions.filter(function(session) {
         return getMonthlySessionMonthKey(session) === selectedMonth;
       });
-      box.innerHTML = renderStudentScheduleCalendar(selectedMonth, monthSessions);
+      const calendarHtml = renderStudentScheduleCalendar(selectedMonth, monthSessions);
+      if (box) box.innerHTML = calendarHtml;
+      if (mobileBox) mobileBox.innerHTML = calendarHtml;
+      if (mobileCard) mobileCard.classList.remove('hidden');
     }
 
     function renderTeacherMonthlyPlanSummary() {
