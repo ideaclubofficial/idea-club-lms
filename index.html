@@ -5155,11 +5155,11 @@
                 <div class="form-row">
                   <div>
                     <label>เลือกชุดข้อสอบ / เดือนสอบ</label>
-                    <select id="adminScoreTestSetFilter" onchange="renderAdminScoreAdjustTable(); renderAdminScoreStatsTable();"></select>
+                    <select id="adminScoreTestSetFilter" onchange="renderAdminScoreTables()"></select>
                   </div>
                   <div>
                     <label>เลือกระดับชั้น</label>
-                    <select id="adminScoreGradeFilter" onchange="renderAdminScoreAdjustTable(); renderAdminScoreStatsTable();">
+                    <select id="adminScoreGradeFilter" onchange="renderAdminScoreTables()">
                       <option value="">-- เลือกระดับชั้น --</option>
                       <option>ป.4</option>
                       <option>ป.5</option>
@@ -6898,10 +6898,14 @@
         seedCollectionIfEmpty('monthlyPlanSessions', monthlyPlanSessions),
         seedCollectionIfEmpty('teacherPreferenceRules', teacherPreferenceRules),
         seedCollectionIfEmpty('holidays', holidays),
-        seedCollectionIfEmpty('scoreReports', scoreReports),
-        seedCollectionIfEmpty('adminScoreRecords', adminScoreRecords),
         seedCollectionIfEmpty('announcements', announcements),
         seedCollectionIfEmpty('activityLogs', activityLogs)
+      ]);
+
+      // Start score collections loading in parallel but don't block the main render on them
+      const scoreCollectionsPromise = Promise.all([
+        getFirebaseCollection('scoreReports'),
+        getFirebaseCollection('adminScoreRecords')
       ]);
 
       const results = await Promise.all([
@@ -6920,8 +6924,6 @@
         getFirebaseCollection('monthlyPlanSessions'),
         getFirebaseCollection('teacherPreferenceRules'),
         getFirebaseCollection('holidays'),
-        getFirebaseCollection('scoreReports'),
-        getFirebaseCollection('adminScoreRecords'),
         getFirebaseCollection('attendanceHistory'),
         getFirebaseCollection('announcements'),
         getFirebaseCollection('activityLogs'),
@@ -6943,12 +6945,10 @@
       replaceArray(monthlyPlanSessions, results[12]);
       replaceArray(teacherPreferenceRules, results[13]);
       replaceArray(holidays, results[14]);
-      replaceArray(scoreReports, results[15]);
-      replaceArray(adminScoreRecords, results[16]);
-      replaceArray(pickupHistory, results[17]);
-      replaceArray(announcements, results[18]);
-      replaceArray(activityLogs, results[19]);
-      const settingsItems = results[20];
+      replaceArray(pickupHistory, results[15]);
+      replaceArray(announcements, results[16]);
+      replaceArray(activityLogs, results[17]);
+      const settingsItems = results[18];
       const mainSettings = settingsItems.find(function(item) { return item.id === 'main' || item.firebaseDocId === 'main'; });
       if (mainSettings) systemSettings = Object.assign(systemSettings, mainSettings);
       // Sync pre-repair: fix in-memory status immediately so first render is correct
@@ -6962,6 +6962,22 @@
       safeRun(renderReceiptMonthFilter, 'receipt-month-filter-after-load');
       safeRun(renderActiveAdminTab, 'active-admin-tab-after-load');
       safeRun(renderStudentReceipts, 'student-receipts-after-load');
+      rebuildStudentLookupMap();
+
+      // Apply score collections when ready (already loading in parallel)
+      scoreCollectionsPromise.then(function(scoreResults) {
+        replaceArray(scoreReports, scoreResults[0]);
+        replaceArray(adminScoreRecords, scoreResults[1]);
+        rebuildStudentLookupMap();
+        safeRun(renderAdminActionCenter, 'admin-action-center-score-loaded');
+        if (getElement('adminScoreAdjustTableBody')) {
+          safeRun(renderAdminScoreFilters, 'admin-score-filters-loaded');
+          safeRun(renderAdminScoreTables, 'admin-score-tables-loaded');
+        }
+        if (getElement('scoreHistoryTableBody') || getElement('scoreSummaryBox')) {
+          safeRun(renderScoreHistoryByMonth, 'score-history-loaded');
+        }
+      }).catch(function(e) { console.warn('score data load error:', e); });
     }
 
     const announcements = [];
@@ -10948,8 +10964,7 @@
         safeRun(function() {
           loadOnlineExamCourses().then(function() {
             renderAdminScoreFilters();
-            renderAdminScoreAdjustTable();
-            renderAdminScoreStatsTable();
+            renderAdminScoreTables();
           });
         }, 'admin-score-latest-online-exam-filters');
         safeRun(renderStudentExamFilters, 'student-exam-filters');
@@ -18938,8 +18953,7 @@ function receiptStatusText(status) {
           result.textContent = 'ยังไม่มีนักเรียนในระดับชั้น ' + selectedGrade + ' จึงไม่สามารถสร้างตารางคะแนนได้';
           result.style.color = '#dc2626';
         }
-        renderAdminScoreAdjustTable();
-        renderAdminScoreStatsTable();
+        renderAdminScoreTables();
         return;
       }
 
@@ -18990,8 +19004,7 @@ function receiptStatusText(status) {
       renderAdminScoreFilters();
       if (getElement('adminScoreTestSetFilter')) getElement('adminScoreTestSetFilter').value = selectedMonth;
       if (getElement('adminScoreGradeFilter')) getElement('adminScoreGradeFilter').value = selectedGrade;
-      renderAdminScoreAdjustTable();
-      renderAdminScoreStatsTable();
+      renderAdminScoreTables();
       renderStudentExamFilters();
 
       if (result) {
@@ -19046,8 +19059,7 @@ function receiptStatusText(status) {
       }
 
       await syncScoreReportFromAdmin(selectedMonth, selectedGrade, 'draft');
-      renderAdminScoreAdjustTable();
-      renderAdminScoreStatsTable();
+      renderAdminScoreTables();
       renderScoreHistoryByMonth();
       renderStudentExamFilters();
       if (result) {
@@ -19090,8 +19102,7 @@ function receiptStatusText(status) {
       }
 
       await syncScoreReportFromAdmin(selectedMonth, selectedGrade, 'published');
-      renderAdminScoreAdjustTable();
-      renderAdminScoreStatsTable();
+      renderAdminScoreTables();
       renderScoreHistoryByMonth();
       renderStudentExamFilters();
       if (getElement('adminScorePublishSelect')) getElement('adminScorePublishSelect').value = 'published';
@@ -19709,19 +19720,33 @@ function receiptStatusText(status) {
       select.value = months.includes(current) ? current : (months[0] || '');
     }
 
+    const _studentLookupMap = new Map();
+
+    function rebuildStudentLookupMap() {
+      _studentLookupMap.clear();
+      students.forEach(function(student) {
+        if (!student || student.deleted === true) return;
+        [student.id, student.firebaseDocId, student.memberId, student.studentId, student.authUid].forEach(function(val) {
+          if (val) _studentLookupMap.set(String(val).trim(), student);
+        });
+        if (student.name) _studentLookupMap.set('n:' + String(student.name).trim(), student);
+      });
+    }
+
     function findStudentForScoreRecord(record) {
       if (!record) return null;
-      return students.find(function(student) {
-        if (!student || student.deleted === true) return false;
-        const ids = [student.id, student.firebaseDocId, student.memberId, student.studentId, student.authUid].map(function(value) {
-          return String(value || '').trim();
-        });
-        const recordIds = [record.studentId, record.memberId, record.studentMemberId, record.authUid].map(function(value) {
-          return String(value || '').trim();
-        }).filter(Boolean);
-        if (recordIds.some(function(id) { return ids.includes(id); })) return true;
-        return !!record.student && String(record.student || '').trim() === String(student.name || '').trim();
-      }) || null;
+      if (!_studentLookupMap.size) rebuildStudentLookupMap();
+      const ids = [record.studentId, record.memberId, record.studentMemberId, record.authUid];
+      for (var i = 0; i < ids.length; i++) {
+        if (!ids[i]) continue;
+        var s = _studentLookupMap.get(String(ids[i]).trim());
+        if (s) return s;
+      }
+      if (record.student) {
+        var s2 = _studentLookupMap.get('n:' + String(record.student).trim());
+        if (s2) return s2;
+      }
+      return null;
     }
 
     function getScoreRecordMemberId(record) {
@@ -19895,8 +19920,7 @@ function receiptStatusText(status) {
         renderAdminScoreFilters();
         if (getElement('adminScoreTestSetFilter')) getElement('adminScoreTestSetFilter').value = selectedMonth;
         if (getElement('adminScoreGradeFilter')) getElement('adminScoreGradeFilter').value = selectedGrade;
-        renderAdminScoreAdjustTable();
-        renderAdminScoreStatsTable();
+        renderAdminScoreTables();
 
         if (resultEl) {
           resultEl.style.color = '#16a34a';
@@ -19914,10 +19938,16 @@ function receiptStatusText(status) {
       }).length;
     }
 
-    function renderAdminScoreAdjustTable() {
+    function renderAdminScoreTables() {
+      const shared = getSelectedAdminScoreRecords();
+      renderAdminScoreAdjustTable(shared);
+      renderAdminScoreStatsTable(shared);
+    }
+
+    function renderAdminScoreAdjustTable(precomputedRecords) {
       const tbody = getElement('adminScoreAdjustTableBody');
       if (!tbody) return;
-      const records = getSelectedAdminScoreRecords();
+      const records = precomputedRecords || getSelectedAdminScoreRecords();
       const selectedMonth = getElement('adminScoreTestSetFilter') ? getElement('adminScoreTestSetFilter').value : '';
       const selectedGrade = getElement('adminScoreGradeFilter') ? getElement('adminScoreGradeFilter').value : '';
 
@@ -19979,8 +20009,7 @@ function receiptStatusText(status) {
       const record = adminScoreRecords[idx];
       if (!confirm('ยืนยันยกเลิกคะแนนของ "' + (record.student || '-') + '"?')) return;
       adminScoreRecords.splice(idx, 1);
-      renderAdminScoreAdjustTable();
-      renderAdminScoreStatsTable();
+      renderAdminScoreTables();
       const result = getElement('scoreAdjustResult');
       try {
         await deleteFirebaseDocument('adminScoreRecords', record);
@@ -19988,7 +20017,7 @@ function receiptStatusText(status) {
       } catch (e) {
         console.error('deleteScoreRecord error:', e);
         adminScoreRecords.splice(idx, 0, record);
-        renderAdminScoreAdjustTable();
+        renderAdminScoreTables();
         if (result) { result.textContent = 'ยกเลิกไม่สำเร็จ: ' + (e.message || e.code); result.style.color = '#dc2626'; }
       }
     }
@@ -20011,8 +20040,7 @@ function receiptStatusText(status) {
         const idx = adminScoreRecords.indexOf(r);
         if (idx !== -1) adminScoreRecords.splice(idx, 1);
       });
-      renderAdminScoreAdjustTable();
-      renderAdminScoreStatsTable();
+      renderAdminScoreTables();
       let failed = 0;
       for (const r of toDelete) {
         try { await deleteFirebaseDocument('adminScoreRecords', r); } catch (e) { failed++; console.error('deleteAllScoreRecords error:', e); }
@@ -20036,10 +20064,10 @@ function receiptStatusText(status) {
       };
     }
 
-    function renderAdminScoreStatsTable() {
+    function renderAdminScoreStatsTable(precomputedRecords) {
       const tbody = getElement('adminScoreStatsTableBody');
       if (!tbody) return;
-      const records = getSelectedAdminScoreRecords();
+      const records = precomputedRecords || getSelectedAdminScoreRecords();
       const selectedGrade = getElement('adminScoreGradeFilter') ? getElement('adminScoreGradeFilter').value : '';
       if (!selectedGrade) {
         tbody.innerHTML = '<tr><td colspan="5">กรุณาเลือกระดับชั้นก่อน</td></tr>';
@@ -27887,8 +27915,7 @@ function receiptStatusText(status) {
         safeRun(function() {
           loadOnlineExamCourses().then(function() {
             renderAdminScoreFilters();
-            renderAdminScoreAdjustTable();
-            renderAdminScoreStatsTable();
+            renderAdminScoreTables();
           });
         }, 'admin-score-latest-online-exam-filters');
       } else {
@@ -29611,7 +29638,7 @@ function receiptStatusText(status) {
           await syncOnlineExamScoreToRecords(r);
         }
         renderOnlineExamGradingPage(onlineExamGradePage);
-        safeRun(function() { renderAdminScoreAdjustTable(); renderAdminScoreStatsTable(); }, 'admin-score-refresh-after-publish');
+        safeRun(renderAdminScoreTables, 'admin-score-refresh-after-publish');
       } catch(e) { alert('ประกาศผลไม่สำเร็จ: ' + (e.message || e)); }
     }
 
@@ -29640,7 +29667,7 @@ function receiptStatusText(status) {
       }
       addActivityLog('ประกาศผลข้อสอบ bulk', count + ' รายการ');
       renderOnlineExamGradingPage(onlineExamGradePage);
-      safeRun(function() { renderAdminScoreAdjustTable(); renderAdminScoreStatsTable(); }, 'admin-score-refresh-after-bulk-publish');
+      safeRun(renderAdminScoreTables, 'admin-score-refresh-after-bulk-publish');
       alert('ประกาศผลสำเร็จ ' + count + ' รายการ');
     }
 
