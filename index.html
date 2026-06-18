@@ -10361,6 +10361,7 @@
           name: student.name || '-',
           nickname: student.nickname || '-',
           grade: student.grade || '-',
+          phone: student.phone || '',
           course: course ? (course.name || student.course || '-') : (student.course || '-'),
           hasClassToday: hasClassToday,
           isOnsite: isOnsite,
@@ -10500,10 +10501,12 @@
           courseNames.map(function(cn) {
             const students = courseMap[cn];
             const rows = students.map(function(item) {
+              var phoneHtml = item.phone ? '<a href="tel:' + escapeHtml(item.phone) + '" style="color:#1d4ed8;text-decoration:none;white-space:nowrap;">' + escapeHtml(item.phone) + '</a>' : '<span style="color:#9ca3af;">-</span>';
               return '<tr>' +
                 '<td class="student-name">' + escapeHtml(item.name) + '</td>' +
                 '<td>' + escapeHtml(item.nickname) + '</td>' +
                 '<td>' + escapeHtml(item.grade) + '</td>' +
+                '<td>' + phoneHtml + '</td>' +
                 '<td><span class="' + getPickupStatusClass(item.status) + '">' + escapeHtml(item.status) + '</span></td>' +
                 '<td><div class="pickup-actions-mobile">' + pickupBtnsHtml(item.id) + '</div></td>' +
               '</tr>';
@@ -10515,7 +10518,7 @@
               '</div>' +
               '<div class="table-wrap" style="margin:0;">' +
                 '<table>' +
-                  '<thead><tr><th>นักเรียน</th><th>ชื่อเล่น</th><th>ระดับชั้น</th><th>สถานะ</th><th>เช็คด่วน</th></tr></thead>' +
+                  '<thead><tr><th>นักเรียน</th><th>ชื่อเล่น</th><th>ระดับชั้น</th><th>เบอร์ติดต่อ</th><th>สถานะ</th><th>เช็คด่วน</th></tr></thead>' +
                   '<tbody>' + rows + '</tbody>' +
                 '</table>' +
               '</div>' +
@@ -10527,9 +10530,12 @@
         mobileEl.innerHTML = courseNames.map(function(cn) {
           const students = courseMap[cn];
           const cards = students.map(function(item) {
+            var mobilePhoneHtml = item.phone
+              ? ' · <a href="tel:' + escapeHtml(item.phone) + '" style="color:#1d4ed8;text-decoration:none;">' + escapeHtml(item.phone) + '</a>'
+              : '';
             return '<div class="teacher-mobile-attendance-card" style="border-left:3px solid #3b82f6;margin-bottom:8px;">' +
               '<strong>' + escapeHtml(item.name) + '</strong>' +
-              '<div class="teacher-mobile-muted">ชื่อเล่น: ' + escapeHtml(item.nickname) + ' · ระดับชั้น: ' + escapeHtml(item.grade) + '</div>' +
+              '<div class="teacher-mobile-muted">ชื่อเล่น: ' + escapeHtml(item.nickname) + ' · ระดับชั้น: ' + escapeHtml(item.grade) + mobilePhoneHtml + '</div>' +
               '<div class="teacher-mobile-card-row"><span class="' + getPickupStatusClass(item.status) + '">' + escapeHtml(item.status) + '</span></div>' +
               '<div class="teacher-mobile-quick-grid">' + pickupBtnsHtml(item.id) + '</div>' +
             '</div>';
@@ -10697,7 +10703,8 @@
           '<td>' + escapeHtml(item.parent || 0) + ' คน</td>' +
           '<td>' + escapeHtml(item.absent || 0) + ' คน</td>' +
           '<td>' + escapeHtml(item.teacher || '-') + '</td>' +
-          '<td><button class="btn ' + (isEditing ? 'btn-green' : 'btn-blue') + '" type="button" style="font-size:12px;padding:4px 10px;" onclick="editAttendanceHistory(\'' + jsArg(id) + '\')">' + (isEditing ? 'กำลังแก้ไข' : 'แก้ไข') + '</button></td>' +
+          '<td style="white-space:nowrap;"><button class="btn ' + (isEditing ? 'btn-green' : 'btn-blue') + '" type="button" style="font-size:12px;padding:4px 10px;margin-right:4px;" onclick="editAttendanceHistory(\'' + jsArg(id) + '\')">' + (isEditing ? 'กำลังแก้ไข' : 'แก้ไข') + '</button>' +
+          '<button class="btn btn-red" type="button" style="font-size:12px;padding:4px 10px;" onclick="deleteAttendanceHistory(\'' + jsArg(id) + '\')">ลบ</button></td>' +
         '</tr>';
       }).join('');
       if (tbody) {
@@ -10711,7 +10718,10 @@
             '<strong>' + escapeHtml(item.date || '-') + '</strong>' +
             '<div class="teacher-mobile-muted">' + escapeHtml(item.courseScope || '-') + ' · ทั้งหมด ' + escapeHtml(item.total || 0) + ' คน</div>' +
             '<div class="teacher-mobile-muted">มา ' + escapeHtml(item.present || 0) + ' · วิธีมาเรียน ' + escapeHtml(item.parent || 0) + ' · ไม่มา ' + escapeHtml(item.absent || 0) + '</div>' +
-            '<div class="teacher-mobile-actions" style="margin-top:8px;"><button class="btn ' + (isEditing ? 'btn-green' : 'btn-blue') + '" type="button" onclick="editAttendanceHistory(\'' + jsArg(id) + '\')">' + (isEditing ? 'กำลังแก้ไข' : 'แก้ไข') + '</button></div>' +
+            '<div class="teacher-mobile-actions" style="margin-top:8px;gap:6px;">' +
+              '<button class="btn ' + (isEditing ? 'btn-green' : 'btn-blue') + '" type="button" onclick="editAttendanceHistory(\'' + jsArg(id) + '\')">' + (isEditing ? 'กำลังแก้ไข' : 'แก้ไข') + '</button>' +
+              '<button class="btn btn-red" type="button" onclick="deleteAttendanceHistory(\'' + jsArg(id) + '\')">ลบ</button>' +
+            '</div>' +
           '</div>';
         }).join('') : '<div class="teacher-mobile-attendance-card"><strong>ยังไม่มีประวัติการบันทึก</strong></div>';
       }
@@ -10736,6 +10746,27 @@
       renderPickupList();
       renderPickupHistory();
       setAttendanceResult('เปิดโหมดแก้ไขประวัติ ' + (item.date || '-') + ' · ' + (item.courseScope || '-') + ' แล้ว แก้สถานะแล้วกดบันทึกอีกครั้ง', '#d97706');
+    }
+
+    async function deleteAttendanceHistory(historyId) {
+      if (isCurrentStudentSession()) { alert('ไม่มีสิทธิ์'); return; }
+      const item = pickupHistory.find(function(record) {
+        return String(record.id || record.firebaseDocId || '') === String(historyId);
+      });
+      if (!item) { setAttendanceResult('ไม่พบประวัติที่ต้องการลบ', '#dc2626'); return; }
+      if (!confirm('ลบประวัติเช็คชื่อ ' + (item.date || '-') + ' · ' + (item.courseScope || '-') + ' ?\nการลบจะไม่สามารถกู้คืนได้')) return;
+      try {
+        await deleteFirebaseDocument('attendanceHistory', item);
+        const idx = pickupHistory.indexOf(item);
+        if (idx !== -1) pickupHistory.splice(idx, 1);
+        if (attendanceEditHistoryId === String(historyId)) attendanceEditHistoryId = '';
+        renderPickupList();
+        renderPickupHistory();
+        setAttendanceResult('ลบประวัติเช็คชื่อ ' + (item.date || '-') + ' เรียบร้อยแล้ว', '#16a34a');
+      } catch (e) {
+        console.error('deleteAttendanceHistory error:', e);
+        setAttendanceResult('เกิดข้อผิดพลาดขณะลบ กรุณาลองใหม่', '#dc2626');
+      }
     }
 
     async function teacherSaveAttendance() {
