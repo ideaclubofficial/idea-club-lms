@@ -5077,9 +5077,9 @@
 
             <!-- Inner Tab: ใบคะแนน -->
             <div id="onlineExamTab-score" style="display:none;">
-              <!-- ส่วนที่ 1: ตรวจผลสอบรายคน -->
+              <!-- ตรวจผลสอบและประกาศผล -->
               <div class="form-box">
-                <h3>ตรวจผลสอบรายคน</h3>
+                <h3>ตรวจและประกาศผลสอบ</h3>
                 <div class="form-row">
                   <div>
                     <label>เดือนสอบ</label>
@@ -5147,10 +5147,10 @@
               </div>
               <div id="onlineExamGradingReport" class="form-box" style="display:none;padding:0;overflow:hidden;"></div>
 
-              <!-- ส่วนที่ 2: ใบคะแนนรวม -->
+              <!-- ใบคะแนนรวม -->
               <div class="form-box" style="margin-top:8px;">
                 <h3>ใบคะแนน</h3>
-                <p style="margin-bottom:18px; color:#6b7280;">กรอก/ปรับคะแนนหลังตรวจข้อสอบ แล้วประกาศผลให้นักเรียนดูย้อนหลัง — หรือกด "📥 นำเข้าคะแนน" เพื่อดึงคะแนนจากข้อสอบออนไลน์อัตโนมัติ</p>
+                <p style="margin-bottom:18px; color:#6b7280;">คะแนนจากข้อสอบออนไลน์จะเข้าตารางนี้อัตโนมัติเมื่อประกาศผลจากตารางด้านบน ใช้ส่วนนี้เพื่อตรวจ ปรับคะแนนรายชุด และเผยแพร่ใบคะแนนย้อนหลัง</p>
 
                 <div class="form-row">
                   <div>
@@ -5177,12 +5177,11 @@
                 <div class="notice">
                   <strong>วิธีใช้งานใบคะแนน</strong>
                   <p>1. เลือกเดือนสอบและระดับชั้น</p>
-                  <p>2. กด "📥 นำเข้าคะแนนจากข้อสอบออนไลน์" — ระบบจะดึงคะแนนจากข้อสอบออนไลน์มาใส่ให้อัตโนมัติ หรือกด "สร้างตารางคะแนน" เพื่อกรอกเอง</p>
-                  <p>3. ตรวจสอบคะแนน กดบันทึก แล้วกดประกาศผลเพื่อให้นักเรียนดูใบคะแนนย้อนหลังได้</p>
+                  <p>2. ประกาศผลจากตารางตรวจข้อสอบด้านบน ระบบจะ sync คะแนนเข้ามาให้ หรือกดสร้างตารางคะแนนสำหรับกรอก/ปรับเอง</p>
+                  <p>3. ตรวจสอบคะแนน กดบันทึก แล้วกดประกาศผลชุดนี้เพื่อให้นักเรียนดูใบคะแนนย้อนหลังได้</p>
                 </div>
 
                 <div class="test-actions">
-                  <button class="btn btn-blue" type="button" onclick="importScoresFromOnlineExam()">📥 นำเข้าคะแนนจากข้อสอบออนไลน์</button>
                   <button class="btn btn-blue" type="button" onclick="createScoreRecordsForSelectedMonthGrade()">สร้างตารางคะแนนจากรายชื่อนักเรียน</button>
                   <button class="btn btn-green" type="button" onclick="saveAdjustedScores()">บันทึกคะแนนชุดนี้</button>
                   <button class="btn btn-dark" type="button" onclick="publishSelectedScoreSet()">ประกาศผลชุดนี้</button>
@@ -19839,99 +19838,6 @@ function receiptStatusText(status) {
       return status === 'published' ? '<span class="status-paid">ประกาศแล้ว</span>' : '<span class="status-waiting">รอประกาศ</span>';
     }
 
-    async function importScoresFromOnlineExam() {
-      if (!hasPermission('admin.onlineExams') && !hasPermission('admin.exams')) { alert('ไม่มีสิทธิ์'); return; }
-      if (!firebaseReady || !db) { alert('Firebase ยังไม่พร้อม'); return; }
-      const selectedMonth = (getElement('adminScoreTestSetFilter') || {}).value || '';
-      const selectedGrade = (getElement('adminScoreGradeFilter') || {}).value || '';
-      const resultEl = getElement('scoreAdjustResult');
-      if (!selectedMonth || !selectedGrade) {
-        if (resultEl) { resultEl.style.color = '#dc2626'; resultEl.textContent = '❌ กรุณาเลือกเดือนและระดับชั้นก่อน'; }
-        return;
-      }
-      if (resultEl) { resultEl.style.color = '#d97706'; resultEl.textContent = '⏳ กำลังนำเข้าคะแนนจากข้อสอบออนไลน์...'; }
-      try {
-        if (!onlineExamCourseCache.length) await loadOnlineExamCourses();
-        const snap = await db.collection('onlineExamResults')
-          .where('grade', '==', selectedGrade)
-          .get()
-          .catch(function() { return db.collection('onlineExamResults').get(); });
-
-        // build set of courseIds that have examMonth === selectedMonth for faster lookup
-        const courseIdsForMonth = new Set(
-          onlineExamCourseCache
-            .filter(function(c) { return c.examMonth === selectedMonth; })
-            .map(function(c) { return c.firebaseDocId; })
-        );
-
-        const allResults = snap.docs.map(function(d) { return Object.assign({ _docId: d.id }, d.data()); })
-          .filter(function(r) {
-            if (r.deleted) return false;
-            if (r.grade && r.grade !== selectedGrade) return false;
-            // prefer matching via course's examMonth field; fallback to parsing submittedAtText
-            if (r.courseId && courseIdsForMonth.size) {
-              return courseIdsForMonth.has(r.courseId);
-            }
-            const resultMonth = getThaiMonthYearFromText(r.submittedAtText || '');
-            return resultMonth === selectedMonth;
-          });
-
-        if (!allResults.length) {
-          if (resultEl) { resultEl.style.color = '#d97706'; resultEl.textContent = '⚠️ ไม่พบผลสอบออนไลน์ของเดือน ' + selectedMonth + ' ระดับชั้น ' + selectedGrade; }
-          return;
-        }
-
-        let imported = 0;
-        let created = 0;
-        for (var i = 0; i < allResults.length; i++) {
-          const r = allResults[i];
-          const subject = getOnlineExamResultSubject(r) || (r.courseId || '');
-          if (!subject) continue;
-          const score50val = r.score50 !== undefined ? r.score50 : onlineExamGetScore50Value(r.correctCount, r.totalQ);
-
-          var record = adminScoreRecords.find(function(rec) {
-            if (rec.month !== selectedMonth || rec.grade !== selectedGrade) return false;
-            if (rec.authUid && r.studentUid && rec.authUid === r.studentUid) return true;
-            if (rec.studentId && r.studentId && String(rec.studentId) === String(r.studentId)) return true;
-            if (rec.student && r.studentName && rec.student === r.studentName) return true;
-            return false;
-          });
-
-          if (!record) {
-            const newId = createFirebaseDocId('adminScoreRecords');
-            record = {
-              id: newId, firebaseDocId: newId,
-              month: selectedMonth, grade: selectedGrade,
-              studentId: r.studentId || '', authUid: r.studentUid || '',
-              memberId: r.memberId || r.studentMemberId || r.studentId || '',
-              student: r.studentName || '-', nickname: '-',
-              scores: {}, status: 'draft'
-            };
-            adminScoreRecords.push(record);
-            created++;
-          }
-
-          record.scores = record.scores || {};
-          record.scores[subject] = score50val;
-          imported++;
-          try { await setFirebaseDocument('adminScoreRecords', record); } catch(e) { console.warn(e); }
-        }
-
-        renderAdminScoreFilters();
-        if (getElement('adminScoreTestSetFilter')) getElement('adminScoreTestSetFilter').value = selectedMonth;
-        if (getElement('adminScoreGradeFilter')) getElement('adminScoreGradeFilter').value = selectedGrade;
-        renderAdminScoreTables();
-
-        if (resultEl) {
-          resultEl.style.color = '#16a34a';
-          resultEl.textContent = '✅ นำเข้าคะแนนสำเร็จ ' + imported + ' รายการ' + (created ? ' · สร้างแถวใหม่ ' + created + ' คน' : '') + ' · กด "บันทึก" แล้ว "ประกาศผล" เพื่อเผยแพร่';
-        }
-      } catch(e) {
-        console.error('importScoresFromOnlineExam error', e);
-        if (resultEl) { resultEl.style.color = '#dc2626'; resultEl.textContent = '❌ นำเข้าไม่สำเร็จ: ' + (e.message || e); }
-      }
-    }
-
     function getMonthlyQuestionCountForSubject(month, subject) {
       return monthlyQuestions.filter(function(q) {
         return getThaiMonthFromDate(q.testDate) === month && q.subject === subject;
@@ -29677,6 +29583,7 @@ function receiptStatusText(status) {
       if (!subject || !grade) return;
       const month = getThaiMonthYearFromText(r.submittedAtText);
       const score50val = r.score50 !== undefined ? r.score50 : onlineExamGetScore50Value(r.correctCount, r.totalQ);
+      const nickname = getOnlineExamResultNickname(r) || '-';
 
       var record = adminScoreRecords.find(function(rec) {
         if (rec.grade !== grade || rec.month !== month) return false;
@@ -29697,13 +29604,14 @@ function receiptStatusText(status) {
           memberId: r.memberId || r.studentMemberId || r.studentId || '',
           authUid: r.studentUid || '',
           student: r.studentName || '-',
-          nickname: '-',
+          nickname: nickname,
           scores: {},
           status: 'published'
         };
         adminScoreRecords.push(record);
       }
 
+      record.nickname = (record.nickname && record.nickname !== '-') ? record.nickname : nickname;
       record.scores = record.scores || {};
       record.scores[subject] = score50val;
       record.status = 'published';
