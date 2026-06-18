@@ -29151,6 +29151,26 @@ function receiptStatusText(status) {
       return student ? String(student.nickname || '').trim() : '';
     }
 
+    function formatOnlineExamSubmittedAtShort(result) {
+      if (!result) return '-';
+      const sourceDate = result.submittedAt && typeof result.submittedAt.toDate === 'function'
+        ? result.submittedAt.toDate()
+        : null;
+      const monthShortNames = getThaiCalendarMonthShortNames ? getThaiCalendarMonthShortNames() : ['ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.', 'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.'];
+      if (sourceDate && !isNaN(sourceDate.getTime())) {
+        const beYearShort = String(sourceDate.getFullYear() + 543).slice(-2);
+        return sourceDate.getDate() + ' ' + monthShortNames[sourceDate.getMonth()] + ' ' + beYearShort + ' ' +
+          sourceDate.toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' });
+      }
+      const text = String(result.submittedAtText || '').trim();
+      if (!text) return '-';
+      const months = getThaiCalendarMonthNames ? getThaiCalendarMonthNames() : ['มกราคม', 'กุมภาพันธ์', 'มีนาคม', 'เมษายน', 'พฤษภาคม', 'มิถุนายน', 'กรกฎาคม', 'สิงหาคม', 'กันยายน', 'ตุลาคม', 'พฤศจิกายน', 'ธันวาคม'];
+      const match = text.match(/(\d{1,2})\s+([^\s]+)\s+(25\d{2})(?:\s+เวลา)?\s*(\d{1,2}:\d{2})?/);
+      if (!match) return text;
+      const monthIndex = months.indexOf(match[2]);
+      return match[1] + ' ' + (monthShortNames[monthIndex] || match[2]) + ' ' + match[3].slice(-2) + (match[4] ? ' ' + match[4] : '');
+    }
+
     function getOnlineExamResultMemberSortParts(result) {
       const raw = getOnlineExamResultMemberId(result);
       const match = raw.match(/^(.*?)(\d+)$/);
@@ -29509,6 +29529,7 @@ function receiptStatusText(status) {
         const usedMin = r.usedSeconds ? Math.ceil(r.usedSeconds / 60) : (r.timeTakenSeconds ? Math.ceil(r.timeTakenSeconds / 60) : '-');
         const memberId = getOnlineExamResultMemberId(r);
         const nickname = getOnlineExamResultNickname(r);
+        const submittedShort = formatOnlineExamSubmittedAtShort(r);
         const studentLine = [
           r.studentName || '',
           nickname ? 'ชื่อเล่น: ' + nickname : '',
@@ -29525,7 +29546,7 @@ function receiptStatusText(status) {
           '<td style="padding:8px 10px;text-align:center;color:#16a34a;font-weight:700;">' + correctCnt + '</td>' +
           '<td style="padding:8px 10px;text-align:center;font-weight:700;">' + (r.correctCount !== undefined ? (r.scoreText || onlineExamFormatScore50(r.correctCount, r.totalQ || correctCnt)) + '<br><span style="font-weight:400;color:#6b7280;">(' + (r.scorePercent || 0) + '%)</span>' : '-') + '</td>' +
           '<td style="padding:8px 10px;text-align:center;">' + (usedMin !== '-' ? usedMin + ' น.' : '-') + '</td>' +
-          '<td style="padding:8px 10px;">' + (r.submittedAtText || '') + '</td>' +
+          '<td style="padding:8px 10px;white-space:nowrap;">' + escapeHtml(submittedShort) + '</td>' +
           '<td style="padding:8px 10px;text-align:center;">' + getOnlineExamResultStatusBadge(rStatus) + '</td>' +
           '<td style="padding:8px 10px;white-space:nowrap;text-align:center;">' +
             '<button class="btn btn-blue" onclick="showOnlineExamResultDetail(\'' + r._docId + '\',\'' + (r.courseId || '') + '\')" style="font-size:10px;padding:3px 7px;margin:1px;" title="ดูรายละเอียด">📋</button>' +
