@@ -29648,11 +29648,43 @@ function receiptStatusText(status) {
       }).join('');
       const pendingCount = getOnlineExamGroupPendingResults(group).length;
       const hasPublished = group.results.some(function(result) { return (result.resultStatus || 'submitted') === 'published'; });
+
+      const pickerId = 'ogdp_' + String(group.key).replace(/[^a-zA-Z0-9]/g, '_');
+      const availableSubjects = ONLINE_EXAM_SCORE_SHEET_SUBJECTS.filter(function(subject) { return !!group.resultsBySubject[subject]; });
+      const subjectPickerBtns = availableSubjects.map(function(subject) {
+        const short = subjectShortMap[subject] || subject;
+        return '<button class="btn btn-red" type="button" style="font-size:10px;padding:2px 8px;margin:2px 2px 2px 0;" onclick="deleteOnlineExamSingleSubjectResult(\'' + jsArg(group.key) + '\',\'' + jsArg(subject) + '\')">' + escapeHtml(short) + '</button>';
+      }).join('');
+      const deletePickerHtml =
+        '<button class="btn btn-red" type="button" style="font-size:10px;padding:3px 7px;margin:1px;" onclick="toggleScoreDeletePicker(\'' + pickerId + '\')">ลบ/ทำใหม่</button>' +
+        '<div id="' + pickerId + '" style="display:none;margin-top:4px;padding:5px 7px;background:#fff7f7;border:1px solid #fecaca;border-radius:6px;">' +
+          '<div style="font-size:10px;color:#6b7280;margin-bottom:3px;">เลือกวิชาที่ต้องการลบ:</div>' +
+          subjectPickerBtns +
+          '<button class="btn btn-dark" type="button" style="font-size:10px;padding:2px 7px;margin:2px 0;" onclick="toggleScoreDeletePicker(\'' + pickerId + '\')">ยกเลิก</button>' +
+        '</div>';
+
       return detailButtons +
         (pendingCount ? '<button class="btn btn-green" type="button" onclick="publishOnlineExamGroupedResults(\'' + jsArg(group.key) + '\')" style="font-size:10px;padding:3px 7px;margin:1px;">ประกาศผล</button>' : '') +
         (hasPublished ? '<button class="btn btn-dark" type="button" onclick="hideOnlineExamGroupedResults(\'' + jsArg(group.key) + '\')" style="font-size:10px;padding:3px 7px;margin:1px;">ซ่อนผล</button>' : '') +
-        '<button class="btn btn-blue" type="button" onclick="setOnlineExamGroupedRetake(\'' + jsArg(group.key) + '\',true)" style="font-size:10px;padding:3px 7px;margin:1px;">ให้ทำใหม่</button>' +
-        '<button class="btn btn-red" type="button" onclick="deleteOnlineExamGroupedResults(\'' + jsArg(group.key) + '\')" style="font-size:10px;padding:3px 7px;margin:1px;">ลบ/ทำใหม่</button>';
+        deletePickerHtml;
+    }
+
+    async function deleteOnlineExamSingleSubjectResult(groupKey, subject) {
+      if (!hasPermission('admin.onlineExams')) { alert('ไม่มีสิทธิ์'); return; }
+      const group = findOnlineExamGroupedRow(groupKey);
+      if (!group) return;
+      const result = group.resultsBySubject[subject];
+      if (!result) { alert('ไม่พบผลสอบวิชา ' + subject); return; }
+      if (!confirm('ลบผลสอบวิชา "' + subject + '" ของ "' + (group.studentName || '-') + '"?\nนักเรียนจะสามารถทำข้อสอบใหม่ได้')) return;
+      try {
+        await db.collection('onlineExamResults').doc(result._docId).delete();
+        onlineExamGradeAllResults = onlineExamGradeAllResults.filter(function(r) { return r._docId !== result._docId; });
+        onlineExamGradeGroupedRows = buildOnlineExamGroupedRows(onlineExamGradeAllResults);
+        addActivityLog('ลบผลสอบ / เปิดทำใหม่', (group.studentName || '-') + ' · ' + subject);
+        renderOnlineExamGradingPage(onlineExamGradePage);
+      } catch (e) {
+        alert('ลบไม่สำเร็จ: ' + (e.message || e));
+      }
     }
 
     async function adjustOnlineExamGroupedSubjectCorrect(groupKey, subject, delta) {
