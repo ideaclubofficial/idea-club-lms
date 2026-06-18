@@ -21619,6 +21619,29 @@ function receiptStatusText(status) {
       return String((session && (session.center || session.location || session.courseLocation || session.roomName)) || (selectedCourse && selectedCourse.location) || '').trim();
     }
 
+    function getCurrentStudentScheduleGrade(selectedCourse) {
+      return String((currentStudent && currentStudent.grade) || (selectedCourse && selectedCourse.grade) || '').trim();
+    }
+
+    function getCurrentStudentScheduleCenter(selectedCourse) {
+      return String((currentStudent && currentStudent.preferredLocation) || (selectedCourse && selectedCourse.location) || '').trim();
+    }
+
+    function getCurrentStudentScheduleCourseName(selectedCourse) {
+      return normalizeTextValue((selectedCourse && (selectedCourse.name || selectedCourse.title)) || (currentStudent && currentStudent.course) || '');
+    }
+
+    function getCurrentStudentScheduleCourseId(selectedCourse) {
+      return String((selectedCourse && (selectedCourse.id || selectedCourse.firebaseDocId)) || (currentStudent && currentStudent.courseId) || '').trim();
+    }
+
+    function isScheduleCourseNameMatched(sessionName, studentCourseName) {
+      const sessionText = normalizeTextValue(sessionName);
+      const studentText = normalizeTextValue(studentCourseName);
+      if (!sessionText || !studentText) return true;
+      return sessionText === studentText || sessionText.includes(studentText) || studentText.includes(sessionText);
+    }
+
     function isStudentMonthlyPlanSessionVisible(session, selectedCourse) {
       if (!session || !currentStudent) return false;
       const status = session.status || 'draft';
@@ -21631,16 +21654,15 @@ function receiptStatusText(status) {
           studentPhone: session.studentPhone
         });
       }
-      if (!selectedCourse) return false;
-      const studentGrade = String(currentStudent.grade || '').trim();
-      const studentCenter = String(currentStudent.preferredLocation || selectedCourse.location || '').trim();
-      const selectedCourseId = String(selectedCourse.id || selectedCourse.firebaseDocId || currentStudent.courseId || '').trim();
+      const studentGrade = getCurrentStudentScheduleGrade(selectedCourse);
+      const studentCenter = getCurrentStudentScheduleCenter(selectedCourse);
+      const selectedCourseId = getCurrentStudentScheduleCourseId(selectedCourse);
       const sessionCourseId = String(session.courseId || '').trim();
       const sessionCourseName = normalizeTextValue(session.courseName || session.course || getMonthlyPlanCourseName(session));
-      const selectedCourseName = normalizeTextValue(selectedCourse.name || selectedCourse.title || currentStudent.course || '');
-      const courseMatched = sessionCourseId
-        ? sessionCourseId === selectedCourseId
-        : (!!sessionCourseName && !!selectedCourseName && sessionCourseName === selectedCourseName);
+      const selectedCourseName = getCurrentStudentScheduleCourseName(selectedCourse);
+      const courseMatched = selectedCourseId && sessionCourseId
+        ? (sessionCourseId === selectedCourseId || isScheduleCourseNameMatched(sessionCourseName, selectedCourseName))
+        : isScheduleCourseNameMatched(sessionCourseName, selectedCourseName);
       if (!courseMatched) return false;
 
       const sessionGrade = getStudentScheduleSessionGrade(session, selectedCourse);
@@ -21721,7 +21743,8 @@ function receiptStatusText(status) {
       if (!box && !mobileBox) return;
 
       const selectedCourse = getCurrentStudentCourse();
-      if (!selectedCourse) {
+      const hasStudentCourse = !!(selectedCourse || (currentStudent && (currentStudent.courseId || (currentStudent.course && currentStudent.course !== 'ยังไม่ได้สมัครคอร์ส'))));
+      if (!hasStudentCourse) {
         if (meta) meta.textContent = 'สมัครคอร์สก่อนจึงจะเห็นตารางเรียน';
         if (mobileMeta) mobileMeta.textContent = 'สมัครคอร์สก่อนจึงจะเห็นตารางเรียน';
         if (monthSelect) monthSelect.innerHTML = '<option value="">ยังไม่มีคอร์ส</option>';
@@ -21741,9 +21764,9 @@ function receiptStatusText(status) {
       setStudentScheduleMonthSelect(monthSelect, months, selectedMonth);
       setStudentScheduleMonthSelect(mobileMonthSelect, months, selectedMonth);
       const metaText = [
-        currentStudent.grade || selectedCourse.grade || '-',
-        currentStudent.preferredLocation || selectedCourse.location || '-',
-        selectedCourse.name || currentStudent.course || '-'
+        getCurrentStudentScheduleGrade(selectedCourse) || '-',
+        getCurrentStudentScheduleCenter(selectedCourse) || '-',
+        getCurrentStudentScheduleCourseName(selectedCourse) || '-'
       ].join(' · ');
       if (meta) {
         meta.textContent = metaText;
