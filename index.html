@@ -5035,13 +5035,13 @@
                   </div>
                   <div>
                     <label>นักเรียน</label>
-                    <select id="onlineExamGradeStudentSelect" style="width:100%;">
+                    <select id="onlineExamGradeStudentSelect" onchange="renderOnlineExamGradingReport()" style="width:100%;">
                       <option value="">-- ทุกคน --</option>
                     </select>
                   </div>
                   <div>
                     <label>สถานะผลสอบ</label>
-                    <select id="onlineExamGradeStatusFilter" style="width:100%;">
+                    <select id="onlineExamGradeStatusFilter" onchange="renderOnlineExamGradingReport()" style="width:100%;">
                       <option value="">-- ทุกสถานะ --</option>
                       <option value="submitted">รอประกาศผล</option>
                       <option value="published">ประกาศผลแล้ว</option>
@@ -5053,14 +5053,14 @@
                 <div class="form-row" style="margin-top:8px;">
                   <div>
                     <label>วันที่สอบ (จาก)</label>
-                    <input type="date" id="onlineExamGradeDateFrom">
+                    <input type="date" id="onlineExamGradeDateFrom" onchange="renderOnlineExamGradingReport()">
                   </div>
                   <div>
                     <label>ถึง</label>
-                    <input type="date" id="onlineExamGradeDateTo">
+                    <input type="date" id="onlineExamGradeDateTo" onchange="renderOnlineExamGradingReport()">
                   </div>
                   <div style="align-self:flex-end;">
-                    <button class="btn btn-blue" onclick="renderOnlineExamGradingReport()">🔍 ค้นหา / โหลด</button>
+                    <button class="btn btn-blue" onclick="renderOnlineExamGradingReport()">🔄 รีเฟรช</button>
                   </div>
                 </div>
               </div>
@@ -7504,6 +7504,7 @@
     let onlineExamGradeMissingHtml = '';
     let onlineExamGradeMissingOnly = false;
     let onlineExamGradeMissingItems = [];
+    let onlineExamGradeFilterChangeTimer = null;
     const ONLINE_EXAM_GRADE_PAGE_SIZE = 20;
     const ONLINE_EXAM_SUBJECT_ORDER = ['คณิตศาสตร์', 'วิทยาศาสตร์', 'ภาษาอังกฤษ', 'ภาษาไทย', 'สังคมศึกษา', 'อื่นๆ'];
     let onlineExamQuestionOrder = [];    // questionIds in display order (shuffled or natural)
@@ -28943,7 +28944,14 @@ function receiptStatusText(status) {
     }
 
     function onlineExamGradeFilterChange() {
-      safeRun(populateOnlineExamStudentSelect, 'online-exam-grade-student-select');
+      if (onlineExamGradeFilterChangeTimer) clearTimeout(onlineExamGradeFilterChangeTimer);
+      onlineExamGradeFilterChangeTimer = setTimeout(function() {
+        populateOnlineExamStudentSelect()
+          .then(function() { return renderOnlineExamGradingReport(); })
+          .catch(function(error) {
+            console.error('onlineExamGradeFilterChange error', error);
+          });
+      }, 120);
     }
 
     async function renderOnlineExamGradingReport() {
