@@ -6185,21 +6185,53 @@
       }
     }
 
-    async function getOwnedStudentRecord(userProfile) {
-      if (!firebaseReady || !db || !firebaseUser) return null;
+    function getStudentRecordDocId(student) {
+      return String(student && (student.firebaseDocId || student.id || student.studentId || '') || '').trim();
+    }
+
+    function normalizeStudentRecordForSession(studentRecord) {
+      if (!studentRecord) return null;
+      return sanitizeStudentProfile(Object.assign({}, studentRecord, {
+        id: studentRecord.id || studentRecord.firebaseDocId || studentRecord.authUid || firebaseUser.uid,
+        authUid: studentRecord.authUid || firebaseUser.uid
+      }));
+    }
+
+    async function getOwnedStudentRecords(userProfile) {
+      if (!firebaseReady || !db || !firebaseUser) return [];
       const uid = firebaseUser.uid;
       const linkedStudentId = String(userProfile && (userProfile.linkedStudentId || userProfile.studentDocId) || '').trim();
+      const linkedStudentIds = Array.isArray(userProfile && userProfile.linkedStudentIds) ? userProfile.linkedStudentIds : [];
       const memberId = String(userProfile && (userProfile.memberId || userProfile.studentId) || '').trim();
-      const candidates = [linkedStudentId, uid].filter(function(value, index, list) {
+      const candidates = [linkedStudentId].concat(linkedStudentIds).concat([uid]).map(function(value) {
+        return String(value || '').trim();
+      }).filter(function(value, index, list) {
         return value && list.indexOf(value) === index;
       });
+      const seen = new Set();
+      const result = [];
+
+      function addStudentRecord(docId, data) {
+        if (!data || data.deleted === true) return;
+        const record = Object.assign({ firebaseDocId: docId }, data);
+        const key = getStudentRecordDocId(record) || String(record.authUid || '') || String(record.memberId || '');
+        if (!key || seen.has(key)) return;
+        if (
+          record.authUid === uid ||
+          String(record.studentAuthUid || '') === uid ||
+          String(record.parentAuthUid || '') === uid ||
+          String(record.memberId || record.studentId || '') === memberId
+        ) {
+          seen.add(key);
+          result.push(record);
+        }
+      }
 
       for (const docId of candidates) {
         try {
           const doc = await db.collection('students').doc(docId).get();
           if (doc.exists) {
-            const data = Object.assign({ firebaseDocId: doc.id }, doc.data());
-            if (data.authUid === uid || String(data.memberId || data.studentId || '') === memberId) return data;
+            addStudentRecord(doc.id, doc.data());
           }
         } catch (error) {
           console.warn('student owned doc lookup skipped:', docId, error);
@@ -6207,28 +6239,49 @@
       }
 
       try {
-        const snapshot = await db.collection('students').where('authUid', '==', uid).limit(1).get();
-        if (!snapshot.empty) {
-          const doc = snapshot.docs[0];
-          return Object.assign({ firebaseDocId: doc.id }, doc.data());
-        }
+        const snapshot = await db.collection('students').where('authUid', '==', uid).get();
+        snapshot.docs.forEach(function(doc) { addStudentRecord(doc.id, doc.data()); });
       } catch (error) {
         console.warn('student authUid query skipped:', error);
       }
 
-      return null;
+      return result;
     }
 
-    async function loadStudentOwnCollection(collectionName, studentDocId, authUid) {
+    async function getOwnedStudentRecord(userProfile) {
+      const records = await getOwnedStudentRecords(userProfile);
+      return records[0] || null;
+    }
+
+    async function loadStudentOwnCollection(collectionName, studentDocIds, authUid) {
       if (!firebaseReady || !db) return [];
       try {
         const queries = [];
-        if (studentDocId) queries.push(db.collection(collectionName).where('studentId', '==', String(studentDocId)).get());
-        if (authUid) queries.push(db.collection(collectionName).where('authUid', '==', String(authUid)).get());
-        const snapshots = await Promise.all(queries);
+        const ids = Array.isArray(studentDocIds) ? studentDocIds : [studentDocIds];
+        ids.map(function(id) { return String(id || '').trim(); })
+          .filter(function(id, index, list) { return id && list.indexOf(id) === index; })
+          .forEach(function(studentDocId) {
+            queries.push({
+              label: collectionName + ':studentId:' + studentDocId,
+              promise: db.collection(collectionName).where('studentId', '==', studentDocId).get()
+            });
+          });
+        if (authUid) {
+          queries.push({
+            label: collectionName + ':authUid:' + authUid,
+            promise: db.collection(collectionName).where('authUid', '==', String(authUid)).get()
+          });
+        }
+        const snapshots = await Promise.all(queries.map(function(item) {
+          return item.promise.catch(function(error) {
+            console.warn('student ' + item.label + ' query skipped:', error);
+            return null;
+          });
+        }));
         const seen = new Set();
         const result = [];
         for (const snapshot of snapshots) {
+          if (!snapshot) continue;
           for (const doc of snapshot.docs) {
             if (!seen.has(doc.id) && doc.data().deleted !== true) {
               seen.add(doc.id);
@@ -6249,7 +6302,7 @@
       if (studentPaymentBundlesUnsubscribe) { try { studentPaymentBundlesUnsubscribe(); } catch(e) {} studentPaymentBundlesUnsubscribe = null; }
     }
 
-    function startStudentPaymentListeners(studentDocId, authUid) {
+    function startStudentPaymentListeners(studentDocIds, authUid) {
       stopStudentPaymentListeners();
       if (!firebaseReady || !db) return;
 
@@ -6282,17 +6335,21 @@
         safeRun(updateStudentCourseDisplay, 'listener-course-display');
       }
 
-      const paymentsQueries = [];
-      if (studentDocId) paymentsQueries.push(db.collection('payments').where('studentId', '==', String(studentDocId)));
-      if (authUid) paymentsQueries.push(db.collection('payments').where('authUid', '==', String(authUid)));
+      function buildStudentOwnedQueries(collectionName) {
+        const ids = Array.isArray(studentDocIds) ? studentDocIds : [studentDocIds];
+        const queries = [];
+        ids.map(function(id) { return String(id || '').trim(); })
+          .filter(function(id, index, list) { return id && list.indexOf(id) === index; })
+          .forEach(function(studentDocId) {
+            queries.push(db.collection(collectionName).where('studentId', '==', studentDocId));
+          });
+        if (authUid) queries.push(db.collection(collectionName).where('authUid', '==', String(authUid)));
+        return queries;
+      }
 
-      const bundleQueries = [];
-      if (studentDocId) bundleQueries.push(db.collection('paymentBundles').where('studentId', '==', String(studentDocId)));
-      if (authUid) bundleQueries.push(db.collection('paymentBundles').where('authUid', '==', String(authUid)));
-
-      const receiptsQueries = [];
-      if (studentDocId) receiptsQueries.push(db.collection('receipts').where('studentId', '==', String(studentDocId)));
-      if (authUid) receiptsQueries.push(db.collection('receipts').where('authUid', '==', String(authUid)));
+      const paymentsQueries = buildStudentOwnedQueries('payments');
+      const bundleQueries = buildStudentOwnedQueries('paymentBundles');
+      const receiptsQueries = buildStudentOwnedQueries('receipts');
 
       const paymentUnsubs = paymentsQueries.map(function(q) {
         return q.onSnapshot(function(snapshot) {
@@ -6331,16 +6388,15 @@
         role: userProfile && userProfile.role
       });
 
-      const studentRecord = await getOwnedStudentRecord(userProfile);
-      let studentDocId = '';
+      const studentRecords = await getOwnedStudentRecords(userProfile);
+      const normalizedStudents = studentRecords.map(normalizeStudentRecordForSession).filter(Boolean);
+      const studentRecord = normalizedStudents[0] || null;
+      const studentDocIds = normalizedStudents.map(getStudentRecordDocId).filter(function(id, index, list) {
+        return id && list.indexOf(id) === index;
+      });
       if (studentRecord) {
-        const normalizedStudent = sanitizeStudentProfile(Object.assign({}, studentRecord, {
-          id: studentRecord.id || studentRecord.firebaseDocId || studentRecord.authUid || firebaseUser.uid,
-          authUid: studentRecord.authUid || firebaseUser.uid
-        }));
-        studentDocId = normalizedStudent.id;
-        replaceArray(students, [normalizedStudent]);
-        currentStudent = normalizedStudent;
+        replaceArray(students, normalizedStudents);
+        currentStudent = studentRecord;
       }
 
       const results = await Promise.all([
@@ -6351,9 +6407,9 @@
         getFirebaseCollectionQuiet('adminScoreRecords'),
         getFirebaseCollectionQuiet('paymentMonths'),
         getFirebaseCollectionQuiet('lineGroups'),
-        loadStudentOwnCollection('payments', studentDocId, firebaseUser.uid),
-        loadStudentOwnCollection('receipts', studentDocId, firebaseUser.uid),
-        loadStudentOwnCollection('paymentBundles', studentDocId, firebaseUser.uid),
+        loadStudentOwnCollection('payments', studentDocIds, firebaseUser.uid),
+        loadStudentOwnCollection('receipts', studentDocIds, firebaseUser.uid),
+        loadStudentOwnCollection('paymentBundles', studentDocIds, firebaseUser.uid),
         getFirebaseCollectionQuiet('monthlyExamLinks'),
         getFirebaseCollectionQuiet('monthlyPlanSessions')
       ]);
@@ -6374,6 +6430,7 @@
       console.log('student-data-load-success', {
         uid: firebaseUser.uid,
         hasStudent: !!studentRecord,
+        studentCount: normalizedStudents.length,
         scoreRecordsLoaded: results[4].length,
         paymentsLoaded: results[7].length,
         receiptsLoaded: results[8].length,
@@ -6382,7 +6439,7 @@
         monthlyPlanSessionsLoaded: results[11].length,
         collections: ['students:own', 'courses', 'onDemandClips', 'announcements', 'scoreReports', 'adminScoreRecords', 'paymentMonths', 'lineGroups', 'payments:own', 'receipts:own', 'paymentBundles:own', 'monthlyExamLinks', 'monthlyPlanSessions']
       });
-      startStudentPaymentListeners(studentDocId, firebaseUser.uid);
+      startStudentPaymentListeners(studentDocIds, firebaseUser.uid);
       return studentRecord;
     }
 
@@ -14464,6 +14521,39 @@
       });
     }
 
+    function getCurrentStudentFamilyRecords() {
+      if (!currentStudent) return [];
+      const currentAuthUid = String(currentStudent.authUid || (firebaseUser ? firebaseUser.uid : '') || '').trim();
+      const currentId = getStudentRecordDocId(currentStudent);
+      const seen = new Set();
+      return (students || []).filter(function(student) {
+        if (!student) return false;
+        const studentId = getStudentRecordDocId(student);
+        const studentAuthUid = String(student.authUid || '').trim();
+        const isSameAccount = (currentAuthUid && studentAuthUid === currentAuthUid) || (currentId && studentId === currentId);
+        if (!isSameAccount) return false;
+        const key = studentId || studentAuthUid || String(student.memberId || student.studentId || '');
+        if (!key || seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+    }
+
+    function getStudentRecordForPayment(payment) {
+      return getPaymentStudentRecord(payment) || getCurrentStudentFamilyRecords().find(function(student) {
+        return isStudentPaymentRecord(student, payment);
+      }) || null;
+    }
+
+    function isCurrentFamilyPaymentRecord(payment) {
+      if (!currentStudent || !payment) return false;
+      const authUid = firebaseUser ? String(firebaseUser.uid || '') : '';
+      if (authUid && (String(payment.authUid || '') === authUid || String(payment.studentAuthUid || '') === authUid)) return true;
+      return getCurrentStudentFamilyRecords().some(function(student) {
+        return isStudentPaymentRecord(student, payment);
+      });
+    }
+
     function getCurrentStudentRelevantPaymentMonthNames() {
       if (!currentStudent || !currentStudent.courseId) return [];
       const months = getStudentVisiblePayments(currentStudent)
@@ -14609,23 +14699,36 @@
 
     function getCurrentStudentBundlePayments() {
       if (!currentStudent) return [];
-      return getStudentVisiblePayments(currentStudent).filter(function(payment) {
+      const seen = new Set();
+      return (payments || []).filter(function(payment) {
+        if (!isCurrentFamilyPaymentRecord(payment)) return false;
+        if (!(payment.paymentMonth || payment.month || payment.billingMonth)) return false;
+        const paymentId = getPaymentRecordId(payment);
+        if (paymentId && seen.has(paymentId)) return false;
+        if (paymentId) seen.add(paymentId);
         const status = getPaymentDisplayStatus(payment);
         if (status === 'ชำระแล้ว') return false;
         const bundle = getPaymentBundleForPayment(payment);
         return !(bundle && bundle.status !== 'ยกเลิก' && bundle.status !== 'cancelled');
       }).sort(function(a, b) {
+        const sa = getStudentRecordForPayment(a) || {};
+        const sb = getStudentRecordForPayment(b) || {};
+        const memberCompare = String(sa.memberId || a.memberId || '').localeCompare(String(sb.memberId || b.memberId || ''));
+        if (memberCompare !== 0) return memberCompare;
         return compareThaiMonthYear(a.month || '', b.month || '');
       });
     }
 
     function getCurrentStudentPaymentBundles() {
       if (!currentStudent) return [];
+      const authUid = firebaseUser ? String(firebaseUser.uid || '') : '';
       return (paymentBundles || []).filter(function(bundle) {
         if (!bundle || bundle.status === 'ยกเลิก' || bundle.status === 'cancelled') return false;
-        return isStudentPaymentRecord(currentStudent, bundle) ||
+        return (authUid && String(bundle.authUid || '') === authUid) ||
+          getCurrentStudentFamilyRecords().some(function(student) { return isStudentPaymentRecord(student, bundle); }) ||
           (Array.isArray(bundle.paymentItems) && bundle.paymentItems.some(function(item) {
-            return isStudentPaymentRecord(currentStudent, item);
+            return isCurrentFamilyPaymentRecord(item) ||
+              getCurrentStudentFamilyRecords().some(function(student) { return isStudentPaymentRecord(student, item); });
           }));
       }).sort(function(a, b) {
         return String(b.createdAtText || '').localeCompare(String(a.createdAtText || ''));
@@ -14659,24 +14762,37 @@
       if (!confirm('สร้างยอดรวม ' + selected.length + ' รายการ รวม ' + formatPrice(totalAmount) + ' ใช่หรือไม่?')) return;
       const bundleId = createFirebaseDocId('paymentBundles');
       const months = Array.from(new Set(selected.map(function(payment) { return payment.month || '-'; })));
+      const selectedStudents = selected.map(getStudentRecordForPayment).filter(Boolean);
+      const studentIds = Array.from(new Set(selectedStudents.map(getStudentRecordDocId).filter(Boolean)));
+      const memberIds = Array.from(new Set(selected.map(function(payment) {
+        const student = getStudentRecordForPayment(payment) || {};
+        return payment.memberId || student.memberId || student.studentId || '';
+      }).filter(Boolean)));
+      const studentNames = Array.from(new Set(selected.map(function(payment) {
+        const student = getStudentRecordForPayment(payment) || {};
+        return payment.student || student.name || currentStudent.name || '-';
+      })));
       const bundle = {
         id: bundleId,
         firebaseDocId: bundleId,
-        studentId: currentStudent.id || currentStudent.firebaseDocId || '',
-        authUid: currentStudent.authUid || firebaseUser.uid || '',
-        memberId: currentStudent.memberId || currentStudent.studentId || '',
-        student: currentStudent.name || '-',
-        studentNames: Array.from(new Set(selected.map(function(payment) { return payment.student || currentStudent.name || '-'; }))),
+        studentId: studentIds[0] || currentStudent.id || currentStudent.firebaseDocId || '',
+        studentIds: studentIds,
+        authUid: firebaseUser.uid || currentStudent.authUid || '',
+        memberId: memberIds[0] || currentStudent.memberId || currentStudent.studentId || '',
+        memberIds: memberIds,
+        student: studentNames[0] || currentStudent.name || '-',
+        studentNames: studentNames,
         months: months,
         paymentIds: selected.map(getPaymentRecordId),
         paymentItems: selected.map(function(payment) {
+          const student = getStudentRecordForPayment(payment) || {};
           return {
             paymentId: getPaymentRecordId(payment),
-            studentId: payment.studentId || currentStudent.id || '',
-            authUid: payment.authUid || payment.studentAuthUid || currentStudent.authUid || firebaseUser.uid || '',
-            memberId: payment.memberId || currentStudent.memberId || currentStudent.studentId || '',
-            student: payment.student || currentStudent.name || '-',
-            course: payment.course || payment.courseName || currentStudent.course || '-',
+            studentId: payment.studentId || getStudentRecordDocId(student) || currentStudent.id || '',
+            authUid: payment.authUid || payment.studentAuthUid || student.authUid || currentStudent.authUid || firebaseUser.uid || '',
+            memberId: payment.memberId || student.memberId || student.studentId || currentStudent.memberId || currentStudent.studentId || '',
+            student: payment.student || student.name || currentStudent.name || '-',
+            course: payment.course || payment.courseName || student.course || currentStudent.course || '-',
             month: payment.month || '',
             amount: getPaymentFinalAmount(payment)
           };
@@ -14691,7 +14807,7 @@
       };
       paymentBundles.push(bundle);
       await setFirebaseDocument('paymentBundles', bundle);
-      addActivityLog('ผู้ปกครองสร้างยอดรวม', (bundle.student || '-') + ' · ' + months.join(', ') + ' · ' + formatPrice(totalAmount));
+      addActivityLog('ผู้ปกครองสร้างยอดรวม', (bundle.studentNames || []).join(', ') + ' · ' + months.join(', ') + ' · ' + formatPrice(totalAmount));
       renderStudentPaymentBundlePanel();
       renderStudentMobilePayment();
       renderPaymentTable();
@@ -14734,8 +14850,8 @@
           fileName: file.name,
           mimeType: file.type,
           folderType: 'payment-slips',
-          studentId: currentStudent.memberId || currentStudent.studentId || currentStudent.id || '',
-          studentName: currentStudent.name || '',
+          studentId: (bundle.memberIds || [])[0] || currentStudent.memberId || currentStudent.studentId || currentStudent.id || '',
+          studentName: (bundle.studentNames || []).join(', ') || currentStudent.name || '',
           paymentId: bundle.id || bundle.firebaseDocId || '',
           month: (bundle.months || []).join(', '),
           courseId: currentStudent.courseId || '',
@@ -14835,9 +14951,14 @@
       const bundles = getCurrentStudentPaymentBundles();
       const optionRows = bundleable.length ? bundleable.map(function(payment) {
         const paymentId = getPaymentRecordId(payment);
+        const student = getStudentRecordForPayment(payment) || {};
+        const studentName = payment.student || student.name || currentStudent.name || '-';
+        const studentMeta = [student.nickname || '', payment.memberId || student.memberId || student.studentId || ''].filter(Boolean).join(' · ');
         return '<label style="display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid #eef2f7;">' +
           '<input class="studentBundlePaymentCheck" type="checkbox" value="' + escapeHtml(paymentId) + '" onchange="updateStudentBundleSelectionHint()">' +
-          '<span><strong>' + escapeHtml(payment.month || '-') + '</strong><br><span class="mini-muted">' + escapeHtml(payment.course || payment.courseName || '-') + ' · ' + formatPrice(getPaymentFinalAmount(payment)) + ' · ' + escapeHtml(getPaymentDisplayStatus(payment)) + '</span></span>' +
+          '<span><strong>' + escapeHtml(studentName) + '</strong>' +
+            (studentMeta ? ' <span class="mini-muted">(' + escapeHtml(studentMeta) + ')</span>' : '') +
+            '<br><span class="mini-muted">' + escapeHtml(payment.month || '-') + ' · ' + escapeHtml(payment.course || payment.courseName || student.course || '-') + ' · ' + formatPrice(getPaymentFinalAmount(payment)) + ' · ' + escapeHtml(getPaymentDisplayStatus(payment)) + '</span></span>' +
         '</label>';
       }).join('') : '<p class="mini-muted">ยังไม่มีรายการที่สามารถรวมยอดได้</p>';
 
@@ -14849,6 +14970,7 @@
         return '<div class="status-display-row" style="align-items:flex-start;">' +
           '<span>' +
             '<strong>ยอดรวม ' + formatPrice(bundle.totalAmount || bundle.amount || 0) + '</strong><br>' +
+            '<span class="mini-muted">' + escapeHtml((bundle.studentNames || []).join(', ') || '-') + '</span><br>' +
             '<span class="mini-muted">' + escapeHtml((bundle.months || []).join(', ') || '-') + ' · ' + (bundle.itemCount || (bundle.paymentIds || []).length || 0) + ' รายการ</span><br>' +
             '<span class="' + statusClass + '">' + escapeHtml(status) + '</span>' +
             (slipUrl ? '<br><a href="' + escapeHtml(slipUrl) + '" target="_blank" rel="noopener">ดูสลิปที่ส่งแล้ว</a>' : '') +
@@ -14859,8 +14981,9 @@
         '</div>';
       }).join('') : '<p class="mini-muted">ยังไม่มียอดรวมที่สร้างไว้</p>';
 
+      const familyCount = getCurrentStudentFamilyRecords().length;
       const html = '<h3>รวมยอดชำระหลายรายการ</h3>' +
-        '<p class="mini-muted">เลือกหลายเดือน/หลายรายการ แล้วอัปโหลดสลิปครั้งเดียว</p>' +
+        '<p class="mini-muted">เลือกหลายเดือน/หลายรายการ' + (familyCount > 1 ? '/หลายคน' : '') + ' แล้วอัปโหลดสลิปครั้งเดียว</p>' +
         '<div style="margin-top:10px;">' + optionRows + '</div>' +
         '<div class="test-actions" style="margin-top:10px;">' +
           '<button class="btn btn-dark" type="button" onclick="createStudentPaymentBundleFromSelected()">สร้างยอดรวม</button>' +
@@ -14874,7 +14997,7 @@
       if (mobile) {
         mobile.innerHTML = '<div class="student-mobile-media-card">' +
           '<strong>สร้างยอดรวม</strong>' +
-          '<p class="student-mobile-muted">ใช้ช่องเลือกไฟล์สลิปเดียวกับด้านบน แล้วกดอัปโหลดสลิปยอดรวมในรายการที่สร้างไว้</p>' +
+          '<p class="student-mobile-muted">เลือกยอดค้างของเด็กในบัญชีนี้ แล้วใช้ช่องเลือกไฟล์สลิปเดียวกับด้านบนเพื่ออัปโหลดสลิปยอดรวม</p>' +
         '</div>' + optionRows +
         '<div class="student-mobile-actions" style="margin-top:10px;">' +
           '<button class="btn btn-dark" type="button" onclick="createStudentPaymentBundleFromSelected()">สร้างยอดรวม</button>' +
@@ -15840,8 +15963,17 @@
 
     async function issueReceiptFromPaymentBundle(bundle) {
       const items = Array.isArray(bundle.paymentItems) ? bundle.paymentItems : [];
+      const studentIds = Array.from(new Set((bundle.studentIds || items.map(function(item) { return item.studentId || ''; })).filter(Boolean)));
+      const memberIds = Array.from(new Set((bundle.memberIds || items.map(function(item) { return item.memberId || ''; })).filter(Boolean)));
       return await createReceipt({
         paymentId: bundle.id || bundle.firebaseDocId || '',
+        bundleId: bundle.id || bundle.firebaseDocId || '',
+        studentId: studentIds[0] || bundle.studentId || '',
+        studentIds: studentIds,
+        authUid: bundle.authUid || '',
+        memberId: memberIds[0] || bundle.memberId || '',
+        memberIds: memberIds,
+        studentNames: bundle.studentNames || [],
         student: 'ยอดรวม: ' + ((bundle.studentNames || []).join(', ') || '-'),
         course: 'รวมหลายรายการ',
         month: (bundle.months || []).join(', '),
@@ -17585,11 +17717,23 @@
     }
 
     function getPaymentStudentRecord(p) {
-      return students.find(function(s) {
-        return (p.studentId && String(s.id || '') === String(p.studentId)) ||
-               (p.authUid && p.authUid === s.authUid) ||
-               (p.memberId && p.memberId === s.memberId);
-      }) || null;
+      if (!p) return null;
+      const studentId = String(p.studentId || '').trim();
+      const memberId = String(p.memberId || '').trim();
+      const authUid = String(p.authUid || p.studentAuthUid || '').trim();
+      const byStrongId = students.find(function(s) {
+        return (studentId && (
+          String(s.id || '') === studentId ||
+          String(s.firebaseDocId || '') === studentId ||
+          String(s.studentId || '') === studentId
+        )) ||
+        (memberId && String(s.memberId || s.studentId || '').trim() === memberId);
+      });
+      if (byStrongId) return byStrongId;
+      const authMatches = students.filter(function(s) {
+        return authUid && String(s.authUid || '').trim() === authUid;
+      });
+      return authMatches.length === 1 ? authMatches[0] : null;
     }
 
     function getPaymentDashboardFilterScope() {
