@@ -11092,11 +11092,10 @@
       if (getElement('dashPendingPayments')) getElement('dashPendingPayments').textContent = pendingPaymentRecords.length + ' รายการ';
       if (getElement('dashOverdueStudents')) getElement('dashOverdueStudents').textContent = overduePaymentRecords.length + ' รายการ';
       if (getElement('dashPendingCourses')) getElement('dashPendingCourses').textContent = pendingCourseStudents.length + ' คน';
-      if (getElement('overdueCount')) getElement('overdueCount').textContent = overduePaymentRecords.length + ' รายการ';
-      if (getElement('pendingSlipCount')) getElement('pendingSlipCount').textContent = pendingPaymentRecords.length + ' รายการ';
       if (getElement('pickupWaitingCount')) getElement('pickupWaitingCount').textContent = todayAbsent + ' คน';
       renderAdminTodoList();
       renderDashboardPaymentSummary();
+      if (getElement('paymentTableBody')) updatePaymentSummary();
     }
 
     let adminStudentCurrentPage = 1;
@@ -17048,26 +17047,74 @@
       }) || null;
     }
 
+    function getPaymentDashboardFilterScope() {
+      return {
+        month: getElement('paymentStatusMonthFilter') ? getElement('paymentStatusMonthFilter').value : 'ทั้งหมด',
+        location: getElement('paymentStatusLocationFilter') ? getElement('paymentStatusLocationFilter').value : 'ทั้งหมด',
+        grade: getElement('paymentStatusGradeFilter') ? getElement('paymentStatusGradeFilter').value : 'ทั้งหมด',
+        status: getElement('paymentStatusStateFilter') ? getElement('paymentStatusStateFilter').value : 'ทั้งหมด',
+        keyword: getElement('paymentSearchKeyword') ? getElement('paymentSearchKeyword').value.trim().toLowerCase() : ''
+      };
+    }
+
+    function getPaymentRecordCourseAndStudent(payment) {
+      const student = getPaymentStudentRecord(payment);
+      const course = getCourseByStudentOrName(student, payment.course || payment.courseName || '');
+      return { student: student, course: course };
+    }
+
+    function paymentMatchesDashboardScope(payment, scope, includeStatus) {
+      const data = getPaymentRecordCourseAndStudent(payment);
+      const student = data.student;
+      const course = data.course;
+      const monthText = String(payment.month || '');
+      const statusText = getPaymentDisplayStatus(payment);
+      const locationText = course ? (course.location || '') : '';
+      const gradeText = student ? (student.grade || '') : (course ? (course.grade || '') : '');
+      const rowText = [
+        payment.student || '',
+        payment.studentName || '',
+        student ? (student.name || '') : '',
+        student ? (student.nickname || '') : '',
+        payment.course || '',
+        payment.courseName || '',
+        payment.month || '',
+        payment.memberId || '',
+        student ? (student.memberId || '') : '',
+        payment.adminNote || ''
+      ].join(' ').toLowerCase();
+      return (scope.month === 'ทั้งหมด' || monthText === scope.month) &&
+        (scope.location === 'ทั้งหมด' || locationText === scope.location) &&
+        (scope.grade === 'ทั้งหมด' || gradeText === scope.grade) &&
+        (!includeStatus || scope.status === 'ทั้งหมด' || statusText.includes(scope.status)) &&
+        (!scope.keyword || rowText.includes(scope.keyword));
+    }
+
+    function getDashboardScopedPayments(includeStatus) {
+      const scope = getPaymentDashboardFilterScope();
+      return payments.filter(function(payment) {
+        return paymentMatchesDashboardScope(payment, scope, includeStatus);
+      });
+    }
+
+    function studentMatchesPaymentDashboardScope(student, scope) {
+      const course = getCourseByStudentOrName(student, student ? student.course : '');
+      const locationText = course ? (course.location || '') : '';
+      const gradeText = student ? (student.grade || '') : '';
+      const rowText = [
+        student ? (student.name || '') : '',
+        student ? (student.nickname || '') : '',
+        student ? (student.memberId || student.studentId || '') : '',
+        student ? (student.course || '') : '',
+        course ? (course.name || '') : ''
+      ].join(' ').toLowerCase();
+      return (scope.location === 'ทั้งหมด' || locationText === scope.location) &&
+        (scope.grade === 'ทั้งหมด' || gradeText === scope.grade) &&
+        (!scope.keyword || rowText.includes(scope.keyword));
+    }
+
     function getFilteredPaymentsForTable() {
-      const selectedMonth = getElement('paymentStatusMonthFilter') ? getElement('paymentStatusMonthFilter').value : 'ทั้งหมด';
-      const selectedLocation = getElement('paymentStatusLocationFilter') ? getElement('paymentStatusLocationFilter').value : 'ทั้งหมด';
-      const selectedGrade = getElement('paymentStatusGradeFilter') ? getElement('paymentStatusGradeFilter').value : 'ทั้งหมด';
-      const selectedStatus = getElement('paymentStatusStateFilter') ? getElement('paymentStatusStateFilter').value : 'ทั้งหมด';
-      const keyword = getElement('paymentSearchKeyword') ? getElement('paymentSearchKeyword').value.trim().toLowerCase() : '';
-      return payments.filter(function(p) {
-        const monthText = String(p.month || '');
-        const statusText = getPaymentDisplayStatus(p);
-        const student = getPaymentStudentRecord(p);
-        const course = getCourseByStudentOrName(student, p.course || p.courseName || '');
-        const locationText = course ? (course.location || '') : '';
-        const gradeText = student ? (student.grade || '') : (course ? (course.grade || '') : '');
-        const rowText = [p.student || '', p.course || '', p.month || '', p.memberId || '', p.adminNote || ''].join(' ').toLowerCase();
-        return (selectedMonth === 'ทั้งหมด' || monthText === selectedMonth) &&
-          (selectedLocation === 'ทั้งหมด' || locationText === selectedLocation) &&
-          (selectedGrade === 'ทั้งหมด' || gradeText === selectedGrade) &&
-          (selectedStatus === 'ทั้งหมด' || statusText.includes(selectedStatus)) &&
-          (!keyword || rowText.includes(keyword));
-      }).sort(function(a, b) {
+      return getDashboardScopedPayments(true).sort(function(a, b) {
         const sA = getPaymentStudentRecord(a);
         const sB = getPaymentStudentRecord(b);
         const gDiff = gradeOrder(sB ? sB.grade : '') - gradeOrder(sA ? sA.grade : '');
@@ -17111,7 +17158,7 @@
     }
 
     function updatePaymentSummary() {
-      const filtered = getFilteredPaymentsForTable();
+      const filtered = getDashboardScopedPayments(false);
       let pending = 0, overdue = 0, paid = 0;
       filtered.forEach(function(p) {
         const statusText = getPaymentDisplayStatus(p);
@@ -25994,18 +26041,24 @@ function receiptStatusText(status) {
     }
 
     function updatePaymentAmountSummary() {
-      const selectedMonth = getElement('paymentStatusMonthFilter') ? getElement('paymentStatusMonthFilter').value : 'ทั้งหมด';
-      const monthForExpected = selectedMonth && selectedMonth !== 'ทั้งหมด' ? selectedMonth : (paymentMonths[0] ? paymentMonths[0].month : '');
-      const visiblePayments = getFilteredPaymentsForTable();
-      const paidAmount = visiblePayments
-        .filter(function(p) { return p.status === 'ชำระแล้ว'; })
+      const scope = getPaymentDashboardFilterScope();
+      const scopedPayments = getDashboardScopedPayments(false);
+      const paidAmount = scopedPayments
+        .filter(function(p) { return getPaymentDisplayStatus(p) === 'ชำระแล้ว'; })
         .reduce(function(sum, p) { return sum + getPaymentFinalAmount(p); }, 0);
 
-      const targetStudents = students.filter(function(s) { return isActiveStudentForDashboard(s) && s.courseId; });
       let expectedAmount = 0;
-      targetStudents.forEach(function(s) {
-        expectedAmount += getExpectedPaymentAmountForStudent(s, monthForExpected);
-      });
+      if (scope.month && scope.month !== 'ทั้งหมด') {
+        const targetStudents = getMonthlyPaymentTargetStudentsForMonth(scope.month)
+          .filter(function(student) { return studentMatchesPaymentDashboardScope(student, scope); });
+        expectedAmount = targetStudents.reduce(function(sum, student) {
+          const payment = findPaymentForStudentMonth(student, scope.month);
+          return sum + (payment ? getPaymentFinalAmount(payment) : getExpectedPaymentAmountForStudent(student, scope.month));
+        }, 0);
+      } else {
+        expectedAmount = scopedPayments.reduce(function(sum, p) { return sum + getPaymentFinalAmount(p); }, 0);
+      }
+
       if (getElement('paidAmountThisMonth')) getElement('paidAmountThisMonth').textContent = formatPrice(paidAmount);
       if (getElement('expectedAmountThisMonth')) getElement('expectedAmountThisMonth').textContent = formatPrice(expectedAmount);
     }
