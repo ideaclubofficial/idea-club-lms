@@ -4250,19 +4250,25 @@
               <table>
                 <thead>
                   <tr>
-                    <th class="sortable" onclick="sortStaticTable(this, 0)">นักเรียน</th>
-                    <th class="sortable" onclick="sortStaticTable(this, 1)">คอร์ส</th>
-                    <th class="sortable" onclick="sortStaticTable(this, 2)">เดือนที่ชำระ</th>
-                    <th class="sortable" onclick="sortStaticTable(this, 3)">ยอดเงิน</th>
-                    <th class="sortable" onclick="sortStaticTable(this, 4)">สลิป</th>
-                    <th class="sortable" onclick="sortStaticTable(this, 5)">สถานะ</th>
+                    <th><input type="checkbox" id="paymentBundleSelectAll" onchange="togglePaymentBundleSelectAll(this)"></th>
+                    <th class="sortable" onclick="sortStaticTable(this, 1)">นักเรียน</th>
+                    <th class="sortable" onclick="sortStaticTable(this, 2)">คอร์ส</th>
+                    <th class="sortable" onclick="sortStaticTable(this, 3)">เดือนที่ชำระ</th>
+                    <th class="sortable" onclick="sortStaticTable(this, 4)">ยอดเงิน</th>
+                    <th class="sortable" onclick="sortStaticTable(this, 5)">สลิป</th>
+                    <th class="sortable" onclick="sortStaticTable(this, 6)">สถานะ</th>
                     <th>จัดการ</th>
                   </tr>
                 </thead>
                 <tbody id="paymentTableBody"></tbody>
               </table>
             </div>
+            <div class="test-actions" style="margin-top:10px;">
+              <button class="btn btn-dark" type="button" onclick="createPaymentBundleFromSelected()">สร้างยอดรวมจากรายการที่เลือก</button>
+              <span id="paymentBundleSelectionHint" class="mini-muted">เลือกรายการรอชำระ/ค้างชำระหลายรายการเพื่อรวมยอด</span>
+            </div>
             <div id="paymentTablePagination" class="test-actions" style="margin-top:10px;"></div>
+            <div id="paymentBundlePanel" class="form-box" style="margin-top:18px;"></div>
 
             <br />
           </section>
@@ -6865,6 +6871,7 @@
         getFirebaseCollection('lineGroups'),
         getFirebaseCollection('payments'),
         getFirebaseCollection('receipts'),
+        getFirebaseCollection('paymentBundles'),
         getFirebaseCollection('monthlyQuestions'),
         getFirebaseCollection('monthlyExamLinks'),
         getFirebaseCollection('monthlyPlans'),
@@ -6886,17 +6893,18 @@
       replaceArray(lineGroups, results[5]);
       replaceArray(payments, results[6]);
       replaceArray(receipts, results[7]);
-      replaceArray(monthlyQuestions, results[8]);
-      replaceArray(monthlyExamLinks, results[9]);
-      replaceArray(monthlyPlans, results[10]);
-      replaceArray(courseTeachingSettings, results[11]);
-      replaceArray(monthlyPlanSessions, results[12]);
-      replaceArray(teacherPreferenceRules, results[13]);
-      replaceArray(holidays, results[14]);
-      replaceArray(pickupHistory, results[15]);
-      replaceArray(announcements, results[16]);
-      replaceArray(activityLogs, results[17]);
-      const settingsItems = results[18];
+      replaceArray(paymentBundles, results[8]);
+      replaceArray(monthlyQuestions, results[9]);
+      replaceArray(monthlyExamLinks, results[10]);
+      replaceArray(monthlyPlans, results[11]);
+      replaceArray(courseTeachingSettings, results[12]);
+      replaceArray(monthlyPlanSessions, results[13]);
+      replaceArray(teacherPreferenceRules, results[14]);
+      replaceArray(holidays, results[15]);
+      replaceArray(pickupHistory, results[16]);
+      replaceArray(announcements, results[17]);
+      replaceArray(activityLogs, results[18]);
+      const settingsItems = results[19];
       const mainSettings = settingsItems.find(function(item) { return item.id === 'main' || item.firebaseDocId === 'main'; });
       if (mainSettings) systemSettings = Object.assign(systemSettings, mainSettings);
       // Sync pre-repair: fix in-memory status immediately so first render is correct
@@ -7531,6 +7539,7 @@
     const paymentMonths = [];
     const lineGroups = [];
     const payments = [];
+    const paymentBundles = [];
 
     const receipts = [];
     let receiptRunningNumber = 1;
@@ -15377,6 +15386,14 @@
       const isPaid = status === 'ชำระแล้ว';
       const rowIdScript = 'openSlipReviewModal(this.closest(\'[data-payment-id]\').dataset.paymentId)';
       const p = paymentId ? (payments || []).find(function(px) { return String(px.id || '') === String(paymentId) || String(px.firebaseDocId || '') === String(paymentId); }) : null;
+      const bundle = getPaymentBundleForPayment(p);
+      if (bundle && bundle.status !== 'ยกเลิก' && bundle.status !== 'cancelled') {
+        return '<div class="payment-actions-wrap">' +
+          '<button class="btn btn-dark" type="button" onclick="scrollPaymentBundlePanel()">จัดการที่ยอดรวม</button>' +
+          '<button class="btn btn-blue" type="button" onclick="showPaymentDetail(this)">ดูข้อมูล</button>' +
+          '<button class="btn btn-dark" type="button" onclick="editPaymentAdminNote(this)">หมายเหตุ</button>' +
+        '</div>';
+      }
       const ocrBtn = p && paymentHasOcrData(p) ? '<button class="btn btn-blue" type="button" onclick="' + actionCall('viewPaymentOcrDetail', paymentId) + '">OCR</button>' : '';
       return '<div class="payment-actions-wrap">' +
         '<button class="btn btn-blue" type="button" onclick="' + rowIdScript + '">ตรวจสลิป</button>' +
@@ -15397,6 +15414,268 @@
       return (payments || []).find(function(p) {
         return String(p.id || '') === String(paymentId) || String(p.firebaseDocId || '') === String(paymentId);
       }) || null;
+    }
+
+    function scrollPaymentBundlePanel() {
+      const panel = getElement('paymentBundlePanel');
+      if (panel) panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+
+    function getPaymentRecordId(payment) {
+      return String((payment && (payment.id || payment.firebaseDocId)) || '');
+    }
+
+    function findPaymentBundleById(bundleId) {
+      return (paymentBundles || []).find(function(bundle) {
+        return String(bundle.id || '') === String(bundleId) || String(bundle.firebaseDocId || '') === String(bundleId);
+      }) || null;
+    }
+
+    function getPaymentBundleForPayment(payment) {
+      const bundleId = payment && payment.bundleId ? String(payment.bundleId) : '';
+      return bundleId ? findPaymentBundleById(bundleId) : null;
+    }
+
+    function canPaymentBeBundled(payment) {
+      if (!payment) return false;
+      const status = getPaymentDisplayStatus(payment);
+      if (status === 'ชำระแล้ว') return false;
+      const bundle = getPaymentBundleForPayment(payment);
+      if (bundle && bundle.status !== 'ยกเลิก' && bundle.status !== 'cancelled') return false;
+      return true;
+    }
+
+    function getSelectedPaymentBundlePayments() {
+      return Array.from(document.querySelectorAll('.paymentBundleRowCheck:checked'))
+        .map(function(input) { return findPaymentByAnyId(input.value); })
+        .filter(Boolean);
+    }
+
+    function togglePaymentBundleSelectAll(checkbox) {
+      document.querySelectorAll('.paymentBundleRowCheck:not(:disabled)').forEach(function(input) {
+        input.checked = !!checkbox.checked;
+      });
+      updatePaymentBundleSelectionHint();
+    }
+
+    function updatePaymentBundleSelectionHint() {
+      const hint = getElement('paymentBundleSelectionHint');
+      if (!hint) return;
+      const selected = getSelectedPaymentBundlePayments();
+      const total = selected.reduce(function(sum, payment) { return sum + getPaymentFinalAmount(payment); }, 0);
+      hint.textContent = selected.length
+        ? 'เลือกแล้ว ' + selected.length + ' รายการ · รวม ' + formatPrice(total)
+        : 'เลือกรายการรอชำระ/ค้างชำระหลายรายการเพื่อรวมยอด';
+    }
+
+    async function createPaymentBundleFromSelected() {
+      if (!hasPermission('admin.finance') && !hasPermission('admin.full')) { alert('ไม่มีสิทธิ์จัดการการเงิน'); return; }
+      const selected = getSelectedPaymentBundlePayments().filter(canPaymentBeBundled);
+      if (selected.length < 2) {
+        alert('กรุณาเลือกรายการที่ยังไม่ชำระอย่างน้อย 2 รายการเพื่อรวมยอด');
+        return;
+      }
+      const totalAmount = selected.reduce(function(sum, payment) { return sum + getPaymentFinalAmount(payment); }, 0);
+      const studentNames = Array.from(new Set(selected.map(function(payment) { return payment.student || '-'; })));
+      const months = Array.from(new Set(selected.map(function(payment) { return payment.month || '-'; })));
+      if (!confirm('สร้างยอดรวม ' + selected.length + ' รายการ รวม ' + formatPrice(totalAmount) + ' ใช่หรือไม่?')) return;
+
+      const bundleId = createFirebaseDocId('paymentBundles');
+      const bundle = {
+        id: bundleId,
+        firebaseDocId: bundleId,
+        status: 'รอชำระเงิน',
+        paymentStatus: 'รอชำระเงิน',
+        paymentIds: selected.map(getPaymentRecordId),
+        paymentItems: selected.map(function(payment) {
+          const student = getPaymentStudentRecord(payment) || {};
+          return {
+            paymentId: getPaymentRecordId(payment),
+            studentId: payment.studentId || student.id || student.firebaseDocId || '',
+            authUid: payment.authUid || payment.studentAuthUid || student.authUid || '',
+            memberId: payment.memberId || student.memberId || student.studentId || '',
+            student: payment.student || student.name || '-',
+            course: payment.course || payment.courseName || '-',
+            month: payment.month || '',
+            amount: getPaymentFinalAmount(payment)
+          };
+        }),
+        studentNames: studentNames,
+        months: months,
+        totalAmount: totalAmount,
+        amount: totalAmount,
+        itemCount: selected.length,
+        createdAtText: new Date().toLocaleString('th-TH'),
+        createdByName: (getElement('profileName') ? getElement('profileName').textContent : '') || 'Admin IDEA CLUB'
+      };
+
+      paymentBundles.push(bundle);
+      await setFirebaseDocument('paymentBundles', bundle);
+      for (let i = 0; i < selected.length; i++) {
+        selected[i].bundleId = bundleId;
+        selected[i].bundleStatus = bundle.status;
+        selected[i].paidByBundle = false;
+        await setFirebaseDocument('payments', selected[i]);
+      }
+      addActivityLog('สร้างยอดรวมหลายรายการ', studentNames.join(', ') + ' · ' + months.join(', ') + ' · ' + formatPrice(totalAmount));
+      renderPaymentTable();
+      renderPaymentBundlePanel();
+    }
+
+    function paymentBundleMatchesScope(bundle, scope) {
+      if (!bundle) return false;
+      const items = Array.isArray(bundle.paymentItems) ? bundle.paymentItems : [];
+      if (!items.length) return false;
+      return items.some(function(item) {
+        const payment = findPaymentByAnyId(item.paymentId) || item;
+        return paymentMatchesDashboardScope(payment, scope, false);
+      });
+    }
+
+    function renderPaymentBundlePanel() {
+      const box = getElement('paymentBundlePanel');
+      if (!box) return;
+      const scope = getPaymentDashboardFilterScope();
+      const visibleBundles = (paymentBundles || [])
+        .filter(function(bundle) { return bundle.status !== 'ยกเลิก' && bundle.status !== 'cancelled'; })
+        .filter(function(bundle) { return paymentBundleMatchesScope(bundle, scope); })
+        .sort(function(a, b) { return String(b.createdAtText || '').localeCompare(String(a.createdAtText || '')); });
+
+      if (!visibleBundles.length) {
+        box.innerHTML = '<h3>ยอดรวมหลายรายการ</h3><p class="mini-muted">ยังไม่มียอดรวมตามตัวกรองนี้</p>';
+        return;
+      }
+
+      box.innerHTML = '<h3>ยอดรวมหลายรายการ</h3>' +
+        '<p class="mini-muted" style="margin-bottom:12px;">รวม payment หลายรายการไว้ตรวจสลิปและอนุมัติครั้งเดียว</p>' +
+        visibleBundles.map(function(bundle) {
+          const items = Array.isArray(bundle.paymentItems) ? bundle.paymentItems : [];
+          const status = bundle.status || 'รอชำระเงิน';
+          const statusClass = status === 'ชำระแล้ว' ? 'status-paid' : (status === 'สลิปไม่ผ่าน' ? 'status-absent' : 'status-waiting');
+          const detail = items.slice(0, 4).map(function(item) {
+            return escapeHtml((item.student || '-') + ' · ' + (item.month || '-') + ' · ' + formatPrice(item.amount || 0));
+          }).join('<br>');
+          const more = items.length > 4 ? '<br><span class="mini-muted">และอีก ' + (items.length - 4) + ' รายการ</span>' : '';
+          const receiptText = bundle.receiptNo ? '<span class="mini-muted">ใบเสร็จ: ' + escapeHtml(bundle.receiptNo) + '</span>' : '';
+          return '<div class="status-display-row" style="align-items:flex-start;">' +
+            '<span>' +
+              '<strong>' + escapeHtml((bundle.studentNames || []).join(', ') || '-') + '</strong><br>' +
+              '<span class="mini-muted">' + escapeHtml((bundle.months || []).join(', ') || '-') + ' · ' + items.length + ' รายการ · รวม ' + formatPrice(bundle.totalAmount || bundle.amount || 0) + '</span><br>' +
+              '<span class="' + statusClass + '">' + escapeHtml(status) + '</span> ' + receiptText +
+              '<div style="margin-top:6px;">' + detail + more + '</div>' +
+            '</span>' +
+            '<span class="test-actions" style="justify-content:flex-end;margin:0;">' +
+              (status !== 'ชำระแล้ว' ? '<button class="btn btn-green" type="button" onclick="approvePaymentBundle(\'' + jsArg(bundle.id || bundle.firebaseDocId) + '\')">อนุมัติยอดรวม</button>' : '') +
+              (status !== 'สลิปไม่ผ่าน' && status !== 'ชำระแล้ว' ? '<button class="btn btn-red" type="button" onclick="rejectPaymentBundle(\'' + jsArg(bundle.id || bundle.firebaseDocId) + '\')">ไม่ผ่าน</button>' : '') +
+              '<button class="btn btn-dark" type="button" onclick="cancelPaymentBundle(\'' + jsArg(bundle.id || bundle.firebaseDocId) + '\')">ยกเลิกยอดรวม</button>' +
+            '</span>' +
+          '</div>';
+        }).join('');
+    }
+
+    async function issueReceiptFromPaymentBundle(bundle) {
+      const items = Array.isArray(bundle.paymentItems) ? bundle.paymentItems : [];
+      return await createReceipt({
+        paymentId: bundle.id || bundle.firebaseDocId || '',
+        student: 'ยอดรวม: ' + ((bundle.studentNames || []).join(', ') || '-'),
+        course: 'รวมหลายรายการ',
+        month: (bundle.months || []).join(', '),
+        amount: String(bundle.totalAmount || bundle.amount || 0),
+        lineItems: items.map(function(item) {
+          return {
+            type: 'paymentBundleItem',
+            label: (item.student || '-') + ' · ' + (item.month || '-') + ' · ' + (item.course || '-'),
+            amount: Number(item.amount || 0) || 0
+          };
+        }),
+        status: 'ชำระแล้ว'
+      }, { publish: true, silent: true, source: 'issueReceiptFromPaymentBundle' });
+    }
+
+    async function approvePaymentBundle(bundleId) {
+      const bundle = findPaymentBundleById(bundleId);
+      if (!bundle) return;
+      if (!confirm('อนุมัติยอดรวม ' + formatPrice(bundle.totalAmount || bundle.amount || 0) + ' และอัปเดตรายการย่อยทั้งหมด?')) return;
+      bundle.status = 'ชำระแล้ว';
+      bundle.paymentStatus = 'ชำระแล้ว';
+      bundle.slipStatus = 'approved';
+      bundle.approvedAtText = new Date().toLocaleString('th-TH');
+      const receipt = await issueReceiptFromPaymentBundle(bundle);
+      if (receipt) {
+        bundle.receiptId = receipt.id || '';
+        bundle.receiptNo = receipt.receiptNo || '';
+        bundle.receiptStatus = 'published';
+      }
+      await setFirebaseDocument('paymentBundles', bundle);
+      const paymentIds = bundle.paymentIds || [];
+      for (let i = 0; i < paymentIds.length; i++) {
+        const payment = findPaymentByAnyId(paymentIds[i]);
+        if (!payment) continue;
+        payment.status = 'ชำระแล้ว';
+        payment.paymentStatus = 'ชำระแล้ว';
+        payment.slipStatus = 'approved';
+        payment.paidByBundle = true;
+        payment.bundleId = bundle.id || bundle.firebaseDocId || '';
+        payment.bundleStatus = bundle.status;
+        payment.receiptId = bundle.receiptId || payment.receiptId || '';
+        payment.receiptNo = bundle.receiptNo || payment.receiptNo || '';
+        payment.receiptStatus = 'published';
+        await setFirebaseDocument('payments', payment);
+        await syncStudentPaymentStatusFromPayment(payment, 'ชำระแล้ว');
+      }
+      addActivityLog('อนุมัติยอดรวมหลายรายการ', ((bundle.studentNames || []).join(', ') || '-') + ' · ' + formatPrice(bundle.totalAmount || bundle.amount || 0));
+      renderPaymentTable();
+      renderPaymentBundlePanel();
+      renderAdminReceipts();
+      renderStudentReceipts();
+      safeRun(renderStudentMobilePayment, 'approve-payment-bundle-mobile');
+    }
+
+    async function rejectPaymentBundle(bundleId) {
+      const bundle = findPaymentBundleById(bundleId);
+      if (!bundle) return;
+      if (!confirm('ตั้งยอดรวมนี้เป็นสลิปไม่ผ่าน และอัปเดตรายการย่อยทั้งหมด?')) return;
+      bundle.status = 'สลิปไม่ผ่าน';
+      bundle.paymentStatus = 'สลิปไม่ผ่าน';
+      bundle.slipStatus = 'rejected';
+      bundle.rejectedAtText = new Date().toLocaleString('th-TH');
+      await setFirebaseDocument('paymentBundles', bundle);
+      const paymentIds = bundle.paymentIds || [];
+      for (let i = 0; i < paymentIds.length; i++) {
+        const payment = findPaymentByAnyId(paymentIds[i]);
+        if (!payment) continue;
+        payment.status = 'สลิปไม่ผ่าน';
+        payment.paymentStatus = 'สลิปไม่ผ่าน';
+        payment.slipStatus = 'rejected';
+        payment.bundleId = bundle.id || bundle.firebaseDocId || '';
+        payment.bundleStatus = bundle.status;
+        await setFirebaseDocument('payments', payment);
+        await syncStudentPaymentStatusFromPayment(payment, 'สลิปไม่ผ่าน');
+      }
+      addActivityLog('ยอดรวมหลายรายการไม่ผ่าน', ((bundle.studentNames || []).join(', ') || '-') + ' · ' + formatPrice(bundle.totalAmount || bundle.amount || 0));
+      renderPaymentTable();
+      renderPaymentBundlePanel();
+    }
+
+    async function cancelPaymentBundle(bundleId) {
+      const bundle = findPaymentBundleById(bundleId);
+      if (!bundle) return;
+      if (!confirm('ยกเลิกยอดรวมนี้? รายการย่อยจะกลับไปเป็นรายการเดี่ยว')) return;
+      bundle.status = 'ยกเลิก';
+      bundle.cancelledAtText = new Date().toLocaleString('th-TH');
+      await setFirebaseDocument('paymentBundles', bundle);
+      const paymentIds = bundle.paymentIds || [];
+      for (let i = 0; i < paymentIds.length; i++) {
+        const payment = findPaymentByAnyId(paymentIds[i]);
+        if (!payment) continue;
+        payment.bundleId = '';
+        payment.bundleStatus = '';
+        payment.paidByBundle = false;
+        await setFirebaseDocument('payments', payment);
+      }
+      addActivityLog('ยกเลิกยอดรวมหลายรายการ', ((bundle.studentNames || []).join(', ') || '-'));
+      renderPaymentTable();
+      renderPaymentBundlePanel();
     }
 
     async function syncStudentPaymentStatusFromPayment(payment, status) {
@@ -17138,15 +17417,31 @@
         const pid = p.id || p.firebaseDocId || '';
         const statusText = getPaymentDisplayStatus(p);
         const statusClass = statusText === 'ชำระแล้ว' ? 'status-paid' : statusText === 'ค้างชำระ' || statusText === 'สลิปไม่ผ่าน' || statusText === 'ไม่ผ่าน' ? 'status-absent' : 'status-waiting';
+        const bundle = getPaymentBundleForPayment(p);
+        const bundleText = bundle && bundle.status !== 'ยกเลิก' && bundle.status !== 'cancelled'
+          ? '<br><span class="tag">ยอดรวม: ' + escapeHtml(bundle.status || '-') + '</span>'
+          : '';
         const student = getPaymentStudentRecord(p);
         const nickname = student ? (student.nickname || '') : '';
         const memberId = student ? (student.memberId || p.memberId || '') : (p.memberId || '');
         const nameCell = '<strong>' + escapeHtml(p.student || '-') + '</strong>' +
           (nickname ? ' <span style="color:#6b7280;font-weight:400;font-size:13px;">(' + escapeHtml(nickname) + ')</span>' : '') +
           (memberId ? '<br><span class="mini-muted">' + escapeHtml(memberId) + '</span>' : '');
-        return '<tr data-payment-id="' + escapeHtml(pid) + '"><td style="word-break:break-word;white-space:normal;">' + nameCell + '</td><td>' + renderPaymentCourseText(p) + '</td><td>' + (p.month || '-') + '</td><td>' + renderPaymentAmountText(p) + '</td><td>' + slipCell + '</td><td><span class="' + statusClass + '">' + statusText + '</span></td><td>' + paymentActionButtons(p.status || p.paymentStatus || 'รอชำระเงิน', pid) + '</td></tr>';
-      }).join('') : '<tr><td colspan="7">ยังไม่มีรายการชำระเงินตามเงื่อนไขที่เลือก</td></tr>';
+        return '<tr data-payment-id="' + escapeHtml(pid) + '">' +
+          '<td style="text-align:center;"><input type="checkbox" class="paymentBundleRowCheck" value="' + escapeHtml(pid) + '"' + (canPaymentBeBundled(p) ? '' : ' disabled') + ' onchange="updatePaymentBundleSelectionHint()"></td>' +
+          '<td style="word-break:break-word;white-space:normal;">' + nameCell + bundleText + '</td>' +
+          '<td>' + renderPaymentCourseText(p) + '</td>' +
+          '<td>' + (p.month || '-') + '</td>' +
+          '<td>' + renderPaymentAmountText(p) + '</td>' +
+          '<td>' + slipCell + '</td>' +
+          '<td><span class="' + statusClass + '">' + statusText + '</span></td>' +
+          '<td>' + paymentActionButtons(p.status || p.paymentStatus || 'รอชำระเงิน', pid) + '</td>' +
+        '</tr>';
+      }).join('') : '<tr><td colspan="8">ยังไม่มีรายการชำระเงินตามเงื่อนไขที่เลือก</td></tr>';
       renderTablePagination('paymentTablePagination', paymentCurrentPage, ptTotalPages, filtered.length, 'changePaymentPage');
+      if (getElement('paymentBundleSelectAll')) getElement('paymentBundleSelectAll').checked = false;
+      updatePaymentBundleSelectionHint();
+      renderPaymentBundlePanel();
       updatePaymentSummary();
     }
 
@@ -17456,7 +17751,7 @@
       const exists = receipts.find(function(r) {
         const samePayment = data.paymentId && String(r.paymentId || '') === String(data.paymentId);
         const sameInfo = r.student === data.student && r.course === data.course && getReceiptMonth(r) === receiptMonth;
-        return samePayment || sameInfo;
+        return data.paymentId ? samePayment : sameInfo;
       });
 
       if (exists) {
@@ -26518,6 +26813,7 @@ function receiptStatusText(status) {
         teachers: teachers || [],
         courses: courses || [],
         payments: payments || [],
+        paymentBundles: paymentBundles || [],
         receipts: receipts || [],
         paymentMonths: paymentMonths || [],
         lineGroups: lineGroups || [],
@@ -26645,10 +26941,10 @@ function receiptStatusText(status) {
     }
 
     const HARD_WIPE_TARGETS = [
-      { key: 'wipeAllSystem', label: 'Wipe ทั้งหมด', collections: ['students', 'payments', 'receipts', 'paymentMonths', 'monthlyQuestions', 'monthlyExamLinks', 'monthlyPlans', 'monthlyPlanSessions', 'holidays', 'scoreReports', 'adminScoreRecords', 'announcements', 'activityLogs', 'onDemandClips', 'attendanceHistory', 'courses', 'teachers', 'lineGroups', 'settings'], studentUsers: true, dangerous: true },
+      { key: 'wipeAllSystem', label: 'Wipe ทั้งหมด', collections: ['students', 'payments', 'paymentBundles', 'receipts', 'paymentMonths', 'monthlyQuestions', 'monthlyExamLinks', 'monthlyPlans', 'monthlyPlanSessions', 'holidays', 'scoreReports', 'adminScoreRecords', 'announcements', 'activityLogs', 'onDemandClips', 'attendanceHistory', 'courses', 'teachers', 'lineGroups', 'settings'], studentUsers: true, dangerous: true },
       { key: 'students', label: 'นักเรียน', collections: ['students'] },
       { key: 'studentUsers', label: 'บัญชี users ของนักเรียน', studentUsers: true },
-      { key: 'finance', label: 'การเงิน / ใบเสร็จ / รอบชำระเงิน', collections: ['payments', 'receipts', 'paymentMonths'] },
+      { key: 'finance', label: 'การเงิน / ใบเสร็จ / รอบชำระเงิน', collections: ['payments', 'paymentBundles', 'receipts', 'paymentMonths'] },
       { key: 'scores', label: 'สอบ / คะแนน', collections: ['monthlyQuestions', 'monthlyExamLinks', 'scoreReports', 'adminScoreRecords'] },
       { key: 'monthlyPlanner', label: 'แผนสอนรายเดือน', collections: ['monthlyPlans', 'monthlyPlanSessions', 'holidays'] },
       { key: 'announcements', label: 'ประกาศ', collections: ['announcements'] },
