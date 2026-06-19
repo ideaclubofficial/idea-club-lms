@@ -14248,7 +14248,6 @@
         return;
       }
       tbody.innerHTML = onlineCourses.map(function(c) {
-        const hasRoom = c.onlineLink || c.roomId;
         const centerShort = String(c.location || '').replace('IDEA CLUB ศูนย์ ', '');
         return '<tr>' +
           '<td>' + c.grade + '</td>' +
@@ -14261,29 +14260,46 @@
           '<td>' + (c.roomPassword || '-') + '</td>' +
           '<td style="white-space:nowrap;">' +
             '<button class="btn btn-blue" type="button" onclick="' + actionCall('editOnlineClass', c.id) + '">แก้ไข</button>' +
-            (hasRoom ? ' <button class="btn btn-red" type="button" onclick="' + actionCall('deleteOnlineClassRoom', c.id) + '">ลบ</button>' : '') +
+            ' <button class="btn btn-red" type="button" onclick="' + actionCall('deleteOnlineClassRoom', c.id) + '">ลบ</button>' +
           '</td>' +
         '</tr>';
       }).join('');
     }
 
     async function deleteOnlineClassRoom(id) {
-      const c = courses.find(function(item) { return String(item.id) === String(id); });
-      if (!c) return;
-      if (!confirm('ลบข้อมูลห้องเรียน Online ของ ' + c.grade + ' · ' + c.name + ' ?')) return;
-      c.onlineLink = '';
-      c.onlineClassDay = '';
-      c.onlineClassTime = '';
-      c.roomId = '';
-      c.roomPassword = '';
-      try {
-        await setFirebaseDocument('courses', c);
-        renderOnlineClassTable();
-        renderAdminCourses();
-        updateStudentCourseDisplay();
-      } catch (error) {
-        console.error('deleteOnlineClassRoom error:', error);
-        alert('ลบไม่สำเร็จ: ' + (error.message || error.code));
+      const idx = courses.findIndex(function(item) { return String(item.id) === String(id); });
+      if (idx === -1) return;
+      const c = courses[idx];
+      const hasRoom = c.onlineLink || c.roomId;
+      if (hasRoom) {
+        if (!confirm('ล้างข้อมูลห้องเรียน Online ของ ' + c.grade + ' · ' + c.name + ' ?')) return;
+        c.onlineLink = '';
+        c.onlineClassDay = '';
+        c.onlineClassTime = '';
+        c.roomId = '';
+        c.roomPassword = '';
+        try {
+          await setFirebaseDocument('courses', c);
+          renderOnlineClassTable();
+          renderAdminCourses();
+          updateStudentCourseDisplay();
+        } catch (error) {
+          console.error('deleteOnlineClassRoom error:', error);
+          alert('ลบไม่สำเร็จ: ' + (error.message || error.code));
+        }
+      } else {
+        if (!confirm('ลบคอร์ส ' + c.grade + ' · ' + c.name + ' ออกจากระบบ ?')) return;
+        try {
+          await deleteFirebaseDocument('courses', c);
+          courses.splice(idx, 1);
+          renderOnlineClassTable();
+          renderAdminCourses();
+          renderStudentCourses();
+          updateStudentCourseDisplay();
+        } catch (error) {
+          console.error('deleteOnlineClassRoom error:', error);
+          alert('ลบไม่สำเร็จ: ' + (error.message || error.code));
+        }
       }
     }
 
