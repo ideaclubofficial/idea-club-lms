@@ -19807,6 +19807,44 @@ function receiptStatusText(status) {
       });
     }
 
+    function getOnlineExamGroupedScoreRecordsForScope(scope) {
+      if (!scope || !scope.month) return [];
+      return (onlineExamGradeGroupedRows || []).filter(function(group) {
+        if (!group || group.month !== scope.month) return false;
+        return scope.grade ? group.grade === scope.grade : !!group.grade;
+      }).map(function(group) {
+        const scores = {};
+        ONLINE_EXAM_SCORE_SHEET_SUBJECTS.forEach(function(subject) {
+          const data = getOnlineExamGroupSubjectData(group, subject);
+          if (data && data.total) scores[subject] = data.score50;
+        });
+        return {
+          id: group.key,
+          firebaseDocId: group.key,
+          month: group.month,
+          grade: group.grade,
+          studentId: group.studentId || '',
+          memberId: group.memberId || '',
+          authUid: group.authUid || '',
+          student: group.studentName || '-',
+          nickname: group.nickname || '-',
+          scores: scores,
+          status: getOnlineExamGroupStatus(group)
+        };
+      }).filter(function(record) {
+        return Object.keys(record.scores || {}).length > 0;
+      }).sort(function(a, b) {
+        const gradeDiff = gradeOrder(a.grade || '') - gradeOrder(b.grade || '');
+        return gradeDiff || compareScoreRecordsByMemberId(a, b);
+      });
+    }
+
+    function getAdminScoreStatsRecordsForScope(scope) {
+      const groupedRecords = getOnlineExamGroupedScoreRecordsForScope(scope);
+      if (groupedRecords.length) return groupedRecords;
+      return getAdminScoreRecordsForScope(scope);
+    }
+
     function renderScoreStatsBar(label, value, color) {
       const safeValue = Math.max(0, Math.min(50, Number(value || 0)));
       const width = Math.round((safeValue / 50) * 1000) / 10;
@@ -19823,7 +19861,7 @@ function receiptStatusText(status) {
       const card = getElement('adminScoreStatsChartCard');
       if (!card) return;
       const scope = getAdminScoreVisibleFilterScope();
-      const records = precomputedRecords || getAdminScoreRecordsForScope(scope);
+      const records = precomputedRecords || getAdminScoreStatsRecordsForScope(scope);
 
       if (!scope.month) {
         card.style.display = 'none';
@@ -20033,7 +20071,7 @@ function receiptStatusText(status) {
       syncAdminScoreFiltersFromOnlineExamFilters();
       const shared = getSelectedAdminScoreRecords();
       renderAdminScoreToolbarSummary(shared);
-      renderAdminScoreStatsChartCard(getAdminScoreRecordsForScope(getAdminScoreVisibleFilterScope()));
+      renderAdminScoreStatsChartCard(getAdminScoreStatsRecordsForScope(getAdminScoreVisibleFilterScope()));
       renderAdminScoreAdjustTable(shared);
       renderAdminScoreStatsTable(shared);
     }
@@ -30088,6 +30126,7 @@ function receiptStatusText(status) {
         onlineExamGradeMissingHtml = renderOnlineExamMissingStudentsHtml(missingStudents, targetCourses, expectedStudents.length);
         onlineExamGradeMissingOnly = statusFilter === 'not_submitted';
         onlineExamGradePage = 1;
+        renderAdminScoreStatsChartCard(getAdminScoreStatsRecordsForScope(getAdminScoreVisibleFilterScope()));
         renderOnlineExamGradingPage(1);
       } catch (e) {
         if (requestId !== onlineExamGradeRefreshSeq) return;
