@@ -34371,7 +34371,10 @@ function receiptStatusText(status) {
           return '<div class="bg-slate-800 rounded-xl p-3 space-y-1.5">' +
             '<div class="flex items-start justify-between gap-2">' +
             '<div><span class="' + colorCls + ' text-xs font-bold px-2 py-0.5 rounded-md">' + escapeHtml(TF_FORMAT_LABELS[s.format] || s.format) + '</span></div>' +
-            '<button onclick="tfDeleteSession(\'' + sessionId + '\')" class="text-slate-400 hover:text-rose-400 text-xs cursor-pointer bg-transparent border-0">ลบ</button></div>' +
+            '<div class="flex gap-2">' +
+            '<button onclick="tfEditSession(\'' + sessionId + '\')" class="text-indigo-300 hover:text-indigo-100 text-xs font-bold cursor-pointer bg-transparent border-0">แก้ไข</button>' +
+            '<button onclick="tfDeleteSession(\'' + sessionId + '\')" class="text-slate-400 hover:text-rose-400 text-xs cursor-pointer bg-transparent border-0">ลบ</button>' +
+            '</div></div>' +
             '<p class="font-bold text-sm">' + escapeHtml(tfGetCourseName(s.courseId)) + '</p>' +
             '<p class="text-xs text-slate-400">' + escapeHtml((tfGetSessionStartText(s) || '') + ' – ' + (tfGetSessionEndText(s) || '')) + ' · ' + escapeHtml(tfGetTutorName(s.tutorId)) + '</p>' +
             (s.center ? '<p class="text-xs text-slate-400">📍 ' + escapeHtml(s.center) + '</p>' : '') +
@@ -34628,6 +34631,9 @@ function receiptStatusText(status) {
       // Reset error
       const errEl = tfEl('tf-sched-error');
       if (errEl) errEl.classList.add('hidden');
+      // Reset modal title
+      const titleEl = modal.querySelector('h3');
+      if (titleEl) titleEl.innerHTML = '<i data-lucide="calendar-plus" class="w-5 h-5"></i> บันทึกตารางสอน';
       tfRenderCourseSyncSummary(null, null);
       modal.classList.remove('hidden');
       if (typeof lucide !== 'undefined') lucide.createIcons();
@@ -34638,6 +34644,66 @@ function receiptStatusText(status) {
       if (modal) { modal.classList.add('hidden'); }
       const form = tfEl('tf-schedule-form');
       if (form) form.reset();
+    }
+
+    function tfEditSession(sessionId) {
+      const session = monthlyPlanSessions.find(function(s) { return (s.id || s.firebaseDocId || '') === sessionId; });
+      if (!session) return;
+      const modal = tfEl('tf-schedule-modal');
+      if (!modal) return;
+
+      // Set editing ID
+      if (tfEl('tf-schedule-editing-id')) tfEl('tf-schedule-editing-id').value = sessionId;
+
+      // Center
+      const center = session.center || session.courseLocation || '';
+      if (tfEl('tf-sched-center')) tfEl('tf-sched-center').value = center;
+
+      // Format/type
+      const format = session.type || session.format || 'onsite';
+      tfPopulateSchedFormats();
+      if (tfEl('tf-sched-format')) tfEl('tf-sched-format').value = format;
+      tfOnFormatChange({ skipSync: true });
+
+      // Populate courses then set value
+      tfPopulateSchedCourses(session.courseId, center);
+      if (tfEl('tf-sched-course')) tfEl('tf-sched-course').value = session.courseId || '';
+
+      // Tutor
+      tfPopulateSchedTutors(format);
+      const tutorId = session.teacherId || session.teacherUid || '';
+      if (tfEl('tf-sched-tutor')) tfEl('tf-sched-tutor').value = tutorId;
+
+      // Date & time
+      if (tfEl('tf-sched-date')) tfEl('tf-sched-date').value = tfGetSessionDateText(session);
+      if (tfEl('tf-sched-start')) tfEl('tf-sched-start').value = tfGetSessionStartText(session);
+      if (tfEl('tf-sched-end')) tfEl('tf-sched-end').value = tfGetSessionEndText(session);
+
+      // Location & notes
+      if (tfEl('tf-sched-location')) tfEl('tf-sched-location').value = session.location || '';
+      if (tfEl('tf-sched-notes')) tfEl('tf-sched-notes').value = session.notes || '';
+
+      // Shared class
+      const isShared = !!session.isSharedClass;
+      if (tfEl('tf-sched-shared')) tfEl('tf-sched-shared').checked = isShared;
+      if (tfEl('tf-sched-center2')) tfEl('tf-sched-center2').value = session.center2 || '';
+      const sharedWrap = tfEl('tf-shared-center2-wrap');
+      if (sharedWrap) { if (isShared) sharedWrap.classList.remove('hidden'); else sharedWrap.classList.add('hidden'); }
+
+      // Sync summary
+      const courseObj = (courses || []).find(function(c) { return (c.id || c.firebaseDocId || '') === session.courseId; });
+      tfRenderCourseSyncSummary(courseObj || null, null);
+
+      // Error reset
+      const errEl = tfEl('tf-sched-error');
+      if (errEl) errEl.classList.add('hidden');
+
+      // Update modal title
+      const title = modal.querySelector('h3');
+      if (title) title.innerHTML = '<i data-lucide="calendar-check" class="w-5 h-5"></i> แก้ไขตารางสอน';
+
+      modal.classList.remove('hidden');
+      if (typeof lucide !== 'undefined') lucide.createIcons();
     }
 
     function tfOnFormatChange(options) {
