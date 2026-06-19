@@ -4195,6 +4195,7 @@
               <p style="margin-bottom:18px; color:#6b7280;">สรุปรายการที่ต้องตรวจสอบและยอดชำระของเดือนที่เลือก</p>
               <div class="dashboard-grid">
                 <div class="stat clickable" onclick="jumpToPaymentStatus('รอตรวจสลิป')"><h4>รอตรวจสลิป</h4><p id="pendingSlipCount">0 รายการ</p></div>
+                <div class="stat clickable" onclick="jumpToPendingPaymentBundles()"><h4>สลิปยอดรวมรอตรวจ</h4><p id="pendingBundleSlipCount">0 รายการ</p></div>
                 <div class="stat clickable" onclick="jumpToPaymentStatus('ค้างชำระ')"><h4>ค้างชำระ</h4><p id="overdueCount">0 รายการ</p></div>
                 <div class="stat"><h4>ชำระแล้วเดือนนี้</h4><p id="paidThisMonthCount">0 รายการ</p></div>
                 <div class="stat"><h4>ยอดที่ชำระแล้ว</h4><p id="paidAmountThisMonth">0 บาท</p></div>
@@ -11050,6 +11051,17 @@
       }, 50);
     }
 
+    function jumpToPendingPaymentBundles() {
+      showAdminTab('admin-payment');
+      setTimeout(function() {
+        const statusFilter = getElement('paymentStatusStateFilter');
+        if (statusFilter) statusFilter.value = 'รอตรวจสลิป';
+        filterPaymentStatusByMonth();
+        const panel = getElement('paymentBundlePanel');
+        if (panel) panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }, 50);
+    }
+
     function jumpToNoCourseStudents() {
       showAdminTab('admin-students');
       setTimeout(function() {
@@ -11125,13 +11137,23 @@
     }
 
     function getPendingPaymentRecords() {
-      return payments.filter(function(p) { return (p.status || '') === 'รอตรวจสลิป'; });
+      return payments.filter(function(p) { return getPaymentDisplayStatus(p) === 'รอตรวจสลิป'; });
     }
 
     function getPendingWebSlipUploads() {
-      return getPendingPaymentRecords()
+      const paymentUploads = getPendingPaymentRecords()
         .filter(function(p) { return p.driveViewUrl || p.slipUploadedByUid || p.slipUploadedByName; })
-        .slice()
+        .map(function(p) { return Object.assign({ uploadKind: 'payment' }, p); });
+      const bundleUploads = getPendingPaymentBundles(false)
+        .filter(function(bundle) { return getPaymentSlipUrl(bundle) || bundle.slipUploadedByUid || bundle.slipUploadedByName; })
+        .map(function(bundle) {
+          return Object.assign({ uploadKind: 'bundle' }, bundle, {
+            studentName: (bundle.studentNames || []).join(', ') || bundle.student || 'ยอดรวมหลายรายการ',
+            month: (bundle.months || []).join(', '),
+            driveViewUrl: getPaymentSlipUrl(bundle)
+          });
+        });
+      return paymentUploads.concat(bundleUploads)
         .sort(function(a, b) {
           const dateA = parseRecordDate(a.slipUploadedAt || a.updatedAt || a.createdAtText);
           const dateB = parseRecordDate(b.slipUploadedAt || b.updatedAt || b.createdAtText);
@@ -11169,6 +11191,7 @@
       const totalStudents = Array.isArray(students) ? students.filter(isActiveStudentForDashboard).length : 0;
       const openCourses = Array.isArray(courses) ? courses.filter(function(c) { return c.status === 'open' || c.status === 'เปิดรับสมัคร'; }).length : 0;
       const pendingPaymentRecords = getPendingPaymentRecords();
+      const pendingPaymentBundles = getPendingPaymentBundles(false);
       const overduePaymentRecords = getOverduePaymentRecords();
       const pendingCourseStudents = getPendingCourseStudents();
       const todayText = getLocalDateString();
@@ -11179,7 +11202,7 @@
 
       if (getElement('dashTotalStudents')) getElement('dashTotalStudents').textContent = totalStudents + ' คน';
       if (getElement('dashOpenCourses')) getElement('dashOpenCourses').textContent = openCourses + ' คอร์ส';
-      if (getElement('dashPendingPayments')) getElement('dashPendingPayments').textContent = pendingPaymentRecords.length + ' รายการ';
+      if (getElement('dashPendingPayments')) getElement('dashPendingPayments').textContent = (pendingPaymentRecords.length + pendingPaymentBundles.length) + ' รายการ';
       if (getElement('dashOverdueStudents')) getElement('dashOverdueStudents').textContent = overduePaymentRecords.length + ' รายการ';
       if (getElement('dashPendingCourses')) getElement('dashPendingCourses').textContent = pendingCourseStudents.length + ' คน';
       if (getElement('pickupWaitingCount')) getElement('pickupWaitingCount').textContent = todayAbsent + ' คน';
@@ -14976,6 +14999,7 @@
             (slipUrl ? '<br><a href="' + escapeHtml(slipUrl) + '" target="_blank" rel="noopener">ดูสลิปที่ส่งแล้ว</a>' : '') +
           '</span>' +
           '<span class="test-actions" style="margin:0;justify-content:flex-end;">' +
+            '<button class="btn btn-dark" type="button" onclick="openPaymentBundleDetail(\'' + jsArg(bundle.id || bundle.firebaseDocId) + '\')">รายละเอียด</button>' +
             (canUploadBundle ? '<button class="btn btn-blue" type="button" onclick="uploadStudentPaymentBundleSlip(\'' + jsArg(bundle.id || bundle.firebaseDocId) + '\')">อัปโหลดสลิปยอดรวม</button>' : '') +
           '</span>' +
         '</div>';
@@ -15824,6 +15848,85 @@
       }) || null;
     }
 
+    function getPaymentBundleDisplayStatus(bundle) {
+      if (!bundle) return 'รอชำระเงิน';
+      if (bundle.status === 'ชำระแล้ว' || bundle.paymentStatus === 'ชำระแล้ว' || bundle.slipStatus === 'approved') return 'ชำระแล้ว';
+      if (bundle.status === 'รอตรวจสลิป' || bundle.paymentStatus === 'รอตรวจสลิป' || bundle.slipStatus === 'waiting_admin_review') return 'รอตรวจสลิป';
+      if (bundle.status === 'สลิปไม่ผ่าน' || bundle.paymentStatus === 'สลิปไม่ผ่าน' || bundle.slipStatus === 'rejected') return 'สลิปไม่ผ่าน';
+      if (bundle.status === 'ยกเลิก' || bundle.status === 'cancelled') return 'ยกเลิก';
+      return bundle.status || bundle.paymentStatus || 'รอชำระเงิน';
+    }
+
+    function getScopedPaymentBundles() {
+      const scope = getPaymentDashboardFilterScope();
+      return (paymentBundles || [])
+        .filter(function(bundle) { return getPaymentBundleDisplayStatus(bundle) !== 'ยกเลิก'; })
+        .filter(function(bundle) {
+          return scope.status === 'ทั้งหมด' || getPaymentBundleDisplayStatus(bundle).includes(scope.status);
+        })
+        .filter(function(bundle) { return paymentBundleMatchesScope(bundle, scope); });
+    }
+
+    function getPendingPaymentBundles(scopeAware) {
+      const list = scopeAware ? getScopedPaymentBundles() : (paymentBundles || []).filter(function(bundle) {
+        return getPaymentBundleDisplayStatus(bundle) !== 'ยกเลิก';
+      });
+      return list.filter(function(bundle) { return getPaymentBundleDisplayStatus(bundle) === 'รอตรวจสลิป'; });
+    }
+
+    function renderPaymentBundleDetailRows(bundle) {
+      const items = Array.isArray(bundle && bundle.paymentItems) ? bundle.paymentItems : [];
+      if (!items.length) return '<tr><td colspan="5">ยังไม่มีรายการย่อยในยอดรวมนี้</td></tr>';
+      return items.map(function(item) {
+        const payment = findPaymentByAnyId(item.paymentId) || item;
+        const student = getPaymentStudentRecord(payment) || {};
+        const statusText = getPaymentDisplayStatus(payment);
+        const statusClass = statusText === 'ชำระแล้ว' ? 'status-paid' : (statusText === 'สลิปไม่ผ่าน' || statusText === 'ค้างชำระ' ? 'status-absent' : 'status-waiting');
+        const memberId = item.memberId || payment.memberId || student.memberId || student.studentId || '-';
+        return '<tr>' +
+          '<td><strong>' + escapeHtml(item.student || payment.student || student.name || '-') + '</strong><br><span class="mini-muted">' + escapeHtml(memberId) + '</span></td>' +
+          '<td>' + escapeHtml(item.month || payment.month || '-') + '</td>' +
+          '<td>' + escapeHtml(item.course || payment.course || payment.courseName || '-') + '</td>' +
+          '<td>' + formatPrice(item.amount || getPaymentFinalAmount(payment) || 0) + '</td>' +
+          '<td><span class="' + statusClass + '">' + escapeHtml(statusText) + '</span></td>' +
+        '</tr>';
+      }).join('');
+    }
+
+    function openPaymentBundleDetail(bundleId) {
+      const bundle = findPaymentBundleById(bundleId);
+      if (!bundle) { alert('ไม่พบยอดรวมนี้'); return; }
+      const status = getPaymentBundleDisplayStatus(bundle);
+      const statusClass = status === 'ชำระแล้ว' ? 'status-paid' : (status === 'สลิปไม่ผ่าน' ? 'status-absent' : 'status-waiting');
+      const slipUrl = getPaymentSlipUrl(bundle);
+      const receiptText = bundle.receiptNo
+        ? '<div class="receipt-line"><strong>ใบเสร็จ</strong><span>' + escapeHtml(bundle.receiptNo) + '</span></div>'
+        : '<div class="receipt-line"><strong>ใบเสร็จ</strong><span>-</span></div>';
+      const adminActions = isStaffAccount(firebaseUserProfile) || hasPermission('admin.finance') || hasPermission('admin.full')
+        ? '<div class="test-actions">' +
+            (status !== 'ชำระแล้ว' ? '<button class="btn btn-green" type="button" onclick="approvePaymentBundle(\'' + jsArg(bundle.id || bundle.firebaseDocId) + '\')">อนุมัติยอดรวม</button>' : '') +
+            (status !== 'สลิปไม่ผ่าน' && status !== 'ชำระแล้ว' ? '<button class="btn btn-red" type="button" onclick="rejectPaymentBundle(\'' + jsArg(bundle.id || bundle.firebaseDocId) + '\')">ไม่ผ่าน</button>' : '') +
+            (status !== 'ยกเลิก' ? '<button class="btn btn-dark" type="button" onclick="cancelPaymentBundle(\'' + jsArg(bundle.id || bundle.firebaseDocId) + '\')">ยกเลิกยอดรวม</button>' : '') +
+          '</div>'
+        : '';
+      openViewBubble('รายละเอียดยอดรวม',
+        '<div class="receipt-box">' +
+          '<div class="receipt-header"><div><div class="receipt-title">ยอดรวมหลายรายการ</div><p>' + escapeHtml((bundle.studentNames || []).join(', ') || bundle.student || '-') + '</p></div><span class="' + statusClass + '">' + escapeHtml(status) + '</span></div>' +
+          '<div class="receipt-line"><strong>ยอดรวม</strong><span style="font-weight:800;">' + formatPrice(bundle.totalAmount || bundle.amount || 0) + '</span></div>' +
+          '<div class="receipt-line"><strong>เดือน</strong><span>' + escapeHtml((bundle.months || []).join(', ') || '-') + '</span></div>' +
+          '<div class="receipt-line"><strong>จำนวนรายการ</strong><span>' + escapeHtml(bundle.itemCount || (bundle.paymentIds || []).length || 0) + ' รายการ</span></div>' +
+          '<div class="receipt-line"><strong>สร้างโดย</strong><span>' + escapeHtml(bundle.createdByName || bundle.createdByRole || '-') + '</span></div>' +
+          '<div class="receipt-line"><strong>วันที่สร้าง</strong><span>' + escapeHtml(bundle.createdAtText || '-') + '</span></div>' +
+          receiptText +
+          '<div class="receipt-line"><strong>สลิป</strong><span>' + (slipUrl ? '<a href="' + escapeHtml(slipUrl) + '" target="_blank" rel="noopener">เปิดสลิป</a>' : '-') + '</span></div>' +
+          '<h3 style="margin-top:18px;">รายการย่อย</h3>' +
+          '<div class="table-wrap"><table><thead><tr><th>นักเรียน</th><th>เดือน</th><th>คอร์ส</th><th>ยอด</th><th>สถานะ</th></tr></thead><tbody>' + renderPaymentBundleDetailRows(bundle) + '</tbody></table></div>' +
+          adminActions +
+          '<div class="test-actions"><button class="btn btn-dark" type="button" onclick="closeEditBubble()">ปิด</button></div>' +
+        '</div>'
+      );
+    }
+
     function canPaymentBeBundled(payment) {
       if (!payment) return false;
       const status = getPaymentDisplayStatus(payment);
@@ -15923,10 +16026,7 @@
     function renderPaymentBundlePanel() {
       const box = getElement('paymentBundlePanel');
       if (!box) return;
-      const scope = getPaymentDashboardFilterScope();
-      const visibleBundles = (paymentBundles || [])
-        .filter(function(bundle) { return bundle.status !== 'ยกเลิก' && bundle.status !== 'cancelled'; })
-        .filter(function(bundle) { return paymentBundleMatchesScope(bundle, scope); })
+      const visibleBundles = getScopedPaymentBundles()
         .sort(function(a, b) { return String(b.createdAtText || '').localeCompare(String(a.createdAtText || '')); });
 
       if (!visibleBundles.length) {
@@ -15938,7 +16038,7 @@
         '<p class="mini-muted" style="margin-bottom:12px;">รวม payment หลายรายการไว้ตรวจสลิปและอนุมัติครั้งเดียว</p>' +
         visibleBundles.map(function(bundle) {
           const items = Array.isArray(bundle.paymentItems) ? bundle.paymentItems : [];
-          const status = bundle.status || 'รอชำระเงิน';
+          const status = getPaymentBundleDisplayStatus(bundle);
           const statusClass = status === 'ชำระแล้ว' ? 'status-paid' : (status === 'สลิปไม่ผ่าน' ? 'status-absent' : 'status-waiting');
           const detail = items.slice(0, 4).map(function(item) {
             return escapeHtml((item.student || '-') + ' · ' + (item.month || '-') + ' · ' + formatPrice(item.amount || 0));
@@ -15953,6 +16053,7 @@
               '<div style="margin-top:6px;">' + detail + more + '</div>' +
             '</span>' +
             '<span class="test-actions" style="justify-content:flex-end;margin:0;">' +
+              '<button class="btn btn-blue" type="button" onclick="openPaymentBundleDetail(\'' + jsArg(bundle.id || bundle.firebaseDocId) + '\')">รายละเอียด</button>' +
               (status !== 'ชำระแล้ว' ? '<button class="btn btn-green" type="button" onclick="approvePaymentBundle(\'' + jsArg(bundle.id || bundle.firebaseDocId) + '\')">อนุมัติยอดรวม</button>' : '') +
               (status !== 'สลิปไม่ผ่าน' && status !== 'ชำระแล้ว' ? '<button class="btn btn-red" type="button" onclick="rejectPaymentBundle(\'' + jsArg(bundle.id || bundle.firebaseDocId) + '\')">ไม่ผ่าน</button>' : '') +
               '<button class="btn btn-dark" type="button" onclick="cancelPaymentBundle(\'' + jsArg(bundle.id || bundle.firebaseDocId) + '\')">ยกเลิกยอดรวม</button>' +
@@ -17871,7 +17972,9 @@
         if (statusText.includes('ค้าง')) overdue++;
         if (statusText.includes('ชำระแล้ว')) paid++;
       });
-      if (getElement('pendingSlipCount')) getElement('pendingSlipCount').textContent = pending + ' รายการ';
+      const pendingBundles = getPendingPaymentBundles(true).length;
+      if (getElement('pendingSlipCount')) getElement('pendingSlipCount').textContent = (pending + pendingBundles) + ' รายการ';
+      if (getElement('pendingBundleSlipCount')) getElement('pendingBundleSlipCount').textContent = pendingBundles + ' รายการ';
       if (getElement('overdueCount')) getElement('overdueCount').textContent = overdue + ' รายการ';
       if (getElement('paidThisMonthCount')) getElement('paidThisMonthCount').textContent = paid + ' รายการ';
       updatePaymentAmountSummary();
@@ -26718,6 +26821,7 @@ function receiptStatusText(status) {
       const box = getElement('adminTodoList');
       if (!box) return;
       const pendingPayments = getPendingPaymentRecords().length;
+      const pendingBundles = getPendingPaymentBundles(false).length;
       const pendingWebSlipUploads = getPendingWebSlipUploads().slice(0, 5);
       const overduePayments = getOverduePaymentRecords().length;
       const draftReceipts = getDraftReceipts().length;
@@ -26725,7 +26829,8 @@ function receiptStatusText(status) {
       const noCourseStudents = getNoCourseStudents().length;
       const pendingCourses = getPendingCourseStudents().length;
       const items = [
-        { label: 'รอตรวจสลิป', value: pendingPayments + ' รายการ', action: "jumpToPaymentStatus('รอตรวจสลิป')" },
+        { label: 'รอตรวจสลิป', value: (pendingPayments + pendingBundles) + ' รายการ', action: "jumpToPaymentStatus('รอตรวจสลิป')" },
+        { label: 'สลิปยอดรวมรอตรวจ', value: pendingBundles + ' รายการ', action: 'jumpToPendingPaymentBundles()' },
         { label: 'ค้างชำระ', value: overduePayments + ' รายการ', action: "jumpToPaymentStatus('ค้างชำระ')" },
         { label: 'ใบเสร็จรอแสดง', value: draftReceipts + ' ใบ', action: "jumpToAdminTab('admin-receipts')" },
         { label: 'คะแนนรอประกาศ', value: unpublishedScores + ' รายการ', action: "jumpToAdminTab('admin-online-exam')" },
@@ -26741,8 +26846,9 @@ function receiptStatusText(status) {
             const uploadedAt = parseRecordDate(p.slipUploadedAt || p.updatedAt || p.createdAtText);
             const uploadedText = uploadedAt ? uploadedAt.toLocaleString('th-TH') : (p.createdAtText || '-');
             const driveButton = p.driveViewUrl ? '<a class="btn btn-blue" href="' + escapeHtml(p.driveViewUrl) + '" target="_blank" rel="noopener">เปิดสลิป</a>' : '';
+            const kindText = p.uploadKind === 'bundle' ? 'ยอดรวม' : (p.driveGradeFolderName || p.grade || p.studentGrade || '-');
             return '<div class="status-display-row"><span><strong>' + escapeHtml(p.studentName || p.student || '-') + '</strong><br><span style="color:#6b7280;">' +
-              escapeHtml((p.month || '-') + ' · ' + (p.driveGradeFolderName || p.grade || p.studentGrade || '-') + ' · อัปโหลดโดย ' + (p.slipUploadedByName || p.slipUploadedByUid || '-')) +
+              escapeHtml((p.month || '-') + ' · ' + kindText + ' · อัปโหลดโดย ' + (p.slipUploadedByName || p.slipUploadedByUid || '-')) +
               '<br>เวลา: ' + escapeHtml(uploadedText) + '</span></span>' + driveButton + '</div>';
           }).join('') +
           '</div>'
@@ -26778,9 +26884,15 @@ function receiptStatusText(status) {
       if (!box) return;
       const month = getElement('dashboardPaymentMonthFilter') ? getElement('dashboardPaymentMonthFilter').value : (paymentMonths[0] ? paymentMonths[0].month : '');
       const monthPayments = payments.filter(function(p) { return !month || p.month === month; });
+      const monthBundles = (paymentBundles || []).filter(function(bundle) {
+        if (getPaymentBundleDisplayStatus(bundle) === 'ยกเลิก') return false;
+        const months = Array.isArray(bundle.months) ? bundle.months : [];
+        return !month || months.includes(month);
+      });
       const enrolledStudents = students.filter(function(s) { return isActiveStudentForDashboard(s) && s.courseId; });
       const paid = monthPayments.filter(function(p) { return p.status === 'ชำระแล้ว'; });
       const pending = monthPayments.filter(function(p) { return p.status === 'รอตรวจสลิป'; });
+      const pendingBundles = monthBundles.filter(function(bundle) { return getPaymentBundleDisplayStatus(bundle) === 'รอตรวจสลิป'; });
       const overdue = monthPayments.filter(function(p) { return p.status === 'ค้างชำระ'; });
       const paidAmount = paid.reduce(function(sum, p) { return sum + getPaymentFinalAmount(p); }, 0);
       let expectedAmount = 0;
@@ -26788,7 +26900,8 @@ function receiptStatusText(status) {
       box.innerHTML = '<div class="status-display-row"><span class="status-label">เดือน</span><strong>' + (month || '-') + '</strong></div>' +
         '<div class="status-display-row"><span class="status-label">นักเรียนที่ต้องชำระ</span><strong>' + enrolledStudents.length + ' คน</strong></div>' +
         '<div class="status-display-row"><span class="status-label">ชำระแล้ว</span><strong class="status-paid">' + paid.length + ' รายการ · ' + formatPrice(paidAmount) + '</strong></div>' +
-        '<div class="status-display-row"><span class="status-label">รอตรวจสลิป</span><strong class="status-waiting">' + pending.length + ' รายการ</strong></div>' +
+        '<div class="status-display-row"><span class="status-label">รอตรวจสลิป</span><strong class="status-waiting">' + (pending.length + pendingBundles.length) + ' รายการ</strong></div>' +
+        '<div class="status-display-row"><span class="status-label">สลิปยอดรวมรอตรวจ</span><strong class="status-waiting">' + pendingBundles.length + ' รายการ</strong></div>' +
         '<div class="status-display-row"><span class="status-label">ค้างชำระ</span><strong class="status-absent">' + overdue.length + ' รายการ</strong></div>' +
         '<div class="status-display-row"><span class="status-label">ยอดที่ควรได้รับ</span><strong>' + formatPrice(expectedAmount) + '</strong></div>';
     }
