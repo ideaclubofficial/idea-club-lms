@@ -3929,42 +3929,73 @@
           <section id="admin-online-class" class="admin-tab hidden">
             <div class="form-box">
               <h3>ห้องเรียน Online</h3>
-              <p style="margin-bottom:18px; color:#6b7280;">ใช้ตั้งค่าลิงก์ MS Teams, Meeting ID และ Password แยกจากข้อมูลคอร์สหลัก</p>
-              <div class="form-row">
-                <div>
-                  <label>เลือกคอร์ส</label>
-                  <select id="adminOnlineClassCourseSelect" onchange="loadOnlineClassForm()"></select>
-                </div>
-                <div>
-                  <label>ลิงก์ห้องเรียน Online / MS Teams</label>
-                  <input id="adminOnlineClassLink" type="url" placeholder="https://teams.microsoft.com/..." />
-                </div>
-              </div>
+              <p style="margin-bottom:18px; color:#6b7280;">ตั้งค่าลิงก์ MS Teams, Meeting ID และ Password แยกตามศูนย์และระดับชั้น คอร์สที่ไม่มีสิทธิ์ Online จะไม่แสดง</p>
 
               <div class="form-row">
                 <div>
-                  <label>Meeting ID</label>
-                  <input id="adminOnlineClassRoomId" type="text" placeholder="เช่น SCI-P6-2569 หรือ Teams Meeting ID" />
+                  <label>ศูนย์</label>
+                  <select id="adminOnlineClassCenter" onchange="onlineClassCenterChange()">
+                    <option value="">เลือกศูนย์</option>
+                    <option value="IDEA CLUB ศูนย์ หนองฉาง">🏬 ศูนย์หนองฉาง</option>
+                    <option value="IDEA CLUB ศูนย์ นครสวรรค์">🏫 ศูนย์นครสวรรค์</option>
+                  </select>
                 </div>
                 <div>
-                  <label>Password</label>
-                  <input id="adminOnlineClassPassword" type="text" placeholder="เช่น IDEA2569" />
+                  <label>ระดับชั้น</label>
+                  <select id="adminOnlineClassGrade" onchange="onlineClassGradeChange()">
+                    <option value="">เลือกศูนย์ก่อน</option>
+                  </select>
                 </div>
               </div>
 
-              <div class="form-row">
-                <div>
-                  <label>วันเรียน Online</label>
-                  <input id="adminOnlineClassDay" type="text" placeholder="เช่น จันทร์ / พุธ หรือ เสาร์" />
+              <div id="adminOnlineClassFields" class="hidden">
+                <div style="margin-bottom:16px; padding:12px; background:#f0f9ff; border:1px solid #bae6fd; border-radius:10px;">
+                  <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
+                    <input type="checkbox" id="adminOnlineClassShared" onchange="onlineClassSharedChange()" style="width:16px; height:16px; accent-color:#4f46e5;" />
+                    <span style="font-size:14px; font-weight:600; color:#1e40af;">ใช้ห้องเดียวกัน 2 ศูนย์</span>
+                  </label>
+                  <div id="adminOnlineClassCenter2Wrap" class="hidden" style="margin-top:10px;">
+                    <label>ศูนย์ที่ 2</label>
+                    <select id="adminOnlineClassCenter2" style="max-width:300px;">
+                      <option value="">เลือกศูนย์ที่ 2</option>
+                      <option value="IDEA CLUB ศูนย์ หนองฉาง">🏬 ศูนย์หนองฉาง</option>
+                      <option value="IDEA CLUB ศูนย์ นครสวรรค์">🏫 ศูนย์นครสวรรค์</option>
+                    </select>
+                  </div>
                 </div>
-                <div>
-                  <label>เวลาเรียน Online</label>
-                  <input id="adminOnlineClassTime" type="text" placeholder="เช่น 16:00–18:30 น." />
-                </div>
-              </div>
 
-              <button class="btn btn-green" type="button" onclick="saveOnlineClassSettings()">บันทึกห้องเรียน Online</button>
-              <p id="adminOnlineClassResult" style="margin-top:14px; font-weight:bold;"></p>
+                <div class="form-row">
+                  <div>
+                    <label>ลิงก์ห้องเรียน Online / MS Teams</label>
+                    <input id="adminOnlineClassLink" type="url" placeholder="https://teams.microsoft.com/..." />
+                  </div>
+                </div>
+
+                <div class="form-row">
+                  <div>
+                    <label>Meeting ID</label>
+                    <input id="adminOnlineClassRoomId" type="text" placeholder="เช่น SCI-P6-2569 หรือ Teams Meeting ID" />
+                  </div>
+                  <div>
+                    <label>Password</label>
+                    <input id="adminOnlineClassPassword" type="text" placeholder="เช่น IDEA2569" />
+                  </div>
+                </div>
+
+                <div class="form-row">
+                  <div>
+                    <label>วันเรียน Online</label>
+                    <input id="adminOnlineClassDay" type="text" placeholder="เช่น จันทร์ / พุธ หรือ เสาร์" />
+                  </div>
+                  <div>
+                    <label>เวลาเรียน Online</label>
+                    <input id="adminOnlineClassTime" type="text" placeholder="เช่น 16:00–18:30 น." />
+                  </div>
+                </div>
+
+                <button class="btn btn-green" type="button" onclick="saveOnlineClassSettings()">บันทึกห้องเรียน Online</button>
+                <p id="adminOnlineClassResult" style="margin-top:14px; font-weight:bold;"></p>
+              </div>
             </div>
 
             <br />
@@ -13547,28 +13578,102 @@
       }).join('');
     }
 
+    function onlineClassHasAccess(course) {
+      return course && String(course.access || '').indexOf('Online') !== -1;
+    }
+
+    function getOnlineCoursesForCenter(center) {
+      return (courses || []).filter(function(c) {
+        if (!c || c.deleted) return false;
+        if (!onlineClassHasAccess(c)) return false;
+        if (!center) return true;
+        const loc = String(c.location || '').trim();
+        return loc === center || loc.indexOf(center) !== -1 || center.indexOf(loc) !== -1;
+      });
+    }
+
+    function onlineClassCenterChange() {
+      const center = (getElement('adminOnlineClassCenter') || {}).value || '';
+      const gradeEl = getElement('adminOnlineClassGrade');
+      if (!gradeEl) return;
+      if (!center) {
+        gradeEl.innerHTML = '<option value="">เลือกศูนย์ก่อน</option>';
+        clearOnlineClassForm();
+        return;
+      }
+      const onlineCourses = getOnlineCoursesForCenter(center);
+      const gradeOrder = ['ป.1','ป.2','ป.3','ป.4','ป.5','ป.6','ม.1','ม.2','ม.3','ม.4','ม.5','ม.6'];
+      const grades = [];
+      onlineCourses.forEach(function(c) { if (c.grade && grades.indexOf(c.grade) === -1) grades.push(c.grade); });
+      grades.sort(function(a, b) {
+        var ia = gradeOrder.indexOf(a), ib = gradeOrder.indexOf(b);
+        return (ia === -1 ? 99 : ia) - (ib === -1 ? 99 : ib);
+      });
+      gradeEl.innerHTML = '<option value="">เลือกระดับชั้น</option>' + grades.map(function(g) {
+        return '<option value="' + g + '">' + g + '</option>';
+      }).join('');
+      clearOnlineClassForm();
+    }
+
+    function onlineClassGradeChange() {
+      const center = (getElement('adminOnlineClassCenter') || {}).value || '';
+      const grade = (getElement('adminOnlineClassGrade') || {}).value || '';
+      if (!center || !grade) { clearOnlineClassForm(); return; }
+      const course = getOnlineCoursesForCenter(center).find(function(c) { return c.grade === grade; });
+      if (!course) { clearOnlineClassForm(); return; }
+      const onlineDefaults = getCourseOnlineScheduleDefaults(course);
+      getElement('adminOnlineClassLink').value = course.onlineLink || '';
+      getElement('adminOnlineClassDay').value = course.onlineClassDay || onlineDefaults.day;
+      getElement('adminOnlineClassTime').value = course.onlineClassTime || onlineDefaults.time;
+      getElement('adminOnlineClassRoomId').value = course.roomId || '';
+      getElement('adminOnlineClassPassword').value = course.roomPassword || '';
+      const result = getElement('adminOnlineClassResult');
+      if (result) result.textContent = '';
+      const fields = getElement('adminOnlineClassFields');
+      if (fields) fields.classList.remove('hidden');
+    }
+
+    function clearOnlineClassForm() {
+      ['adminOnlineClassLink','adminOnlineClassDay','adminOnlineClassTime','adminOnlineClassRoomId','adminOnlineClassPassword'].forEach(function(id) {
+        var el = getElement(id);
+        if (el) el.value = '';
+      });
+      var shared = getElement('adminOnlineClassShared');
+      if (shared) shared.checked = false;
+      var wrap = getElement('adminOnlineClassCenter2Wrap');
+      if (wrap) wrap.classList.add('hidden');
+      var c2 = getElement('adminOnlineClassCenter2');
+      if (c2) c2.value = '';
+      var result = getElement('adminOnlineClassResult');
+      if (result) result.textContent = '';
+      var fields = getElement('adminOnlineClassFields');
+      if (fields) fields.classList.add('hidden');
+    }
+
+    function onlineClassSharedChange() {
+      var checked = getElement('adminOnlineClassShared') && getElement('adminOnlineClassShared').checked;
+      var wrap = getElement('adminOnlineClassCenter2Wrap');
+      if (!wrap) return;
+      if (checked) {
+        wrap.classList.remove('hidden');
+      } else {
+        wrap.classList.add('hidden');
+        var c2 = getElement('adminOnlineClassCenter2');
+        if (c2) c2.value = '';
+      }
+    }
+
     function renderOnlineClassCourseSelect() {
-      const select = getElement('adminOnlineClassCourseSelect');
       const docLocationSelect = getElement('onlineDocLocationSelect');
       const docGradeSelect = getElement('onlineDocGradeSelect');
-      const current = select ? (select.value || String(currentStudentCourseId || (courses[0] ? courses[0].id : ''))) : String(courses[0] ? courses[0].id : '');
-      const optionsHtml = courses.length ? sortCoursesByGrade(courses).map(function(c) {
-        return '<option value="' + c.id + '">' + c.grade + ' · ' + c.name + '</option>';
-      }).join('') : '<option value="">ยังไม่มีคอร์ส</option>';
-
-      if (select) {
-        select.innerHTML = optionsHtml;
-        if (courses.length) select.value = courses.some(function(c) { return String(c.id) === String(current); }) ? current : String(courses[0].id);
-      }
+      const firstCourse = (courses || [])[0];
       if (docLocationSelect) {
-        const selectedCourse = courses.find(function(c) { return String(c.id) === String(select ? select.value : current); }) || courses[0];
-        const currentLocation = docLocationSelect.value || (selectedCourse ? selectedCourse.location : '');
+        const currentLocation = docLocationSelect.value || (firstCourse ? firstCourse.location : '');
         docLocationSelect.innerHTML = locationOptionsHtml(currentLocation);
         if (currentLocation) docLocationSelect.value = currentLocation;
       }
       if (docGradeSelect) {
-        const selectedCourseForGrade = courses.find(function(c) { return String(c.id) === String(select ? select.value : current); }) || courses[0];
-        const currentGrade = docGradeSelect.value || (selectedCourseForGrade ? selectedCourseForGrade.grade : '');
+        const currentGrade = docGradeSelect.value || (firstCourse ? firstCourse.grade : '');
         docGradeSelect.innerHTML = gradeOptionsHtml(currentGrade);
         if (currentGrade) docGradeSelect.value = currentGrade;
       }
@@ -13589,39 +13694,50 @@
     }
 
     function loadOnlineClassForm() {
-      const select = getElement('adminOnlineClassCourseSelect');
-      if (!select) return;
-      const c = courses.find(function(item) { return String(item.id) === String(select.value); });
-      if (!c) return;
-      const onlineDefaults = getCourseOnlineScheduleDefaults(c);
-      getElement('adminOnlineClassLink').value = c.onlineLink || '';
-      getElement('adminOnlineClassDay').value = c.onlineClassDay || onlineDefaults.day;
-      getElement('adminOnlineClassTime').value = c.onlineClassTime || onlineDefaults.time;
-      getElement('adminOnlineClassRoomId').value = c.roomId || '';
-      getElement('adminOnlineClassPassword').value = c.roomPassword || '';
-      if (getElement('onlineDocLocationSelect')) getElement('onlineDocLocationSelect').value = c.location || '';
-      if (getElement('onlineDocGradeSelect')) getElement('onlineDocGradeSelect').value = c.grade || '';
-      renderOnlineDocTable();
+      onlineClassGradeChange();
     }
 
     async function saveOnlineClassSettings() {
-      const select = getElement('adminOnlineClassCourseSelect');
-      if (!select) return;
-      const c = courses.find(function(item) { return String(item.id) === String(select.value); });
-      if (!c) return;
-      c.onlineLink = getElement('adminOnlineClassLink').value.trim();
-      c.onlineClassDay = getElement('adminOnlineClassDay').value.trim();
-      c.onlineClassTime = getElement('adminOnlineClassTime').value.trim();
-      c.roomId = getElement('adminOnlineClassRoomId').value.trim();
-      c.roomPassword = getElement('adminOnlineClassPassword').value.trim();
+      const center = (getElement('adminOnlineClassCenter') || {}).value || '';
+      const grade = (getElement('adminOnlineClassGrade') || {}).value || '';
+      const resultEl = getElement('adminOnlineClassResult');
+      if (!center || !grade) {
+        if (resultEl) { resultEl.textContent = 'กรุณาเลือกศูนย์และระดับชั้น'; resultEl.style.color = '#dc2626'; }
+        return;
+      }
+      const c = getOnlineCoursesForCenter(center).find(function(course) { return course.grade === grade; });
+      if (!c) {
+        if (resultEl) { resultEl.textContent = 'ไม่พบคอร์ส Online สำหรับศูนย์และระดับชั้นที่เลือก'; resultEl.style.color = '#dc2626'; }
+        return;
+      }
+      const link = getElement('adminOnlineClassLink').value.trim();
+      const day = getElement('adminOnlineClassDay').value.trim();
+      const time = getElement('adminOnlineClassTime').value.trim();
+      const roomId = getElement('adminOnlineClassRoomId').value.trim();
+      const password = getElement('adminOnlineClassPassword').value.trim();
+      c.onlineLink = link;
+      c.onlineClassDay = day;
+      c.onlineClassTime = time;
+      c.roomId = roomId;
+      c.roomPassword = password;
+      const toSave = [c];
+      const isShared = getElement('adminOnlineClassShared') && getElement('adminOnlineClassShared').checked;
+      const center2 = isShared && getElement('adminOnlineClassCenter2') ? getElement('adminOnlineClassCenter2').value : '';
+      if (center2) {
+        const c2 = getOnlineCoursesForCenter(center2).find(function(course) { return course.grade === grade; });
+        if (c2) {
+          c2.onlineLink = link; c2.onlineClassDay = day; c2.onlineClassTime = time;
+          c2.roomId = roomId; c2.roomPassword = password;
+          toSave.push(c2);
+        }
+      }
       try {
-        await setFirebaseDocument('courses', c);
-        getElement('adminOnlineClassResult').textContent = 'บันทึกข้อมูลห้องเรียน Online เรียบร้อย';
-        getElement('adminOnlineClassResult').style.color = '#16a34a';
+        for (var i = 0; i < toSave.length; i++) { await setFirebaseDocument('courses', toSave[i]); }
+        const msg = toSave.length > 1 ? 'บันทึกห้องเรียน Online เรียบร้อย (2 ศูนย์)' : 'บันทึกห้องเรียน Online เรียบร้อย';
+        if (resultEl) { resultEl.textContent = msg; resultEl.style.color = '#16a34a'; }
       } catch (error) {
         console.error('online class firebase error:', error);
-        getElement('adminOnlineClassResult').textContent = 'บันทึกไม่สำเร็จ: ' + (error.message || error.code);
-        getElement('adminOnlineClassResult').style.color = '#dc2626';
+        if (resultEl) { resultEl.textContent = 'บันทึกไม่สำเร็จ: ' + (error.message || error.code); resultEl.style.color = '#dc2626'; }
       }
       renderOnlineClassTable();
       renderOnlineDocTable();
