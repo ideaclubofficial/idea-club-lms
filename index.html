@@ -33433,6 +33433,21 @@ function receiptStatusText(status) {
       return tfSortCoursesForSchedule((courses || []).filter(function(c) { return c && !c.deleted && c.status !== 'closed' && c.status !== 'archived'; }));
     }
 
+    function tfGetRegisteredScheduleCourses() {
+      const registeredIds = {};
+      (students || []).forEach(function(student) {
+        if (!student || !student.courseId) return;
+        if (!isActiveStudentForDashboard(student)) return;
+        const status = String(student.courseStatus || '');
+        if (status === 'ยังไม่ได้สมัครคอร์ส' || status === 'ยกเลิก' || status === 'ไม่อนุมัติ') return;
+        registeredIds[String(student.courseId)] = true;
+      });
+      return tfSortCoursesForSchedule((courses || []).filter(function(course) {
+        const id = tfGetCourseId(course);
+        return course && !course.deleted && id && registeredIds[String(id)];
+      }));
+    }
+
     function tfGetCourseId(course) {
       return course ? (course.id || course.firebaseDocId || '') : '';
     }
@@ -33513,7 +33528,7 @@ function receiptStatusText(status) {
     }
 
     function tfGetScheduleCoursesForSelection(selectedCenter, format) {
-      return tfGetCourses().filter(function(course) {
+      return tfGetRegisteredScheduleCourses().filter(function(course) {
         if (format) return tfCourseSupportsFormat(course, format, selectedCenter);
         return ['onsite', 'online', 'ondemand'].some(function(fmt) {
           return tfCourseSupportsFormat(course, fmt, selectedCenter);
@@ -34104,6 +34119,11 @@ function receiptStatusText(status) {
       const filteredCourses = Object.keys(gradeMap)
         .map(function(grade) { return gradeMap[grade]; })
         .sort(tfSortCoursesForSchedule);
+      if (!filteredCourses.length) {
+        courseSel.innerHTML = '<option value="">ยังไม่มีระดับชั้นที่ลงทะเบียนไว้</option>';
+        courseSel.value = '';
+        return;
+      }
       courseSel.innerHTML = '<option value="">เลือกระดับชั้น</option>' +
         filteredCourses.map(function(c) {
           const id = tfGetCourseId(c);
