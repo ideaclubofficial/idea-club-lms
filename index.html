@@ -33409,6 +33409,9 @@ function receiptStatusText(status) {
       base.notes = sch.notes;
       base.status = sch.completed ? 'done' : (existing ? (existing.status || 'draft') : 'draft');
       base.teacherReport = sch.report || '';
+      base.isSharedClass = !!sch.isSharedClass;
+      base.center2 = sch.center2 || '';
+      base.centers = sch.isSharedClass && sch.center2 ? [sch.center, sch.center2] : [sch.center];
       return base;
     }
 
@@ -33527,11 +33530,31 @@ function receiptStatusText(status) {
       return sameCenter;
     }
 
+    function tfGetAllCoursesForScheduling() {
+      return tfSortCoursesForSchedule((courses || []).filter(function(c) {
+        return c && !c.deleted && c.status !== 'archived';
+      }));
+    }
+
+    function tfCourseSupportsFormatForSchedule(course, format, selectedCenter) {
+      if (!course || !format) return false;
+      if (format === 'onsite') {
+        return !selectedCenter || tfCourseMatchesCenter(course, selectedCenter);
+      }
+      if (format === 'online') {
+        return courseFeatureEnabled(course, 'online') && tfCourseAccessIncludes(course, 'Online');
+      }
+      if (format === 'ondemand') {
+        return courseFeatureEnabled(course, 'onDemand') && tfCourseAccessIncludes(course, 'On-demand');
+      }
+      return !selectedCenter || tfCourseMatchesCenter(course, selectedCenter);
+    }
+
     function tfGetScheduleCoursesForSelection(selectedCenter, format) {
-      return tfGetCourses().filter(function(course) {
-        if (format) return tfCourseSupportsFormat(course, format, selectedCenter);
-        return ['onsite', 'online', 'ondemand'].some(function(fmt) {
-          return tfCourseSupportsFormat(course, fmt, selectedCenter);
+      return tfGetAllCoursesForScheduling().filter(function(course) {
+        if (format) return tfCourseSupportsFormatForSchedule(course, format, selectedCenter);
+        return ['onsite', 'online', 'ondemand', 'oneOnOne'].some(function(fmt) {
+          return tfCourseSupportsFormatForSchedule(course, fmt, selectedCenter);
         });
       });
     }
@@ -33559,11 +33582,7 @@ function receiptStatusText(status) {
         { key: 'ondemand', label: '🎥 Ondemand' },
         { key: 'oneOnOne', label: '👥 สอนเดี่ยว (1:1)' }
       ];
-      const available = formats.filter(function(item) {
-        if (!selectedCenter) return item.key === 'oneOnOne';
-        if (item.key === 'oneOnOne') return true;
-        return tfGetScheduleCoursesForSelection(selectedCenter, item.key).length > 0;
-      });
+      const available = selectedCenter ? formats : formats.filter(function(item) { return item.key === 'oneOnOne'; });
       formatSel.innerHTML = '<option value="">เลือกรูปแบบการสอน</option>' +
         available.map(function(item) { return '<option value="' + item.key + '">' + item.label + '</option>'; }).join('');
       formatSel.value = available.some(function(item) { return item.key === current; }) ? current : '';
@@ -34177,6 +34196,13 @@ function receiptStatusText(status) {
       if (tfEl('tf-sched-end')) tfEl('tf-sched-end').value = '';
       if (tfEl('tf-sched-location')) tfEl('tf-sched-location').value = '';
       if (tfEl('tf-sched-notes')) tfEl('tf-sched-notes').value = '';
+      // Reset shared class
+      if (tfEl('tf-sched-shared')) tfEl('tf-sched-shared').checked = false;
+      if (tfEl('tf-sched-center2')) tfEl('tf-sched-center2').value = '';
+      const sharedRow = tfEl('tf-shared-class-row');
+      if (sharedRow) sharedRow.classList.add('hidden');
+      const sharedWrap = tfEl('tf-shared-center2-wrap');
+      if (sharedWrap) sharedWrap.classList.add('hidden');
       // Reset editing id
       if (tfEl('tf-schedule-editing-id')) tfEl('tf-schedule-editing-id').value = '';
       // Reset error
@@ -34202,9 +34228,32 @@ function receiptStatusText(status) {
         if (fmt === 'online' || fmt === 'ondemand') locLabel.textContent = 'ลิงก์เข้าเรียน / รหัสห้อง';
         else locLabel.textContent = 'ห้องเรียน / สถานที่';
       }
+      const sharedRow = tfEl('tf-shared-class-row');
+      if (sharedRow) {
+        if (fmt === 'online' || fmt === 'ondemand') sharedRow.classList.remove('hidden');
+        else {
+          sharedRow.classList.add('hidden');
+          const cb = tfEl('tf-sched-shared');
+          if (cb) cb.checked = false;
+          const wrap = tfEl('tf-shared-center2-wrap');
+          if (wrap) wrap.classList.add('hidden');
+        }
+      }
       tfPopulateSchedTutors(fmt);
       tfPopulateSchedCourses();
       if (!options.skipSync) tfSyncScheduleFormFromCourse({ keepFormat: true });
+    }
+
+    function tfOnSharedClassChange() {
+      const checked = tfEl('tf-sched-shared') && tfEl('tf-sched-shared').checked;
+      const wrap = tfEl('tf-shared-center2-wrap');
+      if (wrap) {
+        if (checked) wrap.classList.remove('hidden');
+        else {
+          wrap.classList.add('hidden');
+          if (tfEl('tf-sched-center2')) tfEl('tf-sched-center2').value = '';
+        }
+      }
     }
 
     function tfPopulateSchedTutors(fmt) {
@@ -34270,13 +34319,19 @@ function receiptStatusText(status) {
       const center = tfEl('tf-sched-center') ? tfEl('tf-sched-center').value : '';
       const location = tfEl('tf-sched-location') ? tfEl('tf-sched-location').value.trim() : '';
       const notes = tfEl('tf-sched-notes') ? tfEl('tf-sched-notes').value.trim() : '';
+      const isSharedClass = !!(tfEl('tf-sched-shared') && tfEl('tf-sched-shared').checked);
+      const center2 = isSharedClass && tfEl('tf-sched-center2') ? tfEl('tf-sched-center2').value : '';
       if (!center || !courseId || !format || !date || !start || !end) {
         if (errEl) { errEl.textContent = 'กรุณากรอกข้อมูลที่จำเป็นให้ครบ (ศูนย์, ระดับชั้น, รูปแบบ, วันที่, เวลา)'; errEl.classList.remove('hidden'); }
         return;
       }
+      if (isSharedClass && !center2) {
+        if (errEl) { errEl.textContent = 'กรุณาเลือกศูนย์ที่ 2 สำหรับคาบเรียนร่วมกัน'; errEl.classList.remove('hidden'); }
+        return;
+      }
       const docId = editingId || createFirebaseDocId('monthlyPlanSessions');
       const existing = monthlyPlanSessions.find(function(s) { return (s.id || s.firebaseDocId || '') === docId; }) || null;
-      const sch = { id: docId, courseId, tutorId, format, center, date, start, end, location, notes, completed: false, report: '' };
+      const sch = { id: docId, courseId, tutorId, format, center, date, start, end, location, notes, completed: false, report: '', isSharedClass: isSharedClass, center2: center2 || '' };
       const session = tfSchedToSession(sch, existing);
       const duplicate = tfFindDuplicateScheduleSession(session, editingId);
       if (duplicate) {
@@ -34519,12 +34574,28 @@ function receiptStatusText(status) {
             </select>
           </div>
         </div>
+        <div id="tf-shared-class-row" class="hidden">
+          <label class="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">ตัวเลือกพิเศษ Online / On-demand</label>
+          <div class="flex items-center gap-3 flex-wrap">
+            <label class="flex items-center gap-2 cursor-pointer select-none">
+              <input type="checkbox" id="tf-sched-shared" onchange="tfOnSharedClassChange()" class="w-4 h-4 accent-indigo-600" />
+              <span class="text-sm font-semibold text-slate-700">เรียนร่วมกัน 2 ศูนย์</span>
+            </label>
+            <div id="tf-shared-center2-wrap" class="hidden flex-1 min-w-[180px]">
+              <select id="tf-sched-center2" class="w-full bg-slate-50 border border-indigo-300 text-slate-900 rounded-xl p-2 font-medium text-sm">
+                <option value="">เลือกศูนย์ที่ 2</option>
+                <option value="IDEA CLUB ศูนย์ หนองฉาง">🏬 ศูนย์หนองฉาง</option>
+                <option value="IDEA CLUB ศูนย์ นครสวรรค์">🏫 ศูนย์นครสวรรค์</option>
+              </select>
+            </div>
+          </div>
+        </div>
         <div>
-          <label class="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">ระดับชั้น * <span class="font-normal normal-case text-indigo-500">ซิงก์ศูนย์/เวลาอัตโนมัติ</span></label>
+          <label class="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">ระดับชั้น * <span class="font-normal normal-case text-indigo-500">ซิงก์เวลาจากคอร์สอัตโนมัติ</span></label>
           <select id="tf-sched-course" onchange="tfSyncScheduleFormFromCourse()" required class="w-full bg-slate-50 border border-slate-300 text-slate-900 rounded-xl p-2.5 font-medium text-sm"></select>
         </div>
         <div id="tf-course-sync-summary">
-          <div class="rounded-xl border border-dashed border-slate-200 bg-slate-50 p-3 text-xs text-slate-500">เลือกระดับชั้นเพื่อซิงก์ศูนย์ รูปแบบ และเวลาเรียนจากข้อมูลคอร์สอัตโนมัติ</div>
+          <div class="rounded-xl border border-dashed border-slate-200 bg-slate-50 p-3 text-xs text-slate-500">เลือกระดับชั้นเพื่อซิงก์รูปแบบ และเวลาเรียนจากข้อมูลคอร์สอัตโนมัติ</div>
         </div>
         <div>
           <label class="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">ผู้สอน * <span class="font-normal normal-case text-slate-400">แอดมินเลือกครู</span></label>
