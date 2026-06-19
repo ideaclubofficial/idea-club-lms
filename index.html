@@ -33491,6 +33491,57 @@ function receiptStatusText(status) {
       return tfCenterTextMatches(tfGetCourseCenterText(course), selectedCenter);
     }
 
+    function tfIsNongchangCenter(centerText) {
+      return tfNormalizeCenterText(centerText).includes('หนองฉาง');
+    }
+
+    function tfCourseAccessIncludes(course, text) {
+      return String((course && course.access) || '').indexOf(text) !== -1;
+    }
+
+    function tfCourseSupportsFormat(course, format, selectedCenter) {
+      if (!course || !format) return false;
+      const sameCenter = !selectedCenter || tfCourseMatchesCenter(course, selectedCenter);
+      if (format === 'onsite') return sameCenter;
+      if (format === 'online') {
+        return courseFeatureEnabled(course, 'online') && tfCourseAccessIncludes(course, 'Online') && (sameCenter || tfIsNongchangCenter(selectedCenter));
+      }
+      if (format === 'ondemand') {
+        return courseFeatureEnabled(course, 'onDemand') && tfCourseAccessIncludes(course, 'On-demand') && (sameCenter || tfIsNongchangCenter(selectedCenter));
+      }
+      return sameCenter;
+    }
+
+    function tfGetScheduleCoursesForSelection(selectedCenter, format) {
+      return tfGetCourses().filter(function(course) {
+        if (format) return tfCourseSupportsFormat(course, format, selectedCenter);
+        return ['onsite', 'online', 'ondemand'].some(function(fmt) {
+          return tfCourseSupportsFormat(course, fmt, selectedCenter);
+        });
+      });
+    }
+
+    function tfPopulateSchedFormats() {
+      const formatSel = tfEl('tf-sched-format');
+      if (!formatSel) return;
+      const current = formatSel.value;
+      const selectedCenter = tfEl('tf-sched-center') ? tfEl('tf-sched-center').value : '';
+      const formats = [
+        { key: 'onsite', label: '🏫 Onsite' },
+        { key: 'online', label: '💻 Online' },
+        { key: 'ondemand', label: '🎥 Ondemand' },
+        { key: 'oneOnOne', label: '👥 สอนเดี่ยว (1:1)' }
+      ];
+      const available = formats.filter(function(item) {
+        if (!selectedCenter) return item.key === 'oneOnOne';
+        if (item.key === 'oneOnOne') return true;
+        return tfGetScheduleCoursesForSelection(selectedCenter, item.key).length > 0;
+      });
+      formatSel.innerHTML = '<option value="">เลือกรูปแบบการสอน</option>' +
+        available.map(function(item) { return '<option value="' + item.key + '">' + item.label + '</option>'; }).join('');
+      formatSel.value = available.some(function(item) { return item.key === current; }) ? current : '';
+    }
+
     // --- TF helper: get element ---
     function tfEl(id) { return document.getElementById(id); }
 
@@ -33983,7 +34034,7 @@ function receiptStatusText(status) {
       const box = tfEl('tf-course-sync-summary');
       if (!box) return;
       if (!course) {
-        box.innerHTML = '<div class="rounded-xl border border-dashed border-slate-200 bg-slate-50 p-3 text-xs text-slate-500">เลือกคอร์สเพื่อซิงก์ศูนย์ รูปแบบ และเวลาเรียนจากข้อมูลคอร์สอัตโนมัติ</div>';
+        box.innerHTML = '<div class="rounded-xl border border-dashed border-slate-200 bg-slate-50 p-3 text-xs text-slate-500">เลือกระดับชั้นเพื่อซิงก์ศูนย์ รูปแบบ และเวลาเรียนจากข้อมูลคอร์สอัตโนมัติ</div>';
         return;
       }
       const scheduleText = getCourseDisplaySchedule(course) || 'ยังไม่ได้ตั้งเวลาเรียนของคอร์ส';
@@ -33992,8 +34043,8 @@ function receiptStatusText(status) {
         : 'ยังไม่พบ slot ที่ตรงกับวันที่เลือก';
       box.innerHTML =
         '<div class="rounded-xl border border-indigo-100 bg-indigo-50/70 p-3 text-xs text-slate-700 leading-relaxed">' +
-          '<div class="font-bold text-indigo-800 mb-1">ซิงก์ข้อมูลจากคอร์สแล้ว</div>' +
-          '<div><strong>คอร์ส:</strong> ' + escapeHtml((course.grade || '') + (course.grade ? ' · ' : '') + (course.name || course.title || '-')) + '</div>' +
+          '<div class="font-bold text-indigo-800 mb-1">ซิงก์ข้อมูลจากระดับชั้นแล้ว</div>' +
+          '<div><strong>ระดับชั้น:</strong> ' + escapeHtml(course.grade || course.level || '-') + '</div>' +
           '<div><strong>ศูนย์:</strong> ' + escapeHtml(course.location || '-') + '</div>' +
           '<div><strong>เวลาเรียนตั้งต้น:</strong> ' + escapeHtml(scheduleText) + '</div>' +
           '<div><strong>ใช้กับคาบนี้:</strong> ' + escapeHtml(slotText) + '</div>' +
@@ -34013,8 +34064,10 @@ function receiptStatusText(status) {
         return;
       }
 
-      if (tfEl('tf-sched-center') && course.location) tfEl('tf-sched-center').value = course.location;
       const finalFormat = formatEl ? formatEl.value : (slot ? slot.format : 'onsite');
+      const selectedCenter = tfEl('tf-sched-center') ? tfEl('tf-sched-center').value : '';
+      const shouldKeepNongchangSharedClass = tfIsNongchangCenter(selectedCenter) && (finalFormat === 'online' || finalFormat === 'ondemand') && !tfCourseMatchesCenter(course, selectedCenter);
+      if (tfEl('tf-sched-center') && course.location && !shouldKeepNongchangSharedClass) tfEl('tf-sched-center').value = course.location;
       if (slot) {
         if (tfEl('tf-sched-start')) tfEl('tf-sched-start').value = slot.startTime || slot.publishTime || '';
         if (tfEl('tf-sched-end')) tfEl('tf-sched-end').value = slot.endTime || '';
@@ -34032,23 +34085,35 @@ function receiptStatusText(status) {
       if (!courseSel) return;
       const current = selectedCourseId !== undefined ? selectedCourseId : courseSel.value;
       const selectedCenter = tfEl('tf-sched-center') ? tfEl('tf-sched-center').value : '';
+      const selectedFormat = tfEl('tf-sched-format') ? tfEl('tf-sched-format').value : '';
       if (!selectedCenter) {
         courseSel.innerHTML = '<option value="">เลือกศูนย์ก่อน</option>';
         courseSel.value = '';
         return;
       }
-      const filteredCourses = tfGetCourses().filter(function(c) {
-        return tfCourseMatchesCenter(c, selectedCenter);
+      if (!selectedFormat) {
+        courseSel.innerHTML = '<option value="">เลือกรูปแบบก่อน</option>';
+        courseSel.value = '';
+        return;
+      }
+      const gradeMap = {};
+      tfGetScheduleCoursesForSelection(selectedCenter, selectedFormat).forEach(function(course) {
+        const grade = tfGetCourseGradeForSort(course) || 'ไม่ระบุระดับชั้น';
+        if (!gradeMap[grade]) gradeMap[grade] = course;
       });
-      courseSel.innerHTML = '<option value="">เลือกคอร์ส</option>' +
+      const filteredCourses = Object.keys(gradeMap)
+        .map(function(grade) { return gradeMap[grade]; })
+        .sort(tfSortCoursesForSchedule);
+      courseSel.innerHTML = '<option value="">เลือกระดับชั้น</option>' +
         filteredCourses.map(function(c) {
           const id = tfGetCourseId(c);
-          return '<option value="' + escapeHtml(id) + '">' + escapeHtml(tfCourseOptionLabel(c)) + '</option>';
+          return '<option value="' + escapeHtml(id) + '">' + escapeHtml(tfGetCourseGradeForSort(c) || tfCourseOptionLabel(c)) + '</option>';
         }).join('');
       courseSel.value = filteredCourses.some(function(c) { return String(tfGetCourseId(c)) === String(current || ''); }) ? current : '';
     }
 
     function tfOnScheduleCenterChange() {
+      tfPopulateSchedFormats();
       tfPopulateSchedCourses();
       if (!((tfEl('tf-sched-course') || {}).value)) {
         tfRenderCourseSyncSummary(null, null);
@@ -34063,6 +34128,7 @@ function receiptStatusText(status) {
       if (!modal) return;
       const centerSelect = tfEl('tf-sched-center');
       if (centerSelect) centerSelect.value = '';
+      tfPopulateSchedFormats();
       if (tfEl('tf-sched-format')) tfEl('tf-sched-format').value = '';
       tfPopulateSchedCourses('');
       // Populate tutor select
@@ -34101,6 +34167,7 @@ function receiptStatusText(status) {
         else locLabel.textContent = 'ห้องเรียน / สถานที่';
       }
       tfPopulateSchedTutors(fmt);
+      tfPopulateSchedCourses();
       if (!options.skipSync) tfSyncScheduleFormFromCourse({ keepFormat: true });
     }
 
@@ -34168,7 +34235,7 @@ function receiptStatusText(status) {
       const location = tfEl('tf-sched-location') ? tfEl('tf-sched-location').value.trim() : '';
       const notes = tfEl('tf-sched-notes') ? tfEl('tf-sched-notes').value.trim() : '';
       if (!center || !courseId || !format || !date || !start || !end) {
-        if (errEl) { errEl.textContent = 'กรุณากรอกข้อมูลที่จำเป็นให้ครบ (ศูนย์, คอร์ส, รูปแบบ, วันที่, เวลา)'; errEl.classList.remove('hidden'); }
+        if (errEl) { errEl.textContent = 'กรุณากรอกข้อมูลที่จำเป็นให้ครบ (ศูนย์, ระดับชั้น, รูปแบบ, วันที่, เวลา)'; errEl.classList.remove('hidden'); }
         return;
       }
       const docId = editingId || createFirebaseDocId('monthlyPlanSessions');
@@ -34417,11 +34484,11 @@ function receiptStatusText(status) {
           </div>
         </div>
         <div>
-          <label class="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">คอร์สเรียน * <span class="font-normal normal-case text-indigo-500">ซิงก์ศูนย์/เวลาอัตโนมัติ</span></label>
+          <label class="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">ระดับชั้น * <span class="font-normal normal-case text-indigo-500">ซิงก์ศูนย์/เวลาอัตโนมัติ</span></label>
           <select id="tf-sched-course" onchange="tfSyncScheduleFormFromCourse()" required class="w-full bg-slate-50 border border-slate-300 text-slate-900 rounded-xl p-2.5 font-medium text-sm"></select>
         </div>
         <div id="tf-course-sync-summary">
-          <div class="rounded-xl border border-dashed border-slate-200 bg-slate-50 p-3 text-xs text-slate-500">เลือกคอร์สเพื่อซิงก์ศูนย์ รูปแบบ และเวลาเรียนจากข้อมูลคอร์สอัตโนมัติ</div>
+          <div class="rounded-xl border border-dashed border-slate-200 bg-slate-50 p-3 text-xs text-slate-500">เลือกระดับชั้นเพื่อซิงก์ศูนย์ รูปแบบ และเวลาเรียนจากข้อมูลคอร์สอัตโนมัติ</div>
         </div>
         <div>
           <label class="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">ผู้สอน * <span class="font-normal normal-case text-slate-400">แอดมินเลือกครู</span></label>
