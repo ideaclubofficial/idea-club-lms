@@ -4067,6 +4067,7 @@
                   <tr>
                     <th>ระดับชั้น</th>
                     <th>ชื่อคอร์ส</th>
+                    <th>ศูนย์</th>
                     <th>MS Teams</th>
                     <th>วันเรียน</th>
                     <th>เวลาเรียน</th>
@@ -14232,13 +14233,54 @@
     function renderOnlineClassTable() {
       const tbody = getElement('adminOnlineClassTableBody');
       if (!tbody) return;
-      if (!Array.isArray(courses) || courses.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="8">ยังไม่มีคอร์สในระบบ</td></tr>';
+      const gradeOrder = ['ป.1','ป.2','ป.3','ป.4','ป.5','ป.6','ม.1','ม.2','ม.3','ม.4','ม.5','ม.6'];
+      const onlineCourses = (courses || []).filter(function(c) { return c && !c.deleted && onlineClassHasAccess(c); })
+        .slice().sort(function(a, b) {
+          const ia = gradeOrder.indexOf(a.grade || ''), ib = gradeOrder.indexOf(b.grade || '');
+          return (ia === -1 ? 99 : ia) - (ib === -1 ? 99 : ib);
+        });
+      if (!onlineCourses.length) {
+        tbody.innerHTML = '<tr><td colspan="9">ยังไม่มีคอร์สที่มีสิทธิ์ Online</td></tr>';
         return;
       }
-      tbody.innerHTML = courses.map(function(c) {
-        return '<tr><td>' + c.grade + '</td><td>' + c.name + '</td><td>' + (c.onlineLink ? 'มีลิงก์' : '-') + '</td><td>' + (c.onlineClassDay || ((c.days || []).join(' / ') || '-')) + '</td><td>' + (c.onlineClassTime || '-') + '</td><td>' + (c.roomId || '-') + '</td><td>' + (c.roomPassword || '-') + '</td><td><button class="btn btn-blue" type="button" onclick="' + actionCall('editOnlineClass', c.id) + '">แก้ไข</button></td></tr>';
+      tbody.innerHTML = onlineCourses.map(function(c) {
+        const hasRoom = c.onlineLink || c.roomId;
+        const centerShort = String(c.location || '').replace('IDEA CLUB ศูนย์ ', '');
+        return '<tr>' +
+          '<td>' + c.grade + '</td>' +
+          '<td>' + c.name + '</td>' +
+          '<td>' + escapeHtml(centerShort || '-') + '</td>' +
+          '<td>' + (c.onlineLink ? '<a href="' + escapeHtml(c.onlineLink) + '" target="_blank" style="color:#4f46e5;">มีลิงก์</a>' : '-') + '</td>' +
+          '<td>' + (c.onlineClassDay || ((c.days || []).join(' / ') || '-')) + '</td>' +
+          '<td>' + (c.onlineClassTime || '-') + '</td>' +
+          '<td>' + (c.roomId || '-') + '</td>' +
+          '<td>' + (c.roomPassword || '-') + '</td>' +
+          '<td style="white-space:nowrap;">' +
+            '<button class="btn btn-blue" type="button" onclick="' + actionCall('editOnlineClass', c.id) + '">แก้ไข</button>' +
+            (hasRoom ? ' <button class="btn btn-red" type="button" onclick="' + actionCall('deleteOnlineClassRoom', c.id) + '">ลบ</button>' : '') +
+          '</td>' +
+        '</tr>';
       }).join('');
+    }
+
+    async function deleteOnlineClassRoom(id) {
+      const c = courses.find(function(item) { return String(item.id) === String(id); });
+      if (!c) return;
+      if (!confirm('ลบข้อมูลห้องเรียน Online ของ ' + c.grade + ' · ' + c.name + ' ?')) return;
+      c.onlineLink = '';
+      c.onlineClassDay = '';
+      c.onlineClassTime = '';
+      c.roomId = '';
+      c.roomPassword = '';
+      try {
+        await setFirebaseDocument('courses', c);
+        renderOnlineClassTable();
+        renderAdminCourses();
+        updateStudentCourseDisplay();
+      } catch (error) {
+        console.error('deleteOnlineClassRoom error:', error);
+        alert('ลบไม่สำเร็จ: ' + (error.message || error.code));
+      }
     }
 
     function editOnlineClass(id) {
