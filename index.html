@@ -9917,11 +9917,7 @@
 
     function isPrivateLessonForCurrentTeacher(session) {
       if (!session || session.type !== 'oneOnOne' || !currentTeacher) return false;
-      const teacherValues = getTeacherIdentityValues(currentTeacher);
-      const sessionValues = [session.teacherId, session.teacherUid, session.teacherAuthUid, session.authUid, session.teacherName]
-        .map(function(value) { return String(value || '').trim(); })
-        .filter(Boolean);
-      return sessionValues.some(function(value) { return teacherValues.includes(value); });
+      return isMonthlySessionForTeacher(session, currentTeacher);
     }
 
     function getTeacherPrivateLessonSessions() {
@@ -10130,10 +10126,9 @@
 
     function getTeacherMonthlyPlanSessionsForMobile() {
       if (!currentTeacher || !Array.isArray(monthlyPlanSessions)) return [];
-      const teacherKey = getTeacherKey(currentTeacher);
       return monthlyPlanSessions.filter(function(session) {
         const status = session.status || 'draft';
-        return teacherKey && getSessionTeacherKey(session) === teacherKey && status !== 'cancelled';
+        return isMonthlySessionForTeacher(session, currentTeacher) && status !== 'cancelled';
       }).sort(function(a, b) {
         return String(getMonthlySessionDate(a) || '').localeCompare(String(getMonthlySessionDate(b) || '')) ||
           String(formatMonthlySessionTimeRange(a) || '').localeCompare(String(formatMonthlySessionTimeRange(b) || ''));
@@ -22100,6 +22095,47 @@ function receiptStatusText(status) {
       return String(session.teacherUid || session.teacherAuthUid || session.authUid || session.teacherId || session.teacherName || '').trim();
     }
 
+    function getTeacherIdentitySet(teacher) {
+      if (!teacher) return [];
+      const values = [
+        teacher.teacherUid,
+        teacher.authUid,
+        teacher.teacherAuthUid,
+        teacher.teacherId,
+        teacher.id,
+        teacher.firebaseDocId,
+        teacher.username,
+        teacher.email,
+        teacher.authEmail,
+        teacher.name,
+        teacher.displayName
+      ];
+      return values.map(function(value) { return String(value || '').trim(); }).filter(Boolean);
+    }
+
+    function getSessionTeacherIdentitySet(session) {
+      if (!session) return [];
+      const values = [
+        session.teacherUid,
+        session.teacherAuthUid,
+        session.authUid,
+        session.teacherId,
+        session.tutorId,
+        session.teacherDocId,
+        session.teacherEmail,
+        session.teacherName,
+        session.tutorName
+      ];
+      return values.map(function(value) { return String(value || '').trim(); }).filter(Boolean);
+    }
+
+    function isMonthlySessionForTeacher(session, teacher) {
+      const teacherKeys = getTeacherIdentitySet(teacher);
+      const sessionKeys = getSessionTeacherIdentitySet(session);
+      if (!teacherKeys.length || !sessionKeys.length) return false;
+      return sessionKeys.some(function(key) { return teacherKeys.includes(key); });
+    }
+
     function parseTimeToMinutes(time) {
       if (!time) return null;
       const match = String(time).trim().match(/^(\d{1,2}):(\d{2})$/);
@@ -23201,9 +23237,8 @@ function receiptStatusText(status) {
         box.innerHTML = '<div class="notice">ยังไม่ได้ล็อกอินในฐานะครู</div>';
         return;
       }
-      const teacherKey = getTeacherKey(currentTeacher);
       const allSessions = (monthlyPlanSessions || []).filter(function(session) {
-        return teacherKey && getSessionTeacherKey(session) === teacherKey && (session.status || 'draft') !== 'cancelled';
+        return isMonthlySessionForTeacher(session, currentTeacher) && (session.status || 'draft') !== 'cancelled';
       });
       const months = [];
       allSessions.forEach(function(session) {
@@ -33733,7 +33768,7 @@ function receiptStatusText(status) {
       return {
         id: s.id || s.firebaseDocId || '',
         courseId: s.courseId || '',
-        tutorId: s.teacherId || '',
+        tutorId: s.teacherId || s.teacherUid || s.teacherAuthUid || s.authUid || '',
         format: s.type || s.format || 'onsite',
         center: s.center || s.courseLocation || '',
         date: tfGetSessionDateText(s),
@@ -34886,8 +34921,9 @@ function receiptStatusText(status) {
 
     // --- Portal: render stats ---
     function tfRenderPortalStats() {
+      const activeTutor = findTeacherByPlannerId(tfActiveTutorId);
       const myScheds = (monthlyPlanSessions || []).filter(function(s) {
-        return (s.teacherId || '') === tfActiveTutorId && !s.deleted && s.status !== 'cancelled';
+        return activeTutor && isMonthlySessionForTeacher(s, activeTutor) && !s.deleted && s.status !== 'cancelled';
       });
       const y = tfCalDate.getFullYear();
       const m = tfCalDate.getMonth();
@@ -34919,8 +34955,9 @@ function receiptStatusText(status) {
       const totalDays = new Date(year, month + 1, 0).getDate();
       const prevDays = new Date(year, month, 0).getDate();
       const monthKey = year + '-' + String(month + 1).padStart(2, '0');
+      const activeTutor = findTeacherByPlannerId(tfActiveTutorId);
       const myScheds = (monthlyPlanSessions || []).filter(function(s) {
-        return (s.teacherId || '') === tfActiveTutorId && !s.deleted && s.status !== 'cancelled' &&
+        return activeTutor && isMonthlySessionForTeacher(s, activeTutor) && !s.deleted && s.status !== 'cancelled' &&
           tfGetSessionDateText(s).startsWith(monthKey);
       });
       const today = new Date();
@@ -34952,9 +34989,9 @@ function receiptStatusText(status) {
     function tfPortalSelectDay(dateStr) {
       const info = tfEl('tf-portal-session-info');
       if (!info) return;
-      const monthKey = tfCalDate.getFullYear() + '-' + String(tfCalDate.getMonth() + 1).padStart(2, '0');
+      const activeTutor = findTeacherByPlannerId(tfActiveTutorId);
       const daySch = (monthlyPlanSessions || []).filter(function(s) {
-        return (s.teacherId || '') === tfActiveTutorId && !s.deleted && s.status !== 'cancelled' &&
+        return activeTutor && isMonthlySessionForTeacher(s, activeTutor) && !s.deleted && s.status !== 'cancelled' &&
           tfGetSessionDateText(s) === dateStr;
       }).sort(function(a, b) { return tfGetSessionStartText(a).localeCompare(tfGetSessionStartText(b)); });
       if (!daySch.length) {
