@@ -2884,6 +2884,17 @@
               </div>
             </div>
 
+            <div id="teacherMonthlyPlanPanel" class="form-box">
+              <h3>ตารางสอนรายเดือน</h3>
+              <div class="student-schedule-toolbar" style="margin-bottom:14px;">
+                <div id="teacherMonthlyPlanMeta" class="mini-muted"></div>
+                <select id="teacherMonthlyPlanMonthFilter" onchange="renderTeacherMonthlyPlanSummary()"></select>
+              </div>
+              <div id="teacherMonthlyPlanList"><p class="mini-muted">กำลังโหลดตารางสอน...</p></div>
+            </div>
+
+            <br />
+
             <div class="dashboard-grid">
               <div class="stat clickable" onclick="showTeacherTab('teacher-online')"><h4>คอร์สที่สอน</h4><p id="teacherDashCourseCount">0 คอร์ส</p><small>กดเพื่อเข้าห้องเรียน Online</small></div>
               <div class="stat clickable" onclick="showTeacherTab('teacher-students')"><h4>นักเรียนในคอร์ส</h4><p id="teacherDashStudentCount">0 คน</p><small>กดเพื่อดูรายชื่อ</small></div>
@@ -23154,24 +23165,68 @@ function receiptStatusText(status) {
       if (mobileCard) mobileCard.classList.remove('hidden');
     }
 
+    function renderTeacherScheduleCard(session) {
+      const typeKey = session.status === 'holiday' ? 'holiday' : (session.type || 'onsite');
+      const statusClass = session.status === 'holiday' ? 'status-absent' : (session.status === 'done' ? 'status-paid' : (session.type === 'makeup' || session.isMakeup ? 'status-paid' : 'status-waiting'));
+      return '<div class="student-schedule-card student-schedule-card-' + escapeHtml(typeKey) + '">' +
+        '<strong>' + escapeHtml(formatMonthlySessionTimeRange(session) || '-') + '</strong>' +
+        '<div>' + escapeHtml(getMonthlyPlanCourseName(session) || '-') + ' · ' + escapeHtml(getMonthlyPlanTypeText(session.type || 'onsite')) + '</div>' +
+        (session.center ? '<div class="mini-muted">📍 ' + escapeHtml(session.center) + '</div>' : '') +
+        (session.type === 'oneOnOne' && session.studentName ? '<div class="mini-muted">นักเรียน: ' + escapeHtml(session.studentName) + '</div>' : '') +
+        '<div><span class="' + statusClass + '">' + escapeHtml(getMonthlySessionStatusLabel(session) || 'ตารางสอน') + '</span>' +
+        (session.isRescheduled ? ' <span class="mini-muted">· ย้ายวัน</span>' : '') + '</div>' +
+      '</div>';
+    }
+
+    function renderTeacherScheduleCalendar(monthKey, sessions) {
+      const days = getMonthlyPlanGridDays(monthKey);
+      if (!days.length) return '<div class="notice">ยังไม่มีเดือนตารางสอนให้แสดง</div>';
+      return '<div class="student-schedule-calendar">' + days.map(function(date) {
+        const dateKey = date.getFullYear() + '-' + padNumber(date.getMonth() + 1, 2) + '-' + padNumber(date.getDate(), 2);
+        const daySessions = sessions.filter(function(s) { return getMonthlySessionDate(s) === dateKey; })
+          .sort(function(a, b) { return (a.timeStart || '').localeCompare(b.timeStart || ''); });
+        return '<div class="student-schedule-day">' +
+          '<div class="student-schedule-day-header"><span>' + escapeHtml(getMonthlyPlanDayText(getMonthlyPlanDayKey(date))) + '</span><strong>' + date.getDate() + '</strong></div>' +
+          (daySessions.length ? daySessions.map(renderTeacherScheduleCard).join('') : '<span class="mini-muted">-</span>') +
+        '</div>';
+      }).join('') + '</div>';
+    }
+
     function renderTeacherMonthlyPlanSummary() {
-      const dashboard = getElement('teacher-dashboard');
-      if (!dashboard || !currentTeacher) return;
-      ensureElement(dashboard, 'teacherMonthlyPlanPanel', '<div id="teacherMonthlyPlanPanel" class="form-box"><h3>ตารางสอนรายเดือน</h3><div id="teacherMonthlyPlanList" class="status-display"></div></div>');
       const box = getElement('teacherMonthlyPlanList');
+      const monthSelect = getElement('teacherMonthlyPlanMonthFilter');
+      const meta = getElement('teacherMonthlyPlanMeta');
       if (!box) return;
+      if (!currentTeacher) {
+        box.innerHTML = '<div class="notice">ยังไม่ได้ล็อกอินในฐานะครู</div>';
+        return;
+      }
       const teacherKey = getTeacherKey(currentTeacher);
-      const list = monthlyPlanSessions.filter(function(session) {
-        const status = session.status || 'draft';
-        return teacherKey && getSessionTeacherKey(session) === teacherKey && status !== 'cancelled' && (status === 'holiday' || session.type === 'makeup' || session.type === 'oneOnOne');
-      }).sort(function(a, b) {
-        return String(getMonthlySessionDate(a)).localeCompare(String(getMonthlySessionDate(b)));
+      const allSessions = (monthlyPlanSessions || []).filter(function(session) {
+        return teacherKey && getSessionTeacherKey(session) === teacherKey && (session.status || 'draft') !== 'cancelled';
       });
-      box.innerHTML = list.length ? list.slice(0, 10).map(function(session) {
-        const labelClass = session.status === 'holiday' ? 'status-absent' : 'status-paid';
-        const rescheduleText = session.isRescheduled ? ' · ย้ายวันเรียน' : '';
-        return '<div class="status-display-row"><span><strong>' + escapeHtml(getMonthlySessionDate(session) || '-') + '</strong><br><span class="mini-muted">' + escapeHtml((session.center || '-') + ' · ' + getMonthlyPlanTypeText(session.type) + ' · ' + (session.type === 'oneOnOne' ? (session.studentName || session.studentMemberId || '-') + ' · ' : '') + getMonthlyPlanCourseName(session) + ' · ' + formatMonthlySessionTimeRange(session) + rescheduleText) + '</span></span><span class="' + labelClass + '">' + escapeHtml(getMonthlySessionStatusLabel(session)) + '</span></div>';
-      }).join('') : '<div class="notice">ยังไม่มีงดเรียน คาบชดเชย หรือคาบสอนเดี่ยวที่ผูกกับครูคนนี้</div>';
+      const months = [];
+      allSessions.forEach(function(session) {
+        const m = getMonthlySessionMonthKey(session);
+        if (m && months.indexOf(m) === -1) months.push(m);
+      });
+      months.sort();
+      const currentMonthKey = getLocalDateString().slice(0, 7);
+      const currentValue = monthSelect ? monthSelect.value : '';
+      const selectedMonth = months.indexOf(currentValue) !== -1 ? currentValue : (months.indexOf(currentMonthKey) !== -1 ? currentMonthKey : (months[0] || ''));
+      if (monthSelect) {
+        monthSelect.innerHTML = months.length
+          ? months.map(function(m) { return '<option value="' + escapeHtml(m) + '">' + escapeHtml(getThaiMonthLabel(m, false) || m) + '</option>'; }).join('')
+          : '<option value="">ยังไม่มีตาราง</option>';
+        if (selectedMonth) monthSelect.value = selectedMonth;
+      }
+      if (meta) meta.textContent = (currentTeacher.name || currentTeacher.displayName || '') + (allSessions.length ? ' · ' + allSessions.length + ' คาบทั้งหมด' : '');
+      if (!selectedMonth) {
+        box.innerHTML = '<div class="notice">ยังไม่มีตารางสอนที่บันทึกไว้</div>';
+        return;
+      }
+      const monthSessions = allSessions.filter(function(session) { return getMonthlySessionMonthKey(session) === selectedMonth; });
+      box.innerHTML = monthSessions.length ? renderTeacherScheduleCalendar(selectedMonth, monthSessions) : '<div class="notice">ยังไม่มีตารางสอนสำหรับเดือนนี้</div>';
     }
 
     function getCourseNameById(courseId) {
