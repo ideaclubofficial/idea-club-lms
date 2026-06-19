@@ -188,6 +188,54 @@ service cloud.firestore {
         && request.resource.data.status == 'รอตรวจสลิป';
     }
 
+    function isStudentPaymentBundleOwner() {
+      return signedIn()
+        && isStudentUser()
+        && resource.data.authUid == request.auth.uid;
+    }
+
+    function isStudentPaymentBundleCreate(docId) {
+      return signedIn()
+        && isStudentUser()
+        && request.resource.data.firebaseDocId == docId
+        && request.resource.data.authUid == request.auth.uid
+        && request.resource.data.status == 'รอชำระเงิน'
+        && request.resource.data.paymentStatus == 'รอชำระเงิน';
+    }
+
+    function isStudentPaymentBundleSlipUpdate(docId) {
+      return isStudentPaymentBundleOwner()
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'firebaseDocId',
+          'deleted',
+          'slipStorageType',
+          'driveFileId',
+          'driveFileUrl',
+          'driveViewUrl',
+          'driveFolderId',
+          'driveFolderName',
+          'slipUploadedByUid',
+          'slipUploadedByName',
+          'slipUploadedAt',
+          'slipUploadedAtText',
+          'slipStatus',
+          'adminReviewStatus',
+          'paymentStatus',
+          'status',
+          'updatedAt',
+          'updatedBy',
+          'updatedByEmail',
+          'updatedByName'
+        ])
+        && request.resource.data.firebaseDocId == docId
+        && request.resource.data.deleted == false
+        && request.resource.data.slipUploadedByUid == request.auth.uid
+        && request.resource.data.slipStatus == 'waiting_admin_review'
+        && request.resource.data.adminReviewStatus == 'pending'
+        && request.resource.data.paymentStatus == 'รอตรวจสลิป'
+        && request.resource.data.status == 'รอตรวจสลิป';
+    }
+
     match /users/{userId} {
       allow read: if signedIn() && (request.auth.uid == userId || isAdmin());
       allow create: if isAdmin() || isOwnStudentProfileCreate(userId);
@@ -224,8 +272,10 @@ service cloud.firestore {
     }
 
     match /paymentBundles/{docId} {
-      allow read: if isAdmin() || hasAdminPermission('admin.full') || isFinance() || isTeacher();
-      allow write: if isAdmin() || isFinance();
+      allow read: if isAdmin() || hasAdminPermission('admin.full') || isFinance() || isTeacher() || isStudentPaymentBundleOwner();
+      allow create: if isAdmin() || isFinance() || isStudentPaymentBundleCreate(docId);
+      allow update: if isAdmin() || isFinance() || isStudentPaymentBundleSlipUpdate(docId);
+      allow delete: if isAdmin();
     }
 
     match /receipts/{docId} {
