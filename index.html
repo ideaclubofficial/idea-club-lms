@@ -5834,10 +5834,6 @@
 
               <div class="form-row">
                 <div>
-                  <label>เลือกคอร์สที่เกี่ยวข้อง</label>
-                  <select id="adminOnDemandCourseSelect" onchange="loadOnDemandForm()"></select>
-                </div>
-                <div>
                   <label>วิชา</label>
                   <select id="adminOnDemandSubject">
                     <option>คณิตศาสตร์</option>
@@ -5847,9 +5843,6 @@
                     <option>สังคมศึกษา</option>
                   </select>
                 </div>
-              </div>
-
-              <div class="form-row">
                 <div>
                   <label>ระดับชั้น</label>
                   <select id="adminOnDemandGrade">
@@ -5954,7 +5947,6 @@
                     <th class="sortable" onclick="setOnDemandSort('grade')">ระดับชั้น</th>
                     <th class="sortable" onclick="setOnDemandSort('playlistName')">ชุดคลิป</th>
                     <th class="sortable" onclick="setOnDemandSort('clipTitle')">ชื่อคลิป</th>
-                    <th>คอร์สที่เกี่ยวข้อง</th>
                     <th>ลิงก์วิดีโอ</th>
                     <th>ไฟล์ PDF</th>
                     <th>จัดการ</th>
@@ -13649,34 +13641,12 @@
     }
 
     function renderOnDemandCourseSelect() {
-      const select = getElement('adminOnDemandCourseSelect');
-      if (!select) return;
-      const current = select.value || String(currentStudentCourseId || (courses[0] ? courses[0].id : ''));
-      if (!courses.length) {
-        select.innerHTML = '<option value="">ยังไม่มีคอร์ส</option>';
-        return;
-      }
-      select.innerHTML = sortCoursesByGrade(courses).map(function(c) {
-        return '<option value="' + c.id + '">' + c.grade + ' · ' + c.name + '</option>';
-      }).join('');
-      select.value = courses.some(function(c) { return String(c.id) === String(current); }) ? current : String(courses[0].id);
     }
 
     function loadOnDemandForm() {
-      const select = getElement('adminOnDemandCourseSelect');
-      if (!select) return;
-      const c = getSelectedOnDemandCourse();
-      if (!c) return;
-      if (!getElement('editingOnDemandClipId').value) {
-        getElement('adminOnDemandSubject').value = c.onDemandSubject || guessSubjectFromCourse(c.name);
-        getElement('adminOnDemandGrade').value = c.onDemandGrade || c.grade || 'ป.6';
-        getElement('adminOnDemandClipName').value = c.onDemandTitle ? c.onDemandTitle.replace(' - คลิปย้อนหลัง', '') : c.name;
-      }
-    }
-
-    function getSelectedOnDemandCourse() {
-      const select = getElement('adminOnDemandCourseSelect');
-      return select ? courses.find(function(item) { return String(item.id) === String(select.value); }) : null;
+      if (getElement('editingOnDemandClipId') && getElement('editingOnDemandClipId').value) return;
+      if (getElement('adminOnDemandSubject')) getElement('adminOnDemandSubject').value = getElement('adminOnDemandSubject').value || 'คณิตศาสตร์';
+      if (getElement('adminOnDemandGrade')) getElement('adminOnDemandGrade').value = getElement('adminOnDemandGrade').value || 'ป.6';
     }
 
     function parsePdfFilesFromText(text) {
@@ -13851,7 +13821,6 @@
     }
 
     async function saveOnDemandSettings() {
-      const courseId = getElement('adminOnDemandCourseSelect').value;
       const subject = getElement('adminOnDemandSubject').value;
       const grade = getElement('adminOnDemandGrade').value;
       const playlistName = getElement('adminOnDemandClipName').value.trim();
@@ -13871,13 +13840,13 @@
         if (editingId) {
           const item = onDemandClips.find(function(p) { return String(p.id) === String(editingId); });
           if (item) {
-            Object.assign(item, { courseId: courseId, subject: subject, grade: grade, playlistName: playlistName, clipTitle: clipTitle, link: link, pdfFiles: pdfFiles, updatedAtText: nowText });
+            Object.assign(item, { courseId: '', subject: subject, grade: grade, playlistName: playlistName, clipTitle: clipTitle, link: link, pdfFiles: pdfFiles, updatedAtText: nowText });
             await setFirebaseDocument('onDemandClips', item);
           }
           getElement('videoSaveResult').textContent = 'แก้ไข ชุดคลิป / คลิป On-demand เรียบร้อย';
         } else {
           const newId = createFirebaseDocId('onDemandClips');
-          const newItem = { id: newId, firebaseDocId: newId, courseId: courseId, subject: subject, grade: grade, playlistName: playlistName, clipTitle: clipTitle, link: link, pdfFiles: pdfFiles, createdAtText: nowText, updatedAtText: nowText };
+          const newItem = { id: newId, firebaseDocId: newId, courseId: '', subject: subject, grade: grade, playlistName: playlistName, clipTitle: clipTitle, link: link, pdfFiles: pdfFiles, createdAtText: nowText, updatedAtText: nowText };
           onDemandClips.push(newItem);
           await setFirebaseDocument('onDemandClips', newItem);
           getElement('videoSaveResult').textContent = 'เพิ่ม ชุดคลิป / คลิป On-demand เรียบร้อย';
@@ -13931,9 +13900,8 @@
       if (!tbody) return;
       const filtered = getFilteredSortedOnDemandClips();
       tbody.innerHTML = filtered.length ? filtered.map(function(item) {
-        const course = courses.find(function(c) { return String(c.id) === String(item.courseId); });
-        return '<tr><td>' + item.subject + '</td><td>' + item.grade + '</td><td>' + item.playlistName + '</td><td>' + item.clipTitle + '</td><td>' + (course ? course.name : '-') + '</td><td>' + (item.link ? 'มีลิงก์' : '-') + '</td><td>' + getPdfFileCountText(item) + '</td><td><button class="btn btn-blue" type="button" onclick="' + actionCall('editOnDemand', item.id) + '">แก้ไข</button><button class="btn btn-red" type="button" onclick="' + actionCall('deleteOnDemandClip', item.id) + '">ลบ</button></td></tr>';
-      }).join('') : '<tr><td colspan="8">ไม่พบคลิป On-demand ตามวิชาและระดับชั้นที่เลือก</td></tr>';
+        return '<tr><td>' + item.subject + '</td><td>' + item.grade + '</td><td>' + item.playlistName + '</td><td>' + item.clipTitle + '</td><td>' + (item.link ? 'มีลิงก์' : '-') + '</td><td>' + getPdfFileCountText(item) + '</td><td><button class="btn btn-blue" type="button" onclick="' + actionCall('editOnDemand', item.id) + '">แก้ไข</button><button class="btn btn-red" type="button" onclick="' + actionCall('deleteOnDemandClip', item.id) + '">ลบ</button></td></tr>';
+      }).join('') : '<tr><td colspan="7">ไม่พบคลิป On-demand ตามวิชาและระดับชั้นที่เลือก</td></tr>';
     }
 
     function editOnDemand(id) {
@@ -13942,11 +13910,10 @@
 
       openEditBubble('แก้ไข ชุดคลิป / คลิป On-demand',
         '<div class="form-row">' +
-          '<div><label>คอร์สที่เกี่ยวข้อง</label><select id="bubbleOnDemandCourse">' + courseOptionsHtml(item.courseId) + '</select></div>' +
           '<div><label>วิชา</label><select id="bubbleOnDemandSubject">' + subjectOptionsHtml(item.subject) + '</select></div>' +
+          '<div><label>ระดับชั้น</label><select id="bubbleOnDemandGrade">' + gradeOptionsHtml(item.grade) + '</select></div>' +
         '</div>' +
         '<div class="form-row">' +
-          '<div><label>ระดับชั้น</label><select id="bubbleOnDemandGrade">' + gradeOptionsHtml(item.grade) + '</select></div>' +
           '<div><label>ชื่อชุดคลิป</label><input id="bubbleOnDemandClipName" type="text" value="' + item.playlistName + '"></div>' +
         '</div>' +
         '<label>ชื่อคลิป / บทเรียน</label><input id="bubbleOnDemandTitle" type="text" value="' + item.clipTitle + '">' +
@@ -13964,7 +13931,7 @@
             return;
           }
           Object.assign(item, {
-            courseId: bubbleSelectValue('bubbleOnDemandCourse'),
+            courseId: '',
             subject: bubbleSelectValue('bubbleOnDemandSubject'),
             grade: bubbleSelectValue('bubbleOnDemandGrade'),
             playlistName: playlistName,
@@ -14000,12 +13967,6 @@
       getElement('adminOnDemandTitle').value = '';
       getElement('adminOnDemandLink').value = '';
       if (getElement('adminOnDemandPdfFiles')) getElement('adminOnDemandPdfFiles').value = '';
-      const course = courses.find(function(c) { return String(c.id) === String(getElement('adminOnDemandCourseSelect').value); });
-      if (course) {
-        getElement('adminOnDemandSubject').value = course.onDemandSubject || guessSubjectFromCourse(course.name);
-        getElement('adminOnDemandGrade').value = course.onDemandGrade || course.grade || 'ป.6';
-        getElement('adminOnDemandClipName').value = course.name;
-      }
       if (clearMessage !== false) getElement('videoSaveResult').textContent = '';
     }
 
@@ -15531,10 +15492,10 @@
       refreshStudentOnDemandFilter();
     }
 
-    function getStudentAllowedOnDemandCourseIds(courseList) {
-      return (courseList || [])
-        .filter(function(c) { return String(c.access || '').indexOf('On-demand') !== -1 && courseFeatureEnabled(c, 'onDemand'); })
-        .map(function(c) { return String(c.id); });
+    function studentHasOnDemandCourseAccess(courseList) {
+      return (courseList || []).some(function(c) {
+        return String(c.access || '').indexOf('On-demand') !== -1 && courseFeatureEnabled(c, 'onDemand');
+      });
     }
 
     function getOnDemandClipTimestamp(item) {
@@ -15549,14 +15510,12 @@
     }
 
     function getStudentOnDemandClips(courseList, grade, subjectFilter) {
-      const allowedCourseIds = getStudentAllowedOnDemandCourseIds(courseList);
-      if (!allowedCourseIds.length) return [];
+      if (!studentHasOnDemandCourseAccess(courseList)) return [];
       const selectedSubject = subjectFilter || 'ทั้งหมด';
       return onDemandClips.filter(function(item) {
         const gradeMatched = item.grade === grade;
         const subjectMatched = selectedSubject === 'ทั้งหมด' || item.subject === selectedSubject;
-        const courseMatched = !item.courseId || allowedCourseIds.includes(String(item.courseId));
-        return gradeMatched && subjectMatched && courseMatched;
+        return gradeMatched && subjectMatched;
       }).slice().sort(compareOnDemandClipsLatestFirst);
     }
 
@@ -15585,9 +15544,8 @@
       const box = getElement('studentOnDemandList');
       if (!box) return;
       const subjectFilter = renderStudentOnDemandSubjectOptions(grade, courseList);
-      const allowedCourseIds = getStudentAllowedOnDemandCourseIds(courseList);
 
-      if (!allowedCourseIds.length) {
+      if (!studentHasOnDemandCourseAccess(courseList)) {
         box.innerHTML = '<div class="notice" style="background:#1f2937; color:white; border-color:#374151;">คอร์สนี้ยังไม่เปิดคลิป On-demand</div>';
         return;
       }
@@ -15668,8 +15626,7 @@
       const box = getElement('studentMobileOnDemandList');
       if (!box) return;
       const subjectFilter = renderStudentOnDemandSubjectOptions(grade, courseList);
-      const allowedCourseIds = getStudentAllowedOnDemandCourseIds(courseList);
-      if (!allowedCourseIds.length) {
+      if (!studentHasOnDemandCourseAccess(courseList)) {
         box.innerHTML = '<div class="student-mobile-media-card"><strong>ยังไม่มีคลิป On-demand</strong><p class="student-mobile-muted">คอร์สนี้ยังไม่เปิดคลิป On-demand</p></div>';
         return;
       }
@@ -15783,9 +15740,13 @@
         alert('คอร์สนี้ยังปิดคลิป On-demand ไว้');
         return;
       }
-      const item = onDemandClips.find(function(p) { return String(p.courseId) === String(id); });
+      if (!c || String(c.access || '').indexOf('On-demand') === -1) {
+        alert('คอร์สนี้ยังไม่แถมคลิป On-demand');
+        return;
+      }
+      const item = onDemandClips.slice().sort(compareOnDemandClipsLatestFirst).find(function(p) { return !c.grade || p.grade === c.grade; });
       if (!item || !item.link) {
-        alert('ยังไม่ได้เพิ่มคลิป On-demand สำหรับคอร์สนี้');
+        alert('ยังไม่ได้เพิ่มคลิป On-demand สำหรับระดับชั้นนี้');
         return;
       }
       window.open(item.link, '_blank');
