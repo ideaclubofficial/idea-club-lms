@@ -6198,11 +6198,22 @@
       });
     }
 
+    const COLLECTION_FETCH_LIMITS = {
+      activityLogs:       { orderField: 'updatedAt', orderDir: 'desc', limit: 100 },
+      payments:           { limit: 600 },
+      receipts:           { limit: 600 },
+      paymentBundles:     { limit: 300 },
+      attendanceHistory:  { limit: 400 },
+      monthlyPlanSessions:{ limit: 500 }
+    };
+
     async function getFirebaseCollection(collectionName, includeDeleted) {
       if (!firebaseReady || !db) return [];
       let query = db.collection(collectionName);
-      if (collectionName === 'activityLogs') {
-        query = query.orderBy('updatedAt', 'desc').limit(100);
+      const cap = COLLECTION_FETCH_LIMITS[collectionName];
+      if (cap) {
+        if (cap.orderField) query = query.orderBy(cap.orderField, cap.orderDir || 'asc');
+        query = query.limit(cap.limit);
       }
       let snapshot = null;
       try {
@@ -6448,7 +6459,7 @@
         getFirebaseCollectionQuiet('onDemandClips'),
         getFirebaseCollectionQuiet('announcements'),
         getFirebaseCollectionQuiet('scoreReports'),
-        getFirebaseCollectionQuiet('adminScoreRecords'),
+        (firebaseReady && db ? db.collection('adminScoreRecords').where('status', '==', 'published').get().then(function(snap) { return snap.docs.map(function(d) { return Object.assign({ firebaseDocId: d.id }, d.data()); }).filter(function(x) { return x.deleted !== true; }); }).catch(function() { return []; }) : Promise.resolve([])),
         getFirebaseCollectionQuiet('paymentMonths'),
         getFirebaseCollectionQuiet('lineGroups'),
         loadStudentOwnCollection('payments', studentDocIds, firebaseUser.uid),
@@ -28033,7 +28044,7 @@ function receiptStatusText(status) {
         addRef(db.collection('users').doc(String(uid)));
       });
 
-      const roleSnapshot = await db.collection('users').where('role', '==', 'student').get();
+      const roleSnapshot = await db.collection('users').where('role', '==', 'student').limit(500).get();
       roleSnapshot.forEach(function(doc) { addRef(doc.ref); });
 
       return deleteRefsInBatches(Object.keys(refsByPath).map(function(path) { return refsByPath[path]; }));
@@ -28571,7 +28582,7 @@ function receiptStatusText(status) {
 
       try {
         // query role == "student" แล้วกรอง grade และ status ใน JS
-        const snapshot = await db.collection('users').where('role', '==', 'student').get();
+        const snapshot = await db.collection('users').where('role', '==', 'student').limit(500).get();
         const targetGrades = ['ป.4', 'ป.5', 'ป.6'];
         examStudentUsers = snapshot.docs.map(function(doc) {
           return Object.assign({ uid: doc.id }, doc.data());
@@ -28918,7 +28929,7 @@ function receiptStatusText(status) {
       } catch (error) {
         // fallback ถ้า Firestore index ยังไม่พร้อม
         try {
-          const snapshot = await db.collection('examResults').get();
+          const snapshot = await db.collection('examResults').limit(500).get();
           examResultsCache = snapshot.docs.map(function(doc) { return Object.assign({ firebaseDocId: doc.id }, doc.data()); });
         } catch (err2) {
           console.warn('loadAndRenderReports error:', err2);
@@ -31361,10 +31372,10 @@ function receiptStatusText(status) {
         let q = db.collection('onlineExamResults');
         if (studentUid) q = q.where('studentUid', '==', studentUid);
 
-        const snap = await runOnlineExamGradeWithTimeout(q.orderBy('submittedAt', 'desc').limit(1000).get().catch(function() {
+        const snap = await runOnlineExamGradeWithTimeout(q.orderBy('submittedAt', 'desc').limit(500).get().catch(function() {
           let q2 = db.collection('onlineExamResults');
           if (studentUid) q2 = q2.where('studentUid', '==', studentUid);
-          return q2.limit(1000).get();
+          return q2.limit(500).get();
         }), 'โหลดผลสอบ');
         if (requestId !== onlineExamGradeRefreshSeq) return;
 
@@ -33201,7 +33212,7 @@ function receiptStatusText(status) {
       const statusEl = getElement('idCardLoadStatus');
       if (statusEl) { statusEl.textContent = 'กำลังโหลดข้อมูลนักเรียน...'; statusEl.style.color = '#d97706'; }
       try {
-        const snapshot = await db.collection('users').where('role', '==', 'student').get();
+        const snapshot = await db.collection('users').where('role', '==', 'student').limit(500).get();
         const filterGrade = (getElement('idCardGradeFilter') || {}).value || 'ทั้งหมด';
         const filterLocation = (getElement('idCardLocationFilter') || {}).value || 'ทั้งหมด';
         const filterPrinted = (getElement('idCardPrintedFilter') || {}).value || 'ทั้งหมด';
