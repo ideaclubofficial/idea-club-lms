@@ -34770,11 +34770,19 @@ function receiptStatusText(status) {
       return c ? (c.name || c.title || courseId) : (courseId || '—');
     }
 
-    function tfGetCourseGradeSubjectLabel(courseId) {
+    function tfGetTutorSubject(tutorId) {
+      const t = (teachers || []).find(function(t) { return (t.id || t.firebaseDocId || '') === tutorId; });
+      if (!t) return '';
+      if (Array.isArray(t.subjects) && t.subjects.length) return t.subjects[0];
+      return t.subject || t.mainSubject || t.teachingSubject || '';
+    }
+
+    function tfGetCourseGradeSubjectLabel(courseId, tutorId) {
       const c = tfFindCourseById(courseId);
       const courseName = c ? (c.name || c.title || '') : tfGetCourseName(courseId);
       const grade = c ? (c.grade || c.level || '') : '';
       let subject = c ? (c.subject || c.onDemandSubject || '') : '';
+      if (!subject && tutorId) subject = tfGetTutorSubject(tutorId);
       if (!subject) {
         const text = String(courseName || '');
         if (text.includes('วิทยาศาสตร์')) subject = 'วิทยาศาสตร์';
@@ -34808,7 +34816,7 @@ function receiptStatusText(status) {
     function tfScheduleCalendarCardHtml(s, compact) {
       const colorCls = TF_FORMAT_COLORS[s.format || s.type] || 'bg-slate-100 text-slate-700';
       const timeText = [tfGetSessionStartText(s), tfGetSessionEndText(s)].filter(Boolean).join('-');
-      const courseText = tfGetCourseGradeSubjectLabel(s.courseId);
+      const courseText = tfGetCourseGradeSubjectLabel(s.courseId, s.tutorId || s.teacherId);
       const metaParts = [tfGetTutorShortName(s.tutorId || s.teacherId), tfGetCenterShortLabel(s.center || s.courseLocation)].filter(Boolean);
       return '<div class="' + colorCls + ' rounded px-1 py-0.5 font-medium leading-tight whitespace-normal break-words ' + (compact ? 'text-[10px]' : 'text-[11px]') + '">' +
         '<div class="font-bold">' + escapeHtml(timeText || '-') + '</div>' +
