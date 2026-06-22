@@ -3170,6 +3170,7 @@
                 <div id="attendanceMobileTodayCourses"></div>
                 <div class="teacher-mobile-actions">
                   <button class="btn btn-blue" type="button" onclick="teacherSaveAttendance()">บันทึกเช็คชื่อ</button>
+                  <button class="btn btn-dark" type="button" onclick="downloadAttendanceRosterPng()">เซฟใบรายชื่อ PNG</button>
                 </div>
                 <p id="teacherMobileAttendanceResult" style="margin-top:10px; font-weight:bold;"></p>
               </div>
@@ -3180,6 +3181,12 @@
                   <div>
                     <label>วันที่เช็คชื่อ</label>
                     <input id="teacherMobilePickupDate" type="date" onchange="syncTeacherMobileAttendanceFilters()" />
+                  </div>
+                  <div>
+                    <label>คลาส onsite วันนี้</label>
+                    <select id="teacherMobileAttendanceCourseFilter" onchange="syncTeacherMobileAttendanceFilters()">
+                      <option value="">ทุกคลาส onsite วันนี้</option>
+                    </select>
                   </div>
                   <div>
                     <label>ระดับชั้น</label>
@@ -3238,6 +3245,12 @@
                   <input id="pickupDate" type="date" onchange="pickupCurrentPage=1; renderPickupList()" />
                 </div>
                 <div>
+                  <label>คลาส onsite วันนี้</label>
+                  <select id="teacherAttendanceCourseFilter" onchange="pickupCurrentPage=1; renderPickupList()">
+                    <option value="">ทุกคลาส onsite วันนี้</option>
+                  </select>
+                </div>
+                <div>
                   <label>ระดับชั้น</label>
                   <select id="pickupGradeFilter" onchange="pickupCurrentPage=1; renderPickupList()">
                     <option value="ทั้งหมด">ทั้งหมด</option>
@@ -3271,6 +3284,7 @@
                 <button class="btn btn-dark" type="button" onclick="markAllPickup('ผู้ปกครองมาส่ง')">ผู้ปกครองมาส่งทั้งหมด</button>
                 <button class="btn btn-red" type="button" onclick="markAllPickup('ไม่มา')">ไม่มาทั้งหมด</button>
                 <button class="btn btn-blue" type="button" onclick="teacherSaveAttendance()">บันทึกเช็คชื่อ</button>
+                <button class="btn btn-dark" type="button" onclick="downloadAttendanceRosterPng()">เซฟใบรายชื่อ PNG</button>
               </div>
 
               <p id="teacherAttendanceResult" style="margin-top:14px; font-weight:bold;"></p>
@@ -10474,28 +10488,43 @@
       return getElement('pickupGradeFilter') ? (getElement('pickupGradeFilter').value || 'ทั้งหมด') : 'ทั้งหมด';
     }
 
-    function getAttendanceCourseScope(grade) {
-      return 'ระดับชั้น: ' + (grade || 'ทั้งหมด');
+    function getSelectedAttendanceCourseId() {
+      const el = getElement('teacherAttendanceCourseFilter');
+      return el ? String(el.value || '') : '';
     }
 
-    function findAttendanceHistoryFor(dateText, grade) {
-      const scope = getAttendanceCourseScope(grade);
+    function getAttendanceCourseLabel(courseId) {
+      if (!courseId) return 'ทุกคลาส onsite วันนี้';
+      const course = courses.find(function(c) {
+        return String(c.id || c.firebaseDocId || '') === String(courseId);
+      });
+      return course ? (course.name || courseId) : courseId;
+    }
+
+    function getAttendanceCourseScope(grade, courseId) {
+      return 'คลาส: ' + getAttendanceCourseLabel(courseId || '') + ' | ระดับชั้น: ' + (grade || 'ทั้งหมด');
+    }
+
+    function findAttendanceHistoryFor(dateText, grade, courseId) {
+      const scope = getAttendanceCourseScope(grade, courseId);
+      const legacyScope = 'ระดับชั้น: ' + (grade || 'ทั้งหมด');
       return pickupHistory.find(function(item) {
         if (!item || item.date !== dateText) return false;
         if (item.courseScope === scope) return true;
-        if (grade !== 'ทั้งหมด' && item.courseScope === getAttendanceCourseScope('ทั้งหมด')) return true;
+        if (!courseId && item.courseScope === legacyScope) return true;
+        if (!courseId && grade !== 'ทั้งหมด' && item.courseScope === 'ระดับชั้น: ทั้งหมด') return true;
         return false;
       }) || null;
     }
 
-    function isAttendanceEditModeFor(dateText, grade) {
+    function isAttendanceEditModeFor(dateText, grade, courseId) {
       if (!attendanceEditHistoryId) return false;
-      const history = findAttendanceHistoryFor(dateText, grade);
+      const history = findAttendanceHistoryFor(dateText, grade, courseId);
       return !!(history && String(history.id || history.firebaseDocId || '') === String(attendanceEditHistoryId));
     }
 
-    function isAttendanceLockedFor(dateText, grade) {
-      return !!findAttendanceHistoryFor(dateText, grade) && !isAttendanceEditModeFor(dateText, grade);
+    function isAttendanceLockedFor(dateText, grade, courseId) {
+      return !!findAttendanceHistoryFor(dateText, grade, courseId) && !isAttendanceEditModeFor(dateText, grade, courseId);
     }
 
     function setAttendanceResult(message, color) {
@@ -10582,6 +10611,76 @@
       return getTeacherVisibleCourses().filter(isAttendanceCourseEnabled);
     }
 
+    function getAttendanceOnsiteClassOptions(dateText) {
+      const targetDate = dateText || getPickupDateValue();
+      const teacherCourses = getTeacherAttendanceCourses().filter(function(course) {
+        return isOnsiteCourse(course);
+      });
+      const teacherCourseIds = teacherCourses.map(function(c) { return String(c.id || c.firebaseDocId || ''); });
+      const optionMap = {};
+      students.forEach(function(student) {
+        const course = getStudentAttendanceCourse(student);
+        if (!course || !isAttendanceCourseEnabled(course) || !isOnsiteCourse(course) || !isStudentClassOnDate(student, targetDate)) return;
+        const courseId = String(course.id || course.firebaseDocId || '');
+        const teacherMatched = (currentTeacher && currentTeacher.role === 'Admin') || (courseId && teacherCourseIds.includes(courseId));
+        if (!teacherMatched) return;
+        if (!optionMap[courseId]) {
+          optionMap[courseId] = {
+            id: courseId,
+            name: course.name || student.course || '-',
+            grades: {},
+            count: 0
+          };
+        }
+        optionMap[courseId].count += 1;
+        if (student.grade) optionMap[courseId].grades[student.grade] = true;
+      });
+      return Object.keys(optionMap).map(function(id) { return optionMap[id]; }).sort(function(a, b) {
+        const gradeA = Object.keys(a.grades).sort(function(x, y) { return gradeOrder(y) - gradeOrder(x); })[0] || '';
+        const gradeB = Object.keys(b.grades).sort(function(x, y) { return gradeOrder(y) - gradeOrder(x); })[0] || '';
+        const gradeDiff = gradeOrder(gradeB) - gradeOrder(gradeA);
+        if (gradeDiff !== 0) return gradeDiff;
+        return String(a.name || '').localeCompare(String(b.name || ''), 'th');
+      });
+    }
+
+    function refreshAttendanceClassFilters() {
+      const options = getAttendanceOnsiteClassOptions(getPickupDateValue());
+      const desktopCourse = getElement('teacherAttendanceCourseFilter');
+      const mobileCourse = getElement('teacherMobileAttendanceCourseFilter');
+      const desktopGrade = getElement('pickupGradeFilter');
+      const mobileGrade = getElement('teacherMobilePickupGradeFilter');
+      const currentCourse = desktopCourse ? String(desktopCourse.value || '') : '';
+      const hasCurrentCourse = !currentCourse || options.some(function(item) { return String(item.id) === currentCourse; });
+      const selectedCourse = hasCurrentCourse ? currentCourse : '';
+      const courseHtml = '<option value="">ทุกคลาส onsite วันนี้</option>' + options.map(function(item) {
+        const grades = Object.keys(item.grades).sort(function(a, b) { return gradeOrder(b) - gradeOrder(a); }).join(', ');
+        return '<option value="' + escapeHtml(item.id) + '">' + escapeHtml(item.name || '-') + (grades ? ' · ' + escapeHtml(grades) : '') + ' (' + item.count + ' คน)</option>';
+      }).join('');
+      [desktopCourse, mobileCourse].forEach(function(select) {
+        if (!select) return;
+        select.innerHTML = courseHtml;
+        select.value = selectedCourse;
+      });
+
+      const gradeMap = {};
+      options.forEach(function(item) {
+        if (selectedCourse && String(item.id) !== selectedCourse) return;
+        Object.keys(item.grades).forEach(function(grade) { gradeMap[grade] = true; });
+      });
+      const grades = Object.keys(gradeMap).sort(function(a, b) { return gradeOrder(b) - gradeOrder(a); });
+      const currentGrade = desktopGrade ? String(desktopGrade.value || 'ทั้งหมด') : 'ทั้งหมด';
+      const selectedGrade = currentGrade === 'ทั้งหมด' || grades.includes(currentGrade) ? currentGrade : 'ทั้งหมด';
+      const gradeHtml = '<option value="ทั้งหมด">ทั้งหมด</option>' + grades.map(function(grade) {
+        return '<option value="' + escapeHtml(grade) + '">' + escapeHtml(grade) + '</option>';
+      }).join('');
+      [desktopGrade, mobileGrade].forEach(function(select) {
+        if (!select) return;
+        select.innerHTML = gradeHtml;
+        select.value = selectedGrade;
+      });
+    }
+
     function teacherCanAccessAttendanceCourse(course) {
       if (!course || !isAttendanceCourseEnabled(course)) return false;
       if (currentTeacher && currentTeacher.role === 'Admin') return true;
@@ -10629,14 +10728,16 @@
       syncPickupListFromStudents();
       const grade = getElement('pickupGradeFilter') ? getElement('pickupGradeFilter').value : 'ทั้งหมด';
       const status = getElement('pickupStatusFilter') ? getElement('pickupStatusFilter').value : 'ทั้งหมด';
+      const selectedCourseId = getSelectedAttendanceCourseId();
       const teacherCourses = getTeacherAttendanceCourses();
       const teacherCourseIds = teacherCourses.map(function(c) { return String(c.id || c.firebaseDocId || ''); });
       return pickupList.filter(function(item) {
         if (!item.isOnsite || !item.hasClassToday) return false;
         const teacherMatched = (currentTeacher && currentTeacher.role === 'Admin') || (!!item.courseId && teacherCourseIds.includes(String(item.courseId)));
+        const courseMatched = !selectedCourseId || String(item.courseId) === String(selectedCourseId);
         const gradeMatched = grade === 'ทั้งหมด' || item.grade === grade;
         const statusMatched = status === 'ทั้งหมด' || item.status === status;
-        return teacherMatched && gradeMatched && statusMatched;
+        return teacherMatched && courseMatched && gradeMatched && statusMatched;
       }).sort(function(a, b) {
         const statusPriority = { 'ยังไม่เช็คชื่อ': 0, 'ไม่มา': 1, 'ผู้ปกครองมาส่ง': 2, 'รถรับส่ง': 3, 'มาเรียน': 4, 'ไม่มีเรียน': 5 };
         const priorityA = statusPriority[a.status] !== undefined ? statusPriority[a.status] : 9;
@@ -10661,6 +10762,7 @@
     function syncTeacherMobileAttendanceFilters() {
       const map = [
         ['teacherMobilePickupDate', 'pickupDate'],
+        ['teacherMobileAttendanceCourseFilter', 'teacherAttendanceCourseFilter'],
         ['teacherMobilePickupGradeFilter', 'pickupGradeFilter'],
         ['teacherMobilePickupStatusFilter', 'pickupStatusFilter']
       ];
@@ -10676,6 +10778,7 @@
     function updateTeacherMobileAttendanceFromExistingData() {
       const map = [
         ['pickupDate', 'teacherMobilePickupDate'],
+        ['teacherAttendanceCourseFilter', 'teacherMobileAttendanceCourseFilter'],
         ['pickupGradeFilter', 'teacherMobilePickupGradeFilter'],
         ['pickupStatusFilter', 'teacherMobilePickupStatusFilter']
       ];
@@ -10709,11 +10812,8 @@
       const mobileEl = getElement('attendanceMobileTodayCourses');
       if (!desktopEl && !mobileEl) return;
 
-      syncPickupListFromStudents();
-      const teacherCourses = getTeacherAttendanceCourses();
-      const teacherCourseIds = teacherCourses.map(function(c) { return String(c.id || c.firebaseDocId || ''); });
-      const todayStudents = pickupList.filter(function(item) {
-        return item.hasClassToday && ((currentTeacher && currentTeacher.role === 'Admin') || (!!item.courseId && teacherCourseIds.includes(String(item.courseId))));
+      const todayStudents = getFilteredPickupList().filter(function(item) {
+        return item.hasClassToday;
       });
 
       const courseMap = {};
@@ -10740,7 +10840,7 @@
       }
 
       function pickupBtnsHtml(id) {
-        if (isAttendanceLockedFor(getPickupDateValue(), getSelectedAttendanceGrade())) {
+        if (isAttendanceLockedFor(getPickupDateValue(), getSelectedAttendanceGrade(), getSelectedAttendanceCourseId())) {
           return '<button class="btn btn-dark" type="button" disabled style="opacity:.65;cursor:not-allowed;">บันทึกแล้ว</button>';
         }
         var sid = jsArg(id);
@@ -10751,7 +10851,7 @@
       }
 
       if (desktopEl) {
-        desktopEl.innerHTML = '<h3 style="margin:0 0 12px;font-size:15px;color:#1e40af;">คอร์สที่มีเรียนวันนี้</h3>' +
+        desktopEl.innerHTML = '<h3 style="margin:0 0 12px;font-size:15px;color:#1e40af;">คลาส onsite ที่ต้องเช็คชื่อ</h3>' +
           courseNames.map(function(cn) {
             const students = courseMap[cn];
             const rows = students.map(function(item) {
@@ -10806,6 +10906,7 @@
     }
 
     function renderPickupList() {
+      refreshAttendanceClassFilters();
       const filtered = getFilteredPickupList();
       updatePickupSummary(filtered);
       safeRun(renderAttendanceByCourse, 'attendance-by-course');
@@ -10818,7 +10919,8 @@
       const selectedDate = getPickupDateValue();
       if (!validateAttendanceDate(selectedDate)) return;
       const selectedGrade = getSelectedAttendanceGrade();
-      if (isAttendanceLockedFor(selectedDate, selectedGrade)) {
+      const selectedCourseId = getSelectedAttendanceCourseId();
+      if (isAttendanceLockedFor(selectedDate, selectedGrade, selectedCourseId)) {
         setAttendanceResult('ชุดเช็คชื่อนี้บันทึกแล้ว หากต้องการแก้ไขให้กดปุ่ม "แก้ไข" จากประวัติการเช็คชื่อก่อน', '#dc2626');
         renderPickupList();
         return;
@@ -10893,7 +10995,8 @@
       const selectedDate = getPickupDateValue();
       if (!validateAttendanceDate(selectedDate)) return;
       const selectedGrade = getSelectedAttendanceGrade();
-      if (isAttendanceLockedFor(selectedDate, selectedGrade)) {
+      const selectedCourseId = getSelectedAttendanceCourseId();
+      if (isAttendanceLockedFor(selectedDate, selectedGrade, selectedCourseId)) {
         setAttendanceResult('ชุดเช็คชื่อนี้บันทึกแล้ว หากต้องการแก้ไขให้กดปุ่ม "แก้ไข" จากประวัติการเช็คชื่อก่อน', '#dc2626');
         renderPickupList();
         return;
@@ -10937,6 +11040,91 @@
       if (result && noClass && !result.textContent) {
         result.textContent = 'มีนักเรียนไม่มีเรียนในวันที่เลือก ' + noClass + ' คน ระบบไม่นับเป็นยังไม่เช็คชื่อ';
         result.style.color = '#6b7280';
+      }
+    }
+
+    function getAttendanceRosterTitle() {
+      const selectedDate = getPickupDateValue();
+      const selectedGrade = getSelectedAttendanceGrade();
+      const selectedCourseId = getSelectedAttendanceCourseId();
+      return {
+        date: selectedDate,
+        className: getAttendanceCourseLabel(selectedCourseId),
+        grade: selectedGrade || 'ทั้งหมด'
+      };
+    }
+
+    function attendanceRosterHtml(rows) {
+      const meta = getAttendanceRosterTitle();
+      const teacherName = getElement('profileName') ? getElement('profileName').textContent : '';
+      const rowHtml = rows.map(function(item, index) {
+        return '<tr>' +
+          '<td>' + (index + 1) + '</td>' +
+          '<td>' + escapeHtml(meta.date || '-') + '</td>' +
+          '<td>' + escapeHtml(item.name || '-') + '</td>' +
+          '<td>' + escapeHtml(item.nickname || '-') + '</td>' +
+          '<td>' + escapeHtml(item.status || '-') + '</td>' +
+        '</tr>';
+      }).join('');
+      return '<div class="document-box">' +
+        '<div class="document-header">' +
+          '<div><div class="document-title">ใบรายชื่อเช็คชื่อ</div>' +
+          '<p class="document-subtitle">IDEA CLUB</p></div>' +
+          '<div class="receipt-meta">วันที่: ' + escapeHtml(meta.date || '-') + '<br>ครูผู้บันทึก: ' + escapeHtml(teacherName || '-') + '</div>' +
+        '</div>' +
+        '<p><strong>คลาส:</strong> ' + escapeHtml(meta.className || '-') + '</p>' +
+        '<p><strong>ระดับชั้น:</strong> ' + escapeHtml(meta.grade || '-') + '</p>' +
+        '<table style="width:100%;border-collapse:collapse;margin-top:14px;font-size:13px;">' +
+          '<thead><tr style="background:#eff6ff;color:#1e40af;">' +
+            '<th style="border:1px solid #dbeafe;padding:8px;text-align:left;">ลำดับ</th>' +
+            '<th style="border:1px solid #dbeafe;padding:8px;text-align:left;">วันที่</th>' +
+            '<th style="border:1px solid #dbeafe;padding:8px;text-align:left;">ชื่อจริง</th>' +
+            '<th style="border:1px solid #dbeafe;padding:8px;text-align:left;">ชื่อเล่น</th>' +
+            '<th style="border:1px solid #dbeafe;padding:8px;text-align:left;">สถานะที่เช็ค</th>' +
+          '</tr></thead>' +
+          '<tbody>' + rowHtml + '</tbody>' +
+        '</table>' +
+      '</div>';
+    }
+
+    async function downloadAttendanceRosterPng() {
+      const rows = getFilteredPickupList().filter(function(item) { return item.hasClassToday; });
+      if (!rows.length) {
+        setAttendanceResult('ไม่มีรายชื่อสำหรับวันที่ คลาส หรือระดับชั้นที่เลือก', '#dc2626');
+        return;
+      }
+      const html2canvasLib = window.html2canvas;
+      if (!html2canvasLib) {
+        setAttendanceResult('ไม่สามารถสร้าง PNG ได้ เพราะโหลดเครื่องมือรูปภาพไม่ครบ กรุณารีเฟรชหน้าแล้วลองใหม่', '#dc2626');
+        return;
+      }
+      const meta = getAttendanceRosterTitle();
+      const fileName = 'attendance-roster-' + [meta.date, meta.className, meta.grade].filter(Boolean).join('-') + '.png';
+      const element = buildPdfDocumentElement('ใบรายชื่อเช็คชื่อ ' + (meta.date || ''), attendanceRosterHtml(rows));
+      document.body.appendChild(element);
+      try {
+        const target = element.querySelector('.pdf-document');
+        const canvas = await html2canvasLib(target, {
+          scale: 2,
+          useCORS: true,
+          backgroundColor: '#ffffff',
+          width: target.offsetWidth,
+          height: target.scrollHeight,
+          windowWidth: target.offsetWidth,
+          windowHeight: target.scrollHeight
+        });
+        const link = document.createElement('a');
+        link.href = canvas.toDataURL('image/png');
+        link.download = getSafeFileName(fileName);
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        setAttendanceResult('เซฟใบรายชื่อ PNG เรียบร้อย', '#16a34a');
+      } catch (error) {
+        console.error('attendance roster png error:', error);
+        setAttendanceResult('สร้าง PNG ไม่สำเร็จ: ' + (error.message || error.code || 'ไม่ทราบสาเหตุ'), '#dc2626');
+      } finally {
+        document.body.removeChild(element);
       }
     }
 
@@ -10990,9 +11178,21 @@
         return;
       }
       attendanceEditHistoryId = String(item.id || item.firebaseDocId || '');
-      const gradeMatch = String(item.courseScope || '').match(/^ระดับชั้น:\s*(.+)$/);
+      const scopeText = String(item.courseScope || '');
+      const gradeMatch = scopeText.match(/ระดับชั้น:\s*(.+)$/);
       const grade = gradeMatch ? gradeMatch[1] : 'ทั้งหมด';
-      [['pickupDate', item.date], ['teacherMobilePickupDate', item.date], ['pickupGradeFilter', grade], ['teacherMobilePickupGradeFilter', grade]].forEach(function(pair) {
+      const courseMatch = scopeText.match(/^คลาส:\s*(.+?)\s*\|\s*ระดับชั้น:/);
+      const courseLabel = courseMatch ? courseMatch[1] : '';
+      const courseOption = courseLabel && courseLabel !== 'ทุกคลาส onsite วันนี้'
+        ? getAttendanceOnsiteClassOptions(item.date).find(function(option) { return String(option.name || '') === courseLabel; })
+        : null;
+      const courseId = courseOption ? courseOption.id : '';
+      [['pickupDate', item.date], ['teacherMobilePickupDate', item.date]].forEach(function(pair) {
+        const el = getElement(pair[0]);
+        if (el) el.value = pair[1] || '';
+      });
+      refreshAttendanceClassFilters();
+      [['teacherAttendanceCourseFilter', courseId], ['teacherMobileAttendanceCourseFilter', courseId], ['pickupGradeFilter', grade], ['teacherMobilePickupGradeFilter', grade]].forEach(function(pair) {
         const el = getElement(pair[0]);
         if (el) el.value = pair[1] || '';
       });
@@ -11029,8 +11229,9 @@
       const selectedDate = getPickupDateValue();
       if (!validateAttendanceDate(selectedDate)) return;
       const selectedGrade = getSelectedAttendanceGrade();
-      const existingHistory = findAttendanceHistoryFor(selectedDate, selectedGrade);
-      if (existingHistory && !isAttendanceEditModeFor(selectedDate, selectedGrade)) {
+      const selectedCourseId = getSelectedAttendanceCourseId();
+      const existingHistory = findAttendanceHistoryFor(selectedDate, selectedGrade, selectedCourseId);
+      if (existingHistory && !isAttendanceEditModeFor(selectedDate, selectedGrade, selectedCourseId)) {
         setAttendanceResult('ชุดเช็คชื่อนี้บันทึกแล้ว หากต้องการแก้ไขให้กดปุ่ม "แก้ไข" จากประวัติการเช็คชื่อก่อน', '#dc2626');
         renderPickupList();
         return;
@@ -11049,7 +11250,7 @@
         id: historyId,
         firebaseDocId: historyId,
         date: selectedDate,
-        courseScope: getAttendanceCourseScope(selectedGrade),
+        courseScope: getAttendanceCourseScope(selectedGrade, selectedCourseId),
         total: filtered.length,
         present: present,
         parent: parent,
