@@ -22432,7 +22432,7 @@ function receiptStatusText(status) {
             return '<div class="monthly-plan-grid-card monthly-plan-grid-card-' + escapeHtml(sessionType) + '" onclick="editMonthlyPlanSession(\'' + jsArg(id) + '\')">' +
               '<div class="grid-card-row"><span class="grid-card-label">' + escapeHtml(getMonthlyPlanTypeText(sessionType)) + '</span><span class="grid-card-time">' + escapeHtml(formatMonthlySessionTimeRange(session)) + '</span></div>' +
               '<div class="grid-card-teacher">' + escapeHtml(getMonthlyPlanTeacherName(session) || '-') + '</div>' +
-              '<div><strong>' + escapeHtml(session.subject || '-') + '</strong></div>' +
+              '<div><strong>' + escapeHtml(getSessionDisplaySubject(session) || '-') + '</strong></div>' +
               (session.type === 'oneOnOne' ? '<div class="grid-card-topic">นักเรียน: ' + escapeHtml(session.studentName || session.studentMemberId || '-') + '</div>' : '') +
               '<div class="grid-card-topic">' + escapeHtml(session.topic || '-') + '</div>' +
               '<div class="grid-card-badges">' + getMonthlyPlanExtraBadges(session) + '</div>' +
@@ -22733,7 +22733,7 @@ function receiptStatusText(status) {
       return '<div class="monthly-planner-mobile-card">' +
         '<strong>' + escapeHtml(timeText || '-') + ' · ' + escapeHtml(getMonthlyPlanTypeText(typeKey)) + '</strong>' +
         '<div class="monthly-planner-mobile-meta">' + escapeHtml(getMonthlyPlanCourseName(session) || '-') + '</div>' +
-        '<div>วิชา: <strong>' + escapeHtml(session.subject || 'ยังไม่กำหนดวิชา') + '</strong></div>' +
+        '<div>วิชา: <strong>' + escapeHtml(getSessionDisplaySubject(session) || 'ยังไม่กำหนดวิชา') + '</strong></div>' +
         '<div class="monthly-planner-mobile-muted">ครู: ' + escapeHtml(getMonthlyPlanTeacherName(session) || '-') + '</div>' +
         (isOneOnOne ? '<div class="monthly-planner-mobile-muted">นักเรียน: ' + escapeHtml(session.studentName || session.studentMemberId || '-') + '</div>' : '') +
         '<div class="monthly-planner-mobile-muted">หัวข้อ: ' + escapeHtml(session.topic || session.objective || '-') + '</div>' +
@@ -23467,12 +23467,22 @@ function receiptStatusText(status) {
       }).filter(Boolean))).sort();
     }
 
+    function getSessionDisplaySubject(session) {
+      if (!session) return '';
+      const tutorId = session.teacherId || session.tutorId || '';
+      if (tutorId) {
+        const t = (teachers || []).find(function(t) { return (t.id || t.firebaseDocId || '') === tutorId; });
+        if (t && t.subject) return t.subject;
+      }
+      return session.subject || '';
+    }
+
     function renderStudentScheduleCard(session) {
       const typeKey = session.status === 'holiday' ? 'holiday' : (session.type || 'onsite');
       const rescheduleText = session.isRescheduled ? ' · ย้ายวันเรียน' : '';
       return '<div class="student-schedule-card student-schedule-card-' + escapeHtml(typeKey) + '">' +
         '<strong>' + escapeHtml(formatMonthlySessionTimeRange(session) || '-') + '</strong>' +
-        '<div>' + escapeHtml((session.subject || '-') + ' · ' + getMonthlyPlanTypeText(session.type || 'onsite')) + '</div>' +
+        '<div>' + escapeHtml((getSessionDisplaySubject(session) || '-') + ' · ' + getMonthlyPlanTypeText(session.type || 'onsite')) + '</div>' +
         '<div class="mini-muted">' + escapeHtml(getMonthlyPlanTeacherName(session) || '-') + '</div>' +
         '<div><span class="' + (session.status === 'holiday' ? 'status-absent' : (session.type === 'makeup' || session.isMakeup ? 'status-paid' : 'status-waiting')) + '">' + escapeHtml(getMonthlySessionStatusLabel(session) || 'ตารางเรียน') + '</span></div>' +
         (rescheduleText ? '<div class="mini-muted">' + escapeHtml(rescheduleText.replace(/^ · /, '')) + '</div>' : '') +
@@ -24000,7 +24010,7 @@ function receiptStatusText(status) {
       const isOneOnOne = typeKey === 'oneOnOne';
       return '<div class="simple-schedule-card simple-schedule-card-' + escapeHtml(typeKey) + '">' +
         '<strong>' + escapeHtml(formatMonthlySessionTimeRange(session) || '-') + '</strong>' +
-        '<div><strong>' + escapeHtml(session.subject || '-') + (isOneOnOne ? ' 1:1' : '') + '</strong></div>' +
+        '<div><strong>' + escapeHtml(getSessionDisplaySubject(session) || '-') + (isOneOnOne ? ' 1:1' : '') + '</strong></div>' +
         '<div>' + escapeHtml(isOneOnOne ? (session.studentName || session.studentMemberId || '-') : (getMonthlyPlanCourseName(session) || '-')) + '</div>' +
         '<div class="mini-muted">ครู: ' + escapeHtml(getMonthlyPlanTeacherName(session) || '-') + '</div>' +
         '<div class="mini-muted">' + escapeHtml(getSimpleScheduleLocationText(session)) + ' / ' + escapeHtml(getMonthlyPlanTypeText(typeKey)) + '</div>' +
