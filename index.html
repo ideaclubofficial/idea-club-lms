@@ -11114,14 +11114,20 @@
           canvas.toBlob(resolve, 'image/png');
         });
         if (!blob) throw new Error('ไม่สามารถแปลงใบรายชื่อเป็นไฟล์รูปได้');
-        const url = URL.createObjectURL(blob);
-        const link = document.createElement('a');
-        link.href = url;
-        link.download = getSafeFileName(fileName.replace(/\.png$/i, '')) + '.png';
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-        setTimeout(function() { URL.revokeObjectURL(url); }, 1000);
+        const safeFileName = getSafeFileName(fileName.replace(/\.png$/i, '')) + '.png';
+        const file = new File([blob], safeFileName, { type: 'image/png' });
+        if (navigator.canShare && navigator.canShare({ files: [file] })) {
+          await navigator.share({ files: [file], title: safeFileName });
+        } else {
+          const url = URL.createObjectURL(blob);
+          const link = document.createElement('a');
+          link.href = url;
+          link.download = safeFileName;
+          document.body.appendChild(link);
+          link.click();
+          document.body.removeChild(link);
+          setTimeout(function() { URL.revokeObjectURL(url); }, 1000);
+        }
         setAttendanceResult('เซฟใบรายชื่อ PNG เรียบร้อย', '#16a34a');
       } catch (error) {
         console.error('attendance roster png error:', error);
