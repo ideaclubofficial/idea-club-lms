@@ -194,24 +194,34 @@
       line-height: 1.35;
     }
 
-    .simple-schedule-card.simple-schedule-card-oneOnOne {
-      border-color: #86efac;
-      background: #f0fdf4;
-    }
-
-    .simple-schedule-card.simple-schedule-card-online {
+    .simple-schedule-card.simple-schedule-card-onsite {
       border-color: #93c5fd;
       background: #dbeafe;
     }
 
+    .simple-schedule-card.simple-schedule-card-online {
+      border-color: #86efac;
+      background: #dcfce7;
+    }
+
     .simple-schedule-card.simple-schedule-card-ondemand {
       border-color: #c4b5fd;
-      background: #f5f3ff;
+      background: #ede9fe;
     }
 
     .simple-schedule-card.simple-schedule-card-makeup {
       border-color: #fde047;
-      background: #fefce8;
+      background: #fef9c3;
+    }
+
+    .simple-schedule-card.simple-schedule-card-holiday {
+      border-color: #fecaca;
+      background: #fee2e2;
+    }
+
+    .simple-schedule-card.simple-schedule-card-oneOnOne {
+      border-color: #fda4af;
+      background: #ffe4e6;
     }
 
     .simple-schedule-card.simple-schedule-card-cancelled {
@@ -270,37 +280,37 @@
       margin-bottom: 6px;
     }
 
-    .student-schedule-card-onsite {
+    .student-schedule-card.student-schedule-card-onsite {
       border-color: #93c5fd;
       background: #dbeafe;
     }
 
-    .student-schedule-card-online {
+    .student-schedule-card.student-schedule-card-online {
       border-color: #86efac;
       background: #dcfce7;
     }
 
-    .student-schedule-card-ondemand {
+    .student-schedule-card.student-schedule-card-ondemand {
       border-color: #c4b5fd;
       background: #ede9fe;
     }
 
-    .student-schedule-card-makeup {
+    .student-schedule-card.student-schedule-card-makeup {
       border-color: #fde047;
       background: #fef9c3;
     }
 
-    .student-schedule-card-holiday {
+    .student-schedule-card.student-schedule-card-holiday {
       border-color: #fecaca;
       background: #fee2e2;
     }
 
-    .student-schedule-card-oneOnOne {
+    .student-schedule-card.student-schedule-card-oneOnOne {
       border-color: #fda4af;
       background: #ffe4e6;
     }
 
-    .student-schedule-card-cancelled {
+    .student-schedule-card.student-schedule-card-cancelled {
       border-color: #d1d5db;
       background: #f3f4f6;
       color: #6b7280;
@@ -3197,6 +3207,12 @@
                     <input id="teacherMobilePickupDate" type="date" onchange="syncTeacherMobileAttendanceFilters()" />
                   </div>
                   <div>
+                    <label>คอร์ส</label>
+                    <select id="teacherMobileAttendanceCourseFilter" onchange="syncTeacherMobileAttendanceFilters()">
+                      <option value="">ทุกคลาส onsite วันนี้</option>
+                    </select>
+                  </div>
+                  <div>
                     <label>ระดับชั้น</label>
                     <select id="teacherMobilePickupGradeFilter" onchange="syncTeacherMobileAttendanceFilters()">
                       <option value="ทั้งหมด">ทั้งหมด</option>
@@ -3257,6 +3273,12 @@
                 <div>
                   <label>วันที่เช็คชื่อ</label>
                   <input id="pickupDate" type="date" onchange="pickupCurrentPage=1; renderPickupList()" />
+                </div>
+                <div>
+                  <label>คอร์ส</label>
+                  <select id="teacherAttendanceCourseFilter" onchange="pickupCurrentPage=1; renderPickupList()">
+                    <option value="">ทุกคลาส onsite วันนี้</option>
+                  </select>
                 </div>
                 <div>
                   <label>ระดับชั้น</label>
@@ -10515,14 +10537,36 @@
       return 'คลาส: ' + getAttendanceCourseLabel(courseId || '') + ' | ระดับชั้น: ' + (grade || 'ทั้งหมด');
     }
 
+    function normalizeAttendanceGradeValue(grade) {
+      return String(grade || 'ทั้งหมด');
+    }
+
+    function normalizeAttendanceCourseIdValue(courseId) {
+      return String(courseId || '');
+    }
+
+    function attendanceHistoryMatchesStructuredScope(item, grade, courseId) {
+      if (!item) return false;
+      const targetGrade = normalizeAttendanceGradeValue(grade);
+      const targetCourseId = normalizeAttendanceCourseIdValue(courseId);
+      const itemGrade = normalizeAttendanceGradeValue(item.grade || item.attendanceGrade);
+      const itemCourseId = normalizeAttendanceCourseIdValue(item.courseId || item.attendanceCourseId);
+      const gradeMatched = targetGrade === 'ทั้งหมด' ? itemGrade === 'ทั้งหมด' : (itemGrade === targetGrade || itemGrade === 'ทั้งหมด');
+      const courseMatched = !targetCourseId ? !itemCourseId : (itemCourseId === targetCourseId || !itemCourseId);
+      return gradeMatched && courseMatched;
+    }
+
     function findAttendanceHistoryFor(dateText, grade, courseId) {
       const scope = getAttendanceCourseScope(grade, courseId);
       const legacyScope = 'ระดับชั้น: ' + (grade || 'ทั้งหมด');
       return pickupHistory.find(function(item) {
         if (!item || item.date !== dateText) return false;
+        if ((item.courseId !== undefined || item.attendanceCourseId !== undefined || item.grade !== undefined || item.attendanceGrade !== undefined) && attendanceHistoryMatchesStructuredScope(item, grade, courseId)) return true;
         if (item.courseScope === scope) return true;
         if (!courseId && item.courseScope === legacyScope) return true;
         if (!courseId && grade !== 'ทั้งหมด' && item.courseScope === 'ระดับชั้น: ทั้งหมด') return true;
+        if (courseId && item.courseScope === getAttendanceCourseScope(grade, '')) return true;
+        if (courseId && grade !== 'ทั้งหมด' && item.courseScope === getAttendanceCourseScope('ทั้งหมด', '')) return true;
         return false;
       }) || null;
     }
@@ -10737,7 +10781,7 @@
         const hasClassToday = isStudentEligibleForAttendance(student, selectedDate);
         const isOnsite = isOnsiteCourse(course);
         pickupList.push({
-          id: student.id || index + 1,
+          id: student.id || student.firebaseDocId || index + 1,
           courseId: course ? String(course.id || course.firebaseDocId || '') : '',
           name: student.name || '-',
           nickname: student.nickname || '-',
@@ -10955,7 +10999,7 @@
         return;
       }
       const item = pickupList.find(function(student) { return String(student.id) === String(id); });
-      const student = students.find(function(s) { return String(s.id) === String(id); });
+      const student = students.find(function(s) { return String(s.id || s.firebaseDocId || '') === String(id); });
       if (!item && !student) {
         setAttendanceResult('ไม่พบข้อมูลนักเรียนที่ต้องการเช็คชื่อ', '#dc2626');
         return;
@@ -11035,7 +11079,7 @@
         .map(function(item) { return String(item.id); });
       const tasks = [];
       students.forEach(function(student) {
-        if (filteredIds.includes(String(student.id))) {
+        if (filteredIds.includes(String(student.id || student.firebaseDocId || ''))) {
           student.pickupStatus = status;
           student.pickupDate = selectedDate;
           tasks.push(setFirebaseDocument('students', student));
@@ -11290,15 +11334,30 @@
         id: historyId,
         firebaseDocId: historyId,
         date: selectedDate,
+        grade: selectedGrade,
+        courseId: selectedCourseId,
         courseScope: getAttendanceCourseScope(selectedGrade, selectedCourseId),
         total: filtered.length,
         present: present,
         parent: parent,
         absent: absent,
-        teacher: getElement('profileName') ? getElement('profileName').textContent : ''
+        teacher: getElement('profileName') ? getElement('profileName').textContent : '',
+        studentIds: filtered.map(function(item) { return String(item.id || ''); }).filter(Boolean)
       };
       try {
-        await setFirebaseDocument('attendanceHistory', historyItem);
+        const statusByStudentId = {};
+        filtered.forEach(function(item) {
+          statusByStudentId[String(item.id)] = item.status || 'ยังไม่เช็คชื่อ';
+        });
+        const studentUpdateTasks = [];
+        students.forEach(function(student) {
+          const studentId = String(student.id || student.firebaseDocId || '');
+          if (!studentId || statusByStudentId[studentId] === undefined) return;
+          student.pickupStatus = statusByStudentId[studentId];
+          student.pickupDate = selectedDate;
+          studentUpdateTasks.push(setFirebaseDocument('students', student));
+        });
+        await Promise.all(studentUpdateTasks.concat([setFirebaseDocument('attendanceHistory', historyItem)]));
         if (existingHistory) {
           Object.assign(existingHistory, historyItem);
         } else {
