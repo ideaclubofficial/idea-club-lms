@@ -30187,12 +30187,16 @@ function receiptStatusText(status) {
       renderOnlineExamSelectedCourseSummary();
     }
 
-    function findOnlineExamCourseByMonthGradeSubject(month, grade, subject, excludeCourseId) {
+    function findOnlineExamCourseByMonthGradeSubject(month, grade, subject, excludeCourseId, location) {
+      const loc = String(location || '').trim();
       return (onlineExamCourseCache || []).find(function(c) {
-        return String(c.firebaseDocId || '') !== String(excludeCourseId || '') &&
-          (c.examMonth || '') === month &&
-          getOnlineExamCourseGrade(c) === grade &&
-          (c.subject || '') === subject;
+        if (String(c.firebaseDocId || '') === String(excludeCourseId || '')) return false;
+        if ((c.examMonth || '') !== month) return false;
+        if (getOnlineExamCourseGrade(c) !== grade) return false;
+        if ((c.subject || '') !== subject) return false;
+        const cLoc = String(c.location || '').trim();
+        if (loc && cLoc && loc !== cLoc) return false;
+        return true;
       }) || null;
     }
 
@@ -30257,7 +30261,7 @@ function receiptStatusText(status) {
       }
       if (!title) { if (resultEl) { resultEl.style.color = '#dc2626'; resultEl.textContent = '❌ กรุณาใส่ชื่อชุดข้อสอบ'; } return; }
 
-      const duplicateCourse = findOnlineExamCourseByMonthGradeSubject(examMonth, grade, subject, editingId);
+      const duplicateCourse = findOnlineExamCourseByMonthGradeSubject(examMonth, grade, subject, editingId, location);
       if (duplicateCourse) {
         editOnlineExamCourse(duplicateCourse.firebaseDocId);
         populateOnlineExamCourseSelects();
@@ -30369,7 +30373,7 @@ function receiptStatusText(status) {
           const status = bubbleSelectValue('bubbleOnlineExamStatus') || 'active';
           const openAtDate = parseOnlineExamDateTimeValue(bubbleValue('bubbleOnlineExamOpenAt'));
           const closeAtDate = parseOnlineExamDateTimeValue(bubbleValue('bubbleOnlineExamCloseAt'));
-          const duplicateCourse = findOnlineExamCourseByMonthGradeSubject(examMonth, grade, subject, courseId);
+          const duplicateCourse = findOnlineExamCourseByMonthGradeSubject(examMonth, grade, subject, courseId, location);
           const resultEl = getElement('editBubbleResult');
 
           if (!title || !examMonth || !grade || !subject) {
