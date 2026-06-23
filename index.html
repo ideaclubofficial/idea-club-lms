@@ -34232,7 +34232,7 @@ function receiptStatusText(status) {
           return Object.assign({}, matchedStudent || {}, userData, {
             uid: doc.id,
             authUid: userData.authUid || doc.id,
-            memberId: userData.memberId || (matchedStudent && matchedStudent.memberId) || userData.studentId || '',
+            memberId: userData.memberId || (matchedStudent && matchedStudent.memberId) || '',
             studentId: userData.studentId || (matchedStudent && matchedStudent.studentId) || userData.memberId || '',
             defaultPassword: userData.defaultPassword || (matchedStudent && matchedStudent.defaultPassword) || ''
           });
@@ -34527,7 +34527,7 @@ function receiptStatusText(status) {
       const name = escapeHtml(student.name || student.displayName || '-');
       const nickname = escapeHtml(student.nickname || '-');
       const grade = escapeHtml(student.grade || student.gradeLevel || '-');
-      const memberId = escapeHtml(student.memberId || student.studentId || '-');
+      const memberId = escapeHtml(getStudentIdCardMemberId(student) || '-');
       const password = escapeHtml(getStudentIdCardPassword(student));
       const logoHtml = logoUrl
         ? '<img class="id-card-logo-img" src="' + logoUrl + '" crossorigin="anonymous" />'
@@ -34572,7 +34572,7 @@ function receiptStatusText(status) {
       const cards = chunk.slice(0, 10);
       const qrUrls = await Promise.all(cards.map(function(s) {
         if (!s) return Promise.resolve('');
-        const memberId = s.memberId || s.studentId || '';
+        const memberId = getStudentIdCardMemberId(s);
         return generateQrDataUrl(ID_CARD_QR_BASE + encodeURIComponent(memberId));
       }));
       const cells = cards.map(function(s, i) {
@@ -34719,13 +34719,14 @@ function receiptStatusText(status) {
     async function resetStudentPassword(idx) {
       const student = idCardStudents[idx];
       if (!student) return;
-      const name = student.name || student.displayName || student.memberId || '-';
+      const memberId = getStudentIdCardMemberId(student);
+      const name = student.name || student.displayName || memberId || '-';
       const defaultPassword = getStudentIdCardPassword(student);
       if (defaultPassword === '-') {
         alert('ไม่พบรหัสผ่าน default ของ ' + name + ' กรุณาตรวจสอบข้อมูลนักเรียน');
         return;
       }
-      if (!confirm('ต้องการรีเซ็ตรหัสผ่านของ ' + name + ' (' + (student.memberId || '-') + ') กลับเป็น "' + defaultPassword + '" ใช่ไหม?')) return;
+      if (!confirm('ต้องการรีเซ็ตรหัสผ่านของ ' + name + ' (' + (memberId || '-') + ') กลับเป็น "' + defaultPassword + '" ใช่ไหม?')) return;
       if (!firebaseReady || !functionsApi) {
         alert('ระบบยังไม่พร้อม กรุณารีเฟรชหน้าแล้วลองใหม่');
         return;
@@ -34734,7 +34735,7 @@ function receiptStatusText(status) {
         const callable = functionsApi.httpsCallable('resetStudentPasswordToDefault');
         await callable({
           uid: student.authUid || student.uid || '',
-          memberId: student.memberId || student.studentId || '',
+          memberId: memberId,
           defaultPassword: defaultPassword
         });
         alert('รีเซ็ตรหัสผ่านเรียบร้อย\n' + name + ' → ' + defaultPassword);
