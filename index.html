@@ -5088,6 +5088,14 @@
                     <select id="examBankGrade">
                       <option value="">-- เลือกระดับชั้น --</option>
                       <option>ป.4</option><option>ป.5</option><option>ป.6</option>
+                      <option>ม.1</option><option>ม.2</option><option>ม.3</option>
+                      <option>ม.4</option><option>ม.5</option><option>ม.6</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label>ศูนย์ (เฉพาะศูนย์ / ทุกศูนย์)</label>
+                    <select id="examBankLocation">
+                      <option value="">-- ทุกศูนย์ (ค่าเริ่มต้น) --</option>
                     </select>
                   </div>
                   <div>
@@ -28938,6 +28946,20 @@ function receiptStatusText(status) {
       }
       renderExamBankList();
       updateExamProcTestSelect();
+      populateExamBankLocationSelect();
+    }
+
+    function populateExamBankLocationSelect() {
+      const sel = getElement('examBankLocation');
+      if (!sel) return;
+      const locs = [];
+      (courses || []).forEach(function(c) {
+        const loc = (c.location || '').trim();
+        if (loc && !locs.includes(loc)) locs.push(loc);
+      });
+      locs.sort();
+      sel.innerHTML = '<option value="">-- ทุกศูนย์ (ค่าเริ่มต้น) --</option>' +
+        locs.map(function(l) { return '<option value="' + escapeHtml(l) + '">' + escapeHtml(l) + '</option>'; }).join('');
     }
 
     /**
@@ -28953,6 +28975,7 @@ function receiptStatusText(status) {
       try {
         const title = ((getElement('examBankTitle') || {}).value || '').trim();
         const grade = (getElement('examBankGrade') || {}).value || '';
+        const location = (getElement('examBankLocation') || {}).value || '';
         const subject = (getElement('examBankSubject') || {}).value || '';
         const topicsRaw = ((getElement('examBankTopics') || {}).value || '').trim();
         const totalItems = parseInt((getElement('examBankTotalItems') || {}).value || '20', 10);
@@ -28976,6 +28999,7 @@ function receiptStatusText(status) {
           testId: docId,
           title: title,
           grade: grade,
+          location: location,
           subject: subject,
           topics: topics,
           totalItems: totalItems,
@@ -29015,6 +29039,8 @@ function receiptStatusText(status) {
       if (totalEl) totalEl.value = '20';
       const gradeEl = getElement('examBankGrade');
       if (gradeEl) gradeEl.value = '';
+      const locationEl = getElement('examBankLocation');
+      if (locationEl) locationEl.value = '';
       const subjectEl = getElement('examBankSubject');
       if (subjectEl) subjectEl.value = '';
       const statusEl2 = getElement('examBankStatus');
@@ -29045,15 +29071,17 @@ function receiptStatusText(status) {
       const ebStart = (examBankCurrentPage - 1) * LIST_PAGE_SIZE;
       const ebItems = filtered.slice(ebStart, ebStart + LIST_PAGE_SIZE);
       container.innerHTML = '<div class="table-wrap"><table><thead><tr>' +
-        '<th>ชื่อข้อสอบ</th><th>ระดับ</th><th>วิชา</th><th>ข้อ</th><th>หัวข้อ</th><th>Drive</th><th>จัดการ</th>' +
+        '<th>ชื่อข้อสอบ</th><th>ระดับ</th><th>ศูนย์</th><th>วิชา</th><th>ข้อ</th><th>หัวข้อ</th><th>Drive</th><th>จัดการ</th>' +
         '</tr></thead><tbody>' +
         ebItems.map(function(e) {
           const testId = e.testId || e.firebaseDocId || '';
           const driveCell = e.driveViewUrl
             ? '<a href="' + escapeHtml(e.driveViewUrl) + '" target="_blank" rel="noopener">เปิด</a>' : '-';
+          const locationLabel = e.location ? escapeHtml(e.location) : '<span style="color:#9ca3af;">ทุกศูนย์</span>';
           return '<tr>' +
             '<td>' + escapeHtml(e.title || '-') + '</td>' +
             '<td>' + escapeHtml(e.grade || '-') + '</td>' +
+            '<td>' + locationLabel + '</td>' +
             '<td>' + escapeHtml(e.subject || '-') + '</td>' +
             '<td>' + (e.totalItems || (e.answerKey && e.answerKey.length) || '-') + '</td>' +
             '<td>' + escapeHtml((e.topics || []).join(', ') || '-') + '</td>' +
@@ -29083,6 +29111,7 @@ function receiptStatusText(status) {
       setVal('editingExamBankId', exam.testId || exam.firebaseDocId || '');
       setVal('examBankTitle', exam.title || '');
       setVal('examBankGrade', exam.grade || '');
+      setVal('examBankLocation', exam.location || '');
       setVal('examBankSubject', exam.subject || '');
       setVal('examBankTopics', (exam.topics || []).join(', '));
       setVal('examBankTotalItems', exam.totalItems || 20);
@@ -30001,6 +30030,7 @@ function receiptStatusText(status) {
       } else if (tab === 'exambank') {
         if (exambankView) exambankView.style.display = '';
         if (btnExambank) btnExambank.style.cssText = activeStyle;
+        safeRun(populateExamBankLocationSelect, 'exambank-location-select');
       } else if (tab === 'score') {
         if (scoreView) scoreView.style.display = '';
         if (btnScore) btnScore.style.cssText = activeStyle;
