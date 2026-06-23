@@ -15977,9 +15977,12 @@
     function getPublishedOnlineExamCoursesForStudent(options) {
       const opts = options || {};
       const grade = currentStudent && currentStudent.grade ? currentStudent.grade : getProfileGrade();
+      const studentLocation = String((currentStudent && (currentStudent.preferredLocation || currentStudent.location || currentStudent.center)) || '').trim();
       return (onlineExamCourseCache || []).filter(function(c) {
         if (!c) return false;
         if (c.status === 'inactive') return false;
+        const examLocation = String(c.location || '').trim();
+        if (examLocation && studentLocation && examLocation !== studentLocation) return false;
         if (opts.exactGradeOnly) return !!grade && c.grade === grade;
         return !c.grade || !grade || c.grade === grade;
       });
@@ -34202,12 +34205,37 @@ function receiptStatusText(status) {
       const statusEl = getElement('idCardLoadStatus');
       if (statusEl) { statusEl.textContent = 'กำลังโหลดข้อมูลนักเรียน...'; statusEl.style.color = '#d97706'; }
       try {
-        const snapshot = await db.collection('users').where('role', '==', 'student').limit(500).get();
+        const [userSnapshot, studentSnapshot] = await Promise.all([
+          db.collection('users').where('role', '==', 'student').limit(500).get(),
+          db.collection('students').limit(800).get()
+        ]);
+        const studentLookup = {};
+        studentSnapshot.docs.forEach(function(doc) {
+          const record = Object.assign({ firebaseDocId: doc.id }, doc.data());
+          [doc.id, record.id, record.firebaseDocId, record.authUid, record.uid, record.memberId, record.studentId].forEach(function(value) {
+            const key = String(value || '').trim();
+            if (key && !studentLookup[key]) studentLookup[key] = record;
+          });
+        });
         const filterGrade = (getElement('idCardGradeFilter') || {}).value || 'ทั้งหมด';
         const filterLocation = (getElement('idCardLocationFilter') || {}).value || 'ทั้งหมด';
         const filterPrinted = (getElement('idCardPrintedFilter') || {}).value || 'ทั้งหมด';
-        let students = snapshot.docs.map(function(doc) {
-          return Object.assign({ uid: doc.id }, doc.data());
+        let students = userSnapshot.docs.map(function(doc) {
+          const userData = Object.assign({ uid: doc.id }, doc.data());
+          const linkedKey = String(userData.linkedStudentId || userData.studentDocId || '').trim();
+          const matchedStudent = studentLookup[doc.id] ||
+            studentLookup[String(userData.authUid || '').trim()] ||
+            (linkedKey ? studentLookup[linkedKey] : null) ||
+            studentLookup[String(userData.memberId || '').trim()] ||
+            studentLookup[String(userData.studentId || '').trim()] ||
+            null;
+          return Object.assign({}, matchedStudent || {}, userData, {
+            uid: doc.id,
+            authUid: userData.authUid || doc.id,
+            memberId: userData.memberId || (matchedStudent && matchedStudent.memberId) || userData.studentId || '',
+            studentId: userData.studentId || (matchedStudent && matchedStudent.studentId) || userData.memberId || '',
+            defaultPassword: userData.defaultPassword || (matchedStudent && matchedStudent.defaultPassword) || ''
+          });
         }).filter(function(s) {
           return String(s.status || 'active').toLowerCase() === 'active';
         });
@@ -34225,7 +34253,7 @@ function receiptStatusText(status) {
           students = students.filter(function(s) { return !!s.idCardPrinted; });
         }
         students.sort(function(a, b) {
-          return String(a.memberId || a.studentId || '').localeCompare(String(b.memberId || b.studentId || ''));
+          return getStudentIdCardMemberId(a).localeCompare(getStudentIdCardMemberId(b), undefined, { numeric: true });
         });
         idCardStudents = students;
         idCardSelectedUids.clear();
@@ -34244,14 +34272,24 @@ function receiptStatusText(status) {
 
     function getStudentIdCardPassword(student) {
       if (!student) return '-';
+      const memberId = getStudentIdCardMemberId(student);
+      if (memberId) return buildDefaultStudentPassword({ memberId: memberId, studentId: memberId });
       const fields = ['defaultPassword', 'passwordDefault', 'initialPassword', 'loginPassword', 'password', 'plainPassword'];
       for (var i = 0; i < fields.length; i++) {
         var val = String(student[fields[i]] || '').trim();
         if (val) return val;
       }
-      // users collection doesn't store defaultPassword — compute from memberId
-      const computed = buildDefaultStudentPassword(student);
-      return (computed && computed !== 'ic0000') ? computed : '-';
+      return '-';
+    }
+
+    function getStudentIdCardMemberId(student) {
+      if (!student) return '';
+      const candidates = [student.memberId, student.loginId, student.studentId, student.id, student.firebaseDocId];
+      for (var i = 0; i < candidates.length; i++) {
+        var value = String(candidates[i] || '').trim();
+        if (value && value.indexOf('@') === -1) return value;
+      }
+      return '';
     }
 
     function renderIdCardStudentList() {
@@ -34265,7 +34303,7 @@ function receiptStatusText(status) {
       }
       tbody.innerHTML = idCardStudents.map(function(s) {
         const uid = s.uid || '';
-        const memberId = escapeHtml(s.memberId || s.studentId || '-');
+        const memberId = escapeHtml(getStudentIdCardMemberId(s) || '-');
         const name = escapeHtml(s.name || s.displayName || '-');
         const nickname = escapeHtml(s.nickname || '-');
         const grade = escapeHtml(s.grade || s.gradeLevel || '-');
