@@ -32231,11 +32231,15 @@ function receiptStatusText(status) {
       } catch(e) { alert('ยกเลิกไม่สำเร็จ: ' + (e.message || e)); }
     }
 
+    var manualExamAnswers = {};
+
     function showAddManualExamResultModal() {
       if (!hasPermission('admin.onlineExams')) { alert('ไม่มีสิทธิ์'); return; }
       const modal = getElement('onlineExamDetailModal');
       const content = getElement('onlineExamDetailModalContent');
       if (!modal || !content) return;
+
+      manualExamAnswers = {};
 
       const studentOpts = (students || []).filter(function(s) { return s && !s.deleted && s.name; })
         .sort(function(a, b) {
@@ -32252,22 +32256,25 @@ function receiptStatusText(status) {
         }).join('');
 
       content.innerHTML =
-        '<h3 style="font-size:16px;margin-bottom:12px;">📝 เพิ่มผลสอบจากกระดาษ</h3>' +
-        '<p style="font-size:12px;color:#6b7280;margin-bottom:14px;">สำหรับนักเรียนที่ทำข้อสอบในกระดาษ — admin กรอกผลแทน</p>' +
-        '<div class="form-row" style="flex-direction:column;gap:10px;">' +
+        '<h3 style="font-size:16px;margin-bottom:4px;">📝 เพิ่มผลสอบจากกระดาษ</h3>' +
+        '<p style="font-size:12px;color:#6b7280;margin-bottom:12px;">เลือกนักเรียนและชุดข้อสอบ แล้วกดตัวเลือกตามที่นักเรียนกาในกระดาษ</p>' +
+        '<div style="display:flex;flex-direction:column;gap:10px;">' +
           '<div><label style="font-size:12px;font-weight:600;">นักเรียน</label>' +
           '<select id="manualExamStudentSel" style="width:100%;"><option value="">-- เลือกนักเรียน --</option>' + studentOpts + '</select></div>' +
           '<div><label style="font-size:12px;font-weight:600;">ชุดข้อสอบ</label>' +
-          '<select id="manualExamCourseSel" onchange="updateManualExamTotalQ()" style="width:100%;"><option value="">-- เลือกชุดข้อสอบ --</option>' + courseOpts + '</select></div>' +
+          '<select id="manualExamCourseSel" onchange="renderManualExamQuestions()" style="width:100%;"><option value="">-- เลือกชุดข้อสอบ --</option>' + courseOpts + '</select></div>' +
+        '</div>' +
+        '<div id="manualExamQuestionsBox" style="margin-top:12px;"></div>' +
+        '<div id="manualExamFallback" style="display:none;margin-top:10px;">' +
           '<div style="display:flex;gap:10px;">' +
             '<div style="flex:1;"><label style="font-size:12px;font-weight:600;">จำนวนข้อถูก</label>' +
             '<input id="manualExamCorrect" type="number" min="0" value="0" style="width:100%;"></div>' +
             '<div style="flex:1;"><label style="font-size:12px;font-weight:600;">จำนวนข้อทั้งหมด</label>' +
             '<input id="manualExamTotal" type="number" min="0" value="0" style="width:100%;"></div>' +
           '</div>' +
-          '<div><label style="font-size:12px;font-weight:600;">หมายเหตุ (ไม่บังคับ)</label>' +
-          '<input id="manualExamNote" type="text" placeholder="เช่น กระดาษสอบวันที่ ..." style="width:100%;"></div>' +
         '</div>' +
+        '<div style="margin-top:10px;"><label style="font-size:12px;font-weight:600;">หมายเหตุ (ไม่บังคับ)</label>' +
+        '<input id="manualExamNote" type="text" placeholder="เช่น กระดาษสอบวันที่ ..." style="width:100%;"></div>' +
         '<p id="manualExamResult" style="margin-top:10px;font-weight:600;font-size:13px;"></p>' +
         '<div style="display:flex;gap:8px;margin-top:14px;">' +
           '<button class="btn btn-green" type="button" onclick="submitManualExamResult()" style="flex:1;">บันทึกผลสอบ</button>' +
@@ -32276,29 +32283,135 @@ function receiptStatusText(status) {
       modal.style.display = '';
     }
 
-    function updateManualExamTotalQ() {
+    function renderManualExamQuestions() {
       const courseId = (getElement('manualExamCourseSel') || {}).value || '';
       const course = (onlineExamCourseCache || []).find(function(c) { return (c.firebaseDocId || '') === courseId; });
-      const totalQ = course ? ((course.questions || []).length || 0) : 0;
-      if (totalQ && getElement('manualExamTotal')) getElement('manualExamTotal').value = totalQ;
+      const box = getElement('manualExamQuestionsBox');
+      const fallback = getElement('manualExamFallback');
+      manualExamAnswers = {};
+
+      if (!courseId || !course) {
+        if (box) box.innerHTML = '';
+        if (fallback) fallback.style.display = 'none';
+        return;
+      }
+
+      const questions = course.questions || [];
+
+      if (!questions.length) {
+        if (box) box.innerHTML = '<div style="color:#6b7280;font-size:12px;padding:6px 0;">ชุดข้อสอบนี้ไม่มีข้อสอบในระบบ — กรอกจำนวนข้อถูกเองด้านล่าง</div>';
+        if (fallback) {
+          fallback.style.display = '';
+          const totalEl = getElement('manualExamTotal');
+          if (totalEl) totalEl.value = 0;
+          const correctEl = getElement('manualExamCorrect');
+          if (correctEl) { correctEl.value = 0; correctEl.readOnly = false; }
+        }
+        return;
+      }
+
+      if (fallback) fallback.style.display = 'none';
+
+      const CHOICE_LABELS = ['A','B','C','D','E'];
+      const rows = questions.map(function(q, idx) {
+        const btnHtml = (q.choices || []).map(function(ch, ci) {
+          const lbl = CHOICE_LABELS[ci] || (ci + 1);
+          return '<button type="button" id="mqb_' + escapeHtml(q.questionId) + '_' + ci + '" ' +
+            'onclick="selectManualExamAnswer(\'' + jsArg(q.questionId) + '\',' + ci + ',' + Number(q.correctIndex) + ',' + (q.choices || []).length + ')" ' +
+            'style="margin:2px;padding:5px 10px;border:2px solid #d1d5db;border-radius:6px;background:#fff;cursor:pointer;font-size:12px;min-width:60px;text-align:left;">' +
+            '<strong>' + lbl + '.</strong> ' + escapeHtml(ch) +
+          '</button>';
+        }).join('');
+        return '<div style="padding:8px 0;border-bottom:1px solid #f3f4f6;">' +
+          '<div style="font-size:13px;margin-bottom:5px;"><strong>' + (idx + 1) + '.</strong> ' + escapeHtml(q.text || '') + '</div>' +
+          '<div style="display:flex;flex-wrap:wrap;gap:2px;">' + btnHtml + '</div>' +
+          '<div id="mqr_' + escapeHtml(q.questionId) + '" style="font-size:11px;margin-top:3px;min-height:14px;"></div>' +
+        '</div>';
+      }).join('');
+
+      if (box) box.innerHTML =
+        '<div style="font-size:12px;font-weight:600;color:#374151;margin-bottom:6px;">' +
+          'ข้อสอบ ' + questions.length + ' ข้อ — กดตัวเลือกตามที่นักเรียนกา' +
+        '</div>' +
+        '<div id="manualExamScoreSummary" style="font-size:13px;font-weight:700;color:#1d4ed8;margin-bottom:8px;">ถูก 0 / ' + questions.length + ' ข้อ · คะแนน 0/50</div>' +
+        '<div style="max-height:420px;overflow-y:auto;border:1px solid #e5e7eb;border-radius:8px;padding:8px 12px;">' + rows + '</div>';
+    }
+
+    function selectManualExamAnswer(questionId, choiceIndex, correctIndex, totalChoices) {
+      manualExamAnswers[questionId] = choiceIndex;
+      const CHOICE_LABELS = ['A','B','C','D','E'];
+      for (var ci = 0; ci < totalChoices; ci++) {
+        const btn = getElement('mqb_' + questionId + '_' + ci);
+        if (!btn) continue;
+        if (ci === choiceIndex && ci === correctIndex) {
+          btn.style.borderColor = '#16a34a'; btn.style.background = '#f0fdf4'; btn.style.fontWeight = '700';
+        } else if (ci === choiceIndex) {
+          btn.style.borderColor = '#3b82f6'; btn.style.background = '#eff6ff'; btn.style.fontWeight = '700';
+        } else if (ci === correctIndex) {
+          btn.style.borderColor = '#16a34a'; btn.style.background = '#f0fdf4'; btn.style.fontWeight = '400';
+        } else {
+          btn.style.borderColor = '#d1d5db'; btn.style.background = '#fff'; btn.style.fontWeight = '400';
+        }
+      }
+      const resultEl = getElement('mqr_' + questionId);
+      if (resultEl) {
+        if (choiceIndex === correctIndex) {
+          resultEl.innerHTML = '<span style="color:#16a34a;">✓ ถูก</span>';
+        } else {
+          resultEl.innerHTML = '<span style="color:#dc2626;">✗ ผิด — เฉลย: <strong>' + (CHOICE_LABELS[correctIndex] || (correctIndex+1)) + '</strong></span>';
+        }
+      }
+      const courseId = (getElement('manualExamCourseSel') || {}).value || '';
+      const course = (onlineExamCourseCache || []).find(function(c) { return (c.firebaseDocId || '') === courseId; });
+      if (course && course.questions) {
+        const totalQ = course.questions.length;
+        const correct = course.questions.filter(function(q) {
+          return manualExamAnswers[q.questionId] !== undefined && manualExamAnswers[q.questionId] === q.correctIndex;
+        }).length;
+        const unanswered = course.questions.filter(function(q) { return manualExamAnswers[q.questionId] === undefined; }).length;
+        const score50val = totalQ > 0 ? onlineExamGetScore50Value(correct, totalQ) : 0;
+        const summaryEl = getElement('manualExamScoreSummary');
+        if (summaryEl) {
+          summaryEl.textContent = 'ถูก ' + correct + ' / ' + totalQ + ' ข้อ · คะแนน ' + score50val.toFixed(1).replace(/\.0$/, '') + '/50' + (unanswered ? ' · ยังไม่ได้กา ' + unanswered + ' ข้อ' : ' ✓ ครบแล้ว');
+          summaryEl.style.color = unanswered ? '#1d4ed8' : '#16a34a';
+        }
+      }
     }
 
     async function submitManualExamResult() {
       if (!hasPermission('admin.onlineExams')) { alert('ไม่มีสิทธิ์'); return; }
       const studentDocId = (getElement('manualExamStudentSel') || {}).value || '';
       const courseId = (getElement('manualExamCourseSel') || {}).value || '';
-      const correct = parseInt((getElement('manualExamCorrect') || {}).value || '0', 10) || 0;
-      const total = parseInt((getElement('manualExamTotal') || {}).value || '0', 10) || 0;
       const note = ((getElement('manualExamNote') || {}).value || '').trim();
       const resultEl = getElement('manualExamResult');
 
       if (!studentDocId) { if (resultEl) { resultEl.textContent = 'กรุณาเลือกนักเรียน'; resultEl.style.color = '#dc2626'; } return; }
       if (!courseId) { if (resultEl) { resultEl.textContent = 'กรุณาเลือกชุดข้อสอบ'; resultEl.style.color = '#dc2626'; } return; }
-      if (correct > total && total > 0) { if (resultEl) { resultEl.textContent = 'จำนวนข้อถูกมากกว่าจำนวนข้อทั้งหมด'; resultEl.style.color = '#dc2626'; } return; }
 
       const student = (students || []).find(function(s) { return (s.id || s.firebaseDocId || '') === studentDocId; });
       const course = (onlineExamCourseCache || []).find(function(c) { return (c.firebaseDocId || '') === courseId; });
       if (!student || !course) { if (resultEl) { resultEl.textContent = 'ไม่พบข้อมูลนักเรียนหรือชุดข้อสอบ'; resultEl.style.color = '#dc2626'; } return; }
+
+      const questions = course.questions || [];
+      let correct, total, answers;
+
+      if (questions.length) {
+        // mode: question-by-question selection
+        const unanswered = questions.filter(function(q) { return manualExamAnswers[q.questionId] === undefined; });
+        if (unanswered.length && !confirm('ยังไม่ได้กา ' + unanswered.length + ' ข้อ — บันทึกต่อไปหรือไม่? (ข้อที่ไม่ได้กาจะนับเป็นผิด)')) return;
+        answers = {};
+        questions.forEach(function(q) {
+          if (manualExamAnswers[q.questionId] !== undefined) answers[q.questionId] = manualExamAnswers[q.questionId];
+        });
+        correct = questions.filter(function(q) { return answers[q.questionId] === q.correctIndex; }).length;
+        total = questions.length;
+      } else {
+        // fallback: manual number entry
+        correct = parseInt((getElement('manualExamCorrect') || {}).value || '0', 10) || 0;
+        total = parseInt((getElement('manualExamTotal') || {}).value || '0', 10) || 0;
+        answers = null;
+        if (correct > total && total > 0) { if (resultEl) { resultEl.textContent = 'จำนวนข้อถูกมากกว่าจำนวนข้อทั้งหมด'; resultEl.style.color = '#dc2626'; } return; }
+      }
 
       const score50val = total > 0 ? onlineExamGetScore50Value(correct, total) : 0;
       const now = new Date();
@@ -32329,15 +32442,17 @@ function receiptStatusText(status) {
         addedByUid: firebaseUser ? firebaseUser.uid : '',
         addedByName: (firebaseUserProfile && (firebaseUserProfile.name || firebaseUserProfile.displayName || firebaseUserProfile.email)) || ''
       };
+      if (answers) doc.answers = answers;
 
       try {
         await db.collection('onlineExamResults').doc(newId).set(doc);
         addActivityLog('เพิ่มผลสอบจากกระดาษ', (student.name || '-') + ' · ' + (course.subject || '') + ' · ถูก ' + correct + '/' + total);
         onlineExamGradeAllResults.push(Object.assign({ _docId: newId }, doc));
         onlineExamGradeGroupedRows = buildOnlineExamGroupedRows(onlineExamGradeAllResults);
-        if (resultEl) { resultEl.textContent = 'บันทึกผลสอบเรียบร้อย (' + (student.name || '-') + ' · ' + correct + '/' + total + ' ข้อ)'; resultEl.style.color = '#16a34a'; }
+        if (resultEl) { resultEl.textContent = 'บันทึกผลสอบเรียบร้อย — ' + (student.name || '-') + ' · ถูก ' + correct + '/' + total + ' ข้อ · ' + score50val.toFixed(1).replace(/\.0$/, '') + '/50 คะแนน'; resultEl.style.color = '#16a34a'; }
         renderOnlineExamGradingPage(onlineExamGradePage);
         safeRun(renderAdminScoreTables, 'admin-score-refresh-after-manual');
+        manualExamAnswers = {};
       } catch(e) {
         if (resultEl) { resultEl.textContent = 'บันทึกไม่สำเร็จ: ' + (e.message || e); resultEl.style.color = '#dc2626'; }
       }
