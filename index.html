@@ -5315,6 +5315,7 @@
                       <option value="submitted">รอประกาศผล</option>
                       <option value="published">ประกาศผลแล้ว</option>
                       <option value="hidden">ซ่อนผล</option>
+                      <option value="absent">ขาดสอบ</option>
                       <option value="not_submitted">ยังไม่ทำข้อสอบ</option>
                     </select>
                   </div>
@@ -5328,8 +5329,9 @@
                     <label>ถึง</label>
                     <input type="date" id="onlineExamGradeDateTo" onchange="renderOnlineExamGradingReport()">
                   </div>
-                  <div style="align-self:flex-end;">
+                  <div style="align-self:flex-end;display:flex;gap:6px;flex-wrap:wrap;">
                     <button id="onlineExamGradeRefreshBtn" class="btn btn-blue" onclick="renderOnlineExamGradingReport()">🔄 รีเฟรช</button>
+                    <button class="btn btn-green" onclick="showAddManualExamResultModal()" type="button">📝 เพิ่มผลสอบจากกระดาษ</button>
                   </div>
                 </div>
 
@@ -31419,8 +31421,9 @@ function receiptStatusText(status) {
       const statuses = (group && group.results || []).map(function(result) { return result.resultStatus || 'submitted'; });
       if (!statuses.length) return 'submitted';
       if (statuses.every(function(status) { return status === 'hidden'; })) return 'hidden';
+      if (statuses.every(function(status) { return status === 'absent'; })) return 'absent';
       if (statuses.some(function(status) { return status === 'submitted'; })) return 'submitted';
-      if (statuses.every(function(status) { return status === 'published'; })) return 'published';
+      if (statuses.every(function(status) { return status === 'published' || status === 'absent'; })) return 'published';
       return statuses.includes('published') ? 'published' : statuses[0];
     }
 
@@ -31462,6 +31465,14 @@ function receiptStatusText(status) {
       if (!data) {
         return '<td style="padding:8px 10px;text-align:center;white-space:nowrap;color:#9ca3af;">-<br><span style="font-size:11px;">ยังไม่มีผลสอบ</span></td>';
       }
+      if (data.result && data.result.resultStatus === 'absent') {
+        const gk = jsArg(group.key);
+        const sj = jsArg(subject);
+        return '<td style="padding:8px 10px;text-align:center;white-space:nowrap;">' +
+          '<span class="status-absent" style="font-size:11px;padding:1px 7px;border-radius:99px;">ขาดสอบ</span>' +
+          '<br><button class="btn" type="button" style="font-size:10px;padding:2px 7px;margin-top:3px;" onclick="undoOnlineExamAbsent(\'' + gk + '\',\'' + sj + '\')">ยกเลิก</button>' +
+        '</td>';
+      }
       const groupKey = jsArg(group.key);
       const subjectArg = jsArg(subject);
       const correctText = data.correct + '/' + (data.total || '-');
@@ -31491,7 +31502,10 @@ function receiptStatusText(status) {
       const hasPublished = group.results.some(function(result) { return (result.resultStatus || 'submitted') === 'published'; });
 
       const pickerId = 'ogdp_' + String(group.key).replace(/[^a-zA-Z0-9]/g, '_');
-      const availableSubjects = ONLINE_EXAM_SCORE_SHEET_SUBJECTS.filter(function(subject) { return !!group.resultsBySubject[subject]; });
+      const availableSubjects = ONLINE_EXAM_SCORE_SHEET_SUBJECTS.filter(function(subject) {
+        const r = group.resultsBySubject[subject];
+        return !!r && (r.resultStatus || 'submitted') !== 'absent';
+      });
       const subjectPickerBtns = availableSubjects.map(function(subject) {
         const short = subjectShortMap[subject] || subject;
         return '<button class="btn btn-red" type="button" style="font-size:10px;padding:2px 8px;margin:2px 2px 2px 0;" onclick="deleteOnlineExamSingleSubjectResult(\'' + jsArg(group.key) + '\',\'' + jsArg(subject) + '\')">' + escapeHtml(short) + '</button>';
@@ -31726,13 +31740,24 @@ function receiptStatusText(status) {
       const rows = missingItems.map(function(item, index) {
         const student = item.student || {};
         const missingCount = (item.missingCourses || []).length;
+        const courseRows = (item.missingCourses || []).map(function(course, ci) {
+          const courseLabel = [course.examMonth || '', getOnlineExamCourseGrade(course) || '', course.subject || '', course.title || ''].filter(Boolean).join(' · ');
+          return '<div style="display:flex;align-items:center;gap:6px;padding:4px 0;border-bottom:1px solid #f1f5f9;">' +
+            '<span style="font-size:12px;flex:1;">' + escapeHtml(courseLabel) + '</span>' +
+            '<button class="btn btn-red" type="button" style="font-size:11px;padding:3px 8px;white-space:nowrap;" onclick="markStudentExamAbsent(' + index + ',\'' + jsArg(course.firebaseDocId || '') + '\')">ขาดสอบ</button>' +
+          '</div>';
+        }).join('');
+        const detailId = 'missingCourseDetail_' + index;
         return '<tr>' +
-          '<td style="padding:8px 10px;border-bottom:1px solid #f1f5f9;">' + (index + 1) + '</td>' +
-          '<td style="padding:8px 10px;border-bottom:1px solid #f1f5f9;white-space:nowrap;">' + escapeHtml(student.memberId || student.studentId || '-') + '</td>' +
-          '<td style="padding:8px 10px;border-bottom:1px solid #f1f5f9;">' + escapeHtml(student.name || '-') + '<br><span class="mini-muted">' + escapeHtml(student.nickname || '-') + '</span></td>' +
-          '<td style="padding:8px 10px;border-bottom:1px solid #f1f5f9;text-align:center;white-space:nowrap;">' + escapeHtml(student.grade || '-') + '</td>' +
-          '<td style="padding:8px 10px;border-bottom:1px solid #f1f5f9;text-align:center;white-space:nowrap;">' + missingCount + ' ชุด</td>' +
-          '<td style="padding:8px 10px;border-bottom:1px solid #f1f5f9;text-align:center;white-space:nowrap;"><button class="btn btn-blue" type="button" style="font-size:11px;padding:4px 10px;" onclick="showOnlineExamMissingCourses(' + index + ')">ดูชุด</button></td>' +
+          '<td style="padding:8px 10px;border-bottom:1px solid #f1f5f9;vertical-align:top;">' + (index + 1) + '</td>' +
+          '<td style="padding:8px 10px;border-bottom:1px solid #f1f5f9;white-space:nowrap;vertical-align:top;">' + escapeHtml(student.memberId || student.studentId || '-') + '</td>' +
+          '<td style="padding:8px 10px;border-bottom:1px solid #f1f5f9;vertical-align:top;">' + escapeHtml(student.name || '-') + '<br><span class="mini-muted">' + escapeHtml(student.nickname || '-') + '</span></td>' +
+          '<td style="padding:8px 10px;border-bottom:1px solid #f1f5f9;text-align:center;white-space:nowrap;vertical-align:top;">' + escapeHtml(student.grade || '-') + '</td>' +
+          '<td style="padding:8px 10px;border-bottom:1px solid #f1f5f9;text-align:center;white-space:nowrap;vertical-align:top;">' + missingCount + ' ชุด</td>' +
+          '<td style="padding:8px 10px;border-bottom:1px solid #f1f5f9;vertical-align:top;">' +
+            '<button class="btn btn-blue" type="button" style="font-size:11px;padding:3px 8px;margin-bottom:4px;" onclick="toggleScoreDeletePicker(\'' + detailId + '\')">ดูชุด / ขาดสอบ</button>' +
+            '<div id="' + detailId + '" style="display:none;margin-top:4px;padding:4px 8px;background:#fff7f7;border:1px solid #fecaca;border-radius:6px;">' + courseRows + '</div>' +
+          '</td>' +
         '</tr>';
       }).join('');
       content.innerHTML =
@@ -31943,6 +31968,7 @@ function receiptStatusText(status) {
     function getOnlineExamResultStatusBadge(status) {
       if (status === 'published') return '<span class="status-paid" style="font-size:10px;padding:1px 8px;border-radius:99px;white-space:nowrap;">ประกาศผลแล้ว</span>';
       if (status === 'hidden') return '<span class="status-absent" style="font-size:10px;padding:1px 8px;border-radius:99px;white-space:nowrap;">ซ่อนผล</span>';
+      if (status === 'absent') return '<span class="status-absent" style="font-size:10px;padding:1px 8px;border-radius:99px;white-space:nowrap;">ขาดสอบ</span>';
       return '<span class="status-waiting" style="font-size:10px;padding:1px 8px;border-radius:99px;white-space:nowrap;">รอประกาศผล</span>';
     }
 
@@ -32138,6 +32164,183 @@ function receiptStatusText(status) {
         onlineExamGradeGroupedRows = buildOnlineExamGroupedRows(onlineExamGradeAllResults);
         renderOnlineExamGradingPage(onlineExamGradePage);
       } catch(e) { alert('ซ่อนผลไม่สำเร็จ: ' + (e.message || e)); }
+    }
+
+    async function markStudentExamAbsent(studentIndex, courseFirebaseDocId) {
+      if (!hasPermission('admin.onlineExams')) { alert('ไม่มีสิทธิ์'); return; }
+      const item = onlineExamGradeMissingItems[Number(studentIndex)];
+      if (!item) return;
+      const student = item.student || {};
+      const course = (item.missingCourses || []).find(function(c) { return (c.firebaseDocId || '') === courseFirebaseDocId; });
+      if (!course) { alert('ไม่พบชุดข้อสอบ'); return; }
+      const courseLabel = [course.examMonth || '', getOnlineExamCourseGrade(course) || '', course.subject || '', course.title || ''].filter(Boolean).join(' · ');
+      if (!confirm('บันทึกว่า "' + (student.name || '-') + '" ขาดสอบ "' + courseLabel + '"?')) return;
+      const newId = createFirebaseDocId('onlineExamResults');
+      const absentDoc = {
+        firebaseDocId: newId,
+        studentUid: student.authUid || student.uid || '',
+        studentId: student.id || student.studentId || '',
+        memberId: student.memberId || '',
+        studentName: student.name || '',
+        studentNickname: student.nickname || '',
+        courseId: courseFirebaseDocId,
+        courseTitle: course.title || '',
+        subject: course.subject || '',
+        examMonth: course.examMonth || '',
+        grade: getOnlineExamCourseGrade(course) || student.grade || '',
+        resultStatus: 'absent',
+        source: 'admin_absent',
+        totalQ: 0,
+        correctCount: 0,
+        score: 0,
+        score50: 0,
+        absentMarkedAt: firebase.firestore.FieldValue.serverTimestamp(),
+        absentMarkedBy: firebaseUser ? firebaseUser.uid : '',
+        absentMarkedByName: (firebaseUserProfile && (firebaseUserProfile.name || firebaseUserProfile.displayName || firebaseUserProfile.email)) || ''
+      };
+      try {
+        await db.collection('onlineExamResults').doc(newId).set(absentDoc);
+        addActivityLog('บันทึกขาดสอบ', (student.name || '-') + ' · ' + courseLabel);
+        onlineExamGradeAllResults.push(Object.assign({ _docId: newId }, absentDoc));
+        onlineExamGradeGroupedRows = buildOnlineExamGroupedRows(onlineExamGradeAllResults);
+        item.missingCourses = (item.missingCourses || []).filter(function(c) { return (c.firebaseDocId || '') !== courseFirebaseDocId; });
+        onlineExamGradeMissingItems = onlineExamGradeMissingItems.filter(function(x) { return (x.missingCourses || []).length > 0; });
+        onlineExamGradeMissingHtml = renderOnlineExamMissingStudentsHtml(onlineExamGradeMissingItems, getOnlineExamGradingTargetCourses(
+          (getElement('onlineExamGradeMonthFilter') || {}).value || '',
+          (getElement('onlineExamGradeSubjectFilter') || {}).value || '',
+          (getElement('onlineExamGradeLevelFilter') || {}).value || ''
+        ), 0);
+        showOnlineExamMissingStudentList();
+        renderOnlineExamGradingPage(onlineExamGradePage);
+      } catch(e) { alert('บันทึกไม่สำเร็จ: ' + (e.message || e)); }
+    }
+
+    async function undoOnlineExamAbsent(groupKey, subject) {
+      if (!hasPermission('admin.onlineExams')) { alert('ไม่มีสิทธิ์'); return; }
+      const group = findOnlineExamGroupedRow(groupKey);
+      if (!group) return;
+      const result = group.resultsBySubject[subject];
+      if (!result || result.resultStatus !== 'absent') return;
+      if (!confirm('ยกเลิกสถานะขาดสอบวิชา "' + subject + '" ของ "' + (group.studentName || '-') + '"?\nนักเรียนจะกลับไปปรากฏในรายการ "ยังไม่ทำข้อสอบ"')) return;
+      try {
+        await db.collection('onlineExamResults').doc(result._docId).delete();
+        onlineExamGradeAllResults = onlineExamGradeAllResults.filter(function(r) { return r._docId !== result._docId; });
+        onlineExamGradeGroupedRows = buildOnlineExamGroupedRows(onlineExamGradeAllResults);
+        addActivityLog('ยกเลิกขาดสอบ', (group.studentName || '-') + ' · ' + subject);
+        renderOnlineExamGradingPage(onlineExamGradePage);
+      } catch(e) { alert('ยกเลิกไม่สำเร็จ: ' + (e.message || e)); }
+    }
+
+    function showAddManualExamResultModal() {
+      if (!hasPermission('admin.onlineExams')) { alert('ไม่มีสิทธิ์'); return; }
+      const modal = getElement('onlineExamDetailModal');
+      const content = getElement('onlineExamDetailModalContent');
+      if (!modal || !content) return;
+
+      const studentOpts = (students || []).filter(function(s) { return s && !s.deleted && s.name; })
+        .sort(function(a, b) {
+          return String(a.memberId || a.studentId || '').localeCompare(String(b.memberId || b.studentId || ''), undefined, { numeric: true });
+        })
+        .map(function(s) {
+          return '<option value="' + escapeHtml(s.id || s.firebaseDocId || '') + '">' + escapeHtml((s.memberId ? '[' + s.memberId + '] ' : '') + (s.name || '') + (s.nickname ? ' (' + s.nickname + ')' : '') + (s.grade ? ' · ' + s.grade : '')) + '</option>';
+        }).join('');
+
+      const courseOpts = (onlineExamCourseCache || []).filter(function(c) { return c && !c.deleted && c.status !== 'inactive' && c.isActive !== false; })
+        .map(function(c) {
+          const label = [c.examMonth || '', getOnlineExamCourseGrade(c) || '', c.subject || '', c.title || ''].filter(Boolean).join(' · ');
+          return '<option value="' + escapeHtml(c.firebaseDocId || '') + '">' + escapeHtml(label) + '</option>';
+        }).join('');
+
+      content.innerHTML =
+        '<h3 style="font-size:16px;margin-bottom:12px;">📝 เพิ่มผลสอบจากกระดาษ</h3>' +
+        '<p style="font-size:12px;color:#6b7280;margin-bottom:14px;">สำหรับนักเรียนที่ทำข้อสอบในกระดาษ — admin กรอกผลแทน</p>' +
+        '<div class="form-row" style="flex-direction:column;gap:10px;">' +
+          '<div><label style="font-size:12px;font-weight:600;">นักเรียน</label>' +
+          '<select id="manualExamStudentSel" style="width:100%;"><option value="">-- เลือกนักเรียน --</option>' + studentOpts + '</select></div>' +
+          '<div><label style="font-size:12px;font-weight:600;">ชุดข้อสอบ</label>' +
+          '<select id="manualExamCourseSel" onchange="updateManualExamTotalQ()" style="width:100%;"><option value="">-- เลือกชุดข้อสอบ --</option>' + courseOpts + '</select></div>' +
+          '<div style="display:flex;gap:10px;">' +
+            '<div style="flex:1;"><label style="font-size:12px;font-weight:600;">จำนวนข้อถูก</label>' +
+            '<input id="manualExamCorrect" type="number" min="0" value="0" style="width:100%;"></div>' +
+            '<div style="flex:1;"><label style="font-size:12px;font-weight:600;">จำนวนข้อทั้งหมด</label>' +
+            '<input id="manualExamTotal" type="number" min="0" value="0" style="width:100%;"></div>' +
+          '</div>' +
+          '<div><label style="font-size:12px;font-weight:600;">หมายเหตุ (ไม่บังคับ)</label>' +
+          '<input id="manualExamNote" type="text" placeholder="เช่น กระดาษสอบวันที่ ..." style="width:100%;"></div>' +
+        '</div>' +
+        '<p id="manualExamResult" style="margin-top:10px;font-weight:600;font-size:13px;"></p>' +
+        '<div style="display:flex;gap:8px;margin-top:14px;">' +
+          '<button class="btn btn-green" type="button" onclick="submitManualExamResult()" style="flex:1;">บันทึกผลสอบ</button>' +
+          '<button class="btn btn-dark" type="button" onclick="closeOnlineExamDetailModal()" style="flex:1;">ยกเลิก</button>' +
+        '</div>';
+      modal.style.display = '';
+    }
+
+    function updateManualExamTotalQ() {
+      const courseId = (getElement('manualExamCourseSel') || {}).value || '';
+      const course = (onlineExamCourseCache || []).find(function(c) { return (c.firebaseDocId || '') === courseId; });
+      const totalQ = course ? ((course.questions || []).length || 0) : 0;
+      if (totalQ && getElement('manualExamTotal')) getElement('manualExamTotal').value = totalQ;
+    }
+
+    async function submitManualExamResult() {
+      if (!hasPermission('admin.onlineExams')) { alert('ไม่มีสิทธิ์'); return; }
+      const studentDocId = (getElement('manualExamStudentSel') || {}).value || '';
+      const courseId = (getElement('manualExamCourseSel') || {}).value || '';
+      const correct = parseInt((getElement('manualExamCorrect') || {}).value || '0', 10) || 0;
+      const total = parseInt((getElement('manualExamTotal') || {}).value || '0', 10) || 0;
+      const note = ((getElement('manualExamNote') || {}).value || '').trim();
+      const resultEl = getElement('manualExamResult');
+
+      if (!studentDocId) { if (resultEl) { resultEl.textContent = 'กรุณาเลือกนักเรียน'; resultEl.style.color = '#dc2626'; } return; }
+      if (!courseId) { if (resultEl) { resultEl.textContent = 'กรุณาเลือกชุดข้อสอบ'; resultEl.style.color = '#dc2626'; } return; }
+      if (correct > total && total > 0) { if (resultEl) { resultEl.textContent = 'จำนวนข้อถูกมากกว่าจำนวนข้อทั้งหมด'; resultEl.style.color = '#dc2626'; } return; }
+
+      const student = (students || []).find(function(s) { return (s.id || s.firebaseDocId || '') === studentDocId; });
+      const course = (onlineExamCourseCache || []).find(function(c) { return (c.firebaseDocId || '') === courseId; });
+      if (!student || !course) { if (resultEl) { resultEl.textContent = 'ไม่พบข้อมูลนักเรียนหรือชุดข้อสอบ'; resultEl.style.color = '#dc2626'; } return; }
+
+      const score50val = total > 0 ? onlineExamGetScore50Value(correct, total) : 0;
+      const now = new Date();
+      const nowText = now.toLocaleDateString('th-TH', { year: 'numeric', month: 'long', day: 'numeric' }) + ' ' + now.toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' });
+
+      const newId = createFirebaseDocId('onlineExamResults');
+      const doc = {
+        firebaseDocId: newId,
+        studentUid: student.authUid || student.uid || '',
+        studentId: student.id || student.studentId || '',
+        memberId: student.memberId || '',
+        studentName: student.name || '',
+        studentNickname: student.nickname || '',
+        courseId: courseId,
+        courseTitle: course.title || '',
+        subject: course.subject || '',
+        examMonth: course.examMonth || '',
+        grade: getOnlineExamCourseGrade(course) || student.grade || '',
+        resultStatus: 'submitted',
+        source: 'manual_paper',
+        correctCount: correct,
+        totalQ: total,
+        score: score50val,
+        score50: score50val,
+        note: note,
+        submittedAt: firebase.firestore.FieldValue.serverTimestamp(),
+        submittedAtText: nowText,
+        addedByUid: firebaseUser ? firebaseUser.uid : '',
+        addedByName: (firebaseUserProfile && (firebaseUserProfile.name || firebaseUserProfile.displayName || firebaseUserProfile.email)) || ''
+      };
+
+      try {
+        await db.collection('onlineExamResults').doc(newId).set(doc);
+        addActivityLog('เพิ่มผลสอบจากกระดาษ', (student.name || '-') + ' · ' + (course.subject || '') + ' · ถูก ' + correct + '/' + total);
+        onlineExamGradeAllResults.push(Object.assign({ _docId: newId }, doc));
+        onlineExamGradeGroupedRows = buildOnlineExamGroupedRows(onlineExamGradeAllResults);
+        if (resultEl) { resultEl.textContent = 'บันทึกผลสอบเรียบร้อย (' + (student.name || '-') + ' · ' + correct + '/' + total + ' ข้อ)'; resultEl.style.color = '#16a34a'; }
+        renderOnlineExamGradingPage(onlineExamGradePage);
+        safeRun(renderAdminScoreTables, 'admin-score-refresh-after-manual');
+      } catch(e) {
+        if (resultEl) { resultEl.textContent = 'บันทึกไม่สำเร็จ: ' + (e.message || e); resultEl.style.color = '#dc2626'; }
+      }
     }
 
     async function setOnlineExamResultRetake(resultDocId, allowRetake) {
