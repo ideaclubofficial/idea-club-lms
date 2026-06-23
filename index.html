@@ -15978,11 +15978,13 @@
       const opts = options || {};
       const grade = currentStudent && currentStudent.grade ? currentStudent.grade : getProfileGrade();
       const studentLocation = String((currentStudent && (currentStudent.preferredLocation || currentStudent.location || currentStudent.center)) || '').trim();
+      const studentDocId = currentStudent && (currentStudent.id || currentStudent.firebaseDocId) ? String(currentStudent.id || currentStudent.firebaseDocId) : '';
       return (onlineExamCourseCache || []).filter(function(c) {
         if (!c) return false;
         if (c.status === 'inactive') return false;
         const examLocation = String(c.location || '').trim();
         if (examLocation && studentLocation && examLocation !== studentLocation) return false;
+        if (studentDocId && (c.exemptStudentIds || []).includes(studentDocId)) return false;
         if (opts.exactGradeOnly) return !!grade && c.grade === grade;
         return !c.grade || !grade || c.grade === grade;
       });
@@ -30829,6 +30831,57 @@ function receiptStatusText(status) {
       monthSel.value = manageMonth;
     }
 
+    function showExamExemptModal(courseId) {
+      const course = onlineExamCourseCache.find(function(c) { return c.firebaseDocId === courseId; });
+      if (!course) return;
+      const exemptIds = course.exemptStudentIds || [];
+      const gradeStudents = (students || []).filter(function(s) {
+        if (!s || s.deleted || !s.name) return false;
+        const cGrade = getOnlineExamCourseGrade(course);
+        return !cGrade || !s.grade || s.grade === cGrade;
+      }).sort(function(a, b) {
+        return String(a.memberId || a.studentId || '').localeCompare(String(b.memberId || b.studentId || ''), undefined, { numeric: true });
+      });
+      const modal = getElement('onlineExamDetailModal');
+      const content = getElement('onlineExamDetailModalContent');
+      if (!modal || !content) return;
+      content.innerHTML =
+        '<h3 style="font-size:15px;margin-bottom:4px;">🚫 ยกเว้นนักเรียนจากข้อสอบ</h3>' +
+        '<p style="font-size:12px;color:#6b7280;margin-bottom:10px;">ชุด: <strong>' + escapeHtml(course.title || '-') + '</strong> · ' + escapeHtml(getOnlineExamCourseGrade(course) || '') + ' · ' + escapeHtml(course.subject || '') + '</p>' +
+        '<p style="font-size:12px;color:#92400e;background:#fef3c7;padding:6px 10px;border-radius:6px;margin-bottom:10px;">นักเรียนที่ติ๊กจะไม่เห็นข้อสอบชุดนี้ และไม่นับเป็นขาดสอบ</p>' +
+        '<div style="max-height:320px;overflow-y:auto;border:1px solid #e5e7eb;border-radius:8px;">' +
+        (gradeStudents.length ? gradeStudents.map(function(s) {
+          const sid = s.id || s.firebaseDocId || '';
+          const checked = exemptIds.includes(sid) ? ' checked' : '';
+          return '<label style="display:flex;align-items:center;gap:8px;padding:8px 12px;border-bottom:1px solid #f3f4f6;cursor:pointer;">' +
+            '<input type="checkbox" value="' + escapeHtml(sid) + '"' + checked + '>' +
+            '<span style="font-size:13px;">' + escapeHtml((s.memberId ? '[' + s.memberId + '] ' : '') + (s.name || '') + (s.nickname ? ' (' + s.nickname + ')' : '') + (s.grade ? ' · ' + s.grade : '')) + '</span>' +
+          '</label>';
+        }).join('') : '<p style="padding:12px;color:#9ca3af;text-align:center;">ไม่มีนักเรียนในระดับชั้นนี้</p>') +
+        '</div>' +
+        '<div style="display:flex;gap:8px;margin-top:12px;">' +
+          '<button class="btn btn-green" style="flex:1;" onclick="saveExamExemptions(\'' + jsArg(courseId) + '\')">บันทึก</button>' +
+          '<button class="btn btn-dark" style="flex:1;" onclick="closeOnlineExamDetailModal()">ยกเลิก</button>' +
+        '</div>' +
+        '<p id="examExemptResult" style="font-size:12px;margin-top:8px;font-weight:600;"></p>';
+      modal.style.display = '';
+    }
+
+    async function saveExamExemptions(courseId) {
+      if (!hasPermission('admin.onlineExams')) { alert('ไม่มีสิทธิ์'); return; }
+      const resultEl = getElement('examExemptResult');
+      const checkboxes = document.querySelectorAll('#onlineExamDetailModalContent input[type="checkbox"]');
+      const exemptStudentIds = Array.from(checkboxes).filter(function(cb) { return cb.checked; }).map(function(cb) { return cb.value; });
+      try {
+        await db.collection('onlineExamCourses').doc(courseId).update({ exemptStudentIds: exemptStudentIds });
+        const course = onlineExamCourseCache.find(function(c) { return c.firebaseDocId === courseId; });
+        if (course) course.exemptStudentIds = exemptStudentIds;
+        if (resultEl) { resultEl.style.color = '#16a34a'; resultEl.textContent = '✅ บันทึกเรียบร้อย ยกเว้น ' + exemptStudentIds.length + ' คน'; }
+      } catch(e) {
+        if (resultEl) { resultEl.style.color = '#dc2626'; resultEl.textContent = '❌ บันทึกไม่สำเร็จ: ' + (e.message || e); }
+      }
+    }
+
     function renderOnlineExamCourseList() {
       const container = getElement('onlineExamCourseList');
       if (!container) return;
@@ -30885,6 +30938,7 @@ function receiptStatusText(status) {
             '<button class="btn btn-green" onclick="openOnlineExamCourseForQuestions(\'' + courseId + '\')" style="font-size:11px;padding:4px 8px;">เลือก</button> ' +
             '<button class="btn btn-dark" onclick="exportOnlineExamCoursePdf(\'' + courseId + '\', this)" style="font-size:11px;padding:4px 8px;">PDF</button> ' +
             '<button class="btn btn-blue" onclick="editOnlineExamCourse(\'' + courseId + '\')" style="font-size:11px;padding:4px 8px;">แก้ไข</button> ' +
+            '<button class="btn" onclick="showExamExemptModal(\'' + courseId + '\')" style="font-size:11px;padding:4px 8px;background:#fef3c7;color:#92400e;border:1px solid #fcd34d;">🚫 ยกเว้น</button> ' +
             '<button class="btn btn-red" onclick="deleteOnlineExamCourse(\'' + courseId + '\')" style="font-size:11px;padding:4px 8px;">ลบ</button>' +
           '</td>' +
         '</tr>';
@@ -31780,7 +31834,9 @@ function receiptStatusText(status) {
         const studentKeys = getStudentOnlineExamIdentitySet(student);
         const studentNameKey = String(student.name || '').trim();
         if (studentNameKey) studentKeys.push('name:' + studentNameKey);
+        const studentDocId = String(student.id || student.firebaseDocId || '');
         const missingCourses = studentTargetCourses.filter(function(course) {
+          if (studentDocId && (course.exemptStudentIds || []).includes(studentDocId)) return false;
           const courseId = String(course.firebaseDocId || '');
           const submittedKeys = submittedKeysByCourseId[courseId] || {};
           return !studentKeys.some(function(key) { return !!submittedKeys[key]; });
