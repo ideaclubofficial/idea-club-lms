@@ -32241,28 +32241,18 @@ function receiptStatusText(status) {
 
       manualExamAnswers = {};
 
-      const studentOpts = (students || []).filter(function(s) { return s && !s.deleted && s.name; })
-        .sort(function(a, b) {
-          return String(a.memberId || a.studentId || '').localeCompare(String(b.memberId || b.studentId || ''), undefined, { numeric: true });
-        })
-        .map(function(s) {
-          return '<option value="' + escapeHtml(s.id || s.firebaseDocId || '') + '">' + escapeHtml((s.memberId ? '[' + s.memberId + '] ' : '') + (s.name || '') + (s.nickname ? ' (' + s.nickname + ')' : '') + (s.grade ? ' · ' + s.grade : '')) + '</option>';
-        }).join('');
-
-      const courseOpts = (onlineExamCourseCache || []).filter(function(c) { return c && !c.deleted && c.status !== 'inactive' && c.isActive !== false; })
-        .map(function(c) {
-          const label = [c.examMonth || '', getOnlineExamCourseGrade(c) || '', c.subject || '', c.title || ''].filter(Boolean).join(' · ');
-          return '<option value="' + escapeHtml(c.firebaseDocId || '') + '">' + escapeHtml(label) + '</option>';
-        }).join('');
-
       content.innerHTML =
         '<h3 style="font-size:16px;margin-bottom:4px;">📝 เพิ่มผลสอบจากกระดาษ</h3>' +
         '<p style="font-size:12px;color:#6b7280;margin-bottom:12px;">เลือกนักเรียนและชุดข้อสอบ แล้วกดตัวเลือกตามที่นักเรียนกาในกระดาษ</p>' +
         '<div style="display:flex;flex-direction:column;gap:10px;">' +
+          '<div><label style="font-size:12px;font-weight:600;">ศูนย์</label>' +
+          '<select id="manualExamCenterSel" onchange="updateManualExamFilteredOptions()" style="width:100%;">' +
+            '<option value="">-- ทุกศูนย์ --</option>' + locationOptionsHtml('') +
+          '</select></div>' +
           '<div><label style="font-size:12px;font-weight:600;">นักเรียน</label>' +
-          '<select id="manualExamStudentSel" style="width:100%;"><option value="">-- เลือกนักเรียน --</option>' + studentOpts + '</select></div>' +
+          '<select id="manualExamStudentSel" style="width:100%;"><option value="">-- เลือกนักเรียน --</option></select></div>' +
           '<div><label style="font-size:12px;font-weight:600;">ชุดข้อสอบ</label>' +
-          '<select id="manualExamCourseSel" onchange="renderManualExamQuestions()" style="width:100%;"><option value="">-- เลือกชุดข้อสอบ --</option>' + courseOpts + '</select></div>' +
+          '<select id="manualExamCourseSel" onchange="renderManualExamQuestions()" style="width:100%;"><option value="">-- เลือกชุดข้อสอบ --</option></select></div>' +
         '</div>' +
         '<div id="manualExamQuestionsBox" style="margin-top:12px;"></div>' +
         '<div id="manualExamFallback" style="display:none;margin-top:10px;">' +
@@ -32281,6 +32271,50 @@ function receiptStatusText(status) {
           '<button class="btn btn-dark" type="button" onclick="closeOnlineExamDetailModal()" style="flex:1;">ยกเลิก</button>' +
         '</div>';
       modal.style.display = '';
+      updateManualExamFilteredOptions();
+    }
+
+    function updateManualExamFilteredOptions() {
+      const center = (getElement('manualExamCenterSel') || {}).value || '';
+
+      const filteredStudents = (students || []).filter(function(s) {
+        if (!s || s.deleted || !s.name) return false;
+        if (center && String(s.preferredLocation || '').trim() !== center) return false;
+        return true;
+      }).sort(function(a, b) {
+        return String(a.memberId || a.studentId || '').localeCompare(String(b.memberId || b.studentId || ''), undefined, { numeric: true });
+      });
+
+      const filteredCourses = (onlineExamCourseCache || []).filter(function(c) {
+        if (!c || c.deleted || c.status === 'inactive' || c.isActive === false) return false;
+        if (center && String(c.location || '').trim() !== center) return false;
+        return true;
+      });
+
+      const studentSel = getElement('manualExamStudentSel');
+      if (studentSel) {
+        studentSel.innerHTML = '<option value="">-- เลือกนักเรียน --</option>' +
+          filteredStudents.map(function(s) {
+            return '<option value="' + escapeHtml(s.id || s.firebaseDocId || '') + '">' +
+              escapeHtml((s.memberId ? '[' + s.memberId + '] ' : '') + (s.name || '') + (s.nickname ? ' (' + s.nickname + ')' : '') + (s.grade ? ' · ' + s.grade : '')) +
+            '</option>';
+          }).join('');
+      }
+
+      const courseSel = getElement('manualExamCourseSel');
+      if (courseSel) {
+        courseSel.innerHTML = '<option value="">-- เลือกชุดข้อสอบ --</option>' +
+          filteredCourses.map(function(c) {
+            const label = [c.examMonth || '', getOnlineExamCourseGrade(c) || '', c.subject || '', c.title || ''].filter(Boolean).join(' · ');
+            return '<option value="' + escapeHtml(c.firebaseDocId || '') + '">' + escapeHtml(label) + '</option>';
+          }).join('');
+      }
+
+      manualExamAnswers = {};
+      const box = getElement('manualExamQuestionsBox');
+      if (box) box.innerHTML = '';
+      const fallback = getElement('manualExamFallback');
+      if (fallback) fallback.style.display = 'none';
     }
 
     function renderManualExamQuestions() {
