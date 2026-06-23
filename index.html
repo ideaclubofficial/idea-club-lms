@@ -10350,21 +10350,22 @@
       return getMonthlySessionDate(session) === getLocalDateString();
     }
 
-    function isTeacherMobileSessionThisWeek(session) {
-      const dateText = getMonthlySessionDate(session);
-      if (!dateText) return false;
-      const date = new Date(dateText + 'T00:00:00');
-      if (Number.isNaN(date.getTime())) return false;
-      const now = new Date();
-      const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-      const diffDays = Math.floor((date.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
-      return diffDays >= 0 && diffDays <= 6;
+    function getTeacherMobileScheduleMonthKey(sessions) {
+      const monthSelect = getElement('teacherMonthlyPlanMonthFilter');
+      const months = Array.from(new Set((sessions || []).map(function(session) {
+        return getMonthlySessionMonthKey(session);
+      }).filter(Boolean))).sort();
+      const selected = monthSelect ? monthSelect.value : '';
+      const currentMonth = getLocalDateString().slice(0, 7);
+      if (selected && months.includes(selected)) return selected;
+      return months.includes(currentMonth) ? currentMonth : (months[0] || '');
     }
 
     function getTeacherMobileScheduleItems(mode) {
       const sessions = getTeacherMonthlyPlanSessionsForMobile();
+      const selectedMonth = getTeacherMobileScheduleMonthKey(sessions);
       return sessions.filter(function(session) {
-        return mode === 'today' ? isTeacherMobileSessionToday(session) : isTeacherMobileSessionThisWeek(session);
+        return mode === 'today' ? isTeacherMobileSessionToday(session) : getMonthlySessionMonthKey(session) === selectedMonth;
       }).map(function(session) {
         return {
           kind: 'session',
@@ -10434,8 +10435,9 @@
 
       const scheduleBox = getElement('teacherMobileScheduleList');
       if (scheduleBox) {
-        const weekItems = getTeacherMobileScheduleItems('week');
-        scheduleBox.innerHTML = weekItems.length ? weekItems.map(teacherMobileScheduleCardHtml).join('') : '<div class="teacher-mobile-schedule-card"><strong>ยังไม่มีตารางสอนสัปดาห์นี้</strong><p class="teacher-mobile-muted">ตารางนี้จะแสดงเฉพาะคาบที่ผูกกับครูผู้สอนในแผนรายเดือน</p></div>';
+        const monthItems = getTeacherMobileScheduleItems('month');
+        const selectedMonth = getTeacherMobileScheduleMonthKey(getTeacherMonthlyPlanSessionsForMobile());
+        scheduleBox.innerHTML = monthItems.length ? monthItems.map(teacherMobileScheduleCardHtml).join('') : '<div class="teacher-mobile-schedule-card"><strong>ยังไม่มีตารางสอน' + escapeHtml(selectedMonth ? ('เดือน ' + (getThaiMonthLabel(selectedMonth, false) || selectedMonth)) : '') + '</strong><p class="teacher-mobile-muted">ตารางนี้จะแสดงเฉพาะคาบที่ผูกกับครูผู้สอนในแผนรายเดือน</p></div>';
       }
     }
 
@@ -22593,11 +22595,16 @@ function receiptStatusText(status) {
         teacher.firebaseDocId,
         teacher.username,
         teacher.email,
-        teacher.authEmail,
-        teacher.name,
-        teacher.displayName
+        teacher.authEmail
       ];
       return values.map(function(value) { return String(value || '').trim(); }).filter(Boolean);
+    }
+
+    function getTeacherNameIdentitySet(teacher) {
+      if (!teacher) return [];
+      return [teacher.name, teacher.displayName].map(function(value) {
+        return String(value || '').trim();
+      }).filter(Boolean);
     }
 
     function getSessionTeacherIdentitySet(session) {
@@ -22609,18 +22616,28 @@ function receiptStatusText(status) {
         session.teacherId,
         session.tutorId,
         session.teacherDocId,
-        session.teacherEmail,
-        session.teacherName,
-        session.tutorName
+        session.teacherEmail
       ];
       return values.map(function(value) { return String(value || '').trim(); }).filter(Boolean);
+    }
+
+    function getSessionTeacherNameIdentitySet(session) {
+      if (!session) return [];
+      return [session.teacherName, session.tutorName].map(function(value) {
+        return String(value || '').trim();
+      }).filter(Boolean);
     }
 
     function isMonthlySessionForTeacher(session, teacher) {
       const teacherKeys = getTeacherIdentitySet(teacher);
       const sessionKeys = getSessionTeacherIdentitySet(session);
-      if (!teacherKeys.length || !sessionKeys.length) return false;
-      return sessionKeys.some(function(key) { return teacherKeys.includes(key); });
+      if (teacherKeys.length && sessionKeys.length) {
+        return sessionKeys.some(function(key) { return teacherKeys.includes(key); });
+      }
+      if (sessionKeys.length) return false;
+      const teacherNames = getTeacherNameIdentitySet(teacher);
+      const sessionNames = getSessionTeacherNameIdentitySet(session);
+      return !!teacherNames.length && sessionNames.some(function(name) { return teacherNames.includes(name); });
     }
 
     function parseTimeToMinutes(time) {
