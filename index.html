@@ -10320,27 +10320,9 @@
       return diffDays >= 0 && diffDays <= 6;
     }
 
-    function getTeacherCourseFallbackScheduleItems(limit) {
-      const today = getThaiDayName(new Date());
-      return getTeacherVisibleOnlineCourses().map(function(course) {
-        const dayText = course.onlineClassDay || ((course.days || []).join(' / ') || '-');
-        return {
-          kind: 'course',
-          date: dayText,
-          today: Array.isArray(course.days) && course.days.includes(today),
-          time: course.onlineClassTime || course.time || '-',
-          courseName: course.name || '-',
-          subject: guessSubjectFromCourse(course.name),
-          typeText: 'Online',
-          courseId: course.id,
-          hasOnline: !!course.onlineLink
-        };
-      }).slice(0, limit || 6);
-    }
-
     function getTeacherMobileScheduleItems(mode) {
       const sessions = getTeacherMonthlyPlanSessionsForMobile();
-      const filteredSessions = sessions.filter(function(session) {
+      return sessions.filter(function(session) {
         return mode === 'today' ? isTeacherMobileSessionToday(session) : isTeacherMobileSessionThisWeek(session);
       }).map(function(session) {
         return {
@@ -10357,9 +10339,6 @@
           raw: session
         };
       });
-      if (filteredSessions.length) return filteredSessions;
-      const fallback = getTeacherCourseFallbackScheduleItems(mode === 'today' ? 4 : 8);
-      return mode === 'today' ? fallback.filter(function(item) { return item.today; }) : fallback;
     }
 
     function teacherMobileScheduleCardHtml(item) {
@@ -10409,13 +10388,13 @@
       const todayBox = getElement('teacherMobileTodayList');
       if (todayBox) {
         const todayItems = getTeacherMobileScheduleItems('today');
-        todayBox.innerHTML = todayItems.length ? todayItems.map(teacherMobileScheduleCardHtml).join('') : '<div class="teacher-mobile-schedule-card"><strong>วันนี้ยังไม่มีคาบสอน</strong><p class="teacher-mobile-muted">ตารางวันนี้จะแสดงเมื่อมีคอร์สหรือคาบที่ผูกกับครู</p></div>';
+        todayBox.innerHTML = todayItems.length ? todayItems.map(teacherMobileScheduleCardHtml).join('') : '<div class="teacher-mobile-schedule-card"><strong>วันนี้ยังไม่มีคาบสอน</strong><p class="teacher-mobile-muted">ตารางวันนี้จะแสดงเฉพาะคาบที่ผูกกับครูผู้สอนในแผนรายเดือน</p></div>';
       }
 
       const scheduleBox = getElement('teacherMobileScheduleList');
       if (scheduleBox) {
         const weekItems = getTeacherMobileScheduleItems('week');
-        scheduleBox.innerHTML = weekItems.length ? weekItems.map(teacherMobileScheduleCardHtml).join('') : '<div class="teacher-mobile-schedule-card"><strong>ยังไม่มีตารางสอนสัปดาห์นี้</strong><p class="teacher-mobile-muted">หากยังไม่มี monthlyPlanSessions ระบบจะแสดงคอร์ส Online ที่ครูมองเห็นแทน</p></div>';
+        scheduleBox.innerHTML = weekItems.length ? weekItems.map(teacherMobileScheduleCardHtml).join('') : '<div class="teacher-mobile-schedule-card"><strong>ยังไม่มีตารางสอนสัปดาห์นี้</strong><p class="teacher-mobile-muted">ตารางนี้จะแสดงเฉพาะคาบที่ผูกกับครูผู้สอนในแผนรายเดือน</p></div>';
       }
     }
 
