@@ -4829,6 +4829,13 @@
                     <p style="font-size:10px;color:#9ca3af;margin:2px 0 0;">เลือกชั้นที่ต้องการให้เห็นข้อสอบ โดยไม่ต้องผูกกับคอร์สรายตัว</p>
                   </div>
                   <div>
+                    <label>ศูนย์ (เฉพาะศูนย์ / ทุกศูนย์)</label>
+                    <select id="onlineExamCourseLocation">
+                      <option value="">-- ทุกศูนย์ (ค่าเริ่มต้น) --</option>
+                    </select>
+                    <p style="font-size:10px;color:#9ca3af;margin:2px 0 0;">ทิ้งว่างไว้ = ทุกศูนย์ใช้ข้อสอบชุดเดียวกัน</p>
+                  </div>
+                  <div>
                     <label>วิชา</label>
                     <select id="onlineExamCourseSubject" onchange="onOnlineExamCourseSubjectChange()">
                       <option value="">-- เลือกวิชา --</option>
@@ -30216,6 +30223,7 @@ function receiptStatusText(status) {
       let title = ((getElement('onlineExamCourseTitle') || {}).value || '').trim();
       const subject = (getElement('onlineExamCourseSubject') || {}).value || '';
       const grade = (getElement('onlineExamCourseGrade') || {}).value || '';
+      const location = (getElement('onlineExamCourseLocation') || {}).value || '';
       const examMonth = getSelectedOnlineExamManageMonth();
       const duration = parseInt((getElement('onlineExamCourseDuration') || {}).value || '15', 10) || 15;
       const status = (getElement('onlineExamCourseStatus') || {}).value || 'active';
@@ -30255,7 +30263,7 @@ function receiptStatusText(status) {
       try {
         const now = firebase.firestore.FieldValue.serverTimestamp();
         const uid = firebaseUser ? firebaseUser.uid : '';
-        const extraFields = { isActive, showScoreAfterSubmit, shuffleQuestions, shuffleChoices, openAt, closeAt, subject, linkedCourseId: null, examMonth: examMonth || null };
+        const extraFields = { isActive, showScoreAfterSubmit, shuffleQuestions, shuffleChoices, openAt, closeAt, subject, location: location || '', linkedCourseId: null, examMonth: examMonth || null };
         let savedCourseId = editingId;
 
         if (editingId) {
@@ -30320,10 +30328,12 @@ function receiptStatusText(status) {
       const subjectOptions = ONLINE_EXAM_SUBJECT_ORDER.map(function(subject) {
         return '<option value="' + escapeHtml(subject) + '"' + (subject === (course.subject || '') ? ' selected' : '') + '>' + escapeHtml(subject) + '</option>';
       }).join('');
+      const locationOptions = '<option value="">-- ทุกศูนย์ --</option>' + locationOptionsHtml(course.location || '');
       openEditBubble('แก้ไขชุดข้อสอบ',
         '<div class="form-row">' +
           '<div><label>เดือนสอบ</label><select id="bubbleOnlineExamMonth">' + monthOptions + '</select></div>' +
           '<div><label>ระดับชั้น</label><select id="bubbleOnlineExamGrade"><option value="">-- เลือกระดับชั้น --</option>' + gradeOptionsHtml(selectedGrade) + '</select></div>' +
+          '<div><label>ศูนย์</label><select id="bubbleOnlineExamLocation">' + locationOptions + '</select></div>' +
           '<div><label>วิชา</label><select id="bubbleOnlineExamSubject"><option value="">-- เลือกวิชา --</option>' + subjectOptions + '</select></div>' +
         '</div>' +
         '<div class="form-row">' +
@@ -30346,6 +30356,7 @@ function receiptStatusText(status) {
           const examMonth = bubbleSelectValue('bubbleOnlineExamMonth');
           const grade = bubbleSelectValue('bubbleOnlineExamGrade');
           const subject = bubbleSelectValue('bubbleOnlineExamSubject');
+          const location = bubbleSelectValue('bubbleOnlineExamLocation') || '';
           const duration = parseInt(bubbleValue('bubbleOnlineExamDuration') || '15', 10) || 15;
           const status = bubbleSelectValue('bubbleOnlineExamStatus') || 'active';
           const openAtDate = parseOnlineExamDateTimeValue(bubbleValue('bubbleOnlineExamOpenAt'));
@@ -30367,6 +30378,7 @@ function receiptStatusText(status) {
             await db.collection('onlineExamCourses').doc(courseId).set({
               title: title,
               grade: grade,
+              location: location,
               durationMinutes: duration,
               status: status,
               isActive: status === 'active',
@@ -30409,6 +30421,7 @@ function receiptStatusText(status) {
       setValue('onlineExamCourseCloseAt', '');
       setValue('onlineExamCourseSubject', '');
       setValue('onlineExamCourseGrade', '');
+      setValue('onlineExamCourseLocation', '');
       syncOnlineExamCourseMonthDisplay();
       const cancelBtn = getElement('onlineExamCourseCancelBtn');
       if (cancelBtn) cancelBtn.style.display = 'none';
@@ -30701,6 +30714,12 @@ function receiptStatusText(status) {
       const current = sel.value;
       sel.innerHTML = '<option value="">-- เลือกระดับชั้น --</option>' + gradeOptionsHtml(current);
       if (current) sel.value = current;
+      const locSel = getElement('onlineExamCourseLocation');
+      if (locSel) {
+        const currentLoc = locSel.value;
+        locSel.innerHTML = '<option value="">-- ทุกศูนย์ (ค่าเริ่มต้น) --</option>' + locationOptionsHtml(currentLoc);
+        if (currentLoc) locSel.value = currentLoc;
+      }
     }
 
     function getOnlineExamLinkedCourseGrade(linkedCourseId) {
