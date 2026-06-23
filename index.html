@@ -3187,6 +3187,7 @@
                     <th class="sortable" onclick="sortStaticTable(this, 5)">คอร์ส</th>
                     <th>เบอร์ผู้ปกครอง</th>
                     <th>สถานะล่าสุด</th>
+                    <th>บัตร</th>
                   </tr>
                 </thead>
                 <tbody id="teacherStudentTableBody"></tbody>
@@ -3422,6 +3423,19 @@
       </div>
     </section>
   </main>
+
+  <!-- Single student ID card preview modal -->
+  <div id="studentIdCardModal" style="display:none;position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.6);overflow-y:auto;padding:16px;">
+    <div style="background:#fff;border-radius:16px;max-width:860px;margin:0 auto;padding:20px;position:relative;">
+      <button onclick="closeStudentIdCardModal()" style="position:absolute;top:12px;right:14px;background:none;border:none;font-size:22px;cursor:pointer;color:#6b7280;line-height:1;">✕</button>
+      <h3 style="font-size:16px;margin:0 0 14px;color:#1e40af;">🪪 บัตรประจำตัวนักเรียน</h3>
+      <div id="studentIdCardModalContent" class="id-card-preview-wrap" style="overflow-x:auto;"></div>
+      <div style="display:flex;gap:8px;margin-top:14px;justify-content:flex-end;">
+        <button class="btn btn-blue" onclick="printStudentIdCard()" type="button">🖨️ พิมพ์บัตร</button>
+        <button class="btn btn-dark" onclick="closeStudentIdCardModal()" type="button">ปิด</button>
+      </div>
+    </div>
+  </div>
 
   <main id="adminInterface" class="hidden">
     <section class="section">
@@ -9938,8 +9952,19 @@
       const tsItems = filtered.slice(tsStart, tsStart + LIST_PAGE_SIZE);
       tbody.innerHTML = tsItems.length ? tsItems.map(function(s, i) {
         const statusClass = getPickupStatusClass(s.pickupStatus || 'ไม่มา');
-        return '<tr><td>' + (tsStart + i + 1) + '</td><td class="student-name">' + (s.name || '-') + '</td><td>' + (s.memberId || s.studentId || '-') + '</td><td>' + (s.nickname || '-') + '</td><td>' + (s.grade || '-') + '</td><td>' + (s.course || '-') + '</td><td>' + (s.phone || '-') + '</td><td><span class="' + statusClass + '">' + (s.pickupStatus || 'ไม่มา') + '</span></td></tr>';
-      }).join('') : '<tr><td colspan="8">ยังไม่มีนักเรียนในเงื่อนไขที่เลือก</td></tr>';
+        const sid = jsArg(s.id || s.firebaseDocId || '');
+        return '<tr>' +
+          '<td>' + (tsStart + i + 1) + '</td>' +
+          '<td class="student-name">' + (s.name || '-') + '</td>' +
+          '<td>' + (s.memberId || s.studentId || '-') + '</td>' +
+          '<td>' + (s.nickname || '-') + '</td>' +
+          '<td>' + (s.grade || '-') + '</td>' +
+          '<td>' + (s.course || '-') + '</td>' +
+          '<td>' + (s.phone || '-') + '</td>' +
+          '<td><span class="' + statusClass + '">' + (s.pickupStatus || 'ไม่มา') + '</span></td>' +
+          '<td><button class="btn btn-blue" type="button" onclick="previewSingleStudentIdCard(\'' + sid + '\')" style="font-size:11px;padding:3px 8px;white-space:nowrap;">🪪 บัตร</button></td>' +
+        '</tr>';
+      }).join('') : '<tr><td colspan="9">ยังไม่มีนักเรียนในเงื่อนไขที่เลือก</td></tr>';
       renderTablePagination('teacherStudentsPagination', teacherStudentsCurrentPage, tsTotalPages, filtered.length, 'changeTeacherStudentsPage');
       safeRun(renderTeacherMobileStudents, 'teacher-mobile-students');
       renderTeacherDashboardSummary();
@@ -32213,6 +32238,48 @@ function receiptStatusText(status) {
         showOnlineExamMissingStudentList();
         renderOnlineExamGradingPage(onlineExamGradePage);
       } catch(e) { alert('บันทึกไม่สำเร็จ: ' + (e.message || e)); }
+    }
+
+    async function previewSingleStudentIdCard(studentDocId) {
+      if (!studentDocId) { alert('ไม่พบ ID นักเรียน'); return; }
+      const modal = getElement('studentIdCardModal');
+      const content = getElement('studentIdCardModalContent');
+      if (!modal || !content) return;
+      content.innerHTML = '<p style="text-align:center;padding:20px;color:#64748b;">กำลังโหลดบัตร...</p>';
+      modal.style.display = 'block';
+      try {
+        const allStudents = pickupList.length ? pickupList : (window.allStudentsCache || []);
+        let student = allStudents.find(function(s) { return (s.id || s.firebaseDocId) === studentDocId; });
+        if (!student) {
+          const snap = await db.collection('students').doc(studentDocId).get();
+          if (!snap.exists) { content.innerHTML = '<p style="color:red;text-align:center;">ไม่พบข้อมูลนักเรียน</p>'; return; }
+          student = Object.assign({ id: snap.id, firebaseDocId: snap.id }, snap.data());
+        }
+        const logo = idCardLogoUrl || '';
+        const watermark = idCardWatermarkUrl || '';
+        const html = await buildIdCardPageHtml([student], logo, watermark);
+        content.innerHTML = html;
+      } catch(e) {
+        content.innerHTML = '<p style="color:red;text-align:center;">โหลดบัตรไม่สำเร็จ: ' + (e.message || e) + '</p>';
+      }
+    }
+
+    function closeStudentIdCardModal() {
+      const modal = getElement('studentIdCardModal');
+      if (modal) modal.style.display = 'none';
+    }
+
+    function printStudentIdCard() {
+      const content = getElement('studentIdCardModalContent');
+      if (!content) return;
+      const win = window.open('', '_blank');
+      if (!win) { alert('กรุณาอนุญาต popup เพื่อพิมพ์บัตร'); return; }
+      win.document.write('<!DOCTYPE html><html><head><meta charset="utf-8"><title>บัตรประจำตัวนักเรียน</title>' +
+        '<style>body{margin:0;padding:16px;font-family:sans-serif;}@media print{body{padding:0;}}</style></head><body>' +
+        content.innerHTML + '</body></html>');
+      win.document.close();
+      win.focus();
+      setTimeout(function() { win.print(); }, 400);
     }
 
     async function undoOnlineExamAbsent(groupKey, subject) {
