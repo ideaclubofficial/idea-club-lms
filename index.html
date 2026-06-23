@@ -3430,7 +3430,7 @@
       <button onclick="closeStudentIdCardModal()" style="position:absolute;top:8px;right:10px;background:none;border:none;font-size:20px;cursor:pointer;color:#6b7280;line-height:1;z-index:1;">✕</button>
       <div id="studentIdCardModalContent" class="id-card-preview-wrap"></div>
       <div style="display:flex;gap:8px;margin-top:10px;justify-content:flex-end;">
-        <button class="btn btn-blue" onclick="printStudentIdCard()" type="button">🖨️ พิมพ์บัตร</button>
+        <button class="btn btn-blue" onclick="printStudentIdCard()" type="button">⬇️ ดาวน์โหลดรูป</button>
         <button class="btn btn-dark" onclick="closeStudentIdCardModal()" type="button">ปิด</button>
       </div>
     </div>
@@ -32270,17 +32270,24 @@ function receiptStatusText(status) {
       if (modal) modal.style.display = 'none';
     }
 
-    function printStudentIdCard() {
+    async function printStudentIdCard() {
       const content = getElement('studentIdCardModalContent');
       if (!content) return;
-      const win = window.open('', '_blank');
-      if (!win) { alert('กรุณาอนุญาต popup เพื่อพิมพ์บัตร'); return; }
-      win.document.write('<!DOCTYPE html><html><head><meta charset="utf-8"><title>บัตรประจำตัวนักเรียน</title>' +
-        '<style>body{margin:0;padding:16px;font-family:sans-serif;}@media print{body{padding:0;}}</style></head><body>' +
-        content.innerHTML + '</body></html>');
-      win.document.close();
-      win.focus();
-      setTimeout(function() { win.print(); }, 400);
+      const cardEl = content.querySelector('.id-card-cell');
+      if (!cardEl) { alert('ไม่พบบัตร'); return; }
+      const btn = document.querySelector('#studentIdCardModal .btn-blue');
+      if (btn) { btn.disabled = true; btn.textContent = 'กำลังสร้างรูป...'; }
+      try {
+        const canvas = await window.html2canvas(cardEl, { scale: 3, useCORS: true, backgroundColor: '#ffffff' });
+        const link = document.createElement('a');
+        link.download = 'id-card.png';
+        link.href = canvas.toDataURL('image/png');
+        link.click();
+      } catch(e) {
+        alert('ดาวน์โหลดไม่สำเร็จ: ' + (e.message || e));
+      } finally {
+        if (btn) { btn.disabled = false; btn.textContent = '⬇️ ดาวน์โหลดรูป'; }
+      }
     }
 
     async function undoOnlineExamAbsent(groupKey, subject) {
