@@ -3110,7 +3110,7 @@
             <div id="teacherMobileStudents" class="teacher-mobile-students">
               <div class="teacher-mobile-hero-card">
                 <h2>รายชื่อนักเรียน</h2>
-                <p>ค้นหาและดูนักเรียนในคอร์สที่สอน</p>
+                <p>ค้นหาและดูนักเรียนตามศูนย์และระดับชั้น</p>
               </div>
 
               <div class="teacher-mobile-card">
@@ -3121,9 +3121,15 @@
                     <input id="teacherMobileStudentSearch" type="text" placeholder="ชื่อ ชื่อเล่น เบอร์ผู้ปกครอง หรือ Member ID" oninput="syncTeacherMobileStudentFilters()" />
                   </div>
                   <div>
-                    <label>เลือกคอร์ส</label>
-                    <select id="teacherMobileCourseFilter" onchange="syncTeacherMobileStudentFilters()">
-                      <option value="ทั้งหมด">ทั้งหมด</option>
+                    <label>ศูนย์</label>
+                    <select id="teacherMobileStudentCenterFilter" onchange="syncTeacherMobileStudentFilters()">
+                      <option value="ทั้งหมด">ทุกศูนย์</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label>ระดับชั้น</label>
+                    <select id="teacherMobileStudentGradeFilter" onchange="syncTeacherMobileStudentFilters()">
+                      <option value="ทั้งหมด">ทุกระดับชั้น</option>
                     </select>
                   </div>
                 </div>
@@ -3135,23 +3141,29 @@
               </div>
 
               <div class="teacher-mobile-card">
-                <h3>รายชื่อนักเรียนในคอร์ส</h3>
+                <h3>รายชื่อนักเรียน</h3>
                 <div id="teacherMobileStudentList" class="teacher-mobile-list"></div>
               </div>
             </div>
 
             <div class="form-box">
-              <h3>รายชื่อนักเรียนในคอร์สที่สอน</h3>
-              <p style="margin-bottom:18px; color:#6b7280;">ค้นหาและกรองรายชื่อตามคอร์ส</p>
+              <h3>รายชื่อนักเรียนที่สอน</h3>
+              <p style="margin-bottom:18px; color:#6b7280;">ค้นหาและกรองรายชื่อตามศูนย์และระดับชั้น</p>
               <div class="form-row">
                 <div>
                   <label>ค้นหานักเรียน / ชื่อเล่น / เบอร์ / Member ID</label>
                   <input id="teacherStudentSearch" type="text" placeholder="พิมพ์ชื่อ ชื่อเล่น เบอร์ผู้ปกครอง หรือ Member ID" oninput="renderTeacherStudents()" />
                 </div>
                 <div>
-                  <label>เลือกคอร์ส</label>
-                  <select onchange="renderTeacherStudents()" id="teacherCourseFilter">
-                    <option value="ทั้งหมด">ทั้งหมด</option>
+                  <label>ศูนย์</label>
+                  <select onchange="teacherStudentsCurrentPage=1; renderTeacherStudents()" id="teacherStudentCenterFilter">
+                    <option value="ทั้งหมด">ทุกศูนย์</option>
+                  </select>
+                </div>
+                <div>
+                  <label>ระดับชั้น</label>
+                  <select onchange="teacherStudentsCurrentPage=1; renderTeacherStudents()" id="teacherStudentGradeFilter">
+                    <option value="ทั้งหมด">ทุกระดับชั้น</option>
                   </select>
                 </div>
               </div>
@@ -9848,34 +9860,72 @@
       return !student.courseId && !!student.course && allowedNames.includes(String(student.course));
     }
 
-    function renderTeacherCourseOptions() {
-      const teacherCourses = getTeacherVisibleCourses();
-      const selects = ['teacherCourseFilter', 'teacherMobileCourseFilter'];
-      selects.forEach(function(id) {
+    function getTeacherStudentCenterValue(student) {
+      const course = getCourseByStudentOrName(student, student && student.course);
+      return String((student && (student.preferredLocation || student.location || student.center || student.courseLocation)) || (course && (course.location || course.center || course.courseLocation)) || '').trim();
+    }
+
+    function getTeacherStudentBaseList(teacherCourses) {
+      const visibleCourses = teacherCourses || getTeacherVisibleCourses();
+      return students.filter(function(s) {
+        return isStudentInTeacherCourseList(s, visibleCourses);
+      });
+    }
+
+    function populateSelectWithValues(selectIds, values, allLabel) {
+      const uniqueValues = values.filter(function(value, index, list) {
+        return value && list.indexOf(value) === index;
+      });
+      selectIds.forEach(function(id) {
         const select = getElement(id);
         if (!select) return;
         const current = select.value || 'ทั้งหมด';
-        select.innerHTML = '<option value="ทั้งหมด">ทั้งหมด</option>' + sortCoursesByGrade(teacherCourses).map(function(c) {
-          return '<option value="' + c.name + '">' + (c.grade || '-') + ' · ' + (c.name || '-') + '</option>';
+        select.innerHTML = '<option value="ทั้งหมด">' + escapeHtml(allLabel || 'ทั้งหมด') + '</option>' + uniqueValues.map(function(value) {
+          return '<option value="' + escapeHtml(value) + '">' + escapeHtml(value) + '</option>';
         }).join('');
         const hasCurrent = Array.from(select.options).some(function(option) { return option.value === current; });
         select.value = hasCurrent ? current : 'ทั้งหมด';
       });
     }
 
+    function renderTeacherCourseOptions() {
+      const teacherCourses = getTeacherVisibleCourses();
+      const teacherStudents = getTeacherStudentBaseList(teacherCourses);
+      const centers = teacherStudents.map(getTeacherStudentCenterValue).filter(Boolean).sort(function(a, b) {
+        return String(a).localeCompare(String(b), 'th');
+      });
+      const grades = teacherStudents.map(function(s) { return s.grade || ''; }).filter(Boolean).sort(function(a, b) {
+        return gradeOrder(a) - gradeOrder(b);
+      });
+      populateSelectWithValues(['teacherStudentCenterFilter', 'teacherMobileStudentCenterFilter'], centers, 'ทุกศูนย์');
+      populateSelectWithValues(['teacherStudentGradeFilter', 'teacherMobileStudentGradeFilter'], grades, 'ทุกระดับชั้น');
+    }
+
+    function getTeacherStudentFilters() {
+      return {
+        center: getElement('teacherStudentCenterFilter') ? getElement('teacherStudentCenterFilter').value : 'ทั้งหมด',
+        grade: getElement('teacherStudentGradeFilter') ? getElement('teacherStudentGradeFilter').value : 'ทั้งหมด',
+        keyword: getElement('teacherStudentSearch') ? getElement('teacherStudentSearch').value.trim().toLowerCase() : ''
+      };
+    }
+
+    function filterTeacherStudentList(teacherCourses) {
+      const filters = getTeacherStudentFilters();
+      return getTeacherStudentBaseList(teacherCourses).filter(function(s) {
+        const centerMatched = filters.center === 'ทั้งหมด' || getTeacherStudentCenterValue(s) === filters.center;
+        const gradeMatched = filters.grade === 'ทั้งหมด' || s.grade === filters.grade;
+        const text = [s.name, s.nickname, s.phone, s.memberId, s.grade, getTeacherStudentCenterValue(s), s.course].join(' ').toLowerCase();
+        const keywordMatched = !filters.keyword || text.indexOf(filters.keyword) !== -1;
+        return centerMatched && gradeMatched && keywordMatched;
+      });
+    }
+
     function renderTeacherStudents() {
       const tbody = getElement('teacherStudentTableBody');
       if (!tbody) return;
-      const courseFilter = getElement('teacherCourseFilter') ? getElement('teacherCourseFilter').value : 'ทั้งหมด';
-      const keyword = getElement('teacherStudentSearch') ? getElement('teacherStudentSearch').value.trim().toLowerCase() : '';
       const teacherCourses = getTeacherVisibleCourses();
-      const filtered = students.filter(function(s) {
-        const courseMatchedByTeacher = isStudentInTeacherCourseList(s, teacherCourses);
-        const courseMatched = courseFilter === 'ทั้งหมด' || s.course === courseFilter;
-        const text = [s.name, s.nickname, s.phone, s.memberId, s.grade, s.course].join(' ').toLowerCase();
-        const keywordMatched = !keyword || text.indexOf(keyword) !== -1;
-        return courseMatchedByTeacher && courseMatched && keywordMatched;
-      }).sort(function(a, b) {
+      renderTeacherCourseOptions();
+      const filtered = filterTeacherStudentList(teacherCourses).sort(function(a, b) {
         var idA = String(a.memberId || a.memberID || a.id || '');
         var idB = String(b.memberId || b.memberID || b.id || '');
         return idA.localeCompare(idB, undefined, { numeric: true });
@@ -9895,14 +9945,7 @@
 
     function changeTeacherStudentsPage(direction) {
       const teacherCourses = getTeacherVisibleCourses();
-      const courseFilter = getElement('teacherCourseFilter') ? getElement('teacherCourseFilter').value : 'ทั้งหมด';
-      const keyword = getElement('teacherStudentSearch') ? getElement('teacherStudentSearch').value.trim().toLowerCase() : '';
-      const filtered = students.filter(function(s) {
-        const courseMatchedByTeacher = isStudentInTeacherCourseList(s, teacherCourses);
-        const courseMatched = courseFilter === 'ทั้งหมด' || s.course === courseFilter;
-        const text = [s.name, s.nickname, s.phone, s.memberId, s.grade, s.course].join(' ').toLowerCase();
-        return courseMatchedByTeacher && courseMatched && (!keyword || text.indexOf(keyword) !== -1);
-      });
+      const filtered = filterTeacherStudentList(teacherCourses);
       const totalPages = Math.max(1, Math.ceil(filtered.length / LIST_PAGE_SIZE));
       teacherStudentsCurrentPage = Math.min(Math.max(1, teacherStudentsCurrentPage + direction), totalPages);
       renderTeacherStudents();
@@ -9911,24 +9954,19 @@
     function syncTeacherMobileStudentFilters() {
       const mobileSearch = getElement('teacherMobileStudentSearch');
       const desktopSearch = getElement('teacherStudentSearch');
-      const mobileCourse = getElement('teacherMobileCourseFilter');
-      const desktopCourse = getElement('teacherCourseFilter');
+      const mobileCenter = getElement('teacherMobileStudentCenterFilter');
+      const desktopCenter = getElement('teacherStudentCenterFilter');
+      const mobileGrade = getElement('teacherMobileStudentGradeFilter');
+      const desktopGrade = getElement('teacherStudentGradeFilter');
       if (mobileSearch && desktopSearch) desktopSearch.value = mobileSearch.value;
-      if (mobileCourse && desktopCourse) desktopCourse.value = mobileCourse.value;
+      if (mobileCenter && desktopCenter) desktopCenter.value = mobileCenter.value;
+      if (mobileGrade && desktopGrade) desktopGrade.value = mobileGrade.value;
+      teacherStudentsCurrentPage = 1;
       renderTeacherStudents();
     }
 
     function getTeacherFilteredStudentsForMobile() {
-      const courseFilter = getElement('teacherCourseFilter') ? getElement('teacherCourseFilter').value : 'ทั้งหมด';
-      const keyword = getElement('teacherStudentSearch') ? getElement('teacherStudentSearch').value.trim().toLowerCase() : '';
-      const teacherCourses = getTeacherVisibleCourses();
-      return students.filter(function(s) {
-        const courseMatchedByTeacher = isStudentInTeacherCourseList(s, teacherCourses);
-        const courseMatched = courseFilter === 'ทั้งหมด' || s.course === courseFilter;
-        const text = [s.name, s.nickname, s.phone, s.memberId, s.grade, s.course].join(' ').toLowerCase();
-        const keywordMatched = !keyword || text.indexOf(keyword) !== -1;
-        return courseMatchedByTeacher && courseMatched && keywordMatched;
-      });
+      return filterTeacherStudentList(getTeacherVisibleCourses());
     }
 
     function renderTeacherMobileApprovalCard(student) {
@@ -9961,10 +9999,13 @@
     function updateTeacherMobileStudentsFromExistingData() {
       const desktopSearch = getElement('teacherStudentSearch');
       const mobileSearch = getElement('teacherMobileStudentSearch');
-      const desktopCourse = getElement('teacherCourseFilter');
-      const mobileCourse = getElement('teacherMobileCourseFilter');
+      const desktopCenter = getElement('teacherStudentCenterFilter');
+      const mobileCenter = getElement('teacherMobileStudentCenterFilter');
+      const desktopGrade = getElement('teacherStudentGradeFilter');
+      const mobileGrade = getElement('teacherMobileStudentGradeFilter');
       if (mobileSearch && desktopSearch) mobileSearch.value = desktopSearch.value;
-      if (mobileCourse && desktopCourse) mobileCourse.value = desktopCourse.value;
+      if (mobileCenter && desktopCenter) mobileCenter.value = desktopCenter.value;
+      if (mobileGrade && desktopGrade) mobileGrade.value = desktopGrade.value;
     }
 
     function renderTeacherMobileStudents() {
@@ -9992,7 +10033,7 @@
         });
         listBox.innerHTML = filtered.length
           ? filtered.map(renderTeacherMobileStudentCard).join('')
-          : '<div class="teacher-mobile-student-card"><strong>ไม่พบนักเรียน</strong><p class="teacher-mobile-muted">ลองเปลี่ยนคำค้นหาหรือคอร์สที่เลือก</p></div>';
+          : '<div class="teacher-mobile-student-card"><strong>ไม่พบนักเรียน</strong><p class="teacher-mobile-muted">ลองเปลี่ยนคำค้นหา ศูนย์ หรือระดับชั้นที่เลือก</p></div>';
       }
     }
 
