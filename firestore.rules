@@ -145,6 +145,39 @@ service cloud.firestore {
       return signedIn() && request.resource.data.authUid == request.auth.uid;
     }
 
+    function isLinkedStudentDocId(studentDocId) {
+      return signedIn()
+        && userProfileExists()
+        && (
+          studentDocId == request.auth.uid
+          || studentDocId == userProfile(request.auth.uid).linkedStudentId
+          || studentDocId == userProfile(request.auth.uid).studentDocId
+          || (
+            userProfile(request.auth.uid).linkedStudentIds is list
+            && studentDocId in userProfile(request.auth.uid).linkedStudentIds
+          )
+        );
+    }
+
+    function ownsExistingGamificationDoc() {
+      return signedIn()
+        && isStudentUser()
+        && (
+          resource.data.authUid == request.auth.uid
+          || isLinkedStudentDocId(resource.data.studentId)
+        );
+    }
+
+    function ownsIncomingGamificationDoc() {
+      return signedIn()
+        && isStudentUser()
+        && request.resource.data.deleted == false
+        && (
+          request.resource.data.authUid == request.auth.uid
+          || isLinkedStudentDocId(request.resource.data.studentId)
+        );
+    }
+
     function isPaymentOwner() {
       return signedIn()
         && (
@@ -301,6 +334,18 @@ service cloud.firestore {
     match /onDemandClips/{docId} {
       allow read: if signedIn();
       allow write: if isAdmin();
+    }
+
+    match /studentGamificationProfiles/{docId} {
+      allow read: if isAdmin() || hasAdminPermission('admin.full') || isTeacher() || ownsExistingGamificationDoc();
+      allow create, update: if isAdmin() || isTeacher() || ownsIncomingGamificationDoc();
+      allow delete: if isAdmin();
+    }
+
+    match /studentGamificationEvents/{docId} {
+      allow read: if isAdmin() || hasAdminPermission('admin.full') || isTeacher() || ownsExistingGamificationDoc();
+      allow create, update: if isAdmin() || isTeacher() || ownsIncomingGamificationDoc();
+      allow delete: if isAdmin();
     }
 
     match /monthlyQuestions/{docId} {

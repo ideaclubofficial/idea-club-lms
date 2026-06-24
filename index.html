@@ -3349,7 +3349,9 @@
                     <th class="sortable" onclick="sortStaticTable(this, 5)">คอร์ส</th>
                     <th>เบอร์ผู้ปกครอง</th>
                     <th>สถานะล่าสุด</th>
+                    <th>EXP / Coins</th>
                     <th>บัตร</th>
+                    <th>ให้รางวัล</th>
                   </tr>
                 </thead>
                 <tbody id="teacherStudentTableBody"></tbody>
@@ -8057,6 +8059,7 @@
     let onlineExamGradeMissingItems = [];
     let onlineExamGradeFilterChangeTimer = null;
     let onlineExamGradeRefreshSeq = 0;
+    let onlineExamDirtyGroups = {};
     const ONLINE_EXAM_GRADE_PAGE_SIZE = 20;
     const ONLINE_EXAM_GRADE_REFRESH_TIMEOUT_MS = 30000;
     const ONLINE_EXAM_SUBJECT_ORDER = ['คณิตศาสตร์', 'วิทยาศาสตร์', 'ภาษาอังกฤษ', 'ภาษาไทย', 'สังคมศึกษา', 'อื่นๆ'];
@@ -10167,6 +10170,7 @@
         const statusClass = getPickupStatusClass(s.pickupStatus || 'ไม่มา');
         const sid = jsArg(s.id || s.firebaseDocId || '');
         const tdNw = ' style="white-space:nowrap;"';
+        const gamificationText = getStudentGamificationSummaryText(s);
         return '<tr>' +
           '<td' + tdNw + '>' + (tsStart + i + 1) + '</td>' +
           '<td class="student-name"' + tdNw + '>' + (s.name || '-') + '</td>' +
@@ -10176,9 +10180,11 @@
           '<td style="white-space:nowrap;max-width:180px;overflow:hidden;text-overflow:ellipsis;" title="' + (s.course || '-') + '">' + (s.course || '-') + '</td>' +
           '<td' + tdNw + '>' + (s.phone || '-') + '</td>' +
           '<td' + tdNw + '><span class="' + statusClass + '">' + (s.pickupStatus || 'ไม่มา') + '</span></td>' +
+          '<td' + tdNw + '>' + escapeHtml(gamificationText) + '</td>' +
           '<td' + tdNw + '><button class="btn btn-blue" type="button" onclick="previewSingleStudentIdCard(\'' + sid + '\')" style="font-size:11px;padding:3px 8px;">🪪 บัตร</button></td>' +
+          '<td' + tdNw + '><button class="btn btn-green" type="button" onclick="openTeacherGiveExpBubble(\'' + sid + '\')" style="font-size:11px;padding:3px 8px;">ให้ EXP</button></td>' +
         '</tr>';
-      }).join('') : '<tr><td colspan="9">ยังไม่มีนักเรียนในเงื่อนไขที่เลือก</td></tr>';
+      }).join('') : '<tr><td colspan="11">ยังไม่มีนักเรียนในเงื่อนไขที่เลือก</td></tr>';
       renderTablePagination('teacherStudentsPagination', teacherStudentsCurrentPage, tsTotalPages, filtered.length, 'changeTeacherStudentsPage');
       safeRun(renderTeacherMobileStudents, 'teacher-mobile-students');
       renderTeacherDashboardSummary();
@@ -10227,15 +10233,20 @@
     function renderTeacherMobileStudentCard(student) {
       const status = student.pickupStatus || 'ไม่มา';
       const statusClass = getPickupStatusClass(status);
+      const sid = jsArg(student.id || student.firebaseDocId || '');
       return '<div class="teacher-mobile-student-card">' +
         '<strong>' + escapeHtml(student.name || '-') + '</strong>' +
         '<div class="teacher-mobile-muted">Member ID: ' + escapeHtml(student.memberId || student.studentId || '-') + '</div>' +
         '<div class="teacher-mobile-muted">ชื่อเล่น: ' + escapeHtml(student.nickname || '-') + ' · ระดับชั้น: ' + escapeHtml(student.grade || '-') + '</div>' +
         '<div class="teacher-mobile-muted">คอร์ส: ' + escapeHtml(student.course || '-') + '</div>' +
         '<div class="teacher-mobile-muted">เบอร์ผู้ปกครอง: ' + escapeHtml(student.phone || '-') + '</div>' +
+        '<div class="teacher-mobile-muted">Progress: ' + escapeHtml(getStudentGamificationSummaryText(student)) + '</div>' +
         '<div class="teacher-mobile-card-row" style="justify-content:space-between;align-items:center;">' +
           '<span class="' + statusClass + '">' + escapeHtml(status) + '</span>' +
-          '<button class="btn btn-blue" type="button" onclick="previewSingleStudentIdCard(\'' + escapeHtml(student.id || student.firebaseDocId || '') + '\')" style="font-size:11px;padding:3px 10px;">🪪 ดูบัตร</button>' +
+          '<span class="teacher-mobile-actions" style="margin:0;justify-content:flex-end;">' +
+            '<button class="btn btn-blue" type="button" onclick="previewSingleStudentIdCard(\'' + sid + '\')" style="font-size:11px;padding:3px 10px;">🪪 ดูบัตร</button>' +
+            '<button class="btn btn-green" type="button" onclick="openTeacherGiveExpBubble(\'' + sid + '\')" style="font-size:11px;padding:3px 10px;">ให้ EXP</button>' +
+          '</span>' +
         '</div>' +
       '</div>';
     }
@@ -16268,6 +16279,19 @@
       }) || null;
     }
 
+    function findStudentGamificationProfile(student) {
+      if (!student) return null;
+      const studentDocId = getStudentRecordDocId(student);
+      const authUid = String(student.authUid || student.studentAuthUid || '').trim();
+      const profileId = getStudentGamificationProfileId(student);
+      return studentGamificationProfiles.find(function(profile) {
+        if (!profile || profile.deleted === true) return false;
+        return String(profile.studentId || '') === studentDocId ||
+          (authUid && String(profile.authUid || '') === authUid) ||
+          String(profile.firebaseDocId || profile.id || '') === profileId;
+      }) || null;
+    }
+
     function getCurrentStudentGamificationProfile() {
       const existing = findCurrentStudentGamificationProfile();
       if (existing) return normalizeStudentGamificationProfile(existing);
@@ -16280,6 +16304,25 @@
         memberId: currentStudent ? (currentStudent.memberId || currentStudent.studentId || '') : '',
         studentName: currentStudent ? (currentStudent.name || '') : '',
         nickname: currentStudent ? (currentStudent.nickname || '') : '',
+        level: 1,
+        exp: 0,
+        coins: 0,
+        profession: 'IDEA Explorer'
+      });
+    }
+
+    function getStudentGamificationProfile(student) {
+      const existing = findStudentGamificationProfile(student);
+      if (existing) return normalizeStudentGamificationProfile(existing);
+      const profileId = getStudentGamificationProfileId(student);
+      return normalizeStudentGamificationProfile({
+        id: profileId,
+        firebaseDocId: profileId,
+        studentId: getStudentRecordDocId(student),
+        authUid: String(student && (student.authUid || student.studentAuthUid) || '').trim(),
+        memberId: student ? (student.memberId || student.studentId || '') : '',
+        studentName: student ? (student.name || '') : '',
+        nickname: student ? (student.nickname || '') : '',
         level: 1,
         exp: 0,
         coins: 0,
@@ -16332,6 +16375,11 @@
 
     function getStudentGamificationEventId(sourceType, sourceId) {
       const studentKey = getStudentGamificationStudentKey(currentStudent) || ((firebaseUser && firebaseUser.uid) || 'student');
+      return sanitizeFirestoreId(['event', studentKey, sourceType, sourceId].join('_'));
+    }
+
+    function getStudentGamificationEventIdForStudent(student, sourceType, sourceId) {
+      const studentKey = getStudentGamificationStudentKey(student) || ((student && student.authUid) || 'student');
       return sanitizeFirestoreId(['event', studentKey, sourceType, sourceId].join('_'));
     }
 
@@ -16412,6 +16460,130 @@
         renderStudentGamificationPanel();
         return false;
       }
+    }
+
+    function getStudentGamificationSummaryText(student) {
+      const profile = getStudentGamificationProfile(student);
+      return 'LV.' + profile.level + ' · ' + profile.exp + '/' + getStudentGamificationLevelMaxExp(profile.level) + ' EXP · ' + profile.coins + ' Coins';
+    }
+
+    function getActiveTeacherAwardInfo() {
+      const teacher = currentTeacher || getActiveAccessRecord() || {};
+      return {
+        uid: firebaseUser && firebaseUser.uid ? firebaseUser.uid : '',
+        teacherId: teacher.teacherId || teacher.id || teacher.firebaseDocId || '',
+        teacherName: teacher.name || teacher.displayName || (getElement('profileName') ? getElement('profileName').textContent : '') || 'ครู IDEA CLUB'
+      };
+    }
+
+    async function awardGamificationForStudent(student, sourceType, sourceId, exp, coins, reason) {
+      if (!student) return false;
+      const profile = getStudentGamificationProfile(student);
+      const existingProfile = findStudentGamificationProfile(student);
+      const profileBefore = Object.assign({}, profile);
+      const teacherInfo = getActiveTeacherAwardInfo();
+      const eventId = getStudentGamificationEventIdForStudent(student, sourceType, sourceId);
+      const event = {
+        id: eventId,
+        firebaseDocId: eventId,
+        studentId: getStudentRecordDocId(student),
+        authUid: String(student.authUid || student.studentAuthUid || '').trim(),
+        memberId: student.memberId || student.studentId || '',
+        studentName: student.name || '',
+        sourceType: sourceType,
+        sourceId: sourceId,
+        reason: reason || '',
+        exp: Number(exp) || 0,
+        coins: Number(coins) || 0,
+        awardedByUid: teacherInfo.uid,
+        awardedByTeacherId: teacherInfo.teacherId,
+        awardedByName: teacherInfo.teacherName,
+        createdAtText: new Date().toLocaleString('th-TH')
+      };
+
+      applyStudentGamificationReward(profile, exp, coins);
+      if (existingProfile) Object.assign(existingProfile, profile);
+      else studentGamificationProfiles.push(profile);
+      studentGamificationEvents.push(event);
+      renderTeacherStudents();
+      renderStudentGamificationPanel();
+
+      try {
+        await saveStudentGamificationAward(profile, event);
+        return true;
+      } catch (error) {
+        console.error('teacher gamification award error:', error);
+        const eventIndex = studentGamificationEvents.findIndex(function(item) {
+          return String(item.firebaseDocId || item.id || '') === eventId;
+        });
+        if (eventIndex !== -1) studentGamificationEvents.splice(eventIndex, 1);
+        if (existingProfile) Object.assign(existingProfile, profileBefore);
+        else {
+          const profileIndex = studentGamificationProfiles.findIndex(function(item) {
+            return String(item.firebaseDocId || item.id || '') === String(profile.firebaseDocId || profile.id || '');
+          });
+          if (profileIndex !== -1) studentGamificationProfiles.splice(profileIndex, 1);
+        }
+        renderTeacherStudents();
+        renderStudentGamificationPanel();
+        throw error;
+      }
+    }
+
+    function openTeacherGiveExpBubble(studentId) {
+      const student = students.find(function(item) {
+        return String(item.id || item.firebaseDocId || '') === String(studentId || '');
+      });
+      if (!student) { alert('ไม่พบนักเรียนที่ต้องการให้ EXP'); return; }
+      if (!isStudentInTeacherCourseList(student, getTeacherVisibleCourses())) {
+        alert('บัญชีครูนี้ไม่มีสิทธิ์ให้ EXP นักเรียนคนนี้');
+        return;
+      }
+      const profile = getStudentGamificationProfile(student);
+      openEditBubble('ให้ EXP / Coins นักเรียน',
+        '<div class="notice" style="margin-bottom:14px;">' +
+          '<p><strong>' + escapeHtml(student.name || '-') + '</strong> · Member ID: ' + escapeHtml(student.memberId || student.studentId || '-') + '</p>' +
+          '<p class="mini-muted">ปัจจุบัน: LV.' + escapeHtml(profile.level) + ' · ' + escapeHtml(profile.exp) + '/' + escapeHtml(getStudentGamificationLevelMaxExp(profile.level)) + ' EXP · ' + escapeHtml(profile.coins) + ' Coins</p>' +
+        '</div>' +
+        '<div class="form-row">' +
+          '<div><label>EXP ที่ให้</label><input id="bubbleTeacherAwardExp" type="number" min="0" max="1000" step="1" value="20" /></div>' +
+          '<div><label>Coins ที่ให้</label><input id="bubbleTeacherAwardCoins" type="number" min="0" max="500" step="1" value="0" /></div>' +
+        '</div>' +
+        '<label>เหตุผล / กิจกรรม</label>' +
+        '<input id="bubbleTeacherAwardReason" type="text" placeholder="เช่น ตอบคำถามดี / ช่วยเพื่อน / ส่งงานครบ" />',
+        async function() {
+          const exp = Math.max(0, Math.min(1000, Number(bubbleValue('bubbleTeacherAwardExp') || 0) || 0));
+          const coins = Math.max(0, Math.min(500, Number(bubbleValue('bubbleTeacherAwardCoins') || 0) || 0));
+          const reason = bubbleValue('bubbleTeacherAwardReason') || 'ครูให้รางวัลจากรายชื่อนักเรียน';
+          const resultEl = getElement('editBubbleResult');
+          if (!exp && !coins) {
+            if (resultEl) {
+              resultEl.textContent = 'กรุณาใส่ EXP หรือ Coins อย่างน้อย 1 ค่า';
+              resultEl.style.color = '#dc2626';
+            }
+            return;
+          }
+          if (resultEl) {
+            resultEl.textContent = 'กำลังบันทึกคะแนนสะสม...';
+            resultEl.style.color = '#d97706';
+          }
+          try {
+            const sourceId = createFirebaseDocId('studentGamificationEvents');
+            await awardGamificationForStudent(student, 'teacherAward', sourceId, exp, coins, reason);
+            addActivityLog('ครูให้ EXP นักเรียน', (student.name || '-') + ' · +' + exp + ' EXP · +' + coins + ' Coins · ' + reason);
+            if (resultEl) {
+              resultEl.textContent = 'บันทึก EXP / Coins ให้ ' + (student.name || '-') + ' เรียบร้อย';
+              resultEl.style.color = '#16a34a';
+            }
+            window.setTimeout(function() { closeEditBubble(); }, 600);
+          } catch (error) {
+            if (resultEl) {
+              resultEl.textContent = 'บันทึกไม่สำเร็จ: ' + (error.message || error.code || 'ไม่ทราบสาเหตุ');
+              resultEl.style.color = '#dc2626';
+            }
+          }
+        }
+      );
     }
 
     function renderStudentGamificationHtml(options) {
@@ -32059,13 +32231,14 @@ function receiptStatusText(status) {
       const scoreText = data.total ? (data.score50.toFixed(1).replace(/\.0$/, '') + '/50') : '-';
       const adjustedBadge = data.adjusted ? '<span style="display:inline-block;margin-left:4px;color:#d97706;font-size:10px;">ปรับ</span>' : '';
       const isPublished = data.result && (data.result.resultStatus === 'published');
+      const btnStyle = isPublished
+        ? 'font-size:11px;padding:2px 7px;margin:0 2px;opacity:0.6;'
+        : 'font-size:11px;padding:2px 7px;margin:0 2px;';
       return '<td style="padding:8px 10px;text-align:center;white-space:nowrap;">' +
         '<div style="font-weight:700;color:#111827;">' + correctText + adjustedBadge + '</div>' +
         '<div style="font-size:11px;color:#6b7280;margin:2px 0 4px;">' + scoreText + '</div>' +
-        (!isPublished ? (
-          '<button class="btn" type="button" style="font-size:11px;padding:2px 7px;margin:0 2px;" onclick="adjustOnlineExamGroupedSubjectCorrect(\'' + groupKey + '\',\'' + subjectArg + '\',-1)">-</button>' +
-          '<button class="btn btn-blue" type="button" style="font-size:11px;padding:2px 7px;margin:0 2px;" onclick="adjustOnlineExamGroupedSubjectCorrect(\'' + groupKey + '\',\'' + subjectArg + '\',1)">+</button>'
-        ) : '') +
+        '<button class="btn" type="button" style="' + btnStyle + '" onclick="adjustOnlineExamGroupedSubjectCorrect(\'' + groupKey + '\',\'' + subjectArg + '\',-1)">-</button>' +
+        '<button class="btn btn-blue" type="button" style="' + btnStyle + '" onclick="adjustOnlineExamGroupedSubjectCorrect(\'' + groupKey + '\',\'' + subjectArg + '\',1)">+</button>' +
       '</td>';
     }
 
@@ -32101,7 +32274,9 @@ function receiptStatusText(status) {
           '<button class="btn btn-dark" type="button" style="font-size:10px;padding:2px 7px;margin:2px 0;" onclick="toggleScoreDeletePicker(\'' + pickerId + '\')">ยกเลิก</button>' +
         '</div>';
 
+      const isDirty = !!onlineExamDirtyGroups[group.key];
       return detailButtons +
+        (isDirty ? '<button class="btn btn-green" type="button" onclick="saveOnlineExamGroupedAdjustments(\'' + jsArg(group.key) + '\')" style="font-size:10px;padding:3px 9px;margin:1px;font-weight:700;">💾 บันทึก</button>' : '') +
         (pendingCount ? '<button class="btn btn-green" type="button" onclick="publishOnlineExamGroupedResults(\'' + jsArg(group.key) + '\')" style="font-size:10px;padding:3px 7px;margin:1px;">ประกาศผล</button>' : '') +
         (hasPublished ? '<button class="btn btn-dark" type="button" onclick="hideOnlineExamGroupedResults(\'' + jsArg(group.key) + '\')" style="font-size:10px;padding:3px 7px;margin:1px;">ซ่อนผล</button>' : '') +
         deletePickerHtml;
@@ -32125,9 +32300,8 @@ function receiptStatusText(status) {
       }
     }
 
-    async function adjustOnlineExamGroupedSubjectCorrect(groupKey, subject, delta) {
+    function adjustOnlineExamGroupedSubjectCorrect(groupKey, subject, delta) {
       if (!hasPermission('admin.onlineExams') && !hasPermission('admin.exams')) { alert('ไม่มีสิทธิ์'); return; }
-      if (!firebaseReady || !db) { alert('Firebase ยังไม่พร้อม'); return; }
       const group = findOnlineExamGroupedRow(groupKey);
       const data = getOnlineExamGroupSubjectData(group, subject);
       const resultEl = getElement('scoreAdjustResult');
@@ -32144,20 +32318,39 @@ function receiptStatusText(status) {
       record.scoreTotals[subject] = data.total;
       record.scores[subject] = onlineExamGetScore50Value(nextCorrect, data.total);
       record.status = record.status || 'draft';
+      onlineExamDirtyGroups[groupKey] = true;
+      if (resultEl) {
+        resultEl.textContent = 'ปรับ ' + subject + ' ของ ' + (group.studentName || '-') + ' เป็นถูก ' + nextCorrect + '/' + data.total + ' · กดปุ่ม "บันทึก" เพื่อยืนยัน';
+        resultEl.style.color = '#d97706';
+      }
+      renderOnlineExamGradingPage(onlineExamGradePage);
+    }
+
+    async function saveOnlineExamGroupedAdjustments(groupKey) {
+      if (!hasPermission('admin.onlineExams') && !hasPermission('admin.exams')) { alert('ไม่มีสิทธิ์'); return; }
+      if (!firebaseReady || !db) { alert('Firebase ยังไม่พร้อม'); return; }
+      const group = findOnlineExamGroupedRow(groupKey);
+      if (!group) return;
+      const record = findAdminScoreRecordForExamGroup(group);
+      if (!record) return;
+      const resultEl = getElement('scoreAdjustResult');
+      const isPublished = record.status === 'published' || group.results.some(function(r) { return r.resultStatus === 'published'; });
+      if (isPublished && !confirm('คะแนนของ "' + (group.studentName || '-') + '" ประกาศผลแล้ว\nต้องการบันทึกคะแนนที่แก้ไขลงในผลที่ประกาศแล้วหรือไม่?')) return;
       try {
         await setFirebaseDocument('adminScoreRecords', record);
         await syncScoreReportFromAdmin(group.month, group.grade, record.status || 'draft');
+        delete onlineExamDirtyGroups[groupKey];
         renderAdminScoreTables();
         renderOnlineExamGradingPage(onlineExamGradePage);
         renderScoreHistoryByMonth();
         renderStudentExamFilters();
         if (resultEl) {
-          resultEl.textContent = 'ปรับ ' + subject + ' ของ ' + (group.studentName || '-') + ' เป็นถูก ' + nextCorrect + '/' + data.total + ' แล้ว';
+          resultEl.textContent = 'บันทึกการปรับคะแนนของ "' + (group.studentName || '-') + '" เรียบร้อยแล้ว';
           resultEl.style.color = '#16a34a';
         }
       } catch (error) {
-        console.error('adjustOnlineExamGroupedSubjectCorrect error:', error);
-        if (resultEl) { resultEl.textContent = 'ปรับจำนวนข้อถูกไม่สำเร็จ: ' + (error.message || error.code || error); resultEl.style.color = '#dc2626'; }
+        console.error('saveOnlineExamGroupedAdjustments error:', error);
+        if (resultEl) { resultEl.textContent = 'บันทึกไม่สำเร็จ: ' + (error.message || error.code || error); resultEl.style.color = '#dc2626'; }
       }
     }
 
