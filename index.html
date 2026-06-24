@@ -384,8 +384,27 @@
     .sgs-desc {
       font-size: 11px;
       color: #64748b;
-      margin: 0 0 8px;
+      margin: 0 0 4px;
       line-height: 1.4;
+    }
+    .sgs-max { font-style: normal; color: #10b981; font-weight: 700; }
+    .sgs-breakdown {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 2px 0;
+      align-items: center;
+      margin: 0 0 8px;
+      font-size: 10px;
+      color: #94a3b8;
+    }
+    .sgs-bk-sep { margin: 0 4px; opacity: 0.4; }
+    .sgs-bk-val { white-space: nowrap; }
+    .sgs-bk-val--active {
+      color: #4f46e5;
+      font-weight: 800;
+      background: #eef2ff;
+      border-radius: 4px;
+      padding: 1px 4px;
     }
     .sgs-upgrade-btn {
       font-size: 11px;
@@ -8816,10 +8835,10 @@
 
     const GAMIFICATION_PROFESSIONS = [
       { id: 'IDEA Explorer', icon: '🌟', label: 'IDEA Explorer',        thaiLabel: 'นักสำรวจ',          passiveName: '-',             passiveDesc: 'อาชีพเริ่มต้น — ไม่มีโบนัสพิเศษ',                          color: '#6366f1', bonusSources: [],                                baseBonus: 0,    bonusType: 'exp'   },
-      { id: 'mage',          icon: '🔮', label: 'Archmage of Wisdom',   thaiLabel: 'จอมเวทแห่งปัญญา', passiveName: 'สมาธิเวท',       passiveDesc: '+12% EXP ต่อเลเวลสกิล จากการสอบ',                       color: '#0ea5e9', bonusSources: ['monthlyExam','onlineExamPass'],  baseBonus: 0.12, bonusType: 'exp'   },
-      { id: 'rogue',         icon: '🏹', label: 'Windrunner Rogue',     thaiLabel: 'นักล่าสายลม',      passiveName: 'ก้าวพริบตา',     passiveDesc: '+15% EXP ต่อเลเวลสกิล จากวิดีโอ On-demand',             color: '#10b981', bonusSources: ['onDemandClip'],                  baseBonus: 0.15, bonusType: 'exp'   },
-      { id: 'crusader',      icon: '🛡️', label: 'Grand Crusader',       thaiLabel: 'อัศวินผู้พิทักษ์', passiveName: 'เกราะแห่งวินัย', passiveDesc: '+20% EXP ต่อเลเวลสกิล จากทุกกิจกรรม',                  color: '#f43f5e', bonusSources: ['all'],                           baseBonus: 0.20, bonusType: 'exp'   },
-      { id: 'alchemist',     icon: '🧪', label: 'Royal Alchemist',      thaiLabel: 'นักแปรธาตุหลวง',   passiveName: 'เหรียญแปรธาตุ',  passiveDesc: '+25% Coins ต่อเลเวลสกิล จากทุกกิจกรรม',                color: '#f59e0b', bonusSources: ['all'],                           baseBonus: 0.25, bonusType: 'coins' }
+      { id: 'mage',          icon: '🔮', label: 'Archmage of Wisdom',   thaiLabel: 'จอมเวทแห่งปัญญา', passiveName: 'สมาธิเวท',       passiveDesc: 'รับ EXP จากการสอบเพิ่มขึ้น +12% (Lv.1) ถึง +60% (Lv.5)',              color: '#0ea5e9', bonusSources: ['monthlyExam','onlineExamPass'],  baseBonus: 0.12, bonusType: 'exp'   },
+      { id: 'rogue',         icon: '🏹', label: 'Windrunner Rogue',     thaiLabel: 'นักล่าสายลม',      passiveName: 'ก้าวพริบตา',     passiveDesc: 'รับ EXP จากวิดีโอ On-demand เพิ่มขึ้น +15% (Lv.1) ถึง +75% (Lv.5)', color: '#10b981', bonusSources: ['onDemandClip'],                  baseBonus: 0.15, bonusType: 'exp'   },
+      { id: 'crusader',      icon: '🛡️', label: 'Grand Crusader',       thaiLabel: 'อัศวินผู้พิทักษ์', passiveName: 'เกราะแห่งวินัย', passiveDesc: 'รับ EXP จากทุกกิจกรรมเพิ่มขึ้น +20% (Lv.1) ถึง +100% (Lv.5)',      color: '#f43f5e', bonusSources: ['all'],                           baseBonus: 0.20, bonusType: 'exp'   },
+      { id: 'alchemist',     icon: '🧪', label: 'Royal Alchemist',      thaiLabel: 'นักแปรธาตุหลวง',   passiveName: 'เหรียญแปรธาตุ',  passiveDesc: 'รับ Coins จากทุกกิจกรรมเพิ่มขึ้น +25% (Lv.1) ถึง +125% (Lv.5)',    color: '#f59e0b', bonusSources: ['all'],                           baseBonus: 0.25, bonusType: 'coins' }
     ];
 
     const PROFESSION_CHANGE_TICKET_REWARD_ID = 'system-profession-change-ticket';
@@ -18031,11 +18050,19 @@
           const ticketCount = getProfessionChangeTickets(profile);
           const professionButtonLabel = chosenProfession ? 'เปลี่ยนอาชีพ' : 'เลือกอาชีพครั้งแรก';
           // profession card
+          const profActiveDesc = (function() {
+            if (!prof.baseBonus) return prof.passiveDesc;
+            const pct = Math.round(prof.baseBonus * passiveLevel * 100);
+            const src = prof.bonusSources[0] === 'all' ? 'ทุกกิจกรรม'
+              : prof.bonusSources.indexOf('onDemandClip') !== -1 ? 'วิดีโอ On-demand'
+              : 'การสอบ';
+            return 'สกิล Lv.' + passiveLevel + '/5 · ได้ +' + pct + '% ' + (prof.bonusType === 'coins' ? 'Coins' : 'EXP') + ' จาก' + src;
+          })();
           let html = '<div class="student-gamification-profession">' +
             '<span class="student-gamification-profession-icon">' + prof.icon + '</span>' +
             '<div class="student-gamification-profession-info">' +
               '<strong>' + prof.thaiLabel + ' · ' + prof.label + '</strong>' +
-              '<span>' + prof.passiveDesc + '</span>' +
+              '<span>' + profActiveDesc + '</span>' +
               (chosenProfession ? '<div class="student-gamification-ticket">บัตรเปลี่ยนอาชีพ: ' + ticketCount + '</div>' : '<div class="student-gamification-ticket">เลือกอาชีพครั้งแรกได้ฟรี</div>') +
             '</div>' +
             (currentStudent ? '<button type="button" class="student-gamification-profession-btn" onclick="openProfessionChooser()">' + professionButtonLabel + '</button>' : '') +
@@ -18057,7 +18084,15 @@
                 '<span class="sgs-sp">SP: ' + sp + '</span>' +
               '</div>' +
               '<div class="sgs-pips">' + pips + '</div>' +
-              '<p class="sgs-desc">โบนัสปัจจุบัน: <strong>' + bonusLabel + '</strong>' + (passiveLevel < 5 ? ' · เลเวลถัดไป: +' + Math.round(prof.baseBonus * (passiveLevel + 1) * 100) + '%' : ' (MAX)') + '</p>' +
+              '<p class="sgs-desc">โบนัสปัจจุบัน: <strong>' + bonusLabel + '</strong>' + (passiveLevel >= 5 ? ' <em class="sgs-max">· สูงสุดแล้ว</em>' : '') + '</p>' +
+              '<p class="sgs-breakdown">' + (function() {
+                let b = '';
+                for (let lv = 1; lv <= 5; lv++) {
+                  const pct = Math.round(prof.baseBonus * lv * 100);
+                  b += (lv > 1 ? '<span class="sgs-bk-sep">·</span>' : '') + '<span class="sgs-bk-val' + (lv === passiveLevel ? ' sgs-bk-val--active' : '') + '">Lv.' + lv + '&thinsp;+' + pct + '%' + (lv === passiveLevel ? '&thinsp;✦' : '') + '</span>';
+                }
+                return b;
+              })() + '</p>' +
               '<button type="button" class="sgs-upgrade-btn" onclick="upgradePassiveSkill()"' + (canUpgrade ? '' : ' disabled') + '>' +
                 (passiveLevel >= 5 ? '✓ สกิลสูงสุดแล้ว' : (sp > 0 ? 'อัปเกรดสกิล (ใช้ 1 SP)' : 'ต้องการ SP เพิ่ม — เก็บ EXP ขึ้นเลเวล')) +
               '</button>' +
