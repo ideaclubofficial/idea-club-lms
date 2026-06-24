@@ -208,6 +208,93 @@
       line-height: 1.5;
     }
 
+    .student-gamification-profession {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-top: 10px;
+      padding: 10px 12px;
+      border-radius: 12px;
+      background: rgba(255, 255, 255, 0.82);
+      border: 1.5px solid rgba(99, 102, 241, 0.22);
+    }
+    .student-gamification-profession-icon {
+      font-size: 22px;
+      line-height: 1;
+      flex-shrink: 0;
+    }
+    .student-gamification-profession-info { flex: 1; min-width: 0; }
+    .student-gamification-profession-info strong {
+      display: block;
+      font-size: 13px;
+      font-weight: 800;
+      color: #1e1b4b;
+    }
+    .student-gamification-profession-info span {
+      font-size: 11px;
+      color: #6366f1;
+      font-weight: 600;
+    }
+    .student-gamification-profession-btn {
+      flex-shrink: 0;
+      font-size: 11px;
+      font-weight: 800;
+      color: #4f46e5;
+      background: #eef2ff;
+      border: 1px solid #c7d2fe;
+      border-radius: 8px;
+      padding: 5px 10px;
+      cursor: pointer;
+      transition: background 0.15s;
+    }
+    .student-gamification-profession-btn:hover { background: #e0e7ff; }
+
+    .profession-chooser-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(195px, 1fr));
+      gap: 10px;
+      margin-top: 4px;
+    }
+    .profession-chooser-card {
+      padding: 14px;
+      border-radius: 12px;
+      border: 2px solid #e2e8f0;
+      background: #f8fafc;
+      cursor: pointer;
+      transition: border-color 0.15s, background 0.15s;
+      text-align: left;
+    }
+    .profession-chooser-card:hover { border-color: #6366f1; background: #eef2ff; }
+    .profession-chooser-card--active { border-color: #4f46e5; background: #eef2ff; }
+    .profession-chooser-card-icon { font-size: 26px; margin-bottom: 6px; display: block; }
+    .profession-chooser-card strong {
+      display: block;
+      font-size: 13px;
+      font-weight: 900;
+      color: #1e1b4b;
+      margin-bottom: 2px;
+    }
+    .profession-chooser-card em {
+      display: block;
+      font-size: 11px;
+      font-style: normal;
+      color: #6366f1;
+      font-weight: 700;
+      margin-bottom: 4px;
+    }
+    .profession-chooser-card p {
+      margin: 0;
+      font-size: 11px;
+      color: #64748b;
+      line-height: 1.45;
+    }
+    .profession-chooser-note {
+      margin-top: 10px;
+      font-size: 11px;
+      color: #94a3b8;
+      text-align: center;
+    }
+
     .student-gamification-leaderboard {
       margin-top: 14px;
       border-radius: 12px;
@@ -8419,6 +8506,15 @@
     const studentGamificationProfiles = [];
     const studentGamificationEvents = [];
     const leaderboardProfiles = [];
+
+    const GAMIFICATION_PROFESSIONS = [
+      { id: 'IDEA Explorer', icon: '🌟', label: 'IDEA Explorer', thaiLabel: 'นักสำรวจ', passiveDesc: 'อาชีพเริ่มต้น — ไม่มีโบนัสพิเศษ', color: '#6366f1', bonusSources: [] },
+      { id: 'mage',          icon: '🔮', label: 'Archmage of Wisdom', thaiLabel: 'จอมเวทแห่งปัญญา', passiveDesc: '+12% EXP จากการสอบ (ข้อสอบออนไลน์และประจำเดือน)', color: '#0ea5e9', bonusSources: ['monthlyExam', 'onlineExamPass'] },
+      { id: 'rogue',         icon: '🏹', label: 'Windrunner Rogue', thaiLabel: 'นักล่าสายลม', passiveDesc: '+15% EXP จากการดูวิดีโอ On-demand', color: '#10b981', bonusSources: ['onDemandClip'] },
+      { id: 'crusader',      icon: '🛡️', label: 'Grand Crusader', thaiLabel: 'อัศวินผู้พิทักษ์', passiveDesc: '+20% EXP จากทุกกิจกรรม', color: '#f43f5e', bonusSources: ['all'] },
+      { id: 'alchemist',     icon: '🧪', label: 'Royal Alchemist', thaiLabel: 'นักแปรธาตุหลวง', passiveDesc: '+25% Coins จากทุกกิจกรรม', color: '#f59e0b', bonusSources: ['all'] }
+    ];
+
     let currentTeacher = null;
     let currentAdmin = null;
 
@@ -16833,6 +16929,20 @@
       else leaderboardProfiles.push(entry);
     }
 
+    function applyProfessionMultiplier(profession, sourceType, baseExp, baseCoins) {
+      const prof = GAMIFICATION_PROFESSIONS.find(function(p) { return p.id === profession; });
+      if (!prof || !prof.bonusSources.length) return { exp: baseExp, coins: baseCoins };
+      const matchesSource = prof.bonusSources[0] === 'all' || prof.bonusSources.indexOf(sourceType) !== -1;
+      if (!matchesSource) return { exp: baseExp, coins: baseCoins };
+      let finalExp = baseExp;
+      let finalCoins = baseCoins;
+      if (profession === 'mage')      finalExp   = Math.floor(baseExp   * 1.12);
+      if (profession === 'rogue')     finalExp   = Math.floor(baseExp   * 1.15);
+      if (profession === 'crusader')  finalExp   = Math.floor(baseExp   * 1.20);
+      if (profession === 'alchemist') finalCoins = Math.floor(baseCoins * 1.25);
+      return { exp: finalExp, coins: finalCoins };
+    }
+
     async function awardStudentGamification(sourceType, sourceId, exp, coins, reason) {
       if (!currentStudent) return false;
       const type = String(sourceType || '').trim();
@@ -16845,6 +16955,7 @@
       const existingProfile = findCurrentStudentGamificationProfile();
       const profile = getCurrentStudentGamificationProfile();
       const profileBefore = Object.assign({}, profile);
+      const boosted = applyProfessionMultiplier(profile.profession, type, Number(exp) || 0, Number(coins) || 0);
       const eventId = getStudentGamificationEventId(type, id);
       const event = {
         id: eventId,
@@ -16856,12 +16967,12 @@
         sourceType: type,
         sourceId: id,
         reason: reason || '',
-        exp: Number(exp) || 0,
-        coins: Number(coins) || 0,
+        exp: boosted.exp,
+        coins: boosted.coins,
         createdAtText: new Date().toLocaleString('th-TH')
       };
 
-      applyStudentGamificationReward(profile, exp, coins);
+      applyStudentGamificationReward(profile, boosted.exp, boosted.coins);
       if (existingProfile) Object.assign(existingProfile, profile);
       else studentGamificationProfiles.push(profile);
       studentGamificationEvents.push(event);
@@ -16908,6 +17019,7 @@
       const existingProfile = findStudentGamificationProfile(student);
       const profileBefore = Object.assign({}, profile);
       const teacherInfo = getActiveTeacherAwardInfo();
+      const boosted = applyProfessionMultiplier(profile.profession, sourceType, Number(exp) || 0, Number(coins) || 0);
       const eventId = getStudentGamificationEventIdForStudent(student, sourceType, sourceId);
       const event = {
         id: eventId,
@@ -16919,15 +17031,15 @@
         sourceType: sourceType,
         sourceId: sourceId,
         reason: reason || '',
-        exp: Number(exp) || 0,
-        coins: Number(coins) || 0,
+        exp: boosted.exp,
+        coins: boosted.coins,
         awardedByUid: teacherInfo.uid,
         awardedByTeacherId: teacherInfo.teacherId,
         awardedByName: teacherInfo.teacherName,
         createdAtText: new Date().toLocaleString('th-TH')
       };
 
-      applyStudentGamificationReward(profile, exp, coins);
+      applyStudentGamificationReward(profile, boosted.exp, boosted.coins);
       if (existingProfile) Object.assign(existingProfile, profile);
       else studentGamificationProfiles.push(profile);
       studentGamificationEvents.push(event);
@@ -17107,6 +17219,17 @@
           '<div class="student-gamification-stat"><span>ภารกิจสำเร็จ</span><strong>' + escapeHtml(clipCount + examCount) + '</strong></div>' +
         '</div>' +
         '<div class="student-gamification-progress" aria-label="EXP progress"><span style="width:' + pct + '%;"></span></div>' +
+        (function() {
+          const prof = GAMIFICATION_PROFESSIONS.find(function(p) { return p.id === (profile.profession || 'IDEA Explorer'); }) || GAMIFICATION_PROFESSIONS[0];
+          return '<div class="student-gamification-profession">' +
+            '<span class="student-gamification-profession-icon">' + prof.icon + '</span>' +
+            '<div class="student-gamification-profession-info">' +
+              '<strong>' + prof.thaiLabel + ' · ' + prof.label + '</strong>' +
+              '<span>' + prof.passiveDesc + '</span>' +
+            '</div>' +
+            (currentStudent ? '<button type="button" class="student-gamification-profession-btn" onclick="openProfessionChooser()">เปลี่ยนอาชีพ</button>' : '') +
+          '</div>';
+        })() +
         '<div class="student-gamification-actions">' +
           '<button class="btn btn-blue" type="button" onclick="studentMobileGo(\'student-learning\')">เข้าเรียน On-demand</button>' +
           '<button class="btn btn-green" type="button" onclick="studentMobileGo(\'student-monthly-test\')">ไปทำข้อสอบ</button>' +
@@ -17126,6 +17249,49 @@
       const mobile = getElement('studentMobileGamificationPanel');
       if (desktop) desktop.innerHTML = renderStudentGamificationHtml({ mobile: false });
       if (mobile) mobile.innerHTML = renderStudentGamificationHtml({ mobile: true });
+    }
+
+    function openProfessionChooser() {
+      if (!currentStudent) return;
+      const profile = getCurrentStudentGamificationProfile();
+      const current = profile.profession || 'IDEA Explorer';
+      let cards = '';
+      GAMIFICATION_PROFESSIONS.forEach(function(p) {
+        const isActive = p.id === current;
+        cards += '<button type="button" class="profession-chooser-card' + (isActive ? ' profession-chooser-card--active' : '') + '" onclick="saveStudentProfession(\'' + p.id + '\')">' +
+          '<span class="profession-chooser-card-icon">' + p.icon + '</span>' +
+          '<strong>' + p.thaiLabel + '</strong>' +
+          '<em>' + p.label + '</em>' +
+          '<p>' + p.passiveDesc + '</p>' +
+        '</button>';
+      });
+      openViewBubble('เลือกอาชีพนักผจญภัย',
+        '<div class="profession-chooser-grid">' + cards + '</div>' +
+        '<p class="profession-chooser-note">เปลี่ยนอาชีพได้ทุกเมื่อ · โบนัสมีผลกับ EXP/Coins ที่ได้รับหลังเปลี่ยนเท่านั้น</p>'
+      );
+    }
+
+    async function saveStudentProfession(professionId) {
+      if (!currentStudent || !firebaseReady || !db) return;
+      const prof = GAMIFICATION_PROFESSIONS.find(function(p) { return p.id === professionId; });
+      if (!prof) return;
+      const profile = getCurrentStudentGamificationProfile();
+      const profileId = String(profile.firebaseDocId || profile.id || getStudentGamificationProfileId(currentStudent));
+      profile.profession = professionId;
+      const existingProfile = findCurrentStudentGamificationProfile();
+      if (existingProfile) existingProfile.profession = professionId;
+      updateLeaderboardProfileInMemory(profileId, profile);
+      renderStudentGamificationPanel();
+      closeEditBubble();
+      try {
+        const now = firebase.firestore.FieldValue.serverTimestamp();
+        const batch = db.batch();
+        batch.set(db.collection('studentGamificationProfiles').doc(profileId), { profession: professionId, updatedAt: now }, { merge: true });
+        batch.set(db.collection('gamificationLeaderboard').doc(profileId), { profession: professionId, updatedAt: now }, { merge: true });
+        await batch.commit();
+      } catch (e) {
+        console.error('saveStudentProfession error:', e);
+      }
     }
 
     function getGamificationLeaderboardDisplayName(profile) {
