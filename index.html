@@ -208,6 +208,91 @@
       line-height: 1.5;
     }
 
+    .student-gamification-leaderboard {
+      margin-top: 14px;
+      border-radius: 12px;
+      border: 1.5px solid #c7d2fe;
+      background: rgba(238, 242, 255, 0.55);
+      overflow: hidden;
+    }
+    .student-gamification-lb-header {
+      padding: 9px 14px;
+      font-size: 13px;
+      font-weight: 900;
+      color: #312e81;
+      background: rgba(199, 210, 254, 0.45);
+      border-bottom: 1px solid #c7d2fe;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .student-gamification-lb-list {
+      display: flex;
+      flex-direction: column;
+    }
+    .student-gamification-lb-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 8px 14px;
+      border-bottom: 1px solid rgba(199, 210, 254, 0.3);
+      transition: background 0.15s;
+    }
+    .student-gamification-lb-row:last-child { border-bottom: none; }
+    .student-gamification-lb-row--me {
+      background: rgba(238, 242, 255, 0.9);
+      border-left: 3px solid #4f46e5;
+    }
+    .student-gamification-lb-rank {
+      min-width: 28px;
+      font-size: 14px;
+      font-weight: 900;
+      text-align: center;
+      color: #6366f1;
+      font-variant-numeric: tabular-nums;
+    }
+    .student-gamification-lb-info {
+      flex: 1;
+      min-width: 0;
+    }
+    .student-gamification-lb-info strong {
+      display: block;
+      font-size: 13px;
+      font-weight: 800;
+      color: #1e1b4b;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .student-gamification-lb-info span {
+      font-size: 11px;
+      color: #6366f1;
+      font-weight: 700;
+    }
+    .student-gamification-lb-stats {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-end;
+      gap: 2px;
+      white-space: nowrap;
+    }
+    .student-gamification-lb-stats .lb-level {
+      font-size: 13px;
+      font-weight: 900;
+      color: #312e81;
+    }
+    .student-gamification-lb-stats .lb-coins {
+      font-size: 11px;
+      color: #92400e;
+      font-weight: 700;
+    }
+    .student-gamification-lb-empty {
+      padding: 14px;
+      text-align: center;
+      font-size: 12px;
+      color: #94a3b8;
+    }
+
     .student-ondemand-experience {
       display: grid;
       grid-template-columns: minmax(220px, 0.85fr) minmax(0, 1.65fr);
@@ -7115,7 +7200,8 @@
         getFirebaseCollectionQuiet('monthlyExamLinks'),
         getFirebaseCollectionQuiet('monthlyPlanSessions'),
         loadStudentOwnCollection('studentGamificationProfiles', studentDocIds, firebaseUser.uid),
-        loadStudentOwnCollection('studentGamificationEvents', studentDocIds, firebaseUser.uid)
+        loadStudentOwnCollection('studentGamificationEvents', studentDocIds, firebaseUser.uid),
+        (firebaseReady && db ? db.collection('gamificationLeaderboard').orderBy('level', 'desc').orderBy('exp', 'desc').limit(10).get().then(function(snap) { return snap.docs.map(function(d) { return Object.assign({ firebaseDocId: d.id }, d.data()); }).filter(function(x) { return x.deleted !== true; }); }).catch(function() { return []; }) : Promise.resolve([]))
       ]);
 
       replaceArray(courses, results[0]);
@@ -7132,6 +7218,7 @@
       replaceArray(monthlyPlanSessions, results[11]);
       replaceArray(studentGamificationProfiles, results[12]);
       replaceArray(studentGamificationEvents, results[13]);
+      replaceArray(leaderboardProfiles, results[14] || []);
 
       console.log('student-data-load-success', {
         uid: firebaseUser.uid,
@@ -8331,6 +8418,7 @@
     let currentStudent = null;
     const studentGamificationProfiles = [];
     const studentGamificationEvents = [];
+    const leaderboardProfiles = [];
     let currentTeacher = null;
     let currentAdmin = null;
 
@@ -16709,7 +16797,40 @@
         createdAt: now,
         updatedAt: now
       }), { merge: true });
+      batch.set(db.collection('gamificationLeaderboard').doc(profileId), {
+        firebaseDocId: profileId,
+        displayName: getGamificationLeaderboardDisplayName(profile),
+        nickname: String(profile.nickname || '').trim(),
+        studentName: String(profile.studentName || '').trim(),
+        level: profile.level || 1,
+        exp: profile.exp || 0,
+        coins: profile.coins || 0,
+        profession: profile.profession || 'IDEA Explorer',
+        deleted: false,
+        updatedAt: now
+      }, { merge: true });
       await batch.commit();
+      updateLeaderboardProfileInMemory(profileId, profile);
+    }
+
+    function updateLeaderboardProfileInMemory(profileId, profile) {
+      const existing = leaderboardProfiles.find(function(p) {
+        return String(p.firebaseDocId || p.id || '') === profileId;
+      });
+      const entry = {
+        firebaseDocId: profileId,
+        id: profileId,
+        displayName: getGamificationLeaderboardDisplayName(profile),
+        nickname: String(profile.nickname || '').trim(),
+        studentName: String(profile.studentName || '').trim(),
+        level: profile.level || 1,
+        exp: profile.exp || 0,
+        coins: profile.coins || 0,
+        profession: profile.profession || 'IDEA Explorer',
+        deleted: false
+      };
+      if (existing) Object.assign(existing, entry);
+      else leaderboardProfiles.push(entry);
     }
 
     async function awardStudentGamification(sourceType, sourceId, exp, coins, reason) {
@@ -16995,6 +17116,7 @@
           '<div class="student-gamification-quest"><span class="student-gamification-quest-icon">' + (clipCount ? '✓' : '▶') + '</span><div><strong>ดูคลิป On-demand</strong><p>' + (approved ? 'เปิดคลิปเพื่อรับ +40 EXP และ +2 Coins ต่อคลิป' : 'รออนุมัติคอร์สก่อนเข้าเรียน') + '</p></div></div>' +
           '<div class="student-gamification-quest"><span class="student-gamification-quest-icon">' + (examCount ? '✓' : 'A+') + '</span><div><strong>สอบออนไลน์ผ่านเกณฑ์</strong><p>ผ่าน 60% ขึ้นไป รับ +150 EXP และ +30 Coins ต่อผลสอบ</p></div></div>' +
         '</div>' +
+        renderStudentGamificationLeaderboardHtml() +
         '<div class="student-gamification-reward">สิทธิ์กิจกรรมและร้านแลกรางวัล: Coming soon</div>' +
       '</div>';
     }
@@ -17004,6 +17126,54 @@
       const mobile = getElement('studentMobileGamificationPanel');
       if (desktop) desktop.innerHTML = renderStudentGamificationHtml({ mobile: false });
       if (mobile) mobile.innerHTML = renderStudentGamificationHtml({ mobile: true });
+    }
+
+    function getGamificationLeaderboardDisplayName(profile) {
+      const nickname = String(profile.nickname || '').trim();
+      if (nickname) return nickname;
+      const name = String(profile.displayName || profile.studentName || '').trim();
+      if (!name) return 'นักเรียน';
+      const parts = name.split(/\s+/);
+      return parts[0] + (parts.length > 1 ? ' ' + parts[1].charAt(0) + '.' : '');
+    }
+
+    function renderStudentGamificationLeaderboardHtml() {
+      const RANK_MEDALS = ['🥇', '🥈', '🥉'];
+      const myProfileId = currentStudent ? getStudentGamificationProfileId(currentStudent) : '';
+      const sorted = leaderboardProfiles.slice().sort(function(a, b) {
+        if (b.level !== a.level) return (Number(b.level) || 0) - (Number(a.level) || 0);
+        return (Number(b.exp) || 0) - (Number(a.exp) || 0);
+      }).slice(0, 10);
+
+      if (!sorted.length) {
+        return '<div class="student-gamification-leaderboard">' +
+          '<div class="student-gamification-lb-header">🏆 อันดับนักผจญภัย</div>' +
+          '<div class="student-gamification-lb-empty">ยังไม่มีข้อมูลอันดับ — เริ่มสะสม EXP เพื่อขึ้นตารางเลย!</div>' +
+        '</div>';
+      }
+
+      let rows = '';
+      for (let i = 0; i < sorted.length; i++) {
+        const p = sorted[i];
+        const isMe = myProfileId && String(p.firebaseDocId || p.id || '') === myProfileId;
+        const rankLabel = i < 3 ? RANK_MEDALS[i] : (i + 1);
+        rows += '<div class="student-gamification-lb-row' + (isMe ? ' student-gamification-lb-row--me' : '') + '">' +
+          '<span class="student-gamification-lb-rank">' + rankLabel + '</span>' +
+          '<div class="student-gamification-lb-info">' +
+            '<strong>' + escapeHtml(getGamificationLeaderboardDisplayName(p)) + (isMe ? ' (คุณ)' : '') + '</strong>' +
+            '<span>' + escapeHtml(p.profession || 'IDEA Explorer') + '</span>' +
+          '</div>' +
+          '<div class="student-gamification-lb-stats">' +
+            '<span class="lb-level">LV.' + escapeHtml(p.level) + '</span>' +
+            '<span class="lb-coins">💰 ' + escapeHtml(p.coins) + '</span>' +
+          '</div>' +
+        '</div>';
+      }
+
+      return '<div class="student-gamification-leaderboard">' +
+        '<div class="student-gamification-lb-header">🏆 อันดับนักผจญภัย</div>' +
+        '<div class="student-gamification-lb-list">' + rows + '</div>' +
+      '</div>';
     }
 
     function updateStudentCourseDisplay() {
