@@ -5848,6 +5848,7 @@
                   <button class="btn btn-green" type="button" onclick="saveAdjustedScores()">บันทึกคะแนนชุดนี้</button>
                   <button class="btn btn-dark" type="button" onclick="publishAllScoreSetsByCurrentFilters()">ประกาศคะแนนทั้งหมดตามตัวกรอง</button>
                   <button class="btn btn-blue" type="button" onclick="exportFilteredScoresXlsx()">ส่งออกคะแนน Excel</button>
+                  <button class="btn btn-dark" type="button" onclick="backfillExamScoreGamification()">แจก EXP ย้อนหลังทุกชุด</button>
                 </div>
                 <p id="scoreAdjustResult" style="margin-top:14px; font-weight:bold;"></p>
                 </div>
@@ -16833,6 +16834,74 @@
       }
     }
 
+    function getMonthlyExamExpReward(scorePercent) {
+      const pct = Math.max(0, Math.min(100, Number(scorePercent) || 0));
+      if (pct >= 90) return { exp: 200, coins: 15 };
+      if (pct >= 80) return { exp: 150, coins: 8 };
+      if (pct >= 70) return { exp: 100, coins: 3 };
+      if (pct >= 60) return { exp: 60, coins: 0 };
+      if (pct >= 50) return { exp: 30, coins: 0 };
+      return { exp: 10, coins: 0 };
+    }
+
+    function findStudentForScoreRecord(record) {
+      return students.find(function(s) {
+        if (record.studentId && String(s.id || s.firebaseDocId || '') === String(record.studentId)) return true;
+        if (record.authUid && String(s.authUid || '') === String(record.authUid)) return true;
+        return s.name === record.student;
+      }) || null;
+    }
+
+    async function awardGamificationForPublishedScoreRecord(record) {
+      if (!record || record.status !== 'published') return;
+      const student = findStudentForScoreRecord(record);
+      if (!student) return;
+      const subjects = Object.keys(record.scores || {});
+      for (let i = 0; i < subjects.length; i++) {
+        const subject = subjects[i];
+        const rawScore = Number(record.scores[subject] || 0);
+        const scorePercent = Math.round(rawScore / 50 * 100);
+        const sourceId = sanitizeFirestoreId((record.firebaseDocId || record.id || '') + '_' + subject);
+        const eventId = getStudentGamificationEventIdForStudent(student, 'monthlyExam', sourceId);
+        const alreadyAwarded = studentGamificationEvents.some(function(e) {
+          return String(e.firebaseDocId || e.id || '') === eventId;
+        });
+        if (alreadyAwarded) continue;
+        const reward = getMonthlyExamExpReward(scorePercent);
+        const reason = 'คะแนนสอบ ' + subject + ' ' + (record.month || '') + ' · ' + rawScore + '/50 (' + scorePercent + '%)';
+        await awardGamificationForStudent(student, 'monthlyExam', sourceId, reward.exp, reward.coins, reason);
+        if (scorePercent === 100) {
+          const bonusId = sourceId + '_perfect';
+          const bonusEventId = getStudentGamificationEventIdForStudent(student, 'monthlyExam', bonusId);
+          const bonusAwarded = studentGamificationEvents.some(function(e) {
+            return String(e.firebaseDocId || e.id || '') === bonusEventId;
+          });
+          if (!bonusAwarded) {
+            await awardGamificationForStudent(student, 'monthlyExam', bonusId, 50, 5, 'Perfect score bonus: ' + subject + ' ' + (record.month || ''));
+          }
+        }
+      }
+    }
+
+    async function awardGamificationForPublishedScoreSet(records) {
+      const published = (records || []).filter(function(r) { return r.status === 'published'; });
+      for (let i = 0; i < published.length; i++) {
+        await awardGamificationForPublishedScoreRecord(published[i]);
+      }
+    }
+
+    async function backfillExamScoreGamification() {
+      const result = getElement('scoreAdjustResult');
+      if (!confirm('แจก EXP ย้อนหลังให้นักเรียนทุกคนจากคะแนนสอบที่ประกาศแล้วทั้งหมด?\n(ระบบจะข้ามรายการที่เคยแจกไปแล้วอัตโนมัติ)')) return;
+      if (result) { result.textContent = 'กำลังแจก EXP ย้อนหลัง...'; result.style.color = '#0f4cbd'; }
+      const published = adminScoreRecords.filter(function(r) { return r.status === 'published'; });
+      await awardGamificationForPublishedScoreSet(published);
+      if (result) {
+        result.textContent = 'แจก EXP ย้อนหลังเสร็จแล้ว · ตรวจสอบ EXP ของนักเรียนแต่ละคนในตารางนักเรียน';
+        result.style.color = '#16a34a';
+      }
+    }
+
     function openTeacherGiveExpBubble(studentId) {
       const student = students.find(function(item) {
         return String(item.id || item.firebaseDocId || '') === String(studentId || '');
@@ -21661,12 +21730,13 @@ function receiptStatusText(status) {
       }
 
       await syncScoreReportFromAdmin(selectedMonth, selectedGrade, 'published');
+      await awardGamificationForPublishedScoreSet(records);
       renderAdminScoreTables();
       renderScoreHistoryByMonth();
       renderStudentExamFilters();
       if (getElement('adminScorePublishSelect')) getElement('adminScorePublishSelect').value = 'published';
       if (result) {
-        result.textContent = 'ประกาศผลชุด ' + selectedMonth + ' ระดับชั้น ' + selectedGrade + ' เรียบร้อย นักเรียนดูใบคะแนนย้อนหลังได้แล้ว';
+        result.textContent = 'ประกาศผลชุด ' + selectedMonth + ' ระดับชั้น ' + selectedGrade + ' เรียบร้อย · แจก EXP จากคะแนนสอบแล้ว';
         result.style.color = '#0f4cbd';
       }
     }
@@ -21732,11 +21802,12 @@ function receiptStatusText(status) {
         }
       }
 
+      await awardGamificationForPublishedScoreSet(records);
       renderAdminScoreTables();
       renderScoreHistoryByMonth();
       renderStudentExamFilters();
       if (result) {
-        result.textContent = 'ประกาศคะแนนทั้งหมด ' + scope.month + ' · ' + scopeText + ' แล้ว ' + (records.length - Math.min(failed, records.length)) + ' รายการ' + (failed ? ' · พบข้อผิดพลาด ' + failed + ' รายการ' : '');
+        result.textContent = 'ประกาศคะแนนทั้งหมด ' + scope.month + ' · ' + scopeText + ' แล้ว ' + (records.length - Math.min(failed, records.length)) + ' รายการ · แจก EXP จากคะแนนสอบแล้ว' + (failed ? ' · พบข้อผิดพลาด ' + failed + ' รายการ' : '');
         result.style.color = failed ? '#d97706' : '#0f4cbd';
       }
     }
