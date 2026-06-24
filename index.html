@@ -356,6 +356,69 @@
     .sgs-upgrade-btn:hover { opacity: 0.88; }
     .sgs-upgrade-btn:disabled { opacity: 0.4; cursor: default; }
 
+    .student-gamification-daily-quests {
+      margin-top: 14px;
+      border-radius: 12px;
+      border: 1.5px solid #a5f3fc;
+      background: rgba(224, 242, 254, 0.5);
+      overflow: hidden;
+    }
+    .sgdq-header {
+      padding: 9px 14px;
+      font-size: 13px;
+      font-weight: 800;
+      color: #0c4a6e;
+      background: rgba(186, 230, 253, 0.45);
+      border-bottom: 1px solid #a5f3fc;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .sgdq-count {
+      margin-left: auto;
+      font-size: 11px;
+      font-weight: 700;
+      color: #0284c7;
+      background: rgba(186, 230, 253, 0.6);
+      border-radius: 999px;
+      padding: 1px 8px;
+    }
+    .sgdq-list { display: flex; flex-direction: column; }
+    .sgdq-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 9px 14px;
+      border-bottom: 1px solid rgba(165, 243, 252, 0.4);
+      transition: background 0.15s;
+    }
+    .sgdq-row:last-child { border-bottom: none; }
+    .sgdq-row--done { opacity: 0.65; }
+    .sgdq-icon {
+      width: 28px;
+      height: 28px;
+      border-radius: 8px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+      background: rgba(186, 230, 253, 0.5);
+      font-size: 14px;
+    }
+    .sgdq-row--done .sgdq-icon { background: #dcfce7; color: #16a34a; font-weight: 900; }
+    .sgdq-info { flex: 1; min-width: 0; }
+    .sgdq-info strong { display: block; font-size: 12px; font-weight: 800; color: #0f172a; }
+    .sgdq-info span { font-size: 11px; color: #64748b; }
+    .sgdq-reward {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-end;
+      gap: 1px;
+      flex-shrink: 0;
+    }
+    .sgdq-exp { font-size: 11px; font-weight: 700; color: #6366f1; }
+    .sgdq-coins { font-size: 10px; color: #d97706; font-weight: 600; }
+
     .student-gamification-shop {
       margin-top: 14px;
       border-radius: 12px;
@@ -8670,6 +8733,15 @@
     const leaderboardProfiles = [];
     const gamificationRewards = [];
     const gamificationRedemptions = [];
+    let dailyLoginQuestTriggeredThisSession = false;
+
+    const DAILY_QUESTS_ENABLED = false; // เปิดเป็น true เมื่อพร้อม launch
+
+    const DAILY_QUESTS = [
+      { id: 'daily_login', icon: '🌅', title: 'เข้าสู่ระบบประจำวัน',  desc: 'เข้าสู่ระบบ 1 ครั้ง',                      target: 1, expReward: 10,  coinReward: 2  },
+      { id: 'daily_clip',  icon: '▶️',  title: 'ดูคลิปบทเรียน',         desc: 'ดูคลิป On-demand 1 คลิป',                 target: 1, expReward: 20,  coinReward: 5  },
+      { id: 'daily_exam',  icon: '📝',  title: 'สอบออนไลน์วันนี้',       desc: 'ผ่านเกณฑ์ 60% ขึ้นไป 1 ครั้ง',            target: 1, expReward: 30,  coinReward: 10 }
+    ];
 
     const GAMIFICATION_PROFESSIONS = [
       { id: 'IDEA Explorer', icon: '🌟', label: 'IDEA Explorer',        thaiLabel: 'นักสำรวจ',          passiveName: '-',             passiveDesc: 'อาชีพเริ่มต้น — ไม่มีโบนัสพิเศษ',                          color: '#6366f1', bonusSources: [],                                baseBonus: 0,    bonusType: 'exp'   },
@@ -16918,13 +16990,15 @@
       const sp = Math.max(0, Number(profile && profile.sp) || 0);
       const rawSkill = (profile && profile.skillLevels) || {};
       const passiveLevel = Math.min(5, Math.max(1, Number(rawSkill.passive) || 1));
+      const rawDqp = (profile && profile.dailyQuestProgress) || {};
       return Object.assign({}, profile || {}, {
         level: level,
         exp: exp,
         coins: coins,
         sp: sp,
         profession: (profile && profile.profession) || 'IDEA Explorer',
-        skillLevels: { passive: passiveLevel }
+        skillLevels: { passive: passiveLevel },
+        dailyQuestProgress: { date: rawDqp.date || '', quests: rawDqp.quests || {} }
       });
     }
 
@@ -17154,6 +17228,10 @@
 
       try {
         await saveStudentGamificationAward(profile, event);
+        if (DAILY_QUESTS_ENABLED && type !== 'dailyQuest') {
+          if (type === 'onDemandClip')   setTimeout(function() { triggerDailyQuestProgress('daily_clip'); }, 0);
+          if (type === 'onlineExamPass') setTimeout(function() { triggerDailyQuestProgress('daily_exam'); }, 0);
+        }
         return true;
       } catch (error) {
         console.error('student gamification award error:', error);
@@ -17366,6 +17444,72 @@
       );
     }
 
+    // ===== Daily Quest System =====
+
+    function getTodayDateString() {
+      const d = new Date();
+      return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+    }
+
+    function getDailyQuestProgressForStudent() {
+      const profile = getCurrentStudentGamificationProfile();
+      const today = getTodayDateString();
+      const raw = profile.dailyQuestProgress || {};
+      if (raw.date !== today) return { date: today, quests: {} };
+      return { date: today, quests: Object.assign({}, raw.quests || {}) };
+    }
+
+    async function saveDailyQuestProgress(progress) {
+      if (!currentStudent || !firebaseReady || !db) return;
+      const profile = getCurrentStudentGamificationProfile();
+      const profileId = String(profile.firebaseDocId || profile.id || getStudentGamificationProfileId(currentStudent));
+      const existingProfile = findCurrentStudentGamificationProfile();
+      if (existingProfile) existingProfile.dailyQuestProgress = progress;
+      try {
+        await db.collection('studentGamificationProfiles').doc(profileId).set({
+          dailyQuestProgress: progress,
+          updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+        }, { merge: true });
+      } catch (e) {
+        console.warn('saveDailyQuestProgress error:', e);
+      }
+    }
+
+    async function triggerDailyQuestProgress(questId) {
+      if (!DAILY_QUESTS_ENABLED || !currentStudent) return;
+      const questDef = DAILY_QUESTS.find(function(q) { return q.id === questId; });
+      if (!questDef) return;
+      const progress = getDailyQuestProgressForStudent();
+      const qData = Object.assign({ count: 0, completed: false, rewardClaimed: false }, progress.quests[questId] || {});
+      if (qData.rewardClaimed) return;
+      qData.count = (qData.count || 0) + 1;
+      progress.quests[questId] = qData;
+      if (qData.count >= questDef.target && !qData.completed) {
+        qData.completed = true;
+        qData.rewardClaimed = true;
+        await saveDailyQuestProgress(progress);
+        const sourceId = sanitizeFirestoreId('dailyQuest_' + questId + '_' + progress.date);
+        await awardStudentGamification('dailyQuest', sourceId, questDef.expReward, questDef.coinReward, 'ภารกิจประจำวัน: ' + questDef.title);
+      } else {
+        await saveDailyQuestProgress(progress);
+        renderStudentGamificationPanel();
+      }
+    }
+
+    function triggerDailyLoginQuestIfNeeded() {
+      if (!DAILY_QUESTS_ENABLED || !currentStudent || dailyLoginQuestTriggeredThisSession) return;
+      const progress = getDailyQuestProgressForStudent();
+      const loginData = progress.quests['daily_login'] || {};
+      if (!loginData.rewardClaimed) {
+        dailyLoginQuestTriggeredThisSession = true;
+        setTimeout(function() { triggerDailyQuestProgress('daily_login'); }, 500);
+      } else {
+        dailyLoginQuestTriggeredThisSession = true;
+      }
+    }
+
+    // ===========================
+
     function renderAdminGamificationShop() {
       const rewardsEl = getElement('adminRewardsTable');
       const redemptionsEl = getElement('adminRedemptionsTable');
@@ -17531,6 +17675,7 @@
           '<div class="student-gamification-quest"><span class="student-gamification-quest-icon">' + (clipCount ? '✓' : '▶') + '</span><div><strong>ดูคลิป On-demand</strong><p>' + (approved ? 'เปิดคลิปเพื่อรับ +40 EXP และ +2 Coins ต่อคลิป' : 'รออนุมัติคอร์สก่อนเข้าเรียน') + '</p></div></div>' +
           '<div class="student-gamification-quest"><span class="student-gamification-quest-icon">' + (examCount ? '✓' : 'A+') + '</span><div><strong>สอบออนไลน์ผ่านเกณฑ์</strong><p>ผ่าน 60% ขึ้นไป รับ +150 EXP และ +30 Coins ต่อผลสอบ</p></div></div>' +
         '</div>' +
+        renderDailyQuestsHtml(profile) +
         renderStudentGamificationLeaderboardHtml() +
         renderStudentGamificationShopHtml(profile) +
       '</div>';
@@ -17541,6 +17686,7 @@
       const mobile = getElement('studentMobileGamificationPanel');
       if (desktop) desktop.innerHTML = renderStudentGamificationHtml({ mobile: false });
       if (mobile) mobile.innerHTML = renderStudentGamificationHtml({ mobile: true });
+      if (currentStudent) triggerDailyLoginQuestIfNeeded();
     }
 
     function openProfessionChooser() {
@@ -17675,6 +17821,34 @@
       return '<div class="student-gamification-leaderboard">' +
         '<div class="student-gamification-lb-header">🏆 อันดับนักผจญภัย</div>' +
         '<div class="student-gamification-lb-list">' + rows + '</div>' +
+      '</div>';
+    }
+
+    function renderDailyQuestsHtml(profile) {
+      if (!DAILY_QUESTS_ENABLED) return '';
+      const today = getTodayDateString();
+      const dqp = profile.dailyQuestProgress || {};
+      const quests = (dqp.date === today) ? (dqp.quests || {}) : {};
+      let rows = DAILY_QUESTS.map(function(q) {
+        const qData = quests[q.id] || { count: 0, completed: false, rewardClaimed: false };
+        const done = !!qData.rewardClaimed;
+        const progress = Math.min(q.target, qData.count || 0);
+        return '<div class="sgdq-row' + (done ? ' sgdq-row--done' : '') + '">' +
+          '<span class="sgdq-icon">' + (done ? '✓' : q.icon) + '</span>' +
+          '<div class="sgdq-info">' +
+            '<strong>' + q.title + '</strong>' +
+            '<span>' + q.desc + (q.target > 1 ? ' (' + progress + '/' + q.target + ')' : '') + '</span>' +
+          '</div>' +
+          '<div class="sgdq-reward">' +
+            '<span class="sgdq-exp">+' + q.expReward + ' EXP</span>' +
+            '<span class="sgdq-coins">+' + q.coinReward + ' 💰</span>' +
+          '</div>' +
+        '</div>';
+      }).join('');
+      const completedCount = DAILY_QUESTS.filter(function(q) { return (quests[q.id] || {}).rewardClaimed; }).length;
+      return '<div class="student-gamification-daily-quests">' +
+        '<div class="sgdq-header">📅 ภารกิจประจำวัน <span class="sgdq-count">' + completedCount + '/' + DAILY_QUESTS.length + '</span></div>' +
+        '<div class="sgdq-list">' + rows + '</div>' +
       '</div>';
     }
 
