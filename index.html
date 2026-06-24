@@ -17115,6 +17115,130 @@
       };
     }
 
+    function getAvatarEvolutionTier(level) {
+      const safeLevel = Math.max(1, Number(level || 1) || 1);
+      if (safeLevel >= 30) {
+        return { key: 'master', label: 'Master', minLevel: 30, coreRadius: 72, iconSize: 76, auraRadius: 0.46, ringCount: 3, particleCount: 62, particleRate: 0.16, runeSpeed: 0.02, ornament: 'master', badge: 'MASTER' };
+      }
+      if (safeLevel >= 20) {
+        return { key: 'elite', label: 'Elite', minLevel: 20, coreRadius: 67, iconSize: 72, auraRadius: 0.43, ringCount: 2, particleCount: 52, particleRate: 0.2, runeSpeed: 0.016, ornament: 'elite', badge: 'ELITE' };
+      }
+      if (safeLevel >= 10) {
+        return { key: 'adept', label: 'Adept', minLevel: 10, coreRadius: 63, iconSize: 68, auraRadius: 0.4, ringCount: 2, particleCount: 44, particleRate: 0.24, runeSpeed: 0.013, ornament: 'adept', badge: 'ADEPT' };
+      }
+      if (safeLevel >= 5) {
+        return { key: 'apprentice', label: 'Apprentice', minLevel: 5, coreRadius: 60, iconSize: 66, auraRadius: 0.37, ringCount: 1, particleCount: 38, particleRate: 0.28, runeSpeed: 0.01, ornament: 'apprentice', badge: '' };
+      }
+      return { key: 'novice', label: 'Novice', minLevel: 1, coreRadius: 54, iconSize: 60, auraRadius: 0.34, ringCount: 1, particleCount: 30, particleRate: 0.34, runeSpeed: 0.007, ornament: 'novice', badge: '' };
+    }
+
+    function drawRoundedRectPath(ctx, x, y, width, height, radius) {
+      const r = Math.min(radius, width / 2, height / 2);
+      ctx.moveTo(x + r, y);
+      ctx.lineTo(x + width - r, y);
+      ctx.quadraticCurveTo(x + width, y, x + width, y + r);
+      ctx.lineTo(x + width, y + height - r);
+      ctx.quadraticCurveTo(x + width, y + height, x + width - r, y + height);
+      ctx.lineTo(x + r, y + height);
+      ctx.quadraticCurveTo(x, y + height, x, y + height - r);
+      ctx.lineTo(x, y + r);
+      ctx.quadraticCurveTo(x, y, x + r, y);
+    }
+
+    function drawAvatarOrnament(ctx, prof, tier, size, time) {
+      const ornamentLevel = tier.key;
+      const sway = Math.sin(time * 1.2) * 2;
+      ctx.save();
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      ctx.strokeStyle = prof.color;
+      ctx.fillStyle = prof.color;
+      ctx.globalAlpha = ornamentLevel === 'novice' ? 0.35 : 0.8;
+
+      if (ornamentLevel === 'apprentice' || ornamentLevel === 'adept' || ornamentLevel === 'elite' || ornamentLevel === 'master') {
+        ctx.globalAlpha = 0.18;
+        ctx.beginPath();
+        ctx.ellipse(size / 2 - 58, size / 2 + 26 + sway, 34, 14, -0.35, 0, Math.PI * 2);
+        ctx.ellipse(size / 2 + 58, size / 2 + 26 - sway, 34, 14, 0.35, 0, Math.PI * 2);
+        ctx.fill();
+      }
+
+      if (ornamentLevel === 'adept' || ornamentLevel === 'elite' || ornamentLevel === 'master') {
+        ctx.globalAlpha = 0.82;
+        ctx.lineWidth = 5;
+        if (prof.id === 'mage') {
+          ctx.beginPath();
+          ctx.moveTo(size / 2 + 76, size / 2 + 46);
+          ctx.lineTo(size / 2 + 98, size / 2 - 54);
+          ctx.stroke();
+          ctx.beginPath();
+          ctx.arc(size / 2 + 101, size / 2 - 62, 10 + Math.sin(time * 2) * 1.5, 0, Math.PI * 2);
+          ctx.fill();
+        } else if (prof.id === 'rogue') {
+          ctx.beginPath();
+          ctx.arc(size / 2 + 84, size / 2, 46, -1.2, 1.15);
+          ctx.stroke();
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          ctx.moveTo(size / 2 + 104, size / 2 - 40);
+          ctx.lineTo(size / 2 + 66, size / 2 + 42);
+          ctx.stroke();
+        } else if (prof.id === 'crusader') {
+          ctx.beginPath();
+          ctx.moveTo(size / 2, size / 2 - 95);
+          ctx.lineTo(size / 2 - 16, size / 2 - 72);
+          ctx.lineTo(size / 2, size / 2 - 80);
+          ctx.lineTo(size / 2 + 16, size / 2 - 72);
+          ctx.closePath();
+          ctx.fill();
+        } else if (prof.id === 'alchemist') {
+          ctx.beginPath();
+          ctx.moveTo(size / 2 + 82, size / 2 + 36);
+          ctx.lineTo(size / 2 + 101, size / 2 - 22);
+          ctx.quadraticCurveTo(size / 2 + 118, size / 2 - 10, size / 2 + 103, size / 2 + 20);
+          ctx.closePath();
+          ctx.fill();
+          ctx.globalAlpha = 0.32;
+          ctx.beginPath();
+          ctx.arc(size / 2 + 112, size / 2 - 42, 8 + Math.sin(time * 2.4) * 2, 0, Math.PI * 2);
+          ctx.fill();
+        } else {
+          ctx.beginPath();
+          ctx.moveTo(size / 2 - 18, size / 2 - 88);
+          ctx.lineTo(size / 2, size / 2 - 108);
+          ctx.lineTo(size / 2 + 18, size / 2 - 88);
+          ctx.stroke();
+        }
+      }
+
+      if (ornamentLevel === 'elite' || ornamentLevel === 'master') {
+        ctx.globalAlpha = ornamentLevel === 'master' ? 0.32 : 0.24;
+        ctx.fillStyle = prof.color;
+        ctx.beginPath();
+        ctx.ellipse(size / 2 - 74, size / 2 + 2 + sway, 42, 70, -0.62, 0, Math.PI * 2);
+        ctx.ellipse(size / 2 + 74, size / 2 + 2 - sway, 42, 70, 0.62, 0, Math.PI * 2);
+        ctx.fill();
+      }
+
+      if (ornamentLevel === 'master') {
+        ctx.globalAlpha = 0.9;
+        ctx.strokeStyle = '#fbbf24';
+        ctx.fillStyle = '#fbbf24';
+        ctx.lineWidth = 4;
+        ctx.beginPath();
+        ctx.moveTo(size / 2 - 32, size / 2 - 106);
+        ctx.lineTo(size / 2 - 14, size / 2 - 128);
+        ctx.lineTo(size / 2, size / 2 - 108);
+        ctx.lineTo(size / 2 + 14, size / 2 - 128);
+        ctx.lineTo(size / 2 + 32, size / 2 - 106);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.arc(size / 2, size / 2 - 134, 4, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.restore();
+    }
+
     function renderStudentGamificationAvatarHtml(profile, options) {
       options = options || {};
       const canvasId = options.mobile ? 'studentGamificationAvatarMobile' : 'studentGamificationAvatarDesktop';
@@ -17137,51 +17261,66 @@
         const professionId = canvas.getAttribute('data-profession') || 'IDEA Explorer';
         const level = Math.max(1, Number(canvas.getAttribute('data-level') || 1) || 1);
         const prof = getGamificationProfessionAvatarConfig(professionId);
+        const tier = getAvatarEvolutionTier(level);
         let time = 0;
         let particles = [];
         let runeAngle = 0;
         const size = 420;
-        const maxParticles = 34;
+        const maxParticles = tier.particleCount;
         const draw = function() {
           ctx.clearRect(0, 0, size, size);
           time += 0.035 + Math.min(0.025, level * 0.002);
           const bob = Math.cos(time * 0.8) * 5;
-          const pulse = 0.8 + Math.sin(time * 1.4) * 0.08;
+          const pulse = 0.82 + Math.sin(time * 1.4) * 0.055;
           ctx.save();
           ctx.translate(size / 2, size / 2);
           ctx.rotate(runeAngle);
-          runeAngle += 0.006 + Math.min(0.012, level * 0.0008);
+          runeAngle += tier.runeSpeed + Math.min(0.008, level * 0.00045);
           ctx.strokeStyle = prof.color + '30';
-          ctx.lineWidth = 2;
-          ctx.beginPath();
-          ctx.arc(0, 0, size * 0.33, 0, Math.PI * 2);
-          ctx.stroke();
-          for (let i = 0; i < 6; i++) {
-            ctx.rotate(Math.PI / 3);
+          ctx.lineWidth = tier.key === 'master' ? 2.8 : 2;
+          for (let ring = 0; ring < tier.ringCount; ring++) {
+            const radius = size * (0.28 + ring * 0.055);
             ctx.beginPath();
-            ctx.moveTo(size * 0.2, 0);
-            ctx.lineTo(size * 0.29, 0);
+            ctx.arc(0, 0, radius, 0, Math.PI * 2);
             ctx.stroke();
+            for (let i = 0; i < 6 + ring * 2; i++) {
+              ctx.rotate((Math.PI * 2) / (6 + ring * 2));
+              ctx.beginPath();
+              ctx.moveTo(radius - 18, 0);
+              ctx.lineTo(radius - 4, 0);
+              ctx.stroke();
+            }
           }
           ctx.restore();
 
-          const glow = ctx.createRadialGradient(size / 2, size / 2, 24, size / 2, size / 2, size * 0.42);
-          glow.addColorStop(0, prof.color + '35');
+          const glow = ctx.createRadialGradient(size / 2, size / 2, 24, size / 2, size / 2, size * tier.auraRadius);
+          glow.addColorStop(0, prof.color + (tier.key === 'master' ? '48' : '35'));
+          glow.addColorStop(0.62, prof.color + (tier.key === 'novice' ? '15' : '24'));
           glow.addColorStop(1, 'rgba(255,255,255,0)');
           ctx.fillStyle = glow;
           ctx.beginPath();
-          ctx.arc(size / 2, size / 2, size * 0.42, 0, Math.PI * 2);
+          ctx.arc(size / 2, size / 2, size * tier.auraRadius, 0, Math.PI * 2);
           ctx.fill();
 
-          if (particles.length < maxParticles && Math.random() > 0.32) {
+          if (tier.key === 'master') {
+            const outerGlow = ctx.createRadialGradient(size / 2, size / 2, size * 0.18, size / 2, size / 2, size * 0.49);
+            outerGlow.addColorStop(0, 'rgba(251,191,36,0.14)');
+            outerGlow.addColorStop(1, 'rgba(251,191,36,0)');
+            ctx.fillStyle = outerGlow;
+            ctx.beginPath();
+            ctx.arc(size / 2, size / 2, size * 0.49, 0, Math.PI * 2);
+            ctx.fill();
+          }
+
+          if (particles.length < maxParticles && Math.random() > tier.particleRate) {
             particles.push({
-              x: size / 2 + (Math.random() - 0.5) * 150,
-              y: size * 0.72,
-              vx: (Math.random() - 0.5) * 0.75,
-              vy: -0.8 - Math.random() * 1.15,
-              r: 1.2 + Math.random() * 2.4,
+              x: size / 2 + (Math.random() - 0.5) * (150 + tier.ringCount * 24),
+              y: size * (0.73 + Math.random() * 0.03),
+              vx: (Math.random() - 0.5) * (0.75 + tier.ringCount * 0.12),
+              vy: -0.75 - Math.random() * (1.05 + tier.ringCount * 0.18),
+              r: 1.2 + Math.random() * (2.4 + tier.ringCount * 0.4),
               life: 0,
-              maxLife: 55 + Math.random() * 55
+              maxLife: 55 + Math.random() * (55 + tier.ringCount * 12)
             });
           }
           particles = particles.filter(function(p) {
@@ -17199,26 +17338,53 @@
             return p.life < p.maxLife;
           });
 
+          drawAvatarOrnament(ctx, prof, tier, size, time);
+
           ctx.save();
           ctx.translate(size / 2, size / 2 + bob);
           ctx.scale(pulse, pulse);
           ctx.fillStyle = '#ffffff';
           ctx.strokeStyle = prof.color;
-          ctx.lineWidth = 8;
+          ctx.lineWidth = tier.key === 'master' ? 10 : 8;
           ctx.beginPath();
-          ctx.arc(0, 0, 58, 0, Math.PI * 2);
+          ctx.arc(0, 0, tier.coreRadius, 0, Math.PI * 2);
           ctx.fill();
           ctx.stroke();
-          ctx.font = '64px sans-serif';
+          if (tier.key === 'elite' || tier.key === 'master') {
+            ctx.globalAlpha = 0.16;
+            ctx.fillStyle = prof.color;
+            ctx.beginPath();
+            ctx.arc(0, 0, tier.coreRadius + 16, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.globalAlpha = 1;
+          }
+          ctx.font = tier.iconSize + 'px sans-serif';
           ctx.textAlign = 'center';
           ctx.textBaseline = 'middle';
           ctx.fillText(prof.icon, 0, 2);
           ctx.restore();
 
+          if (tier.badge) {
+            ctx.save();
+            ctx.fillStyle = tier.key === 'master' ? '#fbbf24' : prof.color;
+            ctx.strokeStyle = '#ffffff';
+            ctx.lineWidth = 3;
+            ctx.beginPath();
+            drawRoundedRectPath(ctx, size / 2 - 46, size * 0.235, 92, 28, 12);
+            ctx.fill();
+            ctx.stroke();
+            ctx.fillStyle = tier.key === 'master' ? '#78350f' : '#ffffff';
+            ctx.font = '800 13px sans-serif';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(tier.badge, size / 2, size * 0.235 + 14);
+            ctx.restore();
+          }
+
           ctx.fillStyle = '#1e1b4b';
           ctx.font = '700 24px sans-serif';
           ctx.textAlign = 'center';
-          ctx.fillText('LV.' + level, size / 2, size * 0.82);
+          ctx.fillText('LV.' + level + ' · ' + tier.label, size / 2, size * 0.82);
           ctx.fillStyle = prof.color;
           ctx.font = '700 18px sans-serif';
           ctx.fillText(prof.thaiLabel, size / 2, size * 0.88);
