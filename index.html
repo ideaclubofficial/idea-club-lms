@@ -17550,38 +17550,42 @@
     async function saveStudentGamificationAward(profile, event) {
       if (!firebaseReady || !db || !firebaseUser) throw new Error('Firebase ยังไม่พร้อมสำหรับบันทึกคะแนนสะสม');
       const now = firebase.firestore.FieldValue.serverTimestamp();
-      const batch = db.batch();
       const profileId = String(profile.firebaseDocId || profile.id || getStudentGamificationProfileId(currentStudent));
       const eventId = String(event.firebaseDocId || event.id || getStudentGamificationEventId(event.sourceType, event.sourceId));
       profile.id = profileId;
       profile.firebaseDocId = profileId;
       event.id = eventId;
       event.firebaseDocId = eventId;
-      batch.set(db.collection('studentGamificationProfiles').doc(profileId), Object.assign({}, profile, {
+      const coreBatch = db.batch();
+      coreBatch.set(db.collection('studentGamificationProfiles').doc(profileId), Object.assign({}, profile, {
         firebaseDocId: profileId,
         deleted: false,
         updatedAt: now
       }), { merge: true });
-      batch.set(db.collection('studentGamificationEvents').doc(eventId), Object.assign({}, event, {
+      coreBatch.set(db.collection('studentGamificationEvents').doc(eventId), Object.assign({}, event, {
         firebaseDocId: eventId,
         deleted: false,
         createdAt: now,
         updatedAt: now
       }), { merge: true });
-      batch.set(db.collection('gamificationLeaderboard').doc(profileId), {
-        firebaseDocId: profileId,
-        displayName: getGamificationLeaderboardDisplayName(profile),
-        nickname: String(profile.nickname || '').trim(),
-        studentName: String(profile.studentName || '').trim(),
-        level: profile.level || 1,
-        exp: profile.exp || 0,
-        coins: profile.coins || 0,
-        profession: profile.profession || 'IDEA Explorer',
-        deleted: false,
-        updatedAt: now
-      }, { merge: true });
-      await batch.commit();
+      await coreBatch.commit();
       updateLeaderboardProfileInMemory(profileId, profile);
+      try {
+        await db.collection('gamificationLeaderboard').doc(profileId).set({
+          firebaseDocId: profileId,
+          displayName: getGamificationLeaderboardDisplayName(profile),
+          nickname: String(profile.nickname || '').trim(),
+          studentName: String(profile.studentName || '').trim(),
+          level: profile.level || 1,
+          exp: profile.exp || 0,
+          coins: profile.coins || 0,
+          profession: profile.profession || 'IDEA Explorer',
+          deleted: false,
+          updatedAt: now
+        }, { merge: true });
+      } catch (e) {
+        console.warn('saveStudentGamificationAward leaderboard error:', e);
+      }
     }
 
     function updateLeaderboardProfileInMemory(profileId, profile) {
@@ -18222,10 +18226,9 @@
       updateLeaderboardProfileInMemory(profileId, profile);
       renderStudentGamificationPanel();
       closeEditBubble();
+      const now = firebase.firestore.FieldValue.serverTimestamp();
       try {
-        const now = firebase.firestore.FieldValue.serverTimestamp();
-        const batch = db.batch();
-        batch.set(db.collection('studentGamificationProfiles').doc(profileId), {
+        await db.collection('studentGamificationProfiles').doc(profileId).set({
           firebaseDocId: profileId,
           id: profileId,
           studentId: getStudentRecordDocId(currentStudent),
@@ -18240,7 +18243,11 @@
           deleted: false,
           updatedAt: now
         }, { merge: true });
-        batch.set(db.collection('gamificationLeaderboard').doc(profileId), {
+      } catch (e) {
+        console.error('saveStudentProfession error:', e);
+      }
+      try {
+        await db.collection('gamificationLeaderboard').doc(profileId).set({
           firebaseDocId: profileId,
           displayName: getGamificationLeaderboardDisplayName(profile),
           nickname: String(profile.nickname || '').trim(),
@@ -18252,9 +18259,8 @@
           deleted: false,
           updatedAt: now
         }, { merge: true });
-        await batch.commit();
       } catch (e) {
-        console.error('saveStudentProfession error:', e);
+        console.warn('saveStudentProfession leaderboard error:', e);
       }
     }
 
