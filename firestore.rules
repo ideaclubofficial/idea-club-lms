@@ -337,15 +337,43 @@ service cloud.firestore {
     }
 
     match /studentGamificationProfiles/{docId} {
-      allow read: if hasStaffAccountType() || ownsExistingGamificationDoc();
-      allow create, update: if hasStaffAccountType() || ownsIncomingGamificationDoc();
+      allow read: if hasStaffAccountType() || ownsExistingGamificationDoc()
+                   || (signedIn() && resource.data.authUid == request.auth.uid);
+      allow create, update: if hasStaffAccountType() || ownsIncomingGamificationDoc()
+                   || (signedIn() && request.resource.data.authUid == request.auth.uid
+                       && request.resource.data.deleted == false);
       allow delete: if isAdmin();
     }
 
     match /studentGamificationEvents/{docId} {
-      allow read: if hasStaffAccountType() || ownsExistingGamificationDoc();
-      allow create, update: if hasStaffAccountType() || ownsIncomingGamificationDoc();
+      allow read: if hasStaffAccountType() || ownsExistingGamificationDoc()
+                   || (signedIn() && resource.data.authUid == request.auth.uid);
+      allow create, update: if hasStaffAccountType() || ownsIncomingGamificationDoc()
+                   || (signedIn() && request.resource.data.authUid == request.auth.uid
+                       && request.resource.data.deleted == false);
       allow delete: if isAdmin();
+    }
+
+    match /gamificationLeaderboard/{docId} {
+      allow read: if signedIn();
+      allow create, update: if hasStaffAccountType()
+                   || (signedIn() && request.resource.data.firebaseDocId == docId
+                       && request.resource.data.deleted == false);
+      allow delete: if isAdmin();
+    }
+
+    match /gamificationRewards/{docId} {
+      allow read: if signedIn();
+      allow write: if isAdmin();
+    }
+
+    match /gamificationRedemptions/{docId} {
+      allow read: if hasStaffAccountType() || ownsExistingGamificationDoc()
+                   || (signedIn() && resource.data.authUid == request.auth.uid);
+      allow create: if hasStaffAccountType() || ownsIncomingGamificationDoc()
+                   || (signedIn() && request.resource.data.authUid == request.auth.uid
+                       && request.resource.data.deleted == false);
+      allow update, delete: if hasStaffAccountType();
     }
 
     match /monthlyQuestions/{docId} {
