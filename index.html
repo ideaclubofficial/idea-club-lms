@@ -1170,6 +1170,93 @@
       min-width: 180px;
     }
 
+    .teacher-mini-calendar {
+      width: 100%;
+      border-collapse: collapse;
+      margin-bottom: 12px;
+    }
+
+    .teacher-mini-calendar th {
+      text-align: center;
+      font-size: 11px;
+      font-weight: 700;
+      color: #64748b;
+      padding: 4px 2px;
+    }
+
+    .teacher-mini-calendar td {
+      text-align: center;
+      padding: 3px 2px;
+    }
+
+    .teacher-mini-cal-day {
+      display: inline-flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: flex-start;
+      width: 36px;
+      height: 44px;
+      border-radius: 8px;
+      cursor: pointer;
+      padding-top: 4px;
+      gap: 3px;
+      font-size: 13px;
+      font-weight: 600;
+      color: #374151;
+      transition: background 0.15s;
+    }
+
+    .teacher-mini-cal-day:hover { background: #f1f5f9; }
+
+    .teacher-mini-cal-day.today {
+      background: #1e40af;
+      color: #fff;
+    }
+
+    .teacher-mini-cal-day.selected {
+      background: #3b82f6;
+      color: #fff;
+    }
+
+    .teacher-mini-cal-day.today.selected {
+      background: #1d4ed8;
+      color: #fff;
+    }
+
+    .teacher-mini-cal-dots {
+      display: flex;
+      gap: 2px;
+      justify-content: center;
+      flex-wrap: wrap;
+      max-width: 28px;
+    }
+
+    .teacher-mini-cal-dot {
+      width: 5px;
+      height: 5px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+
+    .teacher-mini-cal-empty { color: #d1d5db; cursor: default; }
+    .teacher-mini-cal-empty:hover { background: transparent; }
+
+    .teacher-cal-agenda-header {
+      font-size: 14px;
+      font-weight: 700;
+      color: #1e40af;
+      padding: 8px 0 6px;
+      border-top: 1px solid #e5e7eb;
+      margin-top: 4px;
+    }
+
+    .teacher-cal-agenda-empty {
+      font-size: 13px;
+      color: #9ca3af;
+      padding: 12px 0;
+      text-align: center;
+    }
+
     .student-schedule-calendar {
       display: grid;
       grid-template-columns: repeat(7, minmax(120px, 1fr));
@@ -26511,6 +26598,87 @@ function receiptStatusText(status) {
       if (mobileCard) mobileCard.classList.remove('hidden');
     }
 
+    let teacherCalSelectedDate = '';
+
+    function selectTeacherCalendarDay(dateKey) {
+      teacherCalSelectedDate = dateKey;
+      const panel = getElement('teacherMonthlyPlanList');
+      if (!panel) return;
+      // update selected highlight
+      panel.querySelectorAll('.teacher-mini-cal-day').forEach(function(el) {
+        el.classList.remove('selected');
+        if (el.dataset.date === dateKey) el.classList.add('selected');
+      });
+      // update agenda
+      const agendaEl = getElement('teacherCalAgenda');
+      if (!agendaEl) return;
+      const sessions = (monthlyPlanSessions || []).filter(function(s) {
+        return isMonthlySessionForTeacher(s, currentTeacher) &&
+          (s.status || 'draft') !== 'cancelled' &&
+          getMonthlySessionDate(s) === dateKey;
+      }).sort(function(a, b) { return (a.timeStart || '').localeCompare(b.timeStart || ''); });
+      const date = new Date(dateKey + 'T00:00:00');
+      const dayLabel = getMonthlyPlanDayText(getMonthlyPlanDayKey(date)) + ' ' + date.getDate() + ' ' + getThaiMonthLabel(dateKey.slice(0, 7), true);
+      agendaEl.innerHTML = '<div class="teacher-cal-agenda-header">' + escapeHtml(dayLabel) + '</div>' +
+        (sessions.length
+          ? sessions.map(renderTeacherScheduleCard).join('')
+          : '<div class="teacher-cal-agenda-empty">ไม่มีคาบในวันนี้</div>');
+    }
+
+    function renderTeacherMiniCalendar(monthKey, sessions, selectedDate) {
+      const days = getMonthlyPlanGridDays(monthKey);
+      if (!days.length) return '';
+      const today = getLocalDateString();
+      // build map: dateKey → array of type colors
+      const TYPE_DOT_COLOR = { onsite:'#3b82f6', online:'#22c55e', ondemand:'#a855f7', makeup:'#eab308', holiday:'#ef4444', oneOnOne:'#f43f5e' };
+      const dayMap = {};
+      sessions.forEach(function(s) {
+        const dk = getMonthlySessionDate(s);
+        if (!dk) return;
+        if (!dayMap[dk]) dayMap[dk] = [];
+        const type = s.status === 'holiday' ? 'holiday' : (s.type || 'onsite');
+        dayMap[dk].push(TYPE_DOT_COLOR[type] || '#3b82f6');
+      });
+      // build 7-column week grid, starting Monday
+      const firstDay = days[0];
+      // pad with empty cells before first day (0=Sun,1=Mon,...6=Sat → shift so Mon=0)
+      const startDow = (firstDay.getDay() + 6) % 7; // Mon-based
+      const allCells = [];
+      for (let i = 0; i < startDow; i++) allCells.push(null);
+      days.forEach(function(d) { allCells.push(d); });
+      while (allCells.length % 7 !== 0) allCells.push(null);
+      const weeks = [];
+      for (let i = 0; i < allCells.length; i += 7) weeks.push(allCells.slice(i, i + 7));
+      const dayNames = ['จ','อ','พ','พฤ','ศ','ส','อา'];
+      let html = '<table class="teacher-mini-calendar"><thead><tr>';
+      dayNames.forEach(function(d) { html += '<th>' + d + '</th>'; });
+      html += '</tr></thead><tbody>';
+      weeks.forEach(function(week) {
+        html += '<tr>';
+        week.forEach(function(date) {
+          if (!date) { html += '<td></td>'; return; }
+          const dk = date.getFullYear() + '-' + padNumber(date.getMonth() + 1, 2) + '-' + padNumber(date.getDate(), 2);
+          const dots = dayMap[dk] || [];
+          const isToday = dk === today;
+          const isSel = dk === selectedDate;
+          let cls = 'teacher-mini-cal-day';
+          if (isToday) cls += ' today';
+          if (isSel) cls += ' selected';
+          if (!dots.length) cls += ' teacher-mini-cal-empty';
+          const dotHtml = dots.length
+            ? '<div class="teacher-mini-cal-dots">' + dots.slice(0, 3).map(function(c) {
+                return '<span class="teacher-mini-cal-dot" style="background:' + c + ';"></span>';
+              }).join('') + '</div>'
+            : '';
+          html += '<td><div class="' + cls + '" data-date="' + dk + '" onclick="' + (dots.length ? 'selectTeacherCalendarDay(\'' + dk + '\')' : '') + '">' +
+            date.getDate() + dotHtml + '</div></td>';
+        });
+        html += '</tr>';
+      });
+      html += '</tbody></table>';
+      return html;
+    }
+
     function renderTeacherScheduleCard(session) {
       const typeKey = session.status === 'holiday' ? 'holiday' : (session.type || 'onsite');
       const statusClass = session.status === 'holiday' ? 'status-absent' : (session.status === 'done' ? 'status-paid' : (session.type === 'makeup' || session.isMakeup ? 'status-paid' : 'status-waiting'));
@@ -26525,17 +26693,25 @@ function receiptStatusText(status) {
     }
 
     function renderTeacherScheduleCalendar(monthKey, sessions) {
-      const days = getMonthlyPlanGridDays(monthKey);
-      if (!days.length) return '<div class="notice">ยังไม่มีเดือนตารางสอนให้แสดง</div>';
-      return '<div class="student-schedule-calendar">' + days.map(function(date) {
-        const dateKey = date.getFullYear() + '-' + padNumber(date.getMonth() + 1, 2) + '-' + padNumber(date.getDate(), 2);
-        const daySessions = sessions.filter(function(s) { return getMonthlySessionDate(s) === dateKey; })
-          .sort(function(a, b) { return (a.timeStart || '').localeCompare(b.timeStart || ''); });
-        return '<div class="student-schedule-day">' +
-          '<div class="student-schedule-day-header"><span>' + escapeHtml(getMonthlyPlanDayText(getMonthlyPlanDayKey(date))) + '</span><strong>' + date.getDate() + '</strong></div>' +
-          (daySessions.length ? daySessions.map(renderTeacherScheduleCard).join('') : '<span class="mini-muted">-</span>') +
-        '</div>';
-      }).join('') + '</div>';
+      // pick initial selected date: today if has sessions, else first session day
+      const today = getLocalDateString();
+      const sessionDates = sessions.map(function(s) { return getMonthlySessionDate(s); }).filter(Boolean).sort();
+      const initDate = sessionDates.includes(today) ? today : (sessionDates[0] || today);
+      if (!teacherCalSelectedDate || !sessionDates.includes(teacherCalSelectedDate)) {
+        teacherCalSelectedDate = initDate;
+      }
+      const miniCal = renderTeacherMiniCalendar(monthKey, sessions, teacherCalSelectedDate);
+      // agenda for selected date
+      const agendaSessions = sessions.filter(function(s) {
+        return getMonthlySessionDate(s) === teacherCalSelectedDate;
+      }).sort(function(a, b) { return (a.timeStart || '').localeCompare(b.timeStart || ''); });
+      const selDate = new Date(teacherCalSelectedDate + 'T00:00:00');
+      const dayLabel = getMonthlyPlanDayText(getMonthlyPlanDayKey(selDate)) + ' ' + selDate.getDate() + ' ' + getThaiMonthLabel(teacherCalSelectedDate.slice(0, 7), true);
+      const agendaHtml = '<div class="teacher-cal-agenda-header">' + escapeHtml(dayLabel) + '</div>' +
+        (agendaSessions.length
+          ? agendaSessions.map(renderTeacherScheduleCard).join('')
+          : '<div class="teacher-cal-agenda-empty">ไม่มีคาบในวันนี้</div>');
+      return miniCal + '<div id="teacherCalAgenda">' + agendaHtml + '</div>';
     }
 
     function renderTeacherMonthlyPlanSummary() {
