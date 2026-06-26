@@ -14610,7 +14610,7 @@
     }
 
     function getPrivateLessonBillingTeacherKey(session) {
-      return String(session.teacherId || session.teacherUid || session.teacherAuthUid || session.teacherName || '').trim();
+      return getSessionTeacherPlannerId(session) || String(session.teacherName || '').trim();
     }
 
     function getPrivateLessonBillingStudentKey(session) {
@@ -25483,7 +25483,29 @@ function receiptStatusText(status) {
 
     function getSessionTeacherKey(session) {
       if (!session) return '';
-      return String(session.teacherUid || session.teacherAuthUid || session.authUid || session.teacherId || session.teacherName || '').trim();
+      return getSessionTeacherPlannerId(session);
+    }
+
+    function getTeacherPlannerIdFromValues(values) {
+      const keys = (values || []).map(function(value) { return String(value || '').trim(); }).filter(Boolean);
+      for (let i = 0; i < keys.length; i += 1) {
+        const teacher = findTeacherByPlannerId(keys[i]);
+        if (teacher) return getTeacherPlannerId(teacher);
+      }
+      return keys[0] || '';
+    }
+
+    function getSessionTeacherPlannerId(session) {
+      if (!session) return '';
+      return getTeacherPlannerIdFromValues([
+        session.teacherId,
+        session.teacherDocId,
+        session.tutorId,
+        session.teacherUid,
+        session.teacherAuthUid,
+        session.authUid,
+        session.teacherEmail
+      ]);
     }
 
     function getTeacherIdentitySet(teacher) {
@@ -26508,9 +26530,9 @@ function receiptStatusText(status) {
 
     function getSessionDisplaySubject(session) {
       if (!session) return '';
-      const tutorId = session.teacherId || session.tutorId || '';
+      const tutorId = getSessionTeacherPlannerId(session);
       if (tutorId) {
-        const t = (teachers || []).find(function(t) { return (t.id || t.firebaseDocId || '') === tutorId; });
+        const t = findTeacherByPlannerId(tutorId);
         if (t && t.subject) return t.subject;
       }
       return session.subject || '';
@@ -26542,7 +26564,8 @@ function receiptStatusText(status) {
         });
         const agendaEl = panel.querySelector('#studentCalAgenda');
         if (!agendaEl) return;
-        const sessions = (monthlyPlanSessions || []).filter(function(s) {
+        const selectedCourse = getCurrentStudentCourse();
+        const sessions = getStudentMonthlyPlanSessionsForCalendar(selectedCourse).filter(function(s) {
           return getMonthlySessionDate(s) === dateKey;
         }).sort(function(a, b) { return (a.timeStart || '').localeCompare(b.timeStart || ''); });
         const date = new Date(dateKey + 'T00:00:00');
@@ -27475,11 +27498,14 @@ function receiptStatusText(status) {
     function isTeacherAvailableForSession(teacherId, date, start, end, previewList) {
       if (!teacherId) return false;
       const key = String(teacherId || '');
+      const teacher = findTeacherByPlannerId(key);
       const checkAgainst = (previewList || []).concat(monthlyPlanSessions || []);
       for (let i = 0; i < checkAgainst.length; i += 1) {
         const s = checkAgainst[i];
-        const sTeacherKey = String(s.teacherId || s.teacherUid || s.teacherAuthUid || '');
-        if (!sTeacherKey || String(sTeacherKey) !== key) continue;
+        const sameTeacher = teacher
+          ? isMonthlySessionForTeacher(s, teacher)
+          : getSessionTeacherPlannerId(s) === key;
+        if (!sameTeacher) continue;
         const sDate = getMonthlySessionDate(s);
         if (!sDate || sDate !== date) continue;
         const range = getMonthlySessionTimeRange(s);
@@ -29016,7 +29042,7 @@ function receiptStatusText(status) {
         return;
       }
       if (!confirm('ต้องการเติมวิชา Online คาบนี้เป็น ' + newSubject + ' ใช่หรือไม่?')) return;
-      const currentTeacher = findTeacherByPlannerId(session.teacherId || session.teacherUid || session.teacherAuthUid || '');
+      const currentTeacher = findTeacherByPlannerId(getSessionTeacherPlannerId(session));
       const fields = { subject: newSubject };
       const subjectSetting = getMonthlySubjectSetting(Object.assign({}, session, { subject: newSubject }), newSubject);
       if (!currentTeacher || !teacherCanTeachSubject(currentTeacher, newSubject) || !canTeacherTeachMode(currentTeacher, session.type, subjectSetting)) {
@@ -37953,7 +37979,7 @@ function receiptStatusText(status) {
       return {
         id: s.id || s.firebaseDocId || '',
         courseId: s.courseId || '',
-        tutorId: s.teacherId || s.teacherUid || s.teacherAuthUid || s.authUid || '',
+        tutorId: getSessionTeacherPlannerId(s),
         format: s.type || s.format || 'onsite',
         center: s.center || s.courseLocation || '',
         date: tfGetSessionDateText(s),
@@ -38866,7 +38892,7 @@ function receiptStatusText(status) {
 
       // Tutor
       tfPopulateSchedTutors(format);
-      const tutorId = session.teacherId || session.teacherUid || '';
+      const tutorId = getSessionTeacherPlannerId(session);
       if (tfEl('tf-sched-tutor')) tfEl('tf-sched-tutor').value = tutorId;
       tfShowTutorSubject();
 
