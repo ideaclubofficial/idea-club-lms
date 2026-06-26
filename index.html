@@ -1257,6 +1257,38 @@
       text-align: center;
     }
 
+    .teacher-cal-month-nav {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .teacher-cal-month-nav button {
+      background: none;
+      border: 1px solid #d1d5db;
+      border-radius: 8px;
+      width: 32px;
+      height: 32px;
+      font-size: 18px;
+      line-height: 1;
+      cursor: pointer;
+      color: #374151;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 0;
+    }
+
+    .teacher-cal-month-nav button:hover { background: #f3f4f6; }
+
+    #teacherCalMonthLabel {
+      font-size: 15px;
+      font-weight: 700;
+      color: #1e3a8a;
+      min-width: 110px;
+      text-align: center;
+    }
+
     .student-schedule-calendar {
       display: grid;
       grid-template-columns: repeat(7, minmax(120px, 1fr));
@@ -3958,8 +3990,13 @@
               <h3>ตารางสอนรายเดือน</h3>
               <div class="student-schedule-toolbar" style="margin-bottom:14px;">
                 <div id="teacherMonthlyPlanMeta" class="mini-muted"></div>
-                <select id="teacherMonthlyPlanMonthFilter" onchange="renderTeacherMonthlyPlanSummary()"></select>
+                <div class="teacher-cal-month-nav">
+                  <button type="button" onclick="teacherCalNavMonth(-1)">&#8249;</button>
+                  <span id="teacherCalMonthLabel">—</span>
+                  <button type="button" onclick="teacherCalNavMonth(1)">&#8250;</button>
+                </div>
               </div>
+              <select id="teacherMonthlyPlanMonthFilter" style="display:none;"></select>
               <div id="teacherMonthlyPlanList"><p class="mini-muted">กำลังโหลดตารางสอน...</p></div>
             </div>
 
@@ -26608,6 +26645,19 @@ function receiptStatusText(status) {
     }
 
     let teacherCalSelectedDate = '';
+    let teacherCalViewMonth = '';
+
+    function teacherCalNavMonth(delta) {
+      const base = teacherCalViewMonth || getLocalDateString().slice(0, 7);
+      const parts = base.split('-');
+      let year = parseInt(parts[0]);
+      let month = parseInt(parts[1]) - 1 + delta;
+      if (month < 0) { month += 12; year--; }
+      if (month > 11) { month -= 12; year++; }
+      teacherCalViewMonth = year + '-' + padNumber(month + 1, 2);
+      teacherCalSelectedDate = '';
+      renderTeacherMonthlyPlanSummary();
+    }
 
     function selectTeacherCalendarDay(dateKey) {
       teacherCalSelectedDate = dateKey;
@@ -26743,16 +26793,11 @@ function receiptStatusText(status) {
       });
       months.sort();
       const currentMonthKey = getLocalDateString().slice(0, 7);
-      const currentValue = monthSelect ? monthSelect.value : '';
-      const selectedMonth = months.indexOf(currentValue) !== -1 ? currentValue : (months.indexOf(currentMonthKey) !== -1 ? currentMonthKey : (months[0] || ''));
-      if (monthSelect) {
-        monthSelect.innerHTML = months.length
-          ? months.map(function(m) { return '<option value="' + escapeHtml(m) + '">' + escapeHtml(getThaiMonthLabel(m, false) || m) + '</option>'; }).join('')
-          : '<option value="">ยังไม่มีตาราง</option>';
-        if (selectedMonth) monthSelect.value = selectedMonth;
-      }
+      if (!teacherCalViewMonth) teacherCalViewMonth = currentMonthKey;
+      const effectiveMonth = teacherCalViewMonth;
+      const monthLabel = getElement('teacherCalMonthLabel');
+      if (monthLabel) monthLabel.textContent = getThaiMonthLabel(effectiveMonth, false) || effectiveMonth;
       if (meta) meta.textContent = (currentTeacher.name || currentTeacher.displayName || '') + (allSessions.length ? ' · ' + allSessions.length + ' คาบทั้งหมด' : '');
-      const effectiveMonth = selectedMonth || currentMonthKey;
       const monthSessions = allSessions.filter(function(session) { return getMonthlySessionMonthKey(session) === effectiveMonth; });
       box.innerHTML = renderTeacherScheduleCalendar(effectiveMonth, monthSessions);
     }
