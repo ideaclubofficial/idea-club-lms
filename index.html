@@ -9387,24 +9387,29 @@
     async function reserveNextMemberId(grade, yearBE) {
       if (!PRODUCTION_MODE || !firebaseReady || !db) return getNextMemberIdByGrade(grade);
       const parts = getMemberIdParts(grade, yearBE);
-      return db.runTransaction(async function(transaction) {
-        const ref = db.collection('counters').doc(parts.counterId);
-        const snapshot = await transaction.get(ref);
-        const current = snapshot.exists ? Number(snapshot.data().current || 0) || 0 : 0;
-        const baseline = Math.max(current, getMaxMemberRunningByGrade(grade, parts.yearBE));
-        const next = baseline + 1;
-        transaction.set(ref, {
-          type: 'memberId',
-          yearBE: parts.yearBE,
-          grade: parts.grade,
-          gradeCode: parts.gradeCode,
-          prefix: parts.prefix,
-          current: next,
-          updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
-          updatedBy: firebaseUser && firebaseUser.uid ? firebaseUser.uid : ''
-        }, { merge: true });
-        return parts.prefix + padNumber(next, 4);
-      });
+      try {
+        return await db.runTransaction(async function(transaction) {
+          const ref = db.collection('counters').doc(parts.counterId);
+          const snapshot = await transaction.get(ref);
+          const current = snapshot.exists ? Number(snapshot.data().current || 0) || 0 : 0;
+          const baseline = Math.max(current, getMaxMemberRunningByGrade(grade, parts.yearBE));
+          const next = baseline + 1;
+          transaction.set(ref, {
+            type: 'memberId',
+            yearBE: parts.yearBE,
+            grade: parts.grade,
+            gradeCode: parts.gradeCode,
+            prefix: parts.prefix,
+            current: next,
+            updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
+            updatedBy: firebaseUser && firebaseUser.uid ? firebaseUser.uid : ''
+          }, { merge: true });
+          return parts.prefix + padNumber(next, 4);
+        });
+      } catch (error) {
+        console.warn('reserveNextMemberId fallback to local (transaction failed):', error && (error.code || error.message));
+        return getNextMemberIdByGrade(grade);
+      }
     }
 
     let lastTeacherIdFallbackReason = '';
