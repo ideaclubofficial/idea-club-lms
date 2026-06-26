@@ -19163,9 +19163,10 @@
     }
 
     function paymentActionButtons(status, paymentId) {
-      const isPaid = status === 'ชำระแล้ว';
-      const rowIdScript = 'openSlipReviewModal(this.closest(\'[data-payment-id]\').dataset.paymentId)';
       const p = paymentId ? (payments || []).find(function(px) { return String(px.id || '') === String(paymentId) || String(px.firebaseDocId || '') === String(paymentId); }) : null;
+      const displayStatus = p ? getPaymentDisplayStatus(p) : status;
+      const isPaid = displayStatus === 'ชำระแล้ว';
+      const rowIdScript = 'openSlipReviewModal(this.closest(\'[data-payment-id]\').dataset.paymentId)';
       const bundle = getPaymentBundleForPayment(p);
       if (bundle && bundle.status !== 'ยกเลิก' && bundle.status !== 'cancelled') {
         return '<div class="payment-actions-wrap">' +
@@ -19175,9 +19176,20 @@
         '</div>';
       }
       const ocrBtn = p && paymentHasOcrData(p) ? '<button class="btn btn-blue" type="button" onclick="' + actionCall('viewPaymentOcrDetail', paymentId) + '">OCR</button>' : '';
+      if (isPaid) {
+        return '<div class="payment-actions-wrap">' +
+          '<button class="btn btn-blue" type="button" onclick="' + rowIdScript + '">ตรวจสลิป</button>' +
+          '<button class="btn btn-green" type="button" onclick="createReceiptFromPaymentRow(this)">ใบเสร็จ</button>' +
+          '<button class="btn btn-blue" type="button" onclick="showPaymentDetail(this)">ดูข้อมูล</button>' +
+          ocrBtn +
+          '<button class="btn btn-blue" type="button" onclick="editPaymentAmountDiscount(this)">แก้ยอด</button>' +
+          '<button class="btn btn-dark" type="button" onclick="editPaymentAdminNote(this)">หมายเหตุ</button>' +
+          '<button class="btn btn-red" type="button" onclick="deletePaymentRecord(this)">ลบ</button>' +
+        '</div>';
+      }
       return '<div class="payment-actions-wrap">' +
         '<button class="btn btn-blue" type="button" onclick="' + rowIdScript + '">ตรวจสลิป</button>' +
-        '<button class="btn btn-green" type="button" onclick="approvePayment(this)">' + (isPaid ? '✓ อนุมัติ' : 'อนุมัติ') + '</button>' +
+        '<button class="btn btn-green" type="button" onclick="approvePayment(this)">อนุมัติ</button>' +
         '<button class="btn btn-red" type="button" onclick="rejectPayment(this)">ไม่ผ่าน</button>' +
         '<button class="btn btn-dark" type="button" onclick="paymentCash(this)">💵 จ่ายเงินสด</button>' +
         '<button class="btn btn-red" type="button" onclick="setPaymentOverdue(this)">ค้างชำระ</button>' +
@@ -19585,6 +19597,11 @@
       if (!row) return;
       const paymentId = row.getAttribute('data-payment-id');
       const payment = findPaymentByAnyId(paymentId);
+      const nameCell = row.children[1];
+      const monthCell = row.children[3];
+      const slipCell = row.children[5];
+      const statusCell = row.children[6];
+      const actionCell = row.children[7];
       if (payment) {
         payment.status = status;
         payment.paymentStatus = status;
@@ -19600,8 +19617,8 @@
         addActivityLog('เปลี่ยนสถานะชำระเงิน', (payment.student || '-') + ' · ' + (payment.month || '-') + ' · ' + status);
       }
       if (status === 'ชำระแล้ว') {
-        row.children[4].innerHTML = payment ? formatPaymentSlipReviewCell(payment) : '<span class="status-paid">ตรวจแล้ว</span>';
-        row.children[5].innerHTML = '<span class="status-paid">ชำระแล้ว</span>';
+        if (slipCell) slipCell.innerHTML = payment ? formatPaymentSlipReviewCell(payment) : '<span class="status-paid">ตรวจแล้ว</span>';
+        if (statusCell) statusCell.innerHTML = '<span class="status-paid">ชำระแล้ว</span>';
         if (payment) {
           const receipt = await issueReceiptFromPayment(payment);
           if (receipt) {
@@ -19615,23 +19632,23 @@
           await syncStudentPaymentStatusFromRow(row, 'ชำระแล้ว');
         }
       } else if (status === 'สลิปไม่ผ่าน') {
-        row.children[4].innerHTML = payment ? formatPaymentSlipReviewCell(payment) : '<span class="status-absent">สลิปไม่ผ่าน</span>';
-        row.children[5].innerHTML = '<span class="status-absent">สลิปไม่ผ่าน</span>';
+        if (slipCell) slipCell.innerHTML = payment ? formatPaymentSlipReviewCell(payment) : '<span class="status-absent">สลิปไม่ผ่าน</span>';
+        if (statusCell) statusCell.innerHTML = '<span class="status-absent">สลิปไม่ผ่าน</span>';
         if (payment) await syncStudentPaymentStatusFromPayment(payment, 'สลิปไม่ผ่าน');
         else await syncStudentPaymentStatusFromRow(row, 'สลิปไม่ผ่าน');
       } else if (status === 'ค้างชำระ') {
-        row.children[4].innerHTML = payment ? formatPaymentSlipReviewCell(payment) : '<span class="status-absent">ยังไม่พบสลิป</span>';
-        row.children[5].innerHTML = '<span class="status-absent">ค้างชำระ</span>';
+        if (slipCell) slipCell.innerHTML = payment ? formatPaymentSlipReviewCell(payment) : '<span class="status-absent">ยังไม่พบสลิป</span>';
+        if (statusCell) statusCell.innerHTML = '<span class="status-absent">ค้างชำระ</span>';
         if (payment) await syncStudentPaymentStatusFromPayment(payment, 'ค้างชำระ');
         else await syncStudentPaymentStatusFromRow(row, 'ค้างชำระ');
       } else {
-        row.children[4].innerHTML = payment ? formatPaymentSlipReviewCell(payment) : '<span class="status-waiting">มีสลิป</span>';
-        row.children[5].innerHTML = '<span class="status-waiting">รอตรวจสลิป</span>';
+        if (slipCell) slipCell.innerHTML = payment ? formatPaymentSlipReviewCell(payment) : '<span class="status-waiting">มีสลิป</span>';
+        if (statusCell) statusCell.innerHTML = '<span class="status-waiting">รอตรวจสลิป</span>';
         if (payment) await syncStudentPaymentStatusFromPayment(payment, 'รอตรวจสลิป');
         else await syncStudentPaymentStatusFromRow(row, 'รอตรวจสลิป');
       }
-      row.children[6].innerHTML = paymentActionButtons(status, paymentId);
-      addActivityLog('เปลี่ยนสถานะชำระเงิน', (row.children[0] ? row.children[0].innerText : '-') + ' · ' + (row.children[2] ? row.children[2].innerText : '-') + ' · ' + status);
+      if (actionCell) actionCell.innerHTML = paymentActionButtons(status, paymentId);
+      addActivityLog('เปลี่ยนสถานะชำระเงิน', (nameCell ? nameCell.innerText : '-') + ' · ' + (monthCell ? monthCell.innerText : '-') + ' · ' + status);
       updatePaymentSummary();
       renderAdminReceipts();
       renderStudentReceipts();
@@ -19840,8 +19857,8 @@
 
     async function syncStudentPaymentStatusFromRow(row, status) {
       if (!row) return;
-      const studentName = row.children[0] ? row.children[0].innerText.trim() : '';
-      const month = row.children[2] ? row.children[2].innerText.trim() : '';
+      const studentName = row.children[1] ? row.children[1].innerText.trim() : '';
+      const month = row.children[3] ? row.children[3].innerText.trim() : '';
       const student = students.find(function(s) { return s.name === studentName; });
       if (!student) return;
 
@@ -19874,8 +19891,8 @@
 
       const message = [
         'แจ้งเตือนค้างชำระเรียบร้อย',
-        'นักเรียน: ' + row.children[0].innerText,
-        'เดือน: ' + row.children[2].innerText
+        'นักเรียน: ' + (row.children[1] ? row.children[1].innerText : '-'),
+        'เดือน: ' + (row.children[3] ? row.children[3].innerText : '-')
       ].join(String.fromCharCode(10));
 
       alert(message);
@@ -20682,8 +20699,8 @@
 
           if (oldMonth !== newMonth) {
             document.querySelectorAll('#paymentTableBody tr').forEach(function(row) {
-              if (row.children[2] && row.children[2].innerText.trim() === oldMonth) {
-                row.children[2].textContent = newMonth;
+              if (row.children[3] && row.children[3].innerText.trim() === oldMonth) {
+                row.children[3].textContent = newMonth;
               }
             });
 
@@ -20732,7 +20749,7 @@
     }
 
     function getStudentByPaymentRow(row) {
-      const studentName = row && row.children[0] ? row.children[0].innerText.trim() : '';
+      const studentName = row && row.children[1] ? row.children[1].innerText.trim() : '';
       return students.find(function(s) { return s.name === studentName; }) || null;
     }
 
@@ -21367,15 +21384,15 @@
         authUid: payment ? payment.authUid : '',
         courseId: payment ? payment.courseId : '',
         phone: payment ? (payment.phone || payment.studentPhone || '') : '',
-        student: payment ? (payment.student || '-') : (row && row.children[0] ? row.children[0].innerText.trim() : '-'),
-        course: payment ? (payment.course || '-') : (row && row.children[1] ? row.children[1].innerText.trim() : '-'),
-        month: payment ? (payment.month || '-') : (row && row.children[2] ? row.children[2].innerText.trim() : '-'),
-        amount: payment ? String(getPaymentFinalAmount(payment)) : (row && row.children[3] ? row.children[3].innerText.trim().replace(' บาท', '') : '0'),
+        student: payment ? (payment.student || '-') : (row && row.children[1] ? row.children[1].innerText.trim() : '-'),
+        course: payment ? (payment.course || '-') : (row && row.children[2] ? row.children[2].innerText.trim() : '-'),
+        month: payment ? (payment.month || '-') : (row && row.children[3] ? row.children[3].innerText.trim() : '-'),
+        amount: payment ? String(getPaymentFinalAmount(payment)) : (row && row.children[4] ? row.children[4].innerText.trim().replace(' บาท', '') : '0'),
         lineItems: payment && Array.isArray(payment.lineItems) ? payment.lineItems : [],
-        slip: payment ? (payment.slipUrl ? 'มีสลิป' : (payment.slipSource || '-')) : (row && row.children[4] ? row.children[4].innerText.trim() : '-'),
+        slip: payment ? (payment.slipUrl ? 'มีสลิป' : (payment.slipSource || '-')) : (row && row.children[5] ? row.children[5].innerText.trim() : '-'),
         slipNote: payment ? (payment.slipNote || ('นักเรียนแจ้งส่งสลิปของเดือน ' + (payment.month || '-'))) : '',
         sentAt: payment ? (payment.createdAtText || '-') : '-',
-        status: payment ? (payment.status || '-') : (row && row.children[5] ? row.children[5].innerText.trim() : '-')
+        status: payment ? (payment.status || '-') : (row && row.children[6] ? row.children[6].innerText.trim() : '-')
       };
     }
 
