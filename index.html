@@ -5369,6 +5369,7 @@
               </div>
               <div class="admin-toolbar">
                 <input id="paymentSearchKeyword" type="text" placeholder="ค้นหานักเรียน / คอร์ส / หมายเหตุ" oninput="filterPaymentStatusByMonth()" />
+                <button id="adminPaymentRefreshBtn" class="btn btn-dark" type="button" onclick="refreshAdminPaymentData()">รีเฟรชข้อมูล</button>
                 <button class="btn btn-blue" type="button" onclick="exportPaymentsCsv()">ส่งออกการเงิน CSV</button>
               </div>
             </div>
@@ -7321,9 +7322,9 @@
 
     const COLLECTION_FETCH_LIMITS = {
       activityLogs:       { orderField: 'updatedAt', orderDir: 'desc', limit: 100 },
-      payments:           { limit: 600 },
-      receipts:           { limit: 600 },
-      paymentBundles:     { limit: 300 },
+      payments:           { orderField: 'updatedAt', orderDir: 'desc', limit: 600 },
+      receipts:           { orderField: 'updatedAt', orderDir: 'desc', limit: 600 },
+      paymentBundles:     { orderField: 'updatedAt', orderDir: 'desc', limit: 300 },
       attendanceHistory:  { limit: 400 },
       monthlyPlanSessions:{ limit: 500 }
     };
@@ -7774,8 +7775,16 @@
       const configUrl = String(GOOGLE_APPS_SCRIPT_UPLOAD_URL || '').trim();
       if (!configUrl) throw new Error('ยังไม่ได้ตั้งค่า Apps Script Upload URL');
 
+      let idToken = '';
+      try {
+        if (firebaseUser) idToken = await firebaseUser.getIdToken();
+      } catch (tokenErr) {
+        console.warn('getIdToken warning (upload will proceed without token):', tokenErr);
+      }
+
       const payload = {
         action: 'uploadFile',
+        idToken: idToken,
         fileBase64: options.fileBase64 || '',
         fileName: options.fileName || '',
         mimeType: options.mimeType || '',
@@ -7846,6 +7855,8 @@
       }
       if (value && typeof value === 'object') {
         if (value instanceof Date) return value;
+        // Preserve Firestore FieldValue sentinels (serverTimestamp, increment, arrayUnion, etc.)
+        if (typeof value._methodName === 'string') return value;
         const cleanedObject = {};
         Object.keys(value).forEach(function(key) {
           const cleaned = stripUndefinedDeep(value[key]);
@@ -16583,7 +16594,10 @@
       renderPaymentTable();
     }
 
+    let bundleSlipUploadInProgress = false;
+
     async function uploadStudentPaymentBundleSlip(bundleId) {
+      if (bundleSlipUploadInProgress) return;
       const result = getElement('studentSlipResult') || getElement('studentMobileSlipResult');
       const fileInput = getElement('studentSlipFile');
       const file = fileInput && fileInput.files ? fileInput.files[0] : null;
@@ -16611,10 +16625,16 @@
         result.style.color = '#dc2626';
         return;
       }
+
+      bundleSlipUploadInProgress = true;
+      const bundleUploadBtns = document.querySelectorAll('button[onclick*="uploadStudentPaymentBundleSlip"]');
+      bundleUploadBtns.forEach(function(btn) { btn.disabled = true; });
+
+      let bundleDriveData = null;
       try {
-        result.textContent = 'กำลังอัปโหลดสลิปยอดรวม...';
+        result.textContent = 'กำลังอัปโหลดสลิปยอดรวมไปยัง Google Drive...';
         const fileBase64 = await fileToBase64(file);
-        const data = await uploadFileToDriveViaAppsScript({
+        bundleDriveData = await uploadFileToDriveViaAppsScript({
           file: file,
           fileBase64: fileBase64,
           fileName: file.name,
@@ -16628,22 +16648,34 @@
           courseName: 'ยอดรวมหลายรายการ',
           grade: currentStudent.grade || ''
         });
-        Object.assign(bundle, {
-          slipStorageType: 'google_drive',
-          driveFileId: data.fileId || '',
-          driveFileUrl: data.fileUrl || data.viewUrl || data.driveViewUrl || '',
-          driveViewUrl: data.viewUrl || data.driveViewUrl || data.fileUrl || '',
-          driveFolderId: data.folderId || '',
-          driveFolderName: data.folderName || '',
-          slipUploadedByUid: firebaseUser ? firebaseUser.uid : (currentStudent.authUid || ''),
-          slipUploadedByName: getActiveProfileDisplayInfo().displayName || currentStudent.name || '',
-          slipUploadedAt: firebase.firestore.FieldValue.serverTimestamp(),
-          slipUploadedAtText: new Date().toLocaleString('th-TH'),
-          slipStatus: 'waiting_admin_review',
-          adminReviewStatus: 'pending',
-          paymentStatus: 'รอตรวจสลิป',
-          status: 'รอตรวจสลิป'
-        });
+      } catch (driveError) {
+        console.error('bundle drive upload error:', driveError);
+        result.textContent = 'อัปโหลดสลิปยอดรวมไปยัง Google Drive ไม่สำเร็จ กรุณาลองใหม่: ' + (driveError.message || driveError.code || driveError);
+        result.style.color = '#dc2626';
+        bundleSlipUploadInProgress = false;
+        bundleUploadBtns.forEach(function(btn) { btn.disabled = false; });
+        return;
+      }
+
+      Object.assign(bundle, {
+        slipStorageType: 'google_drive',
+        driveFileId: bundleDriveData.fileId || '',
+        driveFileUrl: bundleDriveData.fileUrl || bundleDriveData.viewUrl || bundleDriveData.driveViewUrl || '',
+        driveViewUrl: bundleDriveData.viewUrl || bundleDriveData.driveViewUrl || bundleDriveData.fileUrl || '',
+        driveFolderId: bundleDriveData.folderId || '',
+        driveFolderName: bundleDriveData.folderName || '',
+        slipUploadedByUid: firebaseUser ? firebaseUser.uid : (currentStudent.authUid || ''),
+        slipUploadedByName: getActiveProfileDisplayInfo().displayName || currentStudent.name || '',
+        slipUploadedAt: firebase.firestore.FieldValue.serverTimestamp(),
+        slipUploadedAtText: new Date().toLocaleString('th-TH'),
+        slipStatus: 'waiting_admin_review',
+        adminReviewStatus: 'pending',
+        paymentStatus: 'รอตรวจสลิป',
+        status: 'รอตรวจสลิป'
+      });
+
+      try {
+        result.textContent = 'สลิปถึง Drive แล้ว กำลังบันทึกสถานะ...';
         await setFirebaseDocument('paymentBundles', bundle);
         currentStudent.paymentStatus = 'รอตรวจสลิป';
         if (fileInput) fileInput.value = '';
@@ -16652,10 +16684,15 @@
         renderStudentPaymentBundlePanel();
         renderStudentMobilePayment();
         renderPaymentBundlePanel();
-      } catch (error) {
-        console.error('upload bundle slip error:', error);
-        result.textContent = 'อัปโหลดสลิปยอดรวมไม่สำเร็จ: ' + (error.message || error.code || error);
-        result.style.color = '#dc2626';
+      } catch (saveError) {
+        console.error('firestore save error after bundle drive upload:', saveError);
+        result.innerHTML = 'สลิปยอดรวมอัปโหลดไปยัง Google Drive เรียบร้อยแล้ว แต่บันทึกสถานะในระบบไม่สำเร็จ<br>' +
+          '<strong>กรุณาแจ้งเจ้าหน้าที่</strong> พร้อมแจ้งชื่อไฟล์: <em>' + escapeHtml(file.name) + '</em><br>' +
+          '<small style="color:#6b7280;">(ไฟล์สลิปถึง Drive แล้ว เจ้าหน้าที่สามารถตรวจสอบได้)</small>';
+        result.style.color = '#d97706';
+      } finally {
+        bundleSlipUploadInProgress = false;
+        bundleUploadBtns.forEach(function(btn) { btn.disabled = false; });
       }
     }
 
@@ -16673,7 +16710,7 @@
       const selectedMonth = month || (getElement('studentPaymentMonth') && getElement('studentPaymentMonth').value ? getElement('studentPaymentMonth').value : '');
       if (!currentStudent || !selectedMonth) return true;
       const payment = getStudentPaymentForSelectedMonth();
-      if (!payment) return true;
+      if (!payment) return false;
       const bundle = getPaymentBundleForPayment(payment);
       if (bundle && bundle.status !== 'ยกเลิก' && bundle.status !== 'cancelled') return false;
       const slipStatus = String(payment.slipStatus || '').toLowerCase();
@@ -16695,11 +16732,15 @@
       if (!canUpload) {
         if (result) {
           const selectedPayment = getStudentPaymentForSelectedMonth();
-          const bundle = getPaymentBundleForPayment(selectedPayment);
           result.classList.remove('hidden');
-          result.textContent = bundle && bundle.status !== 'ยกเลิก' && bundle.status !== 'cancelled'
-            ? 'เดือนนี้อยู่ในยอดรวม กรุณาอัปโหลดสลิปที่รายการยอดรวมด้านล่าง'
-            : 'เดือนนี้อัปโหลดสลิปแล้ว กรุณารอเจ้าหน้าที่ตรวจสอบ หากต้องการแก้ไขสลิป กรุณาติดต่อเจ้าหน้าที่';
+          if (!selectedPayment) {
+            result.textContent = 'ยังไม่มีรายการบิลสำหรับเดือนนี้ กรุณารอเจ้าหน้าที่เปิดบิลก่อนอัปโหลดสลิป';
+          } else {
+            const bundle = getPaymentBundleForPayment(selectedPayment);
+            result.textContent = bundle && bundle.status !== 'ยกเลิก' && bundle.status !== 'cancelled'
+              ? 'เดือนนี้อยู่ในยอดรวม กรุณาอัปโหลดสลิปที่รายการยอดรวมด้านล่าง'
+              : 'เดือนนี้อัปโหลดสลิปแล้ว กรุณารอเจ้าหน้าที่ตรวจสอบ หากต้องการแก้ไขสลิป กรุณาติดต่อเจ้าหน้าที่';
+          }
           result.style.color = '#d97706';
         }
       } else if (result) {
@@ -16783,7 +16824,8 @@
       if (!selectedMonth) return '-';
       const selectedMonthPayment = getCurrentStudentPaymentForSelectedMonth();
       if (selectedMonthPayment) return getPaymentDisplayStatus(selectedMonthPayment);
-      if (currentStudent && currentStudent.courseId) return 'รอชำระเงิน';
+      // Month exists in paymentMonths but admin hasn't created the bill record yet
+      if (currentStudent && currentStudent.courseId) return 'รอเปิดบิล';
       if (currentStudent && currentStudent.paymentStatus) return currentStudent.paymentStatus;
       return '-';
     }
@@ -18687,10 +18729,11 @@
       if (getElement('studentPaymentCourseName')) getElement('studentPaymentCourseName').textContent = selectedCourse ? selectedCourse.name : '-';
       refreshStudentPaymentMonthSelect();
       const selectedPaymentMonth = getStudentSelectedPaymentMonth();
-      const selectedPaymentAmount = currentStudent && selectedPaymentMonth && selectedPaymentMonth !== '-'
-        ? getCurrentStudentAdjustedPaymentAmount(selectedPaymentMonth)
-        : (selectedCourse ? getCourseMonthlyPrice(selectedCourse) : 0);
-      if (getElement('studentPaymentAmount')) getElement('studentPaymentAmount').textContent = selectedPaymentAmount ? formatPrice(selectedPaymentAmount) : '-';
+      const selectedPaymentRecord = currentStudent && selectedPaymentMonth && selectedPaymentMonth !== '-'
+        ? getCurrentStudentPaymentForSelectedMonth()
+        : null;
+      const selectedPaymentAmount = selectedPaymentRecord ? getPaymentFinalAmount(selectedPaymentRecord) : 0;
+      if (getElement('studentPaymentAmount')) getElement('studentPaymentAmount').textContent = selectedPaymentRecord && selectedPaymentAmount ? formatPrice(selectedPaymentAmount) : '-';
       if (getElement('studentPaymentCurrentMonth')) {
         getElement('studentPaymentCurrentMonth').textContent = selectedPaymentMonth || '-';
       }
@@ -20766,6 +20809,30 @@
       renderPaymentTable();
     }
 
+    async function refreshAdminPaymentData() {
+      const btn = document.getElementById('adminPaymentRefreshBtn');
+      if (btn) { btn.disabled = true; btn.textContent = 'กำลังโหลด...'; }
+      try {
+        const [freshPayments, freshBundles, freshReceipts] = await Promise.all([
+          getFirebaseCollection('payments'),
+          getFirebaseCollection('paymentBundles'),
+          getFirebaseCollection('receipts')
+        ]);
+        replaceArray(payments, freshPayments);
+        replaceArray(paymentBundles, freshBundles);
+        replaceArray(receipts, freshReceipts);
+        safeRun(applyPaymentRepairsSync, 'refresh-payment-repair');
+        renderPaymentTable();
+        updatePaymentSummary();
+        renderPaymentBundlePanel();
+        safeRun(renderAdminDashboard, 'refresh-dashboard');
+      } catch (err) {
+        alert('โหลดข้อมูลไม่สำเร็จ: ' + (err.message || err));
+      } finally {
+        if (btn) { btn.disabled = false; btn.textContent = 'รีเฟรชข้อมูล'; }
+      }
+    }
+
     function isPaymentMonthVisibleToStudents(item) {
       return !item || item.visibleToStudents !== false;
     }
@@ -22449,7 +22516,8 @@ function receiptStatusText(status) {
       const selectedCourse = getCurrentStudentCourse();
       const selectedMonth = getStudentSelectedPaymentMonth();
       const canShowMonth = !!(selectedMonth && selectedMonth !== '-');
-      const amount = currentStudent && canShowMonth ? getCurrentStudentAdjustedPaymentAmount(selectedMonth) : 0;
+      const mobilePaymentRecord = currentStudent && canShowMonth ? getCurrentStudentPaymentForSelectedMonth() : null;
+      const amount = mobilePaymentRecord ? getPaymentFinalAmount(mobilePaymentRecord) : 0;
       const statusText = currentStudent && currentStudent.courseId ? getCurrentStudentPaymentStatusText() : '-';
       const courseText = selectedCourse ? selectedCourse.name : '-';
 
@@ -22697,7 +22765,10 @@ function receiptStatusText(status) {
       if (pausedNotice) pausedNotice.classList.add('hidden');
     }
 
+    let slipUploadInProgress = false;
+
     async function uploadStudentSlipToDrive() {
+      if (slipUploadInProgress) return;
       const result = getElement('studentSlipResult') || getElement('studentSlipOcrResult');
       const monthSelect = getElement('studentPaymentMonth');
       const fileInput = getElement('studentSlipFile');
@@ -22760,46 +22831,24 @@ function receiptStatusText(status) {
         return;
       }
 
-      let payment = getCurrentStudentPaymentForSelectedMonth();
+      const payment = getCurrentStudentPaymentForSelectedMonth();
       if (!payment) {
-        const fullAmount = getExpectedPaymentAmountForStudent(currentStudent, month);
-        const finalAmount = getCurrentStudentAdjustedPaymentAmount(month);
-        const discountAmount = Math.max(0, fullAmount - finalAmount);
-        const paymentId = createFirebaseDocId('payments');
-        payment = {
-          id: paymentId,
-          firebaseDocId: paymentId,
-          studentId: currentStudent.id || '',
-          memberId: currentStudent.memberId || '',
-          studentName: currentStudent.name || '',
-          studentAuthUid: currentStudent.authUid || (firebaseUser ? firebaseUser.uid : ''),
-          authUid: currentStudent.authUid || (firebaseUser ? firebaseUser.uid : ''),
-          student: currentStudent.name || '',
-          courseId: currentStudent.courseId || '',
-          courseName: currentStudent.course || '',
-          course: currentStudent.course || '',
-          month: month,
-          studentSelectedMonth: month,
-          baseAmount: fullAmount,
-          expectedAmount: fullAmount,
-          discount: discountAmount,
-          finalAmount: finalAmount,
-          amount: finalAmount,
-          slipUrl: '',
-          slipNote: 'นักเรียนอัปโหลดสลิปของเดือน ' + month,
-          paymentStatus: 'รอชำระเงิน',
-          status: 'รอชำระเงิน',
-          createdAtText: new Date().toLocaleString('th-TH')
-        };
-        payments.push(payment);
+        result.textContent = 'ยังไม่มีรายการบิลสำหรับเดือนนี้ กรุณารอเจ้าหน้าที่เปิดบิลก่อนอัปโหลดสลิป';
+        result.style.color = '#d97706';
+        return;
       }
+
+      slipUploadInProgress = true;
+      const slipUploadBtns = document.querySelectorAll('button[onclick="uploadStudentSlipToDrive()"], button[onclick="studentMobileUploadSlip()"]');
+      slipUploadBtns.forEach(function(btn) { btn.disabled = true; });
+
       const paymentId = String(payment.firebaseDocId || payment.id || '');
 
+      let driveData = null;
       try {
-        result.textContent = 'กำลังอัปโหลดสลิป...';
+        result.textContent = 'กำลังอัปโหลดสลิปไปยัง Google Drive...';
         const fileBase64 = await fileToBase64(file);
-        let data = {};
-        data = await uploadFileToDriveViaAppsScript({
+        driveData = await uploadFileToDriveViaAppsScript({
           file: file,
           fileBase64: fileBase64,
           fileName: file.name,
@@ -22813,35 +22862,51 @@ function receiptStatusText(status) {
           courseName: payment.courseName || payment.course || currentStudent.course || '',
           grade: currentStudent.grade || payment.studentGrade || payment.grade || '',
         });
-        Object.assign(payment, {
-          slipStorageType: 'google_drive',
-          driveFileId: data.fileId || '',
-          driveFileUrl: data.fileUrl || data.viewUrl || data.driveViewUrl || '',
-          driveFolderId: data.folderId || '',
-          driveFolderName: data.folderName || '',
-          slipUploadedByUid: firebaseUser ? firebaseUser.uid : (currentStudent.authUid || ''),
-          slipUploadedByName: getActiveProfileDisplayInfo().displayName || currentStudent.name || '',
-          slipUploadedAt: firebase.firestore.FieldValue.serverTimestamp(),
-          slipUploadedAtText: new Date().toLocaleString('th-TH'),
-          slipStatus: 'waiting_admin_review',
-          adminReviewStatus: 'pending',
-          paymentStatus: 'รอตรวจสลิป',
-          status: 'รอตรวจสลิป'
-        });
+      } catch (driveError) {
+        console.error('drive upload error:', driveError);
+        result.textContent = 'อัปโหลดสลิปไปยัง Google Drive ไม่สำเร็จ กรุณาลองใหม่: ' + (driveError.message || driveError.code || driveError);
+        result.style.color = '#dc2626';
+        slipUploadInProgress = false;
+        slipUploadBtns.forEach(function(btn) { btn.disabled = false; });
+        return;
+      }
+
+      Object.assign(payment, {
+        slipStorageType: 'google_drive',
+        driveFileId: driveData.fileId || '',
+        driveFileUrl: driveData.fileUrl || driveData.viewUrl || driveData.driveViewUrl || '',
+        driveFolderId: driveData.folderId || '',
+        driveFolderName: driveData.folderName || '',
+        slipUploadedByUid: firebaseUser ? firebaseUser.uid : (currentStudent.authUid || ''),
+        slipUploadedByName: getActiveProfileDisplayInfo().displayName || currentStudent.name || '',
+        slipUploadedAt: firebase.firestore.FieldValue.serverTimestamp(),
+        slipUploadedAtText: new Date().toLocaleString('th-TH'),
+        slipStatus: 'waiting_admin_review',
+        adminReviewStatus: 'pending',
+        paymentStatus: 'รอตรวจสลิป',
+        status: 'รอตรวจสลิป'
+      });
+
+      try {
+        result.textContent = 'สลิปถึง Drive แล้ว กำลังบันทึกสถานะ...';
         await setFirebaseDocument('payments', payment);
         currentStudent.paymentStatus = 'รอตรวจสลิป';
         result.textContent = 'อัปโหลดสลิปสำเร็จ รอเจ้าหน้าที่ตรวจสอบ';
         result.style.color = '#16a34a';
         if (fileInput) fileInput.value = '';
         updateStudentSlipUploadControls();
-
         updateStudentCourseDisplay();
         renderPaymentTable();
         renderAdminDashboard();
-      } catch (error) {
-        console.error('upload slip to drive error:', error);
-        result.textContent = 'อัปโหลดสลิปไม่สำเร็จ กรุณาลองใหม่ หรือติดต่อเจ้าหน้าที่: ' + (error.message || error.code || error);
-        result.style.color = '#dc2626';
+      } catch (saveError) {
+        console.error('firestore save error after drive upload:', saveError);
+        result.innerHTML = 'สลิปอัปโหลดไปยัง Google Drive เรียบร้อยแล้ว แต่บันทึกสถานะในระบบไม่สำเร็จ<br>' +
+          '<strong>กรุณาแจ้งเจ้าหน้าที่</strong> พร้อมแจ้งชื่อไฟล์: <em>' + escapeHtml(file.name) + '</em><br>' +
+          '<small style="color:#6b7280;">(ไฟล์สลิปถึง Drive แล้ว เจ้าหน้าที่สามารถตรวจสอบได้)</small>';
+        result.style.color = '#d97706';
+      } finally {
+        slipUploadInProgress = false;
+        slipUploadBtns.forEach(function(btn) { btn.disabled = false; });
       }
     }
 
