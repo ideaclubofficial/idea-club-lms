@@ -26509,17 +26509,50 @@ function receiptStatusText(status) {
       '</div>';
     }
 
+    let studentCalSelectedDate = '';
+
+    function selectStudentCalendarDay(dateKey) {
+      studentCalSelectedDate = dateKey;
+      // update highlight in both desktop and mobile panels
+      ['studentMonthlyPlanList', 'studentMobileMonthlyPlanList'].forEach(function(panelId) {
+        const panel = getElement(panelId);
+        if (!panel) return;
+        panel.querySelectorAll('.teacher-mini-cal-day').forEach(function(el) {
+          el.classList.remove('selected');
+          if (el.dataset.date === dateKey) el.classList.add('selected');
+        });
+        const agendaEl = panel.querySelector('#studentCalAgenda');
+        if (!agendaEl) return;
+        const sessions = (monthlyPlanSessions || []).filter(function(s) {
+          return getMonthlySessionDate(s) === dateKey;
+        }).sort(function(a, b) { return (a.timeStart || '').localeCompare(b.timeStart || ''); });
+        const date = new Date(dateKey + 'T00:00:00');
+        const dayLabel = getMonthlyPlanDayText(getMonthlyPlanDayKey(date)) + ' ' + date.getDate() + ' ' + getThaiMonthLabel(dateKey.slice(0, 7), true);
+        agendaEl.innerHTML = '<div class="teacher-cal-agenda-header">' + escapeHtml(dayLabel) + '</div>' +
+          (sessions.length
+            ? sessions.map(renderStudentScheduleCard).join('')
+            : '<div class="teacher-cal-agenda-empty">ไม่มีคาบในวันนี้</div>');
+      });
+    }
+
     function renderStudentScheduleCalendar(monthKey, sessions) {
-      const days = getMonthlyPlanGridDays(monthKey);
-      if (!days.length) return '<div class="notice">ยังไม่มีเดือนตารางเรียนให้แสดง</div>';
-      return '<div class="student-schedule-calendar">' + days.map(function(date) {
-        const dateKey = date.getFullYear() + '-' + padNumber(date.getMonth() + 1, 2) + '-' + padNumber(date.getDate(), 2);
-        const daySessions = sessions.filter(function(session) { return getMonthlySessionDate(session) === dateKey; });
-        return '<div class="student-schedule-day">' +
-          '<div class="student-schedule-day-header"><span>' + escapeHtml(getMonthlyPlanDayText(getMonthlyPlanDayKey(date))) + '</span><strong>' + date.getDate() + '</strong></div>' +
-          (daySessions.length ? daySessions.map(renderStudentScheduleCard).join('') : '<span class="mini-muted">-</span>') +
-        '</div>';
-      }).join('') + '</div>';
+      const today = getLocalDateString();
+      const sessionDates = sessions.map(function(s) { return getMonthlySessionDate(s); }).filter(Boolean).sort();
+      const initDate = sessionDates.includes(today) ? today : (sessionDates[0] || today);
+      if (!studentCalSelectedDate || !sessionDates.includes(studentCalSelectedDate)) {
+        studentCalSelectedDate = initDate;
+      }
+      const miniCal = renderTeacherMiniCalendar(monthKey, sessions, studentCalSelectedDate, 'selectStudentCalendarDay');
+      const agendaSessions = sessions.filter(function(s) {
+        return getMonthlySessionDate(s) === studentCalSelectedDate;
+      }).sort(function(a, b) { return (a.timeStart || '').localeCompare(b.timeStart || ''); });
+      const selDate = new Date(studentCalSelectedDate + 'T00:00:00');
+      const dayLabel = getMonthlyPlanDayText(getMonthlyPlanDayKey(selDate)) + ' ' + selDate.getDate() + ' ' + getThaiMonthLabel(studentCalSelectedDate.slice(0, 7), true);
+      const agendaHtml = '<div class="teacher-cal-agenda-header">' + escapeHtml(dayLabel) + '</div>' +
+        (agendaSessions.length
+          ? agendaSessions.map(renderStudentScheduleCard).join('')
+          : '<div class="teacher-cal-agenda-empty">ไม่มีคาบในวันนี้</div>');
+      return miniCal + '<div id="studentCalAgenda">' + agendaHtml + '</div>';
     }
 
     function setStudentScheduleMonthSelect(select, months, selectedMonth) {
@@ -26625,7 +26658,8 @@ function receiptStatusText(status) {
           : '<div class="teacher-cal-agenda-empty">ไม่มีคาบในวันนี้</div>');
     }
 
-    function renderTeacherMiniCalendar(monthKey, sessions, selectedDate) {
+    function renderTeacherMiniCalendar(monthKey, sessions, selectedDate, onclickFn) {
+      if (!onclickFn) onclickFn = 'selectTeacherCalendarDay';
       const days = getMonthlyPlanGridDays(monthKey);
       if (!days.length) return '';
       const today = getLocalDateString();
@@ -26670,7 +26704,7 @@ function receiptStatusText(status) {
                 return '<span class="teacher-mini-cal-dot" style="background:' + c + ';"></span>';
               }).join('') + '</div>'
             : '';
-          html += '<td><div class="' + cls + '" data-date="' + dk + '" onclick="' + (dots.length ? 'selectTeacherCalendarDay(\'' + dk + '\')' : '') + '">' +
+          html += '<td><div class="' + cls + '" data-date="' + dk + '" onclick="' + (dots.length ? onclickFn + '(\'' + dk + '\')' : '') + '">' +
             date.getDate() + dotHtml + '</div></td>';
         });
         html += '</tr>';
