@@ -35227,10 +35227,10 @@ function receiptStatusText(status) {
               '<option>ม.4</option><option>ม.5</option><option>ม.6</option>' +
             '</select></div>' +
           '</div>' +
-          '<div><label style="font-size:12px;font-weight:600;">นักเรียน</label>' +
-          '<select id="manualExamStudentSel" style="width:100%;"><option value="">-- เลือกนักเรียน --</option></select></div>' +
           '<div><label style="font-size:12px;font-weight:600;">ชุดข้อสอบ</label>' +
-          '<select id="manualExamCourseSel" onchange="renderManualExamQuestions()" style="width:100%;"><option value="">-- เลือกชุดข้อสอบ --</option></select></div>' +
+          '<select id="manualExamCourseSel" onchange="renderManualExamQuestions()" style="width:100%;"><option value="">-- เลือกชุดข้อสอบก่อน --</option></select></div>' +
+          '<div><label style="font-size:12px;font-weight:600;">นักเรียน <span style="font-weight:400;color:#6b7280;" id="manualExamStudentNote"></span></label>' +
+          '<select id="manualExamStudentSel" style="width:100%;"><option value="">-- เลือกชุดข้อสอบก่อน --</option></select></div>' +
         '</div>' +
         '<div id="manualExamQuestionsBox" style="margin-top:12px;"></div>' +
         '<div id="manualExamFallback" style="display:none;margin-top:10px;">' +
@@ -35286,8 +35286,17 @@ function receiptStatusText(status) {
         return String(a.memberId || a.studentId || '').localeCompare(String(b.memberId || b.studentId || ''), undefined, { numeric: true });
       });
 
-      const suffix = courseId ? ' — ยังไม่ได้สอบ ' + filteredStudents.length + ' คน' : '';
-      studentSel.innerHTML = '<option value="">-- เลือกนักเรียน' + suffix + ' --</option>' +
+      const noteEl = getElement('manualExamStudentNote');
+      if (noteEl) {
+        noteEl.textContent = courseId
+          ? '(ยังไม่ได้สอบ ' + filteredStudents.length + ' คน)'
+          : '';
+      }
+
+      const placeholder = courseId
+        ? (filteredStudents.length ? '-- เลือกนักเรียน (' + filteredStudents.length + ' คน) --' : '-- นักเรียนทุกคนสอบแล้ว --')
+        : '-- เลือกชุดข้อสอบก่อน --';
+      studentSel.innerHTML = '<option value="">' + placeholder + '</option>' +
         filteredStudents.map(function(s) {
           return '<option value="' + escapeHtml(s.id || s.firebaseDocId || '') + '">' +
             escapeHtml((s.memberId ? '[' + s.memberId + '] ' : '') + (s.name || '') + (s.nickname ? ' (' + s.nickname + ')' : '') + (s.grade ? ' · ' + s.grade : '')) +
@@ -35457,6 +35466,21 @@ function receiptStatusText(status) {
         total = parseInt((getElement('manualExamTotal') || {}).value || '0', 10) || 0;
         answers = null;
         if (correct > total && total > 0) { if (resultEl) { resultEl.textContent = 'จำนวนข้อถูกมากกว่าจำนวนข้อทั้งหมด'; resultEl.style.color = '#dc2626'; } return; }
+      }
+
+      // Guard: prevent duplicate submission
+      const sId = String(student.id || student.firebaseDocId || '');
+      const sUid = String(student.authUid || '');
+      const alreadyTaken = (onlineExamGradeAllResults || []).some(function(r) {
+        if (String(r.courseId || '') !== courseId) return false;
+        if (r.resultStatus === 'absent') return false;
+        if (r.allowRetake === true) return false;
+        return String(r.studentId || '') === sId || (sUid && String(r.studentUid || '') === sUid);
+      });
+      if (alreadyTaken) {
+        if (resultEl) { resultEl.textContent = 'นักเรียนคนนี้มีผลสอบชุดนี้แล้ว ไม่สามารถบันทึกซ้ำได้'; resultEl.style.color = '#dc2626'; }
+        updateManualExamStudentOptions();
+        return;
       }
 
       const score50val = total > 0 ? onlineExamGetScore50Value(correct, total) : 0;
