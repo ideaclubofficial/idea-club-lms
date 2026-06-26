@@ -5370,6 +5370,7 @@
               <div class="admin-toolbar">
                 <input id="paymentSearchKeyword" type="text" placeholder="ค้นหานักเรียน / คอร์ส / หมายเหตุ" oninput="filterPaymentStatusByMonth()" />
                 <button id="adminPaymentRefreshBtn" class="btn btn-dark" type="button" onclick="refreshAdminPaymentData()">รีเฟรชข้อมูล</button>
+                <button class="btn btn-green" type="button" onclick="openSlipDriveFolder()">Google Drive สลิป</button>
                 <button class="btn btn-blue" type="button" onclick="exportPaymentsCsv()">ส่งออกการเงิน CSV</button>
               </div>
             </div>
@@ -6644,6 +6645,7 @@
                 </div>
                 <div><label>Favicon URL</label><input id="settingFaviconUrl" type="url" placeholder="https://..." /></div>
                 <div><label>QR Code URL</label><input id="settingQrUrl" type="url" placeholder="https://..." /></div>
+                <div><label>Google Drive โฟลเดอร์สลิป URL</label><input id="settingSlipDriveFolderUrl" type="url" placeholder="https://drive.google.com/drive/folders/..." /></div>
               </div>
               <div class="form-row">
                 <div>
@@ -20833,6 +20835,15 @@
       }
     }
 
+    function openSlipDriveFolder() {
+      const url = systemSettings && systemSettings.slipDriveFolderUrl;
+      if (!url) {
+        alert('ยังไม่ได้ตั้งค่า URL โฟลเดอร์ Google Drive สลิป\nกรุณาไปที่ ตั้งค่าระบบ และกรอก "Google Drive โฟลเดอร์สลิป URL"');
+        return;
+      }
+      window.open(url, '_blank', 'noopener');
+    }
+
     function isPaymentMonthVisibleToStudents(item) {
       return !item || item.visibleToStudents !== false;
     }
@@ -21211,7 +21222,7 @@
         ? '<br><span class="mini-muted">อัปโหลดโดย: ' + escapeHtml(payment.slipUploadedByName || payment.slipUploadedByUid) + '</span>'
         : '';
       const folderText = payment.driveFolderName
-        ? '<br><span class="mini-muted">โฟลเดอร์: ' + escapeHtml(payment.driveFolderName) + '</span>'
+        ? '<br><span class="mini-muted">โฟลเดอร์: ' + (payment.driveFolderId ? '<a href="https://drive.google.com/drive/folders/' + encodeURIComponent(String(payment.driveFolderId)) + '" target="_blank" rel="noopener">' + escapeHtml(payment.driveFolderName) + '</a>' : escapeHtml(payment.driveFolderName)) + '</span>'
         : '';
       const slipUrl = getPaymentSlipUrl(payment);
       if (slipUrl) {
@@ -30444,6 +30455,7 @@ function receiptStatusText(status) {
       getElement('settingReceiptFooter').value = systemSettings.receiptFooter || '';
       getElement('settingAcademicYear').value = systemSettings.academicYear || '';
       getElement('settingDefaultPassword').value = systemSettings.defaultPassword || '000000';
+      if (getElement('settingSlipDriveFolderUrl')) getElement('settingSlipDriveFolderUrl').value = systemSettings.slipDriveFolderUrl || '';
       if (getElement('settingLogoPreview')) getElement('settingLogoPreview').innerHTML = systemSettings.logoUrl ? '<img src="' + parseDriveImageUrl(systemSettings.logoUrl) + '" alt="Logo Preview">' : 'ยังไม่ได้เลือกรูป';
       applyLoginLogoPreview(systemSettings.loginLogoUrl || '');
       if (getElement('settingFaviconPreview')) getElement('settingFaviconPreview').innerHTML = systemSettings.faviconUrl ? '<img src="' + parseDriveImageUrl(systemSettings.faviconUrl) + '" alt="Favicon Preview">' : 'ยังไม่ได้เลือกรูป';
@@ -30471,7 +30483,8 @@ function receiptStatusText(status) {
           qrUrl: getElement('settingQrUrl').value.trim(),
           receiptFooter: getElement('settingReceiptFooter').value.trim(),
           academicYear: getElement('settingAcademicYear').value.trim(),
-          defaultPassword: getElement('settingDefaultPassword').value.trim() || '000000'
+          defaultPassword: getElement('settingDefaultPassword').value.trim() || '000000',
+          slipDriveFolderUrl: getElement('settingSlipDriveFolderUrl') ? getElement('settingSlipDriveFolderUrl').value.trim() : ''
         });
         await setFirebaseDocument('settings', systemSettings);
         if (getElement('settingLogoUrl')) getElement('settingLogoUrl').value = systemSettings.logoUrl || '';
@@ -38613,8 +38626,15 @@ function receiptStatusText(status) {
       const checked = tfEl('tf-sched-shared') && tfEl('tf-sched-shared').checked;
       const wrap = tfEl('tf-shared-center2-wrap');
       if (wrap) {
-        if (checked) wrap.classList.remove('hidden');
-        else {
+        if (checked) {
+          wrap.classList.remove('hidden');
+          const center1 = (tfEl('tf-sched-center') || {}).value || '';
+          const sel2 = tfEl('tf-sched-center2');
+          if (sel2 && (!sel2.value || sel2.value === center1)) {
+            const other = Array.from(sel2.options).find(function(o) { return o.value && o.value !== center1; });
+            if (other) sel2.value = other.value;
+          }
+        } else {
           wrap.classList.add('hidden');
           if (tfEl('tf-sched-center2')) tfEl('tf-sched-center2').value = '';
         }
