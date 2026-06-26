@@ -7404,11 +7404,19 @@
           } else if (isTeacherRole(primaryRole)) {
             const linkedTeacherId = String(profile.linkedTeacherId || profile.teacherDocId || '').trim();
             const profileTeacherId = String(profile.teacherId || '').trim();
-            const teacher = teachers.find(function(t) {
+            const teacherProfile = teachers.find(function(t) {
               return (linkedTeacherId && String(t.firebaseDocId || t.id || '') === linkedTeacherId) ||
                      (profileTeacherId && String(t.teacherId || '') === profileTeacherId) ||
                      t.authUid === uid;
             }) || { id: uid, authUid: uid, name: profile.name || profile.displayName || user.email || '', email: profile.email || user.email || '' };
+            const teacher = Object.assign({}, teacherProfile, {
+              linkedTeacherId: profile.linkedTeacherId || teacherProfile.linkedTeacherId || '',
+              teacherDocId: profile.teacherDocId || teacherProfile.teacherDocId || profile.linkedTeacherId || '',
+              teacherId: profile.teacherId || teacherProfile.teacherId || '',
+              authUid: uid,
+              teacherUid: teacherProfile.teacherUid || uid,
+              email: profile.email || teacherProfile.email || user.email || ''
+            });
             currentTeacher = teacher;
             currentStudent = null;
             currentAdmin = profile;
@@ -7441,8 +7449,7 @@
       payments:           { orderField: 'updatedAt', orderDir: 'desc', limit: 600 },
       receipts:           { orderField: 'updatedAt', orderDir: 'desc', limit: 600 },
       paymentBundles:     { orderField: 'updatedAt', orderDir: 'desc', limit: 300 },
-      attendanceHistory:  { limit: 400 },
-      monthlyPlanSessions:{ limit: 500 }
+      attendanceHistory:  { limit: 400 }
     };
 
     async function getFirebaseCollection(collectionName, includeDeleted) {
@@ -10149,12 +10156,16 @@
               role: userRole || 'teacher'
             };
             const teacher = Object.assign({}, teacherProfile, {
+              linkedTeacherId: firebaseUserProfile.linkedTeacherId || teacherProfile.linkedTeacherId || '',
+              teacherDocId: firebaseUserProfile.teacherDocId || teacherProfile.teacherDocId || firebaseUserProfile.linkedTeacherId || '',
+              teacherId: firebaseUserProfile.teacherId || teacherProfile.teacherId || '',
               permissions: firebaseUserProfile.permissions || teacherProfile.permissions,
               permissionMode: firebaseUserProfile.permissionMode || teacherProfile.permissionMode,
               appRole: activeAppRole || teacherProfile.appRole || normalizeAppRole(userRole || teacherProfile.role || 'Teacher'),
               role: userRole || teacherProfile.role || 'teacher',
               status: firebaseUserProfile.status || teacherProfile.status,
               authUid: firebaseUser.uid,
+              teacherUid: teacherProfile.teacherUid || firebaseUser.uid,
               email: firebaseUserProfile.email || teacherProfile.email
             });
             currentStudent = null;
@@ -25511,6 +25522,8 @@ function receiptStatusText(status) {
     function getTeacherIdentitySet(teacher) {
       if (!teacher) return [];
       const values = [
+        teacher.linkedTeacherId,
+        teacher.teacherDocId,
         teacher.teacherUid,
         teacher.authUid,
         teacher.teacherAuthUid,
@@ -28766,7 +28779,7 @@ function receiptStatusText(status) {
     function findTeacherByPlannerId(teacherId) {
       const key = String(teacherId || '');
       return getActivePlannerTeacherList().find(function(teacher) {
-        return [teacher.id, teacher.firebaseDocId, teacher.teacherId, teacher.authUid, teacher.teacherUid, teacher.email].map(function(value) {
+        return [teacher.id, teacher.firebaseDocId, teacher.linkedTeacherId, teacher.teacherDocId, teacher.teacherId, teacher.authUid, teacher.teacherUid, teacher.teacherAuthUid, teacher.email].map(function(value) {
           return String(value || '');
         }).includes(key);
       }) || null;
