@@ -35252,18 +35252,56 @@ function receiptStatusText(status) {
       updateManualExamFilteredOptions();
     }
 
-    function updateManualExamFilteredOptions() {
+    function updateManualExamStudentOptions() {
       const center = (getElement('manualExamCenterSel') || {}).value || '';
       const grade = (getElement('manualExamGradeSel') || {}).value || '';
+      const courseId = (getElement('manualExamCourseSel') || {}).value || '';
+
+      const takenIds = new Set();
+      if (courseId) {
+        (onlineExamGradeAllResults || []).forEach(function(r) {
+          if (String(r.courseId || '') !== courseId) return;
+          if (r.resultStatus === 'absent') return;
+          if (r.allowRetake === true) return;
+          if (r.studentId) takenIds.add(String(r.studentId));
+          if (r.studentUid) takenIds.add(String(r.studentUid));
+        });
+      }
+
+      const studentSel = getElement('manualExamStudentSel');
+      if (!studentSel) return;
+      const prevValue = studentSel.value;
 
       const filteredStudents = (students || []).filter(function(s) {
         if (!s || s.deleted || !s.name) return false;
         if (center && String(s.preferredLocation || '').trim() !== center) return false;
         if (grade && String(s.grade || '').trim() !== grade) return false;
+        if (courseId) {
+          const sId = String(s.id || s.firebaseDocId || '');
+          const sUid = String(s.authUid || '');
+          if (takenIds.has(sId) || (sUid && takenIds.has(sUid))) return false;
+        }
         return true;
       }).sort(function(a, b) {
         return String(a.memberId || a.studentId || '').localeCompare(String(b.memberId || b.studentId || ''), undefined, { numeric: true });
       });
+
+      const suffix = courseId ? ' — ยังไม่ได้สอบ ' + filteredStudents.length + ' คน' : '';
+      studentSel.innerHTML = '<option value="">-- เลือกนักเรียน' + suffix + ' --</option>' +
+        filteredStudents.map(function(s) {
+          return '<option value="' + escapeHtml(s.id || s.firebaseDocId || '') + '">' +
+            escapeHtml((s.memberId ? '[' + s.memberId + '] ' : '') + (s.name || '') + (s.nickname ? ' (' + s.nickname + ')' : '') + (s.grade ? ' · ' + s.grade : '')) +
+          '</option>';
+        }).join('');
+
+      if (prevValue && filteredStudents.some(function(s) { return String(s.id || s.firebaseDocId || '') === prevValue; })) {
+        studentSel.value = prevValue;
+      }
+    }
+
+    function updateManualExamFilteredOptions() {
+      const center = (getElement('manualExamCenterSel') || {}).value || '';
+      const grade = (getElement('manualExamGradeSel') || {}).value || '';
 
       const filteredCourses = (onlineExamCourseCache || []).filter(function(c) {
         if (!c || c.deleted || c.status === 'inactive' || c.isActive === false) return false;
@@ -35271,16 +35309,6 @@ function receiptStatusText(status) {
         if (grade && getOnlineExamCourseGrade(c) !== grade) return false;
         return true;
       });
-
-      const studentSel = getElement('manualExamStudentSel');
-      if (studentSel) {
-        studentSel.innerHTML = '<option value="">-- เลือกนักเรียน --</option>' +
-          filteredStudents.map(function(s) {
-            return '<option value="' + escapeHtml(s.id || s.firebaseDocId || '') + '">' +
-              escapeHtml((s.memberId ? '[' + s.memberId + '] ' : '') + (s.name || '') + (s.nickname ? ' (' + s.nickname + ')' : '') + (s.grade ? ' · ' + s.grade : '')) +
-            '</option>';
-          }).join('');
-      }
 
       const courseSel = getElement('manualExamCourseSel');
       if (courseSel) {
@@ -35290,6 +35318,8 @@ function receiptStatusText(status) {
             return '<option value="' + escapeHtml(c.firebaseDocId || '') + '">' + escapeHtml(label) + '</option>';
           }).join('');
       }
+
+      updateManualExamStudentOptions();
 
       manualExamAnswers = {};
       const box = getElement('manualExamQuestionsBox');
@@ -35304,6 +35334,7 @@ function receiptStatusText(status) {
       const box = getElement('manualExamQuestionsBox');
       const fallback = getElement('manualExamFallback');
       manualExamAnswers = {};
+      updateManualExamStudentOptions();
 
       if (!courseId || !course) {
         if (box) box.innerHTML = '';
