@@ -4195,6 +4195,9 @@
             <div class="form-box">
               <h3>รายชื่อนักเรียนที่สอน</h3>
               <p style="margin-bottom:18px; color:#6b7280;">ค้นหาและกรองรายชื่อตามศูนย์และระดับชั้น</p>
+              <div class="test-actions" style="justify-content:flex-end;margin-bottom:12px;">
+                <button class="btn btn-blue" type="button" onclick="downloadTeacherStudentListCsv()">ดาวน์โหลดรายชื่อ</button>
+              </div>
               <div class="form-row">
                 <div>
                   <label>ค้นหานักเรียน / ชื่อเล่น / เบอร์ / Member ID</label>
@@ -8343,6 +8346,8 @@
       replaceArray(gamificationRedemptions, results[23] || []);
       const mainSettings = settingsItems.find(function(item) { return item.id === 'main' || item.firebaseDocId === 'main'; });
       if (mainSettings) systemSettings = Object.assign(systemSettings, mainSettings);
+      safeRun(applySystemSettingsToPage, 'settings-apply-after-load');
+      safeRun(renderSystemSettingsForm, 'settings-form-after-load');
       // Sync pre-repair: fix in-memory status immediately so first render is correct
       safeRun(applyPaymentRepairsSync, 'sync-payment-repair');
       safeRun(repairReceiptMonthsFromPayments, 'repair-receipt-months');
@@ -11136,16 +11141,45 @@
       });
     }
 
+    function getSortedTeacherStudentListForExport() {
+      return filterTeacherStudentList(getTeacherVisibleCourses()).sort(function(a, b) {
+        const idA = String(a.memberId || a.memberID || a.id || '');
+        const idB = String(b.memberId || b.memberID || b.id || '');
+        return idA.localeCompare(idB, undefined, { numeric: true });
+      });
+    }
+
+    function downloadTeacherStudentListCsv() {
+      const list = getSortedTeacherStudentListForExport();
+      if (!list.length) {
+        alert('ไม่พบรายชื่อนักเรียนสำหรับดาวน์โหลด');
+        return;
+      }
+      const rows = [['ลำดับ','Member ID','ชื่อ','ชื่อเล่น','ระดับชั้น','คอร์ส','ศูนย์','เบอร์ผู้ปกครอง','สถานะล่าสุด','Progress']];
+      list.forEach(function(s, index) {
+        rows.push([
+          index + 1,
+          s.memberId || s.studentId || '',
+          s.name || '',
+          s.nickname || '',
+          s.grade || '',
+          s.course || '',
+          getTeacherStudentCenterValue(s) || '',
+          s.phone || '',
+          s.pickupStatus || '',
+          getStudentGamificationSummaryText(s)
+        ]);
+      });
+      const today = getLocalDateString ? getLocalDateString() : new Date().toISOString().slice(0, 10);
+      downloadCsv('teacher-students-' + today + '.csv', rows);
+    }
+
     function renderTeacherStudents() {
       const tbody = getElement('teacherStudentTableBody');
       if (!tbody) return;
       const teacherCourses = getTeacherVisibleCourses();
       renderTeacherCourseOptions();
-      const filtered = filterTeacherStudentList(teacherCourses).sort(function(a, b) {
-        var idA = String(a.memberId || a.memberID || a.id || '');
-        var idB = String(b.memberId || b.memberID || b.id || '');
-        return idA.localeCompare(idB, undefined, { numeric: true });
-      });
+      const filtered = getSortedTeacherStudentListForExport();
       const tsTotalPages = Math.max(1, Math.ceil(filtered.length / LIST_PAGE_SIZE));
       if (teacherStudentsCurrentPage > tsTotalPages) teacherStudentsCurrentPage = tsTotalPages;
       const tsStart = (teacherStudentsCurrentPage - 1) * LIST_PAGE_SIZE;
@@ -35438,7 +35472,7 @@ function receiptStatusText(status) {
           if (!snap.exists) { content.innerHTML = '<p style="color:red;text-align:center;">ไม่พบข้อมูลนักเรียน</p>'; return; }
           student = Object.assign({ id: snap.id, firebaseDocId: snap.id }, snap.data());
         }
-        const logo = idCardLogoUrl || '';
+        const logo = await getActiveIdCardLogoUrl();
         const watermark = idCardWatermarkUrl || '';
         const qrDataUrl = await generateQrDataUrl(ID_CARD_QR_BASE + encodeURIComponent(student.memberId || student.studentId || ''));
         const cardHtml = buildIdCardCellHtml(student, qrDataUrl || '', logo, watermark);
@@ -37283,6 +37317,19 @@ function receiptStatusText(status) {
         console.warn('loadIdCardSettings error', e);
         idCardSettings = {};
       }
+    }
+
+    async function ensureIdCardSettingsLoaded() {
+      if (!idCardLogoUrl || idCardLogoUrl === ID_CARD_DEFAULT_LOGO) {
+        await loadIdCardSettings();
+      }
+      if (!idCardLogoUrl) idCardLogoUrl = parseDriveImageUrl(ID_CARD_DEFAULT_LOGO);
+      return idCardSettings || {};
+    }
+
+    async function getActiveIdCardLogoUrl() {
+      await ensureIdCardSettingsLoaded();
+      return parseDriveImageUrl(idCardLogoUrl || ID_CARD_DEFAULT_LOGO);
     }
 
     function updateIdCardLogoPreview(url) {
