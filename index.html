@@ -25539,7 +25539,7 @@ function receiptStatusText(status) {
 
     function getTeacherNameIdentitySet(teacher) {
       if (!teacher) return [];
-      return [teacher.name, teacher.displayName].map(function(value) {
+      return [teacher.name, teacher.displayName, teacher.username].map(function(value) {
         return String(value || '').trim();
       }).filter(Boolean);
     }
@@ -25560,21 +25560,38 @@ function receiptStatusText(status) {
 
     function getSessionTeacherNameIdentitySet(session) {
       if (!session) return [];
-      return [session.teacherName, session.tutorName].map(function(value) {
+      return [session.teacherName, session.tutorName, session.teacher, session.tutor, session.instructorName, session.teacherId, session.tutorId].map(function(value) {
         return String(value || '').trim();
       }).filter(Boolean);
+    }
+
+    function normalizeTeacherNameIdentity(value) {
+      return String(value || '')
+        .toLowerCase()
+        .replace(/^(ครู|teacher|tutor)\s*/i, '')
+        .replace(/\s+/g, '')
+        .trim();
+    }
+
+    function hasTeacherNameIdentityMatch(teacherNames, sessionNames) {
+      const normalizedTeacherNames = (teacherNames || []).map(normalizeTeacherNameIdentity).filter(Boolean);
+      if (!normalizedTeacherNames.length) return false;
+      return (sessionNames || []).map(normalizeTeacherNameIdentity).filter(Boolean).some(function(name) {
+        return normalizedTeacherNames.includes(name);
+      });
     }
 
     function isMonthlySessionForTeacher(session, teacher) {
       const teacherKeys = getTeacherIdentitySet(teacher);
       const sessionKeys = getSessionTeacherIdentitySet(session);
       if (teacherKeys.length && sessionKeys.length) {
-        return sessionKeys.some(function(key) { return teacherKeys.includes(key); });
+        if (sessionKeys.some(function(key) { return teacherKeys.includes(key); })) return true;
+        return hasTeacherNameIdentityMatch(getTeacherNameIdentitySet(teacher), getSessionTeacherNameIdentitySet(session));
       }
-      if (sessionKeys.length) return false;
       const teacherNames = getTeacherNameIdentitySet(teacher);
       const sessionNames = getSessionTeacherNameIdentitySet(session);
-      return !!teacherNames.length && sessionNames.some(function(name) { return teacherNames.includes(name); });
+      if (hasTeacherNameIdentityMatch(teacherNames, sessionNames)) return true;
+      return !sessionKeys.length && !!teacherNames.length && sessionNames.some(function(name) { return teacherNames.includes(name); });
     }
 
     function parseTimeToMinutes(time) {
@@ -28778,10 +28795,14 @@ function receiptStatusText(status) {
 
     function findTeacherByPlannerId(teacherId) {
       const key = String(teacherId || '');
+      const nameKey = normalizeTeacherNameIdentity(key);
       return getActivePlannerTeacherList().find(function(teacher) {
-        return [teacher.id, teacher.firebaseDocId, teacher.linkedTeacherId, teacher.teacherDocId, teacher.teacherId, teacher.authUid, teacher.teacherUid, teacher.teacherAuthUid, teacher.email].map(function(value) {
+        const identityMatched = [teacher.id, teacher.firebaseDocId, teacher.linkedTeacherId, teacher.teacherDocId, teacher.teacherId, teacher.authUid, teacher.teacherUid, teacher.teacherAuthUid, teacher.email].map(function(value) {
           return String(value || '');
         }).includes(key);
+        if (identityMatched) return true;
+        if (!nameKey) return false;
+        return [teacher.name, teacher.displayName, teacher.username].map(normalizeTeacherNameIdentity).filter(Boolean).includes(nameKey);
       }) || null;
     }
 
