@@ -35252,21 +35252,14 @@ function receiptStatusText(status) {
       updateManualExamFilteredOptions();
     }
 
+    // takenIds: Set of studentId/studentUid strings who already have a result for the selected course
+    // Populated by renderManualExamQuestions() via a live Firestore query
+    var manualExamTakenIds = new Set();
+
     function updateManualExamStudentOptions() {
       const center = (getElement('manualExamCenterSel') || {}).value || '';
       const grade = (getElement('manualExamGradeSel') || {}).value || '';
       const courseId = (getElement('manualExamCourseSel') || {}).value || '';
-
-      const takenIds = new Set();
-      if (courseId) {
-        (onlineExamGradeAllResults || []).forEach(function(r) {
-          if (String(r.courseId || '') !== courseId) return;
-          if (r.resultStatus === 'absent') return;
-          if (r.allowRetake === true) return;
-          if (r.studentId) takenIds.add(String(r.studentId));
-          if (r.studentUid) takenIds.add(String(r.studentUid));
-        });
-      }
 
       const studentSel = getElement('manualExamStudentSel');
       if (!studentSel) return;
@@ -35279,7 +35272,7 @@ function receiptStatusText(status) {
         if (courseId) {
           const sId = String(s.id || s.firebaseDocId || '');
           const sUid = String(s.authUid || '');
-          if (takenIds.has(sId) || (sUid && takenIds.has(sUid))) return false;
+          if (manualExamTakenIds.has(sId) || (sUid && manualExamTakenIds.has(sUid))) return false;
         }
         return true;
       }).sort(function(a, b) {
@@ -35337,19 +35330,43 @@ function receiptStatusText(status) {
       if (fallback) fallback.style.display = 'none';
     }
 
-    function renderManualExamQuestions() {
+    async function renderManualExamQuestions() {
       const courseId = (getElement('manualExamCourseSel') || {}).value || '';
       const course = (onlineExamCourseCache || []).find(function(c) { return (c.firebaseDocId || '') === courseId; });
       const box = getElement('manualExamQuestionsBox');
       const fallback = getElement('manualExamFallback');
       manualExamAnswers = {};
-      updateManualExamStudentOptions();
+      manualExamTakenIds = new Set();
 
       if (!courseId || !course) {
+        updateManualExamStudentOptions();
         if (box) box.innerHTML = '';
         if (fallback) fallback.style.display = 'none';
         return;
       }
+
+      // Show loading state in student dropdown while querying
+      const studentSel = getElement('manualExamStudentSel');
+      if (studentSel) studentSel.innerHTML = '<option value="">-- กำลังโหลด... --</option>';
+      const noteEl = getElement('manualExamStudentNote');
+      if (noteEl) noteEl.textContent = '';
+
+      // Query Firestore for who already has a result for this specific course
+      if (firebaseReady && db) {
+        try {
+          const snap = await db.collection('onlineExamResults').where('courseId', '==', courseId).get();
+          snap.docs.forEach(function(d) {
+            const r = d.data();
+            if (r.resultStatus === 'absent') return;
+            if (r.allowRetake === true) return;
+            if (r.studentId) manualExamTakenIds.add(String(r.studentId));
+            if (r.studentUid) manualExamTakenIds.add(String(r.studentUid));
+          });
+        } catch(e) {
+          console.warn('renderManualExamQuestions: could not load taken ids', e);
+        }
+      }
+      updateManualExamStudentOptions();
 
       const questions = course.questions || [];
 
@@ -35468,18 +35485,12 @@ function receiptStatusText(status) {
         if (correct > total && total > 0) { if (resultEl) { resultEl.textContent = 'จำนวนข้อถูกมากกว่าจำนวนข้อทั้งหมด'; resultEl.style.color = '#dc2626'; } return; }
       }
 
-      // Guard: prevent duplicate submission
+      // Guard: prevent duplicate submission (manualExamTakenIds is fresh from last Firestore query)
       const sId = String(student.id || student.firebaseDocId || '');
       const sUid = String(student.authUid || '');
-      const alreadyTaken = (onlineExamGradeAllResults || []).some(function(r) {
-        if (String(r.courseId || '') !== courseId) return false;
-        if (r.resultStatus === 'absent') return false;
-        if (r.allowRetake === true) return false;
-        return String(r.studentId || '') === sId || (sUid && String(r.studentUid || '') === sUid);
-      });
-      if (alreadyTaken) {
+      if (manualExamTakenIds.has(sId) || (sUid && manualExamTakenIds.has(sUid))) {
         if (resultEl) { resultEl.textContent = 'นักเรียนคนนี้มีผลสอบชุดนี้แล้ว ไม่สามารถบันทึกซ้ำได้'; resultEl.style.color = '#dc2626'; }
-        updateManualExamStudentOptions();
+        await renderManualExamQuestions();
         return;
       }
 
@@ -35519,6 +35530,10 @@ function receiptStatusText(status) {
         addActivityLog('เพิ่มผลสอบจากกระดาษ', (student.name || '-') + ' · ' + (course.subject || '') + ' · ถูก ' + correct + '/' + total);
         onlineExamGradeAllResults.push(Object.assign({ _docId: newId }, doc));
         onlineExamGradeGroupedRows = buildOnlineExamGroupedRows(onlineExamGradeAllResults);
+        // Update local taken-ids cache so dropdown refreshes immediately
+        if (sId) manualExamTakenIds.add(sId);
+        if (sUid) manualExamTakenIds.add(sUid);
+        updateManualExamStudentOptions();
         if (resultEl) { resultEl.textContent = 'บันทึกผลสอบเรียบร้อย — ' + (student.name || '-') + ' · ถูก ' + correct + '/' + total + ' ข้อ · ' + score50val.toFixed(1).replace(/\.0$/, '') + '/50 คะแนน'; resultEl.style.color = '#16a34a'; }
         renderOnlineExamGradingPage(onlineExamGradePage);
         safeRun(renderAdminScoreTables, 'admin-score-refresh-after-manual');
