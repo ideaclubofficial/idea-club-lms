@@ -2920,6 +2920,14 @@
     /* ── CHANGE D: Compact payment action buttons ── */
     .payment-actions-wrap { display: flex; flex-wrap: wrap; gap: 5px; align-items: center; min-width: 320px; }
 
+    /* ── Finance detail clickable amounts ── */
+    .finance-detail-link {
+      cursor: pointer;
+      text-decoration: underline dotted;
+      text-underline-offset: 3px;
+    }
+    .finance-detail-link:hover { opacity: 0.75; }
+
     /* ── Payment table: truncate course column ── */
     #paymentTableBody td:nth-child(3) { max-width: 120px; }
     .payment-course-name {
@@ -31665,11 +31673,14 @@ function receiptStatusText(status) {
         totalIncome += income;
         totalExpected += expected;
         totalExp += exp;
-        return { name: name, expected: expected, income: income, expenses: exp, profit: profit };
+        return { name: name, monthKey: monthKey, expected: expected, income: income, expenses: exp, profit: profit };
       });
 
       var totalProfit = totalIncome - totalExp;
       function profitColor(v) { return v >= 0 ? '#16a34a' : '#dc2626'; }
+      function clickable(monthKey, type, html) {
+        return '<span class="finance-detail-link" onclick="showFinanceDetailBubble(\'' + jsArg(monthKey) + '\',\'' + type + '\')">' + html + '</span>';
+      }
 
       container.innerHTML =
         '<div class="table-wrap"><table>' +
@@ -31679,10 +31690,10 @@ function receiptStatusText(status) {
           var hasData = r.expected || r.income || r.expenses;
           return '<tr>' +
             '<td>' + escapeHtml(r.name) + '</td>' +
-            '<td style="color:#6b7280;">' + (hasData ? formatPrice(r.expected) : '-') + '</td>' +
-            '<td style="color:#16a34a;">' + (hasData ? formatPrice(r.income) : '-') + '</td>' +
-            '<td style="color:#dc2626;">' + (hasData ? formatPrice(r.expenses) : '-') + '</td>' +
-            '<td style="color:' + profitColor(r.profit) + ';font-weight:700;">' + (hasData ? formatPrice(r.profit) : '-') + '</td>' +
+            '<td style="color:#6b7280;">' + (hasData ? clickable(r.monthKey, 'expected', formatPrice(r.expected)) : '-') + '</td>' +
+            '<td style="color:#16a34a;">' + (hasData ? clickable(r.monthKey, 'income', formatPrice(r.income)) : '-') + '</td>' +
+            '<td style="color:#dc2626;">' + (hasData ? clickable(r.monthKey, 'expenses', formatPrice(r.expenses)) : '-') + '</td>' +
+            '<td style="color:' + profitColor(r.profit) + ';font-weight:700;">' + (hasData ? clickable(r.monthKey, 'profit', formatPrice(r.profit)) : '-') + '</td>' +
             '</tr>';
         }).join('') +
         '<tr style="font-weight:800;border-top:2px solid #e5e7eb;">' +
@@ -31693,6 +31704,71 @@ function receiptStatusText(status) {
         '<td style="color:' + profitColor(totalProfit) + ';">' + formatPrice(totalProfit) + '</td>' +
         '</tr>' +
         '</tbody></table></div>';
+    }
+
+    function showFinanceDetailBubble(monthKey, type) {
+      var titleMap = { expected: 'ยอดที่ควรได้รับ', income: 'รายรับ (ชำระแล้ว)', expenses: 'รายจ่าย', profit: 'กำไร / ขาดทุน' };
+      var title = (titleMap[type] || type) + ' — ' + escapeHtml(monthKey);
+
+      function paymentRows(filterFn) {
+        var list = payments.filter(function(p) {
+          return p.deleted !== true && p.month === monthKey && filterFn(p);
+        });
+        if (!list.length) return '<p style="color:#6b7280;text-align:center;padding:12px 0;">ไม่มีรายการ</p>';
+        var total = list.reduce(function(s, p) { return s + getPaymentFinalAmount(p); }, 0);
+        return '<div class="table-wrap" style="max-height:360px;overflow-y:auto;">' +
+          '<table><thead><tr><th>นักเรียน</th><th>คอร์ส</th><th>ยอด</th><th>สถานะ</th></tr></thead><tbody>' +
+          list.map(function(p) {
+            return '<tr>' +
+              '<td>' + escapeHtml(p.student || '-') + '</td>' +
+              '<td style="max-width:120px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + escapeHtml(p.course || p.courseName || '-') + '</td>' +
+              '<td>' + formatPrice(getPaymentFinalAmount(p)) + '</td>' +
+              '<td><span class="' + (getPaymentDisplayStatus(p) === 'ชำระแล้ว' ? 'status-paid' : 'status-waiting') + '">' + escapeHtml(getPaymentDisplayStatus(p)) + '</span></td>' +
+              '</tr>';
+          }).join('') +
+          '</tbody></table></div>' +
+          '<div style="text-align:right;font-weight:700;margin-top:10px;">รวม: ' + formatPrice(total) + '</div>';
+      }
+
+      function expenseRows() {
+        var list = expenses.filter(function(e) { return e.deleted !== true && e.month === monthKey; });
+        if (!list.length) return '<p style="color:#6b7280;text-align:center;padding:12px 0;">ไม่มีรายการ</p>';
+        var total = list.reduce(function(s, e) { return s + Number(e.amount || 0); }, 0);
+        return '<div class="table-wrap" style="max-height:360px;overflow-y:auto;">' +
+          '<table><thead><tr><th>หมวดหมู่</th><th>รายละเอียด</th><th>จำนวนเงิน</th></tr></thead><tbody>' +
+          list.map(function(e) {
+            return '<tr>' +
+              '<td>' + escapeHtml(e.category || '-') + '</td>' +
+              '<td>' + escapeHtml(e.description || '-') + '</td>' +
+              '<td>' + formatPrice(Number(e.amount || 0)) + '</td>' +
+              '</tr>';
+          }).join('') +
+          '</tbody></table></div>' +
+          '<div style="text-align:right;font-weight:700;margin-top:10px;">รวม: ' + formatPrice(total) + '</div>';
+      }
+
+      var bodyHtml = '';
+      if (type === 'expected') {
+        bodyHtml = paymentRows(function() { return true; });
+      } else if (type === 'income') {
+        bodyHtml = paymentRows(function(p) { return getPaymentDisplayStatus(p) === 'ชำระแล้ว'; });
+      } else if (type === 'expenses') {
+        bodyHtml = expenseRows();
+      } else if (type === 'profit') {
+        var income = getMonthlyIncome(monthKey);
+        var exp = getMonthlyExpensesTotal(monthKey, 'ทั้งหมด');
+        var profit = income - exp;
+        bodyHtml =
+          '<div class="dashboard-grid" style="margin-bottom:16px;">' +
+          '<div class="stat"><h4>รายรับ (ชำระแล้ว)</h4><p style="color:#16a34a;">' + formatPrice(income) + '</p></div>' +
+          '<div class="stat"><h4>รายจ่าย</h4><p style="color:#dc2626;">' + formatPrice(exp) + '</p></div>' +
+          '<div class="stat"><h4>กำไร / ขาดทุน</h4><p style="color:' + (profit >= 0 ? '#16a34a' : '#dc2626') + ';font-weight:800;">' + formatPrice(profit) + '</p></div>' +
+          '</div>' +
+          '<h4 style="margin:12px 0 6px;">รายรับ</h4>' + paymentRows(function(p) { return getPaymentDisplayStatus(p) === 'ชำระแล้ว'; }) +
+          '<h4 style="margin:16px 0 6px;">รายจ่าย</h4>' + expenseRows();
+      }
+
+      openViewBubble(title, bodyHtml);
     }
 
     function initExpenseMonthYearPickers() {
