@@ -31710,24 +31710,40 @@ function receiptStatusText(status) {
       var titleMap = { expected: 'ยอดที่ควรได้รับ', income: 'รายรับ (ชำระแล้ว)', expenses: 'รายจ่าย', profit: 'กำไร / ขาดทุน' };
       var title = (titleMap[type] || type) + ' — ' + escapeHtml(monthKey);
 
-      function paymentRows(filterFn) {
+      function paymentByCourseRows(filterFn) {
         var list = payments.filter(function(p) {
           return p.deleted !== true && p.month === monthKey && filterFn(p);
         });
         if (!list.length) return '<p style="color:#6b7280;text-align:center;padding:12px 0;">ไม่มีรายการ</p>';
-        var total = list.reduce(function(s, p) { return s + getPaymentFinalAmount(p); }, 0);
-        return '<div class="table-wrap" style="max-height:360px;overflow-y:auto;">' +
-          '<table><thead><tr><th>นักเรียน</th><th>คอร์ส</th><th>ยอด</th><th>สถานะ</th></tr></thead><tbody>' +
-          list.map(function(p) {
+
+        // group by courseId (fallback to course name)
+        var groupMap = {};
+        list.forEach(function(p) {
+          var courseObj = courses.find(function(c) { return String(c.id) === String(p.courseId || ''); });
+          var courseName = (courseObj && courseObj.name) || p.course || p.courseName || 'ไม่ระบุคอร์ส';
+          var location = (courseObj && courseObj.location) || '-';
+          var key = String(p.courseId || courseName);
+          if (!groupMap[key]) groupMap[key] = { courseName: courseName, location: location, total: 0, count: 0 };
+          groupMap[key].total += getPaymentFinalAmount(p);
+          groupMap[key].count += 1;
+        });
+
+        var groups = Object.keys(groupMap).map(function(k) { return groupMap[k]; });
+        groups.sort(function(a, b) { return b.total - a.total; });
+        var grandTotal = list.reduce(function(s, p) { return s + getPaymentFinalAmount(p); }, 0);
+
+        return '<div class="table-wrap" style="max-height:400px;overflow-y:auto;">' +
+          '<table><thead><tr><th>คอร์ส</th><th>ศูนย์</th><th>จำนวน (คน)</th><th>ยอดรวม</th></tr></thead><tbody>' +
+          groups.map(function(g) {
             return '<tr>' +
-              '<td>' + escapeHtml(p.student || '-') + '</td>' +
-              '<td style="max-width:120px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + escapeHtml(p.course || p.courseName || '-') + '</td>' +
-              '<td>' + formatPrice(getPaymentFinalAmount(p)) + '</td>' +
-              '<td><span class="' + (getPaymentDisplayStatus(p) === 'ชำระแล้ว' ? 'status-paid' : 'status-waiting') + '">' + escapeHtml(getPaymentDisplayStatus(p)) + '</span></td>' +
+              '<td>' + escapeHtml(g.courseName) + '</td>' +
+              '<td>' + escapeHtml(g.location) + '</td>' +
+              '<td style="text-align:center;">' + g.count + '</td>' +
+              '<td style="font-weight:600;">' + formatPrice(g.total) + '</td>' +
               '</tr>';
           }).join('') +
           '</tbody></table></div>' +
-          '<div style="text-align:right;font-weight:700;margin-top:10px;">รวม: ' + formatPrice(total) + '</div>';
+          '<div style="text-align:right;font-weight:700;margin-top:10px;">รวมทั้งหมด: ' + formatPrice(grandTotal) + ' (' + list.length + ' รายการ)</div>';
       }
 
       function expenseRows() {
@@ -31749,9 +31765,9 @@ function receiptStatusText(status) {
 
       var bodyHtml = '';
       if (type === 'expected') {
-        bodyHtml = paymentRows(function() { return true; });
+        bodyHtml = paymentByCourseRows(function() { return true; });
       } else if (type === 'income') {
-        bodyHtml = paymentRows(function(p) { return getPaymentDisplayStatus(p) === 'ชำระแล้ว'; });
+        bodyHtml = paymentByCourseRows(function(p) { return getPaymentDisplayStatus(p) === 'ชำระแล้ว'; });
       } else if (type === 'expenses') {
         bodyHtml = expenseRows();
       } else if (type === 'profit') {
@@ -31764,7 +31780,7 @@ function receiptStatusText(status) {
           '<div class="stat"><h4>รายจ่าย</h4><p style="color:#dc2626;">' + formatPrice(exp) + '</p></div>' +
           '<div class="stat"><h4>กำไร / ขาดทุน</h4><p style="color:' + (profit >= 0 ? '#16a34a' : '#dc2626') + ';font-weight:800;">' + formatPrice(profit) + '</p></div>' +
           '</div>' +
-          '<h4 style="margin:12px 0 6px;">รายรับ</h4>' + paymentRows(function(p) { return getPaymentDisplayStatus(p) === 'ชำระแล้ว'; }) +
+          '<h4 style="margin:12px 0 6px;">รายรับ (แยกตามคอร์ส)</h4>' + paymentByCourseRows(function(p) { return getPaymentDisplayStatus(p) === 'ชำระแล้ว'; }) +
           '<h4 style="margin:16px 0 6px;">รายจ่าย</h4>' + expenseRows();
       }
 
