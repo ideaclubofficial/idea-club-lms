@@ -21890,6 +21890,44 @@
       }
     }
 
+    async function downloadHtmlAsImage(title, bodyHtml, fileName) {
+      const html2canvasLib = window.html2canvas;
+      if (!html2canvasLib) {
+        alert('ไม่สามารถสร้างรูปได้ เพราะโหลดเครื่องมือไม่ครบ กรุณารีเฟรชหน้าแล้วลองใหม่');
+        return;
+      }
+      const element = buildPdfDocumentElement(title, bodyHtml);
+      document.body.appendChild(element);
+      try {
+        const target = element.querySelector('.pdf-document');
+        const canvas = await html2canvasLib(target, {
+          scale: 2,
+          useCORS: true,
+          backgroundColor: '#ffffff',
+          width: target.offsetWidth,
+          height: target.scrollHeight,
+          windowWidth: target.offsetWidth,
+          windowHeight: target.scrollHeight
+        });
+        const safeFileName = getSafeFileName(String(fileName || title).replace(/\.png$/i, '')) + '.png';
+        canvas.toBlob(function(blob) {
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = safeFileName;
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+          setTimeout(function() { URL.revokeObjectURL(url); }, 3000);
+        }, 'image/png');
+      } catch (error) {
+        console.error('download image error:', error);
+        alert('ดาวน์โหลดรูปไม่สำเร็จ: ' + (error.message || error.code || 'ไม่ทราบสาเหตุ'));
+      } finally {
+        document.body.removeChild(element);
+      }
+    }
+
     function applicationFormHtml(student, isBlank) {
       const data = student || {};
       const blank = !!isBlank;
@@ -22080,10 +22118,13 @@
     function printOverdueNotice(paymentId) {
       if (!hasPermission('admin.payments')) { alert('ไม่มีสิทธิ์'); return; }
       const html = overdueNoticeHtml(paymentId);
+      const pid = jsArg(String(paymentId));
+      const fileBase = 'overdue-notice-' + getSafeFileName(String(paymentId)).slice(0, 12);
       openViewBubble('ใบแจ้งยอดค้างชำระ',
         html +
         '<div class="test-actions">' +
-          '<button class="btn btn-orange" type="button" onclick="downloadHtmlAsPdf(\'ใบแจ้งหนี้\', overdueNoticeHtml(\'' + jsArg(String(paymentId)) + '\'), \'overdue-notice-' + escapeHtml(String(paymentId)).slice(0, 12) + '.pdf\')">ดาวน์โหลด PDF</button>' +
+          '<button class="btn btn-orange" type="button" onclick="downloadHtmlAsPdf(\'ใบแจ้งหนี้\', overdueNoticeHtml(\'' + pid + '\'), \'' + fileBase + '.pdf\')">ดาวน์โหลด PDF</button>' +
+          '<button class="btn btn-green" type="button" onclick="downloadHtmlAsImage(\'ใบแจ้งหนี้\', overdueNoticeHtml(\'' + pid + '\'), \'' + fileBase + '.png\')">บันทึกเป็นรูป</button>' +
           '<button class="btn btn-dark" type="button" onclick="closeEditBubble()">ปิด</button>' +
         '</div>'
       );
