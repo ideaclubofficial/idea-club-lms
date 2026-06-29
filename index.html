@@ -15182,6 +15182,24 @@
       return studentHasAppliedCourse(activeStudent) && isCourseStatusApproved(activeStudent.courseStatus || '');
     }
 
+    function getStudentLearningStatus(student) {
+      const activeStudent = student || currentStudent || {};
+      return String(activeStudent.learningStatus || activeStudent.status || 'เรียนอยู่').trim();
+    }
+
+    function isStudentOnLearningPause(student) {
+      return getStudentLearningStatus(student) === 'พักเรียน';
+    }
+
+    function studentCanUseCourseEntitlements(student) {
+      const activeStudent = student || currentStudent;
+      return studentHasApprovedCourse(activeStudent) && !isStudentOnLearningPause(activeStudent);
+    }
+
+    function getPausedCourseAccessMessage() {
+      return 'สถานะพักเรียน: ระบบปิดสิทธิ์เข้าเรียนของคอร์สชั่วคราว แต่ยังดูคะแนนและระบบตัวละครได้';
+    }
+
     function updateStudentCourseApplySectionVisibility() {
       const section = getElement('course-section');
       if (!section) return;
@@ -17223,12 +17241,14 @@
       const hasClassToday = classSummary.hasClassToday;
       const courseStatusForHome = currentStudent && currentStudent.courseStatus ? currentStudent.courseStatus : '';
       const isApprovedForHome = hasRegisteredCourse && isCourseStatusApproved(courseStatusForHome);
+      const canUseCourseForHome = hasRegisteredCourse && studentCanUseCourseEntitlements(currentStudent);
+      const isPausedForHome = isStudentOnLearningPause(currentStudent);
       if (getElement('studentDashClassToday')) {
-        getElement('studentDashClassToday').textContent = !hasRegisteredCourse ? 'ยังไม่ได้สมัครคอร์ส' : (!isApprovedForHome ? 'รออนุมัติคอร์ส' : classSummary.statusText);
-        getElement('studentDashClassToday').className = 'status-badge ' + (isApprovedForHome && hasClassToday ? 'present' : 'parent');
+        getElement('studentDashClassToday').textContent = !hasRegisteredCourse ? 'ยังไม่ได้สมัครคอร์ส' : (!isApprovedForHome ? 'รออนุมัติคอร์ส' : (isPausedForHome ? 'พักเรียน' : classSummary.statusText));
+        getElement('studentDashClassToday').className = 'status-badge ' + (canUseCourseForHome && hasClassToday ? 'present' : 'parent');
       }
       if (getElement('studentDashClassDetail')) {
-        getElement('studentDashClassDetail').innerHTML = !selectedCourse ? 'สมัครคอร์สก่อนจึงจะเห็นห้องเรียน' : (!isApprovedForHome ? 'รอเจ้าหน้าที่ตรวจสอบการชำระเงิน' : classSummary.detailHtml);
+        getElement('studentDashClassDetail').innerHTML = !selectedCourse ? 'สมัครคอร์สก่อนจึงจะเห็นห้องเรียน' : (!isApprovedForHome ? 'รอเจ้าหน้าที่ตรวจสอบการชำระเงิน' : (isPausedForHome ? getPausedCourseAccessMessage() : classSummary.detailHtml));
       }
 
       const latestScore = isApprovedForHome ? getLatestPublishedScoreInfo() : null;
@@ -17313,6 +17333,8 @@
       const memberId = student.memberId || student.studentId || '-';
       const courseStatus = student.courseStatus || '';
       const isApproved = !!(hasRegisteredCourse && isCourseStatusApproved(courseStatus));
+      const canUseCourse = !!(hasRegisteredCourse && studentCanUseCourseEntitlements(student));
+      const isPaused = isStudentOnLearningPause(student);
       const today = getThaiDayName(new Date());
       const classSummary = getStudentTodayClassSummary(selectedCourse);
       const hasClassToday = classSummary.hasClassToday;
@@ -17325,12 +17347,12 @@
       setStudentMobileText('studentMobileMemberId', memberId);
 
       setStudentMobileText('studentMobileTodayClassTitle',
-        !hasRegisteredCourse ? 'ยังไม่ได้สมัครคอร์ส' : (!isApproved ? 'รออนุมัติคอร์ส' : classSummary.statusText.replace(/^วันนี้มีเรียน[:\s]*/, '').trim() || classSummary.statusText)
+        !hasRegisteredCourse ? 'ยังไม่ได้สมัครคอร์ส' : (!isApproved ? 'รออนุมัติคอร์ส' : (isPaused ? 'พักเรียน' : classSummary.statusText.replace(/^วันนี้มีเรียน[:\s]*/, '').trim() || classSummary.statusText))
       );
       setStudentMobileText('studentMobileTodayClassDetail',
-        !selectedCourse ? 'สมัครคอร์สก่อนจึงจะเห็นห้องเรียน' : (!isApproved ? 'รอเจ้าหน้าที่ตรวจสอบการชำระเงิน' : classSummary.detailText)
+        !selectedCourse ? 'สมัครคอร์สก่อนจึงจะเห็นห้องเรียน' : (!isApproved ? 'รอเจ้าหน้าที่ตรวจสอบการชำระเงิน' : (isPaused ? getPausedCourseAccessMessage() : classSummary.detailText))
       );
-      setStudentMobileTag('studentMobileTodayClassTag', today || 'วันนี้');
+      setStudentMobileTag('studentMobileTodayClassTag', isPaused ? 'พักเรียน' : (today || 'วันนี้'), canUseCourse && hasClassToday ? 'present' : 'parent');
 
       setStudentMobileText('studentMobileCourseName', selectedCourse ? selectedCourse.name : 'ยังไม่มีคอร์ส');
       setStudentMobileText('studentMobileCourseMeta', selectedCourse
@@ -17375,6 +17397,10 @@
     }
 
     function studentMobileGoToOnlineExam() {
+      if (!studentCanUseCourseEntitlements(currentStudent)) {
+        alert(getPausedCourseAccessMessage());
+        return;
+      }
       document.body.classList.add('student-mobile-online-exam-open');
       studentMobileGo('student-monthly-test');
       var el = getElement('desktopOnlineExamWrapper') || getElement('onlineExamCourseGrid');
@@ -17382,6 +17408,7 @@
     }
 
     function getPublishedOnlineExamCoursesForStudent(options) {
+      if (!studentCanUseCourseEntitlements(currentStudent)) return [];
       const opts = options || {};
       const grade = currentStudent && currentStudent.grade ? currentStudent.grade : getProfileGrade();
       const studentLocation = String((currentStudent && (currentStudent.preferredLocation || currentStudent.location || currentStudent.center)) || '').trim();
@@ -17403,19 +17430,19 @@
 
     function updateStudentInWebExamUx() {
       const selectedCourse = getCurrentStudentCourse ? getCurrentStudentCourse() : null;
-      safeRun(function() { updateStudentMobileOnlineExamCard(!!currentStudent, selectedCourse ? normalizeCourseFeatures(selectedCourse) : {}); }, 'student-mobile-online-exam-card');
+      safeRun(function() { updateStudentMobileOnlineExamCard(studentCanUseCourseEntitlements(currentStudent), selectedCourse ? normalizeCourseFeatures(selectedCourse) : {}); }, 'student-mobile-online-exam-card');
       safeRun(renderStudentMobileExam, 'student-mobile-score-ux');
     }
 
     function updateStudentMobileOnlineExamCard(isApproved, selectedFeatures) {
       const card = getElement('studentMobileOnlineExamCard');
       if (!card) return;
-      const canUseExams = !!isApproved;
+      const canUseExams = !!isApproved && (!selectedFeatures || selectedFeatures.exams !== false);
       const count = canUseExams ? getStudentOnlineExamCount() : 0;
-      card.style.display = isApproved ? '' : 'none';
+      card.style.display = canUseExams ? '' : 'none';
       if (getElement('studentMobileOnlineExamCardDesc')) {
         getElement('studentMobileOnlineExamCardDesc').textContent = !canUseExams
-          ? 'กรุณาเข้าสู่ระบบนักเรียนก่อน'
+          ? (isStudentOnLearningPause(currentStudent) ? 'สถานะพักเรียนยังไม่เปิดสิทธิ์ทำข้อสอบออนไลน์' : 'กรุณาเข้าสู่ระบบนักเรียนก่อน')
           : (count ? ('มีข้อสอบออนไลน์ ' + count + ' ชุดสำหรับชั้นเรียนของคุณ') : 'ยังไม่มีข้อสอบออนไลน์ที่เผยแพร่');
       }
       if (getElement('studentMobileOnlineExamTag')) {
@@ -18984,14 +19011,15 @@
       const hasRegisteredCourse = !!(currentStudent && currentStudent.courseId && selectedCourse);
       const courseStatus = currentStudent && currentStudent.courseStatus ? currentStudent.courseStatus : '';
       const isCourseApproved = hasRegisteredCourse && isCourseStatusApproved(courseStatus);
+      const canUseCourseEntitlements = hasRegisteredCourse && selectedCourse && studentCanUseCourseEntitlements(currentStudent);
       const selectedFeatures = selectedCourse ? normalizeCourseFeatures(selectedCourse) : {};
       const canUsePayment = hasRegisteredCourse && selectedFeatures.payment !== false;
       const canUseReceipts = hasRegisteredCourse && selectedFeatures.receipts !== false;
       const canUseExamArea = !!currentStudent;
-      const canUseOnlineExamArea = !!currentStudent;
-      const canUseScoreArea = isCourseApproved && selectedFeatures.exams !== false;
-      const canUsePickupStatus = hasRegisteredCourse && selectedFeatures.attendance !== false;
-      const canUseAnnouncements = !selectedCourse || selectedFeatures.announcements !== false;
+      const canUseOnlineExamArea = !!canUseCourseEntitlements && selectedFeatures.exams !== false;
+      const canUseScoreArea = isCourseApproved && selectedFeatures.scores !== false;
+      const canUsePickupStatus = !!canUseCourseEntitlements && selectedFeatures.attendance !== false;
+      const canUseAnnouncements = (!selectedCourse || selectedFeatures.announcements !== false) && !isStudentOnLearningPause(currentStudent);
 
       if (selectedCourse) currentStudentCourseId = selectedCourse.id;
       updateStudentCourseApplySectionVisibility();
@@ -19017,7 +19045,7 @@
           getElement('studentPaymentLocked').innerHTML = '<h3>ชำระเงิน</h3><p style="color:#6b7280;">คอร์สนี้ยังปิดเมนูชำระเงินไว้ หากต้องการชำระเงิน กรุณาติดต่อเจ้าหน้าที่</p>';
         }
       }
-      safeRun(function() { updateStudentMobileOnlineExamCard(!!currentStudent, selectedFeatures); }, 'student-mobile-online-exam-card');
+      safeRun(function() { updateStudentMobileOnlineExamCard(canUseOnlineExamArea, selectedFeatures); }, 'student-mobile-online-exam-card');
       if (getElement('studentExamContent')) getElement('studentExamContent').classList.toggle('hidden', !canUseExamArea);
       if (getElement('studentExamLocked')) {
         getElement('studentExamLocked').classList.toggle('hidden', canUseExamArea);
@@ -19031,7 +19059,7 @@
       if (onlineExamLocked) {
         onlineExamLocked.style.display = canUseOnlineExamArea ? 'none' : '';
         if (!canUseOnlineExamArea) {
-          onlineExamLocked.innerHTML = '<div style="text-align:center;padding:32px 16px;color:#9ca3af;"><div style="font-size:48px;margin-bottom:12px;">🔒</div><p style="font-size:14px;font-weight:600;color:#374151;">ยังไม่สามารถใช้งานได้</p><p style="font-size:13px;margin-top:6px;">กรุณาสมัครและรับการอนุมัติคอร์สก่อน จึงจะเข้าทำข้อสอบออนไลน์ได้</p></div>';
+          onlineExamLocked.innerHTML = '<div style="text-align:center;padding:32px 16px;color:#9ca3af;"><div style="font-size:48px;margin-bottom:12px;">🔒</div><p style="font-size:14px;font-weight:600;color:#374151;">ยังไม่สามารถใช้งานได้</p><p style="font-size:13px;margin-top:6px;">' + (isStudentOnLearningPause(currentStudent) ? getPausedCourseAccessMessage() : 'กรุณาสมัครและรับการอนุมัติคอร์สก่อน จึงจะเข้าทำข้อสอบออนไลน์ได้') + '</p></div>';
         }
       }
       if (onlineExamContent) {
@@ -19098,7 +19126,7 @@
 
       safeRun(renderStudentLineGroupButton, 'student-line-group-display');
 
-      const entitledCourses = isCourseApproved && selectedCourse ? [selectedCourse] : [];
+      const entitledCourses = canUseCourseEntitlements ? [selectedCourse] : [];
       renderStudentOnlineClasses(entitledCourses, profileGrade);
       renderStudentOnDemandClasses(entitledCourses, profileGrade);
       safeRun(renderStudentMobileLearning, 'student-mobile-learning');
@@ -19138,8 +19166,7 @@
     function refreshStudentOnDemandFilter() {
       const profileGrade = currentStudent && currentStudent.grade ? currentStudent.grade : getProfileGrade();
       const selectedCourse = getCurrentStudentCourse();
-      const isCourseApproved = !!(currentStudent && currentStudent.courseId && selectedCourse && isCourseStatusApproved(currentStudent.courseStatus));
-      const entitledCourses = isCourseApproved && selectedCourse ? [selectedCourse] : [];
+      const entitledCourses = studentCanUseCourseEntitlements(currentStudent) && selectedCourse ? [selectedCourse] : [];
       renderStudentOnDemandClasses(entitledCourses, profileGrade);
       renderStudentMobileOnDemandClasses(entitledCourses, profileGrade);
     }
@@ -19252,6 +19279,10 @@
     }
 
     async function startStudentOnDemandClip(id) {
+      if (!studentCanUseCourseEntitlements(currentStudent)) {
+        alert(getPausedCourseAccessMessage());
+        return;
+      }
       const item = onDemandClips.find(function(p) { return getOnDemandClipId(p) === String(id || ''); });
       if (!item || !item.link) {
         alert('ยังไม่ได้เพิ่มลิงก์คลิปนี้');
@@ -19365,9 +19396,7 @@
 
     function getStudentEntitledCoursesForMobile() {
       const selectedCourse = getCurrentStudentCourse();
-      const courseStatus = currentStudent && currentStudent.courseStatus ? currentStudent.courseStatus : '';
-      const approved = !!(currentStudent && currentStudent.courseId && selectedCourse && isCourseStatusApproved(courseStatus));
-      return approved ? [selectedCourse] : [];
+      return studentCanUseCourseEntitlements(currentStudent) && selectedCourse ? [selectedCourse] : [];
     }
 
     function renderStudentMobileOnlineClasses(courseList, grade) {
@@ -19463,6 +19492,10 @@
     }
 
     function openOnDemandClipClip(id) {
+      if (!studentCanUseCourseEntitlements(currentStudent)) {
+        alert(getPausedCourseAccessMessage());
+        return;
+      }
       const item = onDemandClips.find(function(p) { return getOnDemandClipId(p) === String(id || ''); });
       if (!item || !item.link) {
         alert('ยังไม่ได้เพิ่มลิงก์คลิปนี้');
@@ -19475,6 +19508,10 @@
     }
 
     function openOnlineClassByCourseId(id) {
+      if (!studentCanUseCourseEntitlements(currentStudent)) {
+        alert(getPausedCourseAccessMessage());
+        return;
+      }
       const c = courses.find(function(item) { return String(item.id) === String(id); });
       if (c && !courseFeatureEnabled(c, 'online')) {
         alert('คอร์สนี้ยังปิดห้องเรียน Online ไว้');
@@ -19488,6 +19525,10 @@
     }
 
     function openOnDemandByCourseId(id) {
+      if (!studentCanUseCourseEntitlements(currentStudent)) {
+        alert(getPausedCourseAccessMessage());
+        return;
+      }
       const c = courses.find(function(course) { return String(course.id) === String(id); });
       if (c && !courseFeatureEnabled(c, 'onDemand')) {
         alert('คอร์สนี้ยังปิดคลิป On-demand ไว้');
@@ -19506,6 +19547,10 @@
     }
 
     function openStudentOnlineClass() {
+      if (!studentCanUseCourseEntitlements(currentStudent)) {
+        alert(getPausedCourseAccessMessage());
+        return;
+      }
       const c = getCurrentStudentCourse();
       if (c && !courseFeatureEnabled(c, 'online')) {
         alert('คอร์สนี้ยังปิดห้องเรียน Online ไว้');
@@ -20331,6 +20376,12 @@
         return;
       }
 
+      if (!studentCanUseCourseEntitlements(currentStudent)) {
+        text.textContent = getPausedCourseAccessMessage();
+        button.classList.add('hidden');
+        return;
+      }
+
       if (!courseFeatureEnabled(selectedCourse, 'lineGroup')) {
         text.textContent = 'คอร์สนี้ยังปิดปุ่ม LINE กลุ่มไว้ กรุณาติดต่อเจ้าหน้าที่';
         button.classList.add('hidden');
@@ -20351,6 +20402,10 @@
 
     async function openStudentLineGroup() {
       const selectedCourse = getCurrentStudentCourse ? getCurrentStudentCourse() : null;
+      if (!studentCanUseCourseEntitlements(currentStudent)) {
+        alert(getPausedCourseAccessMessage());
+        return;
+      }
       if (selectedCourse && !courseFeatureEnabled(selectedCourse, 'lineGroup')) {
         alert('คอร์สนี้ยังปิดปุ่ม LINE กลุ่มไว้ กรุณาติดต่อเจ้าหน้าที่');
         return;
@@ -23726,6 +23781,10 @@ function receiptStatusText(status) {
     function openMonthlyExamPage() {
       if (!(currentStudent && currentStudent.courseId)) {
         alert('กรุณาสมัครคอร์สก่อนทำแบบทดสอบ');
+        return;
+      }
+      if (!studentCanUseCourseEntitlements(currentStudent)) {
+        alert(getPausedCourseAccessMessage());
         return;
       }
       studentMobileGoToOnlineExam();
@@ -27132,6 +27191,17 @@ function receiptStatusText(status) {
 
       const selectedCourse = getCurrentStudentCourse();
       const hasStudentCourse = !!(selectedCourse || (currentStudent && (currentStudent.courseId || (currentStudent.course && currentStudent.course !== 'ยังไม่ได้สมัครคอร์ส'))));
+      if (hasStudentCourse && !studentCanUseCourseEntitlements(currentStudent)) {
+        if (meta) meta.textContent = 'สถานะพักเรียน';
+        if (mobileMeta) mobileMeta.textContent = 'สถานะพักเรียน';
+        if (monthSelect) monthSelect.innerHTML = '<option value="">พักเรียน</option>';
+        if (mobileMonthSelect) mobileMonthSelect.innerHTML = '<option value="">พักเรียน</option>';
+        const pausedHtml = '<div class="notice">' + escapeHtml(getPausedCourseAccessMessage()) + '</div>';
+        if (box) box.innerHTML = pausedHtml;
+        if (mobileBox) mobileBox.innerHTML = pausedHtml;
+        if (mobileCard) mobileCard.classList.remove('hidden');
+        return;
+      }
       if (!hasStudentCourse) {
         if (meta) meta.textContent = 'สมัครคอร์สก่อนจึงจะเห็นตารางเรียน';
         if (mobileMeta) mobileMeta.textContent = 'สมัครคอร์สก่อนจึงจะเห็นตารางเรียน';
@@ -37177,6 +37247,16 @@ function receiptStatusText(status) {
       const locked = getElement('onlineExamStudentLocked');
       const content = getElement('onlineExamStudentContent');
 
+      if (!studentCanUseCourseEntitlements(currentStudent)) {
+        if (locked) {
+          locked.style.display = '';
+          locked.innerHTML = '<div style="text-align:center;padding:32px 16px;color:#9ca3af;"><div style="font-size:48px;margin-bottom:12px;">🔒</div><p style="font-size:14px;font-weight:600;color:#374151;">ยังไม่สามารถใช้งานได้</p><p style="font-size:13px;margin-top:6px;">' + escapeHtml(getPausedCourseAccessMessage()) + '</p></div>';
+        }
+        if (content) content.style.display = 'none';
+        container.innerHTML = '';
+        return;
+      }
+
       if (locked) locked.style.display = 'none';
       if (content) content.style.display = '';
 
@@ -37332,6 +37412,10 @@ function receiptStatusText(status) {
     function viewStudentExamResult() { /* ไม่แสดงคะแนนให้นักเรียน */ }
 
     async function startOnlineExam(courseId) {
+      if (!studentCanUseCourseEntitlements(currentStudent)) {
+        alert(getPausedCourseAccessMessage());
+        return;
+      }
       const course = onlineExamCourseCache.find(function(c) { return c.firebaseDocId === courseId; });
       if (!course) { alert('ไม่พบข้อมูลคอร์ส'); return; }
       if (!(course.questions || []).length) { alert('คอร์สนี้ยังไม่มีข้อสอบ'); return; }
