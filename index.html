@@ -19376,6 +19376,8 @@
         '</div>';
       }
       const ocrBtn = p && paymentHasOcrData(p) ? '<button class="btn btn-blue" type="button" onclick="' + actionCall('viewPaymentOcrDetail', paymentId) + '">OCR</button>' : '';
+      const isOverdue = displayStatus === 'ค้างชำระ';
+      const overdueNoticeBtn = isOverdue && paymentId ? '<button class="btn btn-orange" type="button" onclick="' + actionCall('printOverdueNotice', paymentId) + '">ใบแจ้งหนี้</button>' : '';
       if (isPaid) {
         return '<div class="payment-actions-wrap">' +
           '<button class="btn btn-blue" type="button" onclick="' + rowIdScript + '">ตรวจสลิป</button>' +
@@ -19393,6 +19395,7 @@
         '<button class="btn btn-red" type="button" onclick="rejectPayment(this)">ไม่ผ่าน</button>' +
         '<button class="btn btn-dark" type="button" onclick="paymentCash(this)">💵 จ่ายเงินสด</button>' +
         '<button class="btn btn-red" type="button" onclick="setPaymentOverdue(this)">ค้างชำระ</button>' +
+        overdueNoticeBtn +
         '<button class="btn ' + (isPaid ? 'btn-green' : 'btn-dark') + '" type="button" onclick="createReceiptFromPaymentRow(this)">ใบเสร็จ</button>' +
         '<button class="btn btn-blue" type="button" onclick="showPaymentDetail(this)">ดูข้อมูล</button>' +
         ocrBtn +
@@ -21975,6 +21978,115 @@
         return;
       }
       downloadHtmlAsPdf('ใบสมัคร ' + (currentStudent.memberId || currentStudent.name || 'IDEA CLUB'), applicationFormHtml(currentStudent, false), 'application-' + (currentStudent.memberId || currentStudent.name || 'student') + '.pdf');
+    }
+
+    function overdueNoticeHtml(paymentId) {
+      const triggerPayment = (payments || []).find(function(p) {
+        return String(p.id || p.firebaseDocId || '') === String(paymentId);
+      });
+      if (!triggerPayment) return '<p>ไม่พบรายการชำระเงิน</p>';
+      const student = getPaymentStudentRecord(triggerPayment) || {};
+      const studentId = String(triggerPayment.studentId || student.id || student.firebaseDocId || '');
+      const memberId = String(triggerPayment.memberId || student.memberId || student.studentId || '');
+      const authUid = String(triggerPayment.authUid || triggerPayment.studentAuthUid || student.authUid || '');
+
+      const overduePayments = (payments || []).filter(function(p) {
+        if (!p) return false;
+        const pStatus = getPaymentDisplayStatus(p);
+        if (pStatus !== 'ค้างชำระ') return false;
+        const pStudentId = String(p.studentId || '');
+        const pMemberId = String(p.memberId || '');
+        const pAuthUid = String(p.authUid || p.studentAuthUid || '');
+        return (studentId && pStudentId && pStudentId === studentId) ||
+               (memberId && pMemberId && pMemberId === memberId) ||
+               (authUid && pAuthUid && pAuthUid === authUid);
+      }).sort(function(a, b) {
+        return String(a.month || '').localeCompare(String(b.month || ''));
+      });
+
+      const usedPayments = overduePayments.length ? overduePayments : [triggerPayment];
+      const studentName = student.name || triggerPayment.student || '-';
+      const studentGrade = student.grade || triggerPayment.studentGrade || triggerPayment.grade || '';
+      const studentMemberId = memberId || '';
+      const courseName = triggerPayment.course || triggerPayment.courseName || student.course || '-';
+      const instituteName = (systemSettings && systemSettings.instituteName) || 'IDEA CLUB';
+      const phone = (systemSettings && systemSettings.phone) || '';
+      const lineId = (systemSettings && systemSettings.lineOfficial) || '';
+      const today = new Date().toLocaleDateString('th-TH', { year: 'numeric', month: 'long', day: 'numeric' });
+      const totalAmount = usedPayments.reduce(function(sum, p) { return sum + (Number(getPaymentFinalAmount(p)) || 0); }, 0);
+
+      const rowsHtml = usedPayments.map(function(p, i) {
+        const pCourse = p.course || p.courseName || courseName;
+        const pMonth = p.month || '-';
+        const pAmount = getPaymentFinalAmount(p);
+        return '<tr style="' + (i % 2 === 0 ? 'background:#f9fafb;' : 'background:#fff;') + '">' +
+          '<td style="padding:9px 14px;border-bottom:1px solid #e5e7eb;">' + escapeHtml(pMonth) + '</td>' +
+          '<td style="padding:9px 14px;border-bottom:1px solid #e5e7eb;">' + escapeHtml(pCourse) + '</td>' +
+          '<td style="padding:9px 14px;border-bottom:1px solid #e5e7eb;text-align:right;font-weight:600;">' + escapeHtml(formatPrice(pAmount)) + '</td>' +
+        '</tr>';
+      }).join('');
+
+      const contactLines = [];
+      if (phone) contactLines.push('โทรศัพท์: ' + escapeHtml(phone));
+      if (lineId) contactLines.push('LINE: ' + escapeHtml(lineId));
+
+      return '<style>' +
+        '.overdue-notice *{box-sizing:border-box;font-family:\'Sarabun\',\'Noto Sans Thai\',Arial,sans-serif;}' +
+        '.overdue-notice{width:100%;max-width:680px;margin:0 auto;border:2px solid #ea580c;border-radius:14px;padding:28px 28px 24px;background:#fff;}' +
+        '.overdue-notice h1{color:#ea580c;font-size:20px;font-weight:800;margin:0 0 4px;}' +
+        '.overdue-notice .notice-sub{color:#6b7280;font-size:13px;margin:0 0 20px;}' +
+        '.overdue-notice .notice-body{font-size:14px;line-height:1.8;color:#1f2937;}' +
+        '.overdue-notice table{width:100%;border-collapse:collapse;margin:16px 0;border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;}' +
+        '.overdue-notice thead tr{background:#ea580c;color:#fff;}' +
+        '.overdue-notice thead th{padding:10px 14px;text-align:left;font-size:13px;font-weight:700;}' +
+        '.overdue-notice thead th:last-child{text-align:right;}' +
+        '.overdue-notice .total-row td{background:#fff7ed;font-weight:800;font-size:15px;color:#ea580c;padding:10px 14px;border-top:2px solid #ea580c;}' +
+        '.overdue-notice .total-row td:last-child{text-align:right;}' +
+        '.overdue-notice .contact-box{background:#fff7ed;border:1px solid #fed7aa;border-radius:8px;padding:12px 16px;margin-top:16px;font-size:13px;color:#9a3412;}' +
+        '.overdue-notice .signature{margin-top:24px;text-align:right;font-size:13px;color:#374151;}' +
+        '@media print{.overdue-notice{border-radius:0;border:2px solid #ea580c;}}' +
+      '</style>' +
+      '<div class="overdue-notice">' +
+        '<div style="display:flex;align-items:flex-start;justify-content:space-between;border-bottom:2px solid #e5e7eb;padding-bottom:14px;margin-bottom:16px;">' +
+          '<div>' +
+            '<h1>' + escapeHtml(instituteName) + '</h1>' +
+            '<p class="notice-sub">ใบแจ้งยอดค้างชำระ</p>' +
+          '</div>' +
+          '<div style="text-align:right;font-size:12px;color:#6b7280;">' +
+            '<strong>วันที่</strong><br>' + escapeHtml(today) +
+          '</div>' +
+        '</div>' +
+        '<div class="notice-body">' +
+          '<p style="margin:0 0 8px;">เรียน คุณผู้ปกครองของ <strong>' + escapeHtml(studentName) + '</strong>' +
+            (studentGrade ? ' (' + escapeHtml(studentGrade) + ')' : '') +
+            (studentMemberId ? ' <span style="color:#6b7280;font-size:13px;">[' + escapeHtml(studentMemberId) + ']</span>' : '') +
+          '</p>' +
+          '<p style="margin:0 0 14px;color:#6b7280;font-size:13px;">ด้วยความเคารพ ทางสถาบันฯ ขอแจ้งให้ทราบว่า มียอดค้างชำระค่าเรียน ดังรายการต่อไปนี้</p>' +
+          '<table>' +
+            '<thead><tr><th>เดือน</th><th>คอร์ส</th><th style="text-align:right;">ยอดชำระ</th></tr></thead>' +
+            '<tbody>' + rowsHtml + '</tbody>' +
+            '<tfoot><tr class="total-row"><td colspan="2">ยอดค้างชำระรวมทั้งหมด</td><td>' + escapeHtml(formatPrice(totalAmount)) + '</td></tr></tfoot>' +
+          '</table>' +
+          '<p style="margin:14px 0 6px;">กรุณาชำระยอดดังกล่าวโดยเร็วที่สุด เพื่อรักษาสิทธิ์การเรียนของบุตรหลาน ทางสถาบันฯ ต้องขออภัยในความไม่สะดวกและขอบคุณที่ให้ความร่วมมือมา ณ โอกาสนี้</p>' +
+          (contactLines.length ? '<div class="contact-box"><strong>ติดต่อสอบถาม:</strong> ' + contactLines.join('  ·  ') + '</div>' : '') +
+        '</div>' +
+        '<div class="signature">' +
+          '<p style="margin:0;">ขอแสดงความนับถือ</p>' +
+          '<p style="margin:4px 0 0;font-weight:700;">' + escapeHtml(instituteName) + '</p>' +
+        '</div>' +
+      '</div>';
+    }
+
+    function printOverdueNotice(paymentId) {
+      if (!hasPermission('admin.payments')) { alert('ไม่มีสิทธิ์'); return; }
+      const html = overdueNoticeHtml(paymentId);
+      openViewBubble('ใบแจ้งยอดค้างชำระ',
+        html +
+        '<div class="test-actions">' +
+          '<button class="btn btn-orange" type="button" onclick="downloadHtmlAsPdf(\'ใบแจ้งหนี้\', overdueNoticeHtml(\'' + jsArg(String(paymentId)) + '\'), \'overdue-notice-' + escapeHtml(String(paymentId)).slice(0, 12) + '.pdf\')">ดาวน์โหลด PDF</button>' +
+          '<button class="btn btn-dark" type="button" onclick="closeEditBubble()">ปิด</button>' +
+        '</div>'
+      );
     }
 
     function createReceiptFromPaymentRow(button) {
