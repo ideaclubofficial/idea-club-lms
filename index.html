@@ -15197,6 +15197,14 @@
       return studentHasApprovedCourse(activeStudent) && !isStudentOnLearningPause(activeStudent);
     }
 
+    function studentCanReceiveIdCard(student) {
+      return !!student && !isStudentOnLearningPause(student);
+    }
+
+    function studentCanParticipateInExams(student) {
+      return !!student && !isStudentOnLearningPause(student);
+    }
+
     function getPausedCourseAccessMessage() {
       return 'สถานะพักเรียน: ระบบปิดสิทธิ์เข้าเรียนของคอร์สชั่วคราว แต่ยังดูคะแนนและระบบตัวละครได้';
     }
@@ -34778,6 +34786,7 @@ function receiptStatusText(status) {
       const exemptIds = course.exemptStudentIds || [];
       const gradeStudents = (students || []).filter(function(s) {
         if (!s || s.deleted || !s.name) return false;
+        if (!studentCanParticipateInExams(s)) return false;
         const cGrade = getOnlineExamCourseGrade(course);
         return !cGrade || !s.grade || s.grade === cGrade;
       }).sort(function(a, b) {
@@ -35276,6 +35285,7 @@ function receiptStatusText(status) {
       }).filter(Boolean)));
       return (students || []).filter(function(student) {
         if (!student || !isActiveStudentForDashboard(student)) return false;
+        if (!studentCanParticipateInExams(student)) return false;
         if (gradeFilter && student.grade !== gradeFilter) return false;
         if (!gradeFilter && targetGrades.length && !targetGrades.includes(student.grade || '')) return false;
         return true;
@@ -36274,6 +36284,7 @@ function receiptStatusText(status) {
       const student = item.student || {};
       const course = (item.missingCourses || []).find(function(c) { return (c.firebaseDocId || '') === courseFirebaseDocId; });
       if (!course) { alert('ไม่พบชุดข้อสอบ'); return; }
+      if (!studentCanParticipateInExams(student)) { alert('นักเรียนสถานะพักเรียนยังไม่สามารถทำข้อสอบหรือถูกบันทึกสถานะสอบได้'); return; }
       const courseLabel = [course.examMonth || '', getOnlineExamCourseGrade(course) || '', course.subject || '', course.title || ''].filter(Boolean).join(' · ');
       if (!confirm('บันทึกว่า "' + (student.name || '-') + '" ขาดสอบ "' + courseLabel + '"?')) return;
       const newId = createFirebaseDocId('onlineExamResults');
@@ -36330,6 +36341,10 @@ function receiptStatusText(status) {
           const snap = await db.collection('students').doc(studentDocId).get();
           if (!snap.exists) { content.innerHTML = '<p style="color:red;text-align:center;">ไม่พบข้อมูลนักเรียน</p>'; return; }
           student = Object.assign({ id: snap.id, firebaseDocId: snap.id }, snap.data());
+        }
+        if (!studentCanReceiveIdCard(student)) {
+          content.innerHTML = '<p style="color:#dc2626;text-align:center;padding:20px;">นักเรียนสถานะพักเรียนยังไม่สามารถพิมพ์บัตรได้ กรุณาเปลี่ยนสถานะก่อน</p>';
+          return;
         }
         const logo = await getActiveIdCardLogoUrl();
         const watermark = idCardWatermarkUrl || '';
@@ -36449,6 +36464,7 @@ function receiptStatusText(status) {
 
       const filteredStudents = (students || []).filter(function(s) {
         if (!s || s.deleted || !s.name) return false;
+        if (!studentCanParticipateInExams(s)) return false;
         if (center && String(s.preferredLocation || '').trim() !== center) return false;
         if (grade && String(s.grade || '').trim() !== grade) return false;
         if (courseId) {
@@ -36645,6 +36661,7 @@ function receiptStatusText(status) {
       const student = (students || []).find(function(s) { return (s.id || s.firebaseDocId || '') === studentDocId; });
       const course = (onlineExamCourseCache || []).find(function(c) { return (c.firebaseDocId || '') === courseId; });
       if (!student || !course) { if (resultEl) { resultEl.textContent = 'ไม่พบข้อมูลนักเรียนหรือชุดข้อสอบ'; resultEl.style.color = '#dc2626'; } return; }
+      if (!studentCanParticipateInExams(student)) { if (resultEl) { resultEl.textContent = 'นักเรียนสถานะพักเรียนยังไม่สามารถทำข้อสอบหรือบันทึกผลสอบใหม่ได้'; resultEl.style.color = '#dc2626'; } return; }
 
       const questions = course.questions || [];
       let correct, total, answers;
@@ -38358,10 +38375,11 @@ function receiptStatusText(status) {
             authUid: userData.authUid || doc.id,
             memberId: userData.memberId || (matchedStudent && matchedStudent.memberId) || '',
             studentId: userData.studentId || (matchedStudent && matchedStudent.studentId) || userData.memberId || '',
-            defaultPassword: userData.defaultPassword || (matchedStudent && matchedStudent.defaultPassword) || ''
+            defaultPassword: userData.defaultPassword || (matchedStudent && matchedStudent.defaultPassword) || '',
+            learningStatus: userData.learningStatus || (matchedStudent && (matchedStudent.learningStatus || matchedStudent.status)) || ''
           });
         }).filter(function(s) {
-          return String(s.status || 'active').toLowerCase() === 'active';
+          return String(s.status || 'active').toLowerCase() === 'active' && studentCanReceiveIdCard(s);
         });
         if (filterGrade !== 'ทั้งหมด') {
           students = students.filter(function(s) { return (s.grade || s.gradeLevel || '') === filterGrade; });
