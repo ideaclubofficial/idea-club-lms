@@ -31526,6 +31526,17 @@ function receiptStatusText(status) {
         .reduce(function(sum, p) { return sum + getPaymentFinalAmount(p); }, 0);
     }
 
+    function getExpectedMonthlyIncome(month) {
+      return payments
+        .filter(function(p) {
+          return p.deleted !== true &&
+            (!month || month === 'ทั้งหมด' || p.month === month);
+        })
+        .reduce(function(sum, p) {
+          return sum + Number(p.expectedAmount || p.finalAmount || p.amount || 0);
+        }, 0);
+    }
+
     function getMonthlyExpensesTotal(month, category) {
       return expenses
         .filter(function(e) {
@@ -31543,12 +31554,14 @@ function receiptStatusText(status) {
 
       var month = (getElement('financeSummaryMonthFilter') || {}).value || 'ทั้งหมด';
       var income = getMonthlyIncome(month);
+      var expected = getExpectedMonthlyIncome(month);
       var totalExp = getMonthlyExpensesTotal(month, 'ทั้งหมด');
       var profit = income - totalExp;
 
       var cards = getElement('financeSummaryCards');
       if (cards) {
         cards.innerHTML =
+          '<div class="stat"><h4>ยอดที่ควรได้รับ</h4><p style="color:#6b7280;">' + formatPrice(expected) + '</p></div>' +
           '<div class="stat"><h4>รายรับ (ชำระแล้ว)</h4><p style="color:#16a34a;">' + formatPrice(income) + '</p></div>' +
           '<div class="stat"><h4>รายจ่าย</h4><p style="color:#dc2626;">' + formatPrice(totalExp) + '</p></div>' +
           '<div class="stat"><h4>กำไร / ขาดทุน</h4><p style="color:' + (profit >= 0 ? '#16a34a' : '#dc2626') + ';font-weight:800;">' + formatPrice(profit) + '</p></div>';
@@ -31618,14 +31631,17 @@ function receiptStatusText(status) {
       var monthNames = getThaiCalendarMonthNames();
       var totalIncome = 0, totalExp = 0;
 
+      var totalExpected = 0;
       var rows = monthNames.map(function(name) {
         var monthKey = name + ' ' + beYear;
         var income = getMonthlyIncome(monthKey);
+        var expected = getExpectedMonthlyIncome(monthKey);
         var exp = getMonthlyExpensesTotal(monthKey, 'ทั้งหมด');
         var profit = income - exp;
         totalIncome += income;
+        totalExpected += expected;
         totalExp += exp;
-        return { name: name, income: income, expenses: exp, profit: profit };
+        return { name: name, expected: expected, income: income, expenses: exp, profit: profit };
       });
 
       var totalProfit = totalIncome - totalExp;
@@ -31633,12 +31649,13 @@ function receiptStatusText(status) {
 
       container.innerHTML =
         '<div class="table-wrap"><table>' +
-        '<thead><tr><th>เดือน</th><th>รายรับ</th><th>รายจ่าย</th><th>กำไร/ขาดทุน</th></tr></thead>' +
+        '<thead><tr><th>เดือน</th><th>ยอดที่ควรได้รับ</th><th>รายรับ (ชำระแล้ว)</th><th>รายจ่าย</th><th>กำไร/ขาดทุน</th></tr></thead>' +
         '<tbody>' +
         rows.map(function(r) {
-          var hasData = r.income || r.expenses;
+          var hasData = r.expected || r.income || r.expenses;
           return '<tr>' +
             '<td>' + escapeHtml(r.name) + '</td>' +
+            '<td style="color:#6b7280;">' + (hasData ? formatPrice(r.expected) : '-') + '</td>' +
             '<td style="color:#16a34a;">' + (hasData ? formatPrice(r.income) : '-') + '</td>' +
             '<td style="color:#dc2626;">' + (hasData ? formatPrice(r.expenses) : '-') + '</td>' +
             '<td style="color:' + profitColor(r.profit) + ';font-weight:700;">' + (hasData ? formatPrice(r.profit) : '-') + '</td>' +
@@ -31646,6 +31663,7 @@ function receiptStatusText(status) {
         }).join('') +
         '<tr style="font-weight:800;border-top:2px solid #e5e7eb;">' +
         '<td>รวมทั้งปี</td>' +
+        '<td style="color:#6b7280;">' + formatPrice(totalExpected) + '</td>' +
         '<td style="color:#16a34a;">' + formatPrice(totalIncome) + '</td>' +
         '<td style="color:#dc2626;">' + formatPrice(totalExp) + '</td>' +
         '<td style="color:' + profitColor(totalProfit) + ';">' + formatPrice(totalProfit) + '</td>' +
