@@ -22,7 +22,7 @@ function doPost(e) {
     const fileName = sanitizeName(data.fileName || "upload");
     const mimeType = String(data.mimeType || "application/octet-stream");
     const folderType = sanitizeName(data.folderType || "uploads");
-    const assetType = sanitizeName(data.assetType || "");
+    const assetType = String(data.assetType || "").trim();
 
     if (!fileBase64) {
       return jsonResponse({ ok: false, error: "Missing fileBase64" });
