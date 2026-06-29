@@ -5289,6 +5289,7 @@
               <a class="active">📅 รอบชำระ</a>
               <a onclick="showAdminTab('admin-payment')">💳 ตรวจสลิป</a>
               <a onclick="showAdminTab('admin-receipts')">🧾 ใบเสร็จ</a>
+              <a onclick="showAdminTab('admin-finance-summary')">📊 สรุปการเงิน</a>
             </nav>
             <div class="form-box">
               <h3>ตั้งค่ารอบชำระเงิน</h3>
@@ -5430,6 +5431,7 @@
               <a onclick="showAdminTab('admin-payment-round')">📅 รอบชำระ</a>
               <a class="active">💳 ตรวจสลิป</a>
               <a onclick="showAdminTab('admin-receipts')">🧾 ใบเสร็จ</a>
+              <a onclick="showAdminTab('admin-finance-summary')">📊 สรุปการเงิน</a>
             </nav>
             <div class="form-box">
               <h3>Dashboard การเงิน</h3>
@@ -5596,6 +5598,7 @@
               <a onclick="showAdminTab('admin-payment-round')">📅 รอบชำระ</a>
               <a onclick="showAdminTab('admin-payment')">💳 ตรวจสลิป</a>
               <a class="active">🧾 ใบเสร็จ</a>
+              <a onclick="showAdminTab('admin-finance-summary')">📊 สรุปการเงิน</a>
             </nav>
             <div class="form-box">
               <h3>ใบเสร็จ</h3>
@@ -5650,6 +5653,138 @@
               </table>
             </div>
             <div id="adminReceiptsPagination" class="test-actions" style="margin-top:10px;"></div>
+          </section>
+
+          <section id="admin-finance-summary" class="admin-tab hidden">
+            <nav class="finance-sub-nav">
+              <a onclick="showAdminTab('admin-payment-round')">📅 รอบชำระ</a>
+              <a onclick="showAdminTab('admin-payment')">💳 ตรวจสลิป</a>
+              <a onclick="showAdminTab('admin-receipts')">🧾 ใบเสร็จ</a>
+              <a class="active">📊 สรุปการเงิน</a>
+            </nav>
+
+            <!-- Section A: Monthly Summary Dashboard -->
+            <div class="form-box">
+              <h3>สรุปรายรับ-รายจ่าย รายเดือน</h3>
+              <div class="form-row">
+                <div>
+                  <label>เดือน</label>
+                  <select id="financeSummaryMonthFilter" onchange="renderFinanceSummary()">
+                    <option value="ทั้งหมด">ทั้งหมด</option>
+                  </select>
+                </div>
+              </div>
+              <div class="dashboard-grid" id="financeSummaryCards"></div>
+            </div>
+
+            <br />
+
+            <!-- Section B: Add/Edit Expense Form -->
+            <div class="form-box">
+              <h3>บันทึกรายจ่าย</h3>
+              <input id="editingExpenseId" type="hidden" value="" />
+              <div class="form-row">
+                <div>
+                  <label>เดือน</label>
+                  <input id="expenseMonthHidden" type="hidden" />
+                  <div class="form-row" style="margin-bottom:0;">
+                    <div><select id="expenseMonthSelect" onchange="syncExpenseMonthHidden()"></select></div>
+                    <div><select id="expenseYearSelect" onchange="syncExpenseMonthHidden()"></select></div>
+                  </div>
+                </div>
+                <div>
+                  <label>หมวดหมู่</label>
+                  <select id="expenseCategory">
+                    <option value="เงินเดือน">เงินเดือน (Salary)</option>
+                    <option value="ค่าเช่า">ค่าเช่า (Rent)</option>
+                    <option value="สาธารณูปโภค">สาธารณูปโภค (Utilities)</option>
+                    <option value="วัสดุ">วัสดุ/อุปกรณ์ (Supplies)</option>
+                    <option value="การตลาด">การตลาด (Marketing)</option>
+                    <option value="อื่นๆ">อื่นๆ (Other)</option>
+                  </select>
+                </div>
+              </div>
+              <div class="form-row">
+                <div>
+                  <label>รายละเอียด</label>
+                  <input id="expenseDescription" type="text" placeholder="เช่น ค่าเช่าตึก ธ.ค." />
+                </div>
+                <div>
+                  <label>จำนวนเงิน (บาท)</label>
+                  <input id="expenseAmount" type="number" min="0" step="0.01" placeholder="0" />
+                </div>
+                <div>
+                  <label>หมายเหตุ</label>
+                  <input id="expenseNote" type="text" placeholder="(ไม่บังคับ)" />
+                </div>
+              </div>
+              <div class="test-actions">
+                <button class="btn btn-green" type="button" onclick="saveExpense()">บันทึกรายจ่าย</button>
+                <button class="btn btn-dark" type="button" onclick="clearExpenseForm()">ล้างฟอร์ม</button>
+              </div>
+              <p id="expenseFormResult" style="margin-top:10px; font-weight:bold;"></p>
+            </div>
+
+            <br />
+
+            <!-- Section C: Expense List Table -->
+            <div class="form-box">
+              <h3>รายการรายจ่าย</h3>
+              <div class="form-row">
+                <div>
+                  <label>กรองเดือน</label>
+                  <select id="expenseMonthFilter" onchange="renderExpenseTable()">
+                    <option value="ทั้งหมด">ทั้งหมด</option>
+                  </select>
+                </div>
+                <div>
+                  <label>กรองหมวดหมู่</label>
+                  <select id="expenseCategoryFilter" onchange="renderExpenseTable()">
+                    <option value="ทั้งหมด">ทั้งหมด</option>
+                    <option value="เงินเดือน">เงินเดือน</option>
+                    <option value="ค่าเช่า">ค่าเช่า</option>
+                    <option value="สาธารณูปโภค">สาธารณูปโภค</option>
+                    <option value="วัสดุ">วัสดุ</option>
+                    <option value="การตลาด">การตลาด</option>
+                    <option value="อื่นๆ">อื่นๆ</option>
+                  </select>
+                </div>
+                <div style="align-self:flex-end;">
+                  <button class="btn btn-blue" type="button" onclick="exportExpensesCsv()">ส่งออก CSV</button>
+                </div>
+              </div>
+            </div>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>เดือน</th>
+                    <th>หมวดหมู่</th>
+                    <th>รายละเอียด</th>
+                    <th>จำนวนเงิน</th>
+                    <th>หมายเหตุ</th>
+                    <th>บันทึกโดย</th>
+                    <th>จัดการ</th>
+                  </tr>
+                </thead>
+                <tbody id="expenseTableBody"></tbody>
+              </table>
+            </div>
+            <div id="expenseTablePagination" class="test-actions" style="margin-top:10px;"></div>
+
+            <br />
+
+            <!-- Section D: Yearly Overview -->
+            <div class="form-box">
+              <h3>ภาพรวมรายปี</h3>
+              <div class="form-row">
+                <div>
+                  <label>ปี (พ.ศ.)</label>
+                  <select id="financeYearFilter" onchange="renderYearlyFinanceSummary()"></select>
+                </div>
+              </div>
+              <div id="yearlyFinanceSummaryTable"></div>
+            </div>
           </section>
 
           <section id="admin-monthly-test" class="admin-tab hidden">
@@ -7452,7 +7587,8 @@
       payments:           { orderField: 'updatedAt', orderDir: 'desc', limit: 600 },
       receipts:           { orderField: 'updatedAt', orderDir: 'desc', limit: 600 },
       paymentBundles:     { orderField: 'updatedAt', orderDir: 'desc', limit: 300 },
-      attendanceHistory:  { limit: 400 }
+      attendanceHistory:  { limit: 400 },
+      expenses:           { orderField: 'updatedAt', orderDir: 'desc', limit: 600 }
     };
 
     async function getFirebaseCollection(collectionName, includeDeleted) {
@@ -8317,7 +8453,8 @@
         getFirebaseCollection('studentGamificationEvents'),
         getFirebaseCollection('settings'),
         getFirebaseCollection('gamificationRewards'),
-        getFirebaseCollection('gamificationRedemptions')
+        getFirebaseCollection('gamificationRedemptions'),
+        getFirebaseCollection('expenses')
       ]);
 
       replaceArray(students, results[0]);
@@ -8344,6 +8481,7 @@
       const settingsItems = results[21];
       replaceArray(gamificationRewards, results[22] || []);
       replaceArray(gamificationRedemptions, results[23] || []);
+      replaceArray(expenses, results[24] || []);
       const mainSettings = settingsItems.find(function(item) { return item.id === 'main' || item.firebaseDocId === 'main'; });
       if (mainSettings) systemSettings = Object.assign(systemSettings, mainSettings);
       safeRun(applySystemSettingsToPage, 'settings-apply-after-load');
@@ -8475,6 +8613,7 @@
       'admin-payment': 'admin.finance',
       'admin-private-lesson-billing': 'admin.finance',
       'admin-receipts': 'admin.receipts',
+      'admin-finance-summary': 'admin.finance',
       'admin-monthly-test': 'admin.exams',
       'admin-online-exam': 'admin.onlineExams',
       'admin-monthly-planner': 'admin.monthlyPlanner',
@@ -8780,7 +8919,7 @@
     }
 
     function findFirstAllowedAdminTab() {
-      const order = ['admin-dashboard','admin-profile','admin-students','admin-id-cards','admin-private-students','admin-courses','admin-online-class','admin-video','admin-payment-round','admin-payment','admin-private-lesson-billing','admin-receipts','admin-online-exam','admin-monthly-planner','admin-teachers','admin-announcements','admin-settings','admin-activity-log'];
+      const order = ['admin-dashboard','admin-profile','admin-students','admin-id-cards','admin-private-students','admin-courses','admin-online-class','admin-video','admin-payment-round','admin-payment','admin-private-lesson-billing','admin-receipts','admin-finance-summary','admin-online-exam','admin-monthly-planner','admin-teachers','admin-announcements','admin-settings','admin-activity-log'];
       return order.find(function(tabId) { return canOpenAdminTab(tabId); }) || 'admin-dashboard';
     }
 
@@ -9010,6 +9149,7 @@
     const lineGroups = [];
     const payments = [];
     const paymentBundles = [];
+    const expenses = [];
 
     const receipts = [];
     let receiptRunningNumber = 1;
@@ -12781,6 +12921,10 @@
       if (tabId === 'admin-receipts') {
         safeRun(renderReceiptMonthFilter, 'receipt-month-filter');
         safeRun(renderAdminReceipts, 'admin-receipts');
+      }
+      if (tabId === 'admin-finance-summary') {
+        safeRun(initExpenseMonthYearPickers, 'expense-month-year-pickers');
+        safeRun(renderFinanceSummary, 'finance-summary');
       }
       if (tabId === 'admin-announcements') { safeRun(renderAnnouncements, 'announcements'); }
       if (tabId === 'admin-settings') { safeRun(renderSystemSettingsForm, 'settings-form'); safeRun(renderLineGroups, 'line-groups'); safeRun(loadPaymentQrFromGithubAsset, 'settings-payment-qr'); }
@@ -31256,6 +31400,327 @@ function receiptStatusText(status) {
         '<div class="status-display-row"><span class="status-label">ค้างชำระ</span><strong class="status-absent">' + overdue.length + ' รายการ</strong></div>' +
         '<div class="status-display-row"><span class="status-label">ยอดที่ควรได้รับ</span><strong>' + formatPrice(expectedAmount) + '</strong></div>';
     }
+
+    // ── Finance Summary (Income / Expense Tracking) ──────────────────────────
+
+    function populateFinanceMonthFilter(selectId) {
+      var el = getElement(selectId);
+      if (!el) return;
+      var monthSet = {};
+      payments.forEach(function(p) { if (p.month) monthSet[p.month] = true; });
+      expenses.forEach(function(e) { if (e.month) monthSet[e.month] = true; });
+      var sorted = Object.keys(monthSet).sort(function(a, b) { return compareThaiMonthYear(b, a); });
+      var current = el.value;
+      el.innerHTML = '<option value="ทั้งหมด">ทั้งหมด</option>' +
+        sorted.map(function(m) { return '<option value="' + escapeHtml(m) + '">' + escapeHtml(m) + '</option>'; }).join('');
+      if (current && el.querySelector('option[value="' + current + '"]')) el.value = current;
+    }
+
+    function populateFinanceYearFilter(selectId) {
+      var el = getElement(selectId);
+      if (!el) return;
+      var yearSet = {};
+      payments.forEach(function(p) {
+        var parsed = parseThaiMonthYear(p.month);
+        if (parsed) yearSet[parsed.year - 543] = true;
+      });
+      expenses.forEach(function(e) { if (e.year) yearSet[e.year] = true; });
+      var currentYear = new Date().getFullYear();
+      yearSet[currentYear] = true;
+      var sorted = Object.keys(yearSet).map(Number).sort(function(a, b) { return b - a; });
+      var current = el.value ? Number(el.value) : currentYear;
+      el.innerHTML = sorted.map(function(y) {
+        return '<option value="' + y + '">' + (y + 543) + ' (พ.ศ.)</option>';
+      }).join('');
+      if (yearSet[current]) el.value = String(current);
+    }
+
+    function getMonthlyIncome(month) {
+      return payments
+        .filter(function(p) {
+          return p.deleted !== true &&
+            getPaymentDisplayStatus(p) === 'ชำระแล้ว' &&
+            (!month || month === 'ทั้งหมด' || p.month === month);
+        })
+        .reduce(function(sum, p) { return sum + getPaymentFinalAmount(p); }, 0);
+    }
+
+    function getMonthlyExpensesTotal(month, category) {
+      return expenses
+        .filter(function(e) {
+          return e.deleted !== true &&
+            (!month || month === 'ทั้งหมด' || e.month === month) &&
+            (!category || category === 'ทั้งหมด' || e.category === category);
+        })
+        .reduce(function(sum, e) { return sum + Number(e.amount || 0); }, 0);
+    }
+
+    function renderFinanceSummary() {
+      populateFinanceMonthFilter('financeSummaryMonthFilter');
+      populateFinanceMonthFilter('expenseMonthFilter');
+      populateFinanceYearFilter('financeYearFilter');
+
+      var month = (getElement('financeSummaryMonthFilter') || {}).value || 'ทั้งหมด';
+      var income = getMonthlyIncome(month);
+      var totalExp = getMonthlyExpensesTotal(month, 'ทั้งหมด');
+      var profit = income - totalExp;
+
+      var cards = getElement('financeSummaryCards');
+      if (cards) {
+        cards.innerHTML =
+          '<div class="stat"><h4>รายรับ (ชำระแล้ว)</h4><p style="color:#16a34a;">' + formatPrice(income) + '</p></div>' +
+          '<div class="stat"><h4>รายจ่าย</h4><p style="color:#dc2626;">' + formatPrice(totalExp) + '</p></div>' +
+          '<div class="stat"><h4>กำไร / ขาดทุน</h4><p style="color:' + (profit >= 0 ? '#16a34a' : '#dc2626') + ';font-weight:800;">' + formatPrice(profit) + '</p></div>';
+      }
+
+      renderExpenseTable();
+      renderYearlyFinanceSummary();
+    }
+
+    var expenseTableCurrentPage = 1;
+
+    function renderExpenseTable() {
+      var tbody = getElement('expenseTableBody');
+      if (!tbody) return;
+      var month = (getElement('expenseMonthFilter') || {}).value || 'ทั้งหมด';
+      var category = (getElement('expenseCategoryFilter') || {}).value || 'ทั้งหมด';
+
+      var filtered = expenses.filter(function(e) {
+        return e.deleted !== true &&
+          (month === 'ทั้งหมด' || e.month === month) &&
+          (category === 'ทั้งหมด' || e.category === category);
+      }).sort(function(a, b) { return compareThaiMonthYear(b.month || '', a.month || ''); });
+
+      var totalPages = Math.max(1, Math.ceil(filtered.length / LIST_PAGE_SIZE));
+      if (expenseTableCurrentPage > totalPages) expenseTableCurrentPage = 1;
+      var start = (expenseTableCurrentPage - 1) * LIST_PAGE_SIZE;
+      var page = filtered.slice(start, start + LIST_PAGE_SIZE);
+
+      tbody.innerHTML = page.length ? page.map(function(e) {
+        var id = jsArg(e.firebaseDocId || e.id || '');
+        return '<tr>' +
+          '<td>' + escapeHtml(e.month || '-') + '</td>' +
+          '<td>' + escapeHtml(e.category || '-') + '</td>' +
+          '<td>' + escapeHtml(e.description || '-') + '</td>' +
+          '<td>' + formatPrice(Number(e.amount || 0)) + '</td>' +
+          '<td>' + escapeHtml(e.note || '-') + '</td>' +
+          '<td><span class="mini-muted">' + escapeHtml(e.createdByName || e.updatedByName || '-') + '</span></td>' +
+          '<td>' +
+            '<button class="btn btn-blue" type="button" onclick="editExpense(\'' + id + '\')">แก้ไข</button> ' +
+            '<button class="btn btn-dark" type="button" onclick="deleteExpense(\'' + id + '\')">ลบ</button>' +
+          '</td>' +
+          '</tr>';
+      }).join('') : '<tr><td colspan="7" style="text-align:center;color:#6b7280;">ยังไม่มีรายการรายจ่าย</td></tr>';
+
+      renderTablePagination('expenseTablePagination', expenseTableCurrentPage, totalPages, filtered.length, 'changeExpensePage');
+    }
+
+    function changeExpensePage(direction) {
+      var month = (getElement('expenseMonthFilter') || {}).value || 'ทั้งหมด';
+      var category = (getElement('expenseCategoryFilter') || {}).value || 'ทั้งหมด';
+      var filtered = expenses.filter(function(e) {
+        return e.deleted !== true &&
+          (month === 'ทั้งหมด' || e.month === month) &&
+          (category === 'ทั้งหมด' || e.category === category);
+      });
+      var totalPages = Math.max(1, Math.ceil(filtered.length / LIST_PAGE_SIZE));
+      expenseTableCurrentPage = Math.min(Math.max(1, expenseTableCurrentPage + direction), totalPages);
+      renderExpenseTable();
+    }
+
+    function renderYearlyFinanceSummary() {
+      var container = getElement('yearlyFinanceSummaryTable');
+      if (!container) return;
+      var yearEl = getElement('financeYearFilter');
+      var year = yearEl ? Number(yearEl.value) : new Date().getFullYear();
+      var beYear = year + 543;
+      var monthNames = getThaiCalendarMonthNames();
+      var totalIncome = 0, totalExp = 0;
+
+      var rows = monthNames.map(function(name) {
+        var monthKey = name + ' ' + beYear;
+        var income = getMonthlyIncome(monthKey);
+        var exp = getMonthlyExpensesTotal(monthKey, 'ทั้งหมด');
+        var profit = income - exp;
+        totalIncome += income;
+        totalExp += exp;
+        return { name: name, income: income, expenses: exp, profit: profit };
+      });
+
+      var totalProfit = totalIncome - totalExp;
+      function profitColor(v) { return v >= 0 ? '#16a34a' : '#dc2626'; }
+
+      container.innerHTML =
+        '<div class="table-wrap"><table>' +
+        '<thead><tr><th>เดือน</th><th>รายรับ</th><th>รายจ่าย</th><th>กำไร/ขาดทุน</th></tr></thead>' +
+        '<tbody>' +
+        rows.map(function(r) {
+          var hasData = r.income || r.expenses;
+          return '<tr>' +
+            '<td>' + escapeHtml(r.name) + '</td>' +
+            '<td style="color:#16a34a;">' + (hasData ? formatPrice(r.income) : '-') + '</td>' +
+            '<td style="color:#dc2626;">' + (hasData ? formatPrice(r.expenses) : '-') + '</td>' +
+            '<td style="color:' + profitColor(r.profit) + ';font-weight:700;">' + (hasData ? formatPrice(r.profit) : '-') + '</td>' +
+            '</tr>';
+        }).join('') +
+        '<tr style="font-weight:800;border-top:2px solid #e5e7eb;">' +
+        '<td>รวมทั้งปี</td>' +
+        '<td style="color:#16a34a;">' + formatPrice(totalIncome) + '</td>' +
+        '<td style="color:#dc2626;">' + formatPrice(totalExp) + '</td>' +
+        '<td style="color:' + profitColor(totalProfit) + ';">' + formatPrice(totalProfit) + '</td>' +
+        '</tr>' +
+        '</tbody></table></div>';
+    }
+
+    function initExpenseMonthYearPickers() {
+      var monthEl = getElement('expenseMonthSelect');
+      var yearEl = getElement('expenseYearSelect');
+      if (!monthEl || !yearEl) return;
+      var monthNames = getThaiCalendarMonthNames();
+      monthEl.innerHTML = monthNames.map(function(name) {
+        return '<option value="' + name + '">' + name + '</option>';
+      }).join('');
+      var currentBEYear = getCurrentBEYear();
+      var years = [currentBEYear - 1, currentBEYear, currentBEYear + 1];
+      yearEl.innerHTML = years.map(function(y) {
+        return '<option value="' + y + '">' + y + '</option>';
+      }).join('');
+      var now = new Date();
+      monthEl.value = monthNames[now.getMonth()];
+      yearEl.value = String(currentBEYear);
+      syncExpenseMonthHidden();
+    }
+
+    function syncExpenseMonthHidden() {
+      var monthEl = getElement('expenseMonthSelect');
+      var yearEl = getElement('expenseYearSelect');
+      var hiddenEl = getElement('expenseMonthHidden');
+      if (monthEl && yearEl && hiddenEl) {
+        hiddenEl.value = monthEl.value + ' ' + yearEl.value;
+      }
+    }
+
+    async function saveExpense() {
+      if (!hasPermission('admin.finance') && !hasPermission('admin.full')) {
+        alert('ไม่มีสิทธิ์บันทึกรายจ่าย'); return;
+      }
+      var editingId = ((getElement('editingExpenseId') || {}).value || '').trim();
+      var month = ((getElement('expenseMonthHidden') || {}).value || '').trim();
+      var category = (getElement('expenseCategory') || {}).value || '';
+      var description = ((getElement('expenseDescription') || {}).value || '').trim();
+      var amount = Number((getElement('expenseAmount') || {}).value || 0);
+      var note = ((getElement('expenseNote') || {}).value || '').trim();
+      var resultEl = getElement('expenseFormResult');
+
+      if (!month) { if (resultEl) resultEl.textContent = 'กรุณาเลือกเดือน'; return; }
+      if (!description) { if (resultEl) resultEl.textContent = 'กรุณาระบุรายละเอียด'; return; }
+      if (!amount || amount <= 0) { if (resultEl) resultEl.textContent = 'กรุณาระบุจำนวนเงินที่มากกว่า 0'; return; }
+
+      var parsed = parseThaiMonthYear(month);
+      var ceYear = parsed ? (parsed.year - 543) : new Date().getFullYear();
+      var docId = editingId || createFirebaseDocId('expenses');
+      var item = {
+        firebaseDocId: docId, id: docId,
+        month: month, year: ceYear,
+        category: category, description: description,
+        amount: amount, note: note
+      };
+
+      try {
+        if (resultEl) resultEl.textContent = 'กำลังบันทึก...';
+        await setFirebaseDocument('expenses', item);
+        var idx = expenses.findIndex(function(e) { return e.firebaseDocId === docId || e.id === docId; });
+        if (idx !== -1) { Object.assign(expenses[idx], item); } else { expenses.push(item); }
+        addActivityLog(editingId ? 'แก้ไขรายจ่าย' : 'เพิ่มรายจ่าย', category + ' · ' + description + ' · ' + formatPrice(amount) + ' · ' + month);
+        if (resultEl) resultEl.textContent = editingId ? 'แก้ไขเรียบร้อย' : 'บันทึกเรียบร้อย';
+        clearExpenseForm();
+        renderFinanceSummary();
+      } catch (error) {
+        console.error('saveExpense error:', error);
+        if (resultEl) resultEl.textContent = 'เกิดข้อผิดพลาด: ' + (error.message || error);
+      }
+    }
+
+    function editExpense(docId) {
+      var expense = expenses.find(function(e) { return String(e.firebaseDocId || e.id || '') === String(docId); });
+      if (!expense) return;
+      var editingIdEl = getElement('editingExpenseId');
+      var hiddenEl = getElement('expenseMonthHidden');
+      var categoryEl = getElement('expenseCategory');
+      var descEl = getElement('expenseDescription');
+      var amountEl = getElement('expenseAmount');
+      var noteEl = getElement('expenseNote');
+      var resultEl = getElement('expenseFormResult');
+
+      if (editingIdEl) editingIdEl.value = docId;
+      if (hiddenEl) hiddenEl.value = expense.month || '';
+      var parsed = parseThaiMonthYear(expense.month || '');
+      if (parsed) {
+        var monthEl = getElement('expenseMonthSelect');
+        var yearEl = getElement('expenseYearSelect');
+        var monthNames = getThaiCalendarMonthNames();
+        if (monthEl) monthEl.value = monthNames[parsed.month - 1];
+        if (yearEl) yearEl.value = String(parsed.year);
+      }
+      if (categoryEl) categoryEl.value = expense.category || 'อื่นๆ';
+      if (descEl) descEl.value = expense.description || '';
+      if (amountEl) amountEl.value = expense.amount || 0;
+      if (noteEl) noteEl.value = expense.note || '';
+      if (resultEl) resultEl.textContent = 'แก้ไขรายการ: ' + escapeHtml(expense.description || '');
+      var formBox = getElement('expenseFormResult');
+      if (formBox) { var box = formBox.closest('.form-box'); if (box) box.scrollIntoView({ behavior: 'smooth' }); }
+    }
+
+    async function deleteExpense(docId) {
+      if (!hasPermission('admin.finance') && !hasPermission('admin.full')) {
+        alert('ไม่มีสิทธิ์ลบรายจ่าย'); return;
+      }
+      var expense = expenses.find(function(e) { return String(e.firebaseDocId || e.id || '') === String(docId); });
+      if (!expense) return;
+      if (!confirm('ยืนยันการลบรายจ่าย: ' + (expense.description || '') + ' · ' + formatPrice(Number(expense.amount || 0)) + '?')) return;
+      try {
+        await deleteFirebaseDocument('expenses', expense);
+        var idx = expenses.findIndex(function(e) { return String(e.firebaseDocId || e.id || '') === String(docId); });
+        if (idx !== -1) expenses.splice(idx, 1);
+        addActivityLog('ลบรายจ่าย', (expense.category || '-') + ' · ' + (expense.description || '-') + ' · ' + (expense.month || '-'));
+        renderFinanceSummary();
+      } catch (error) {
+        console.error('deleteExpense error:', error);
+        alert('เกิดข้อผิดพลาดในการลบ: ' + (error.message || error));
+      }
+    }
+
+    function clearExpenseForm() {
+      var editingIdEl = getElement('editingExpenseId');
+      var descEl = getElement('expenseDescription');
+      var amountEl = getElement('expenseAmount');
+      var noteEl = getElement('expenseNote');
+      var resultEl = getElement('expenseFormResult');
+      if (editingIdEl) editingIdEl.value = '';
+      if (descEl) descEl.value = '';
+      if (amountEl) amountEl.value = '';
+      if (noteEl) noteEl.value = '';
+      if (resultEl) resultEl.textContent = '';
+      initExpenseMonthYearPickers();
+    }
+
+    function exportExpensesCsv() {
+      var month = (getElement('expenseMonthFilter') || {}).value || 'ทั้งหมด';
+      var category = (getElement('expenseCategoryFilter') || {}).value || 'ทั้งหมด';
+      var filtered = expenses.filter(function(e) {
+        return e.deleted !== true &&
+          (month === 'ทั้งหมด' || e.month === month) &&
+          (category === 'ทั้งหมด' || e.category === category);
+      }).sort(function(a, b) { return compareThaiMonthYear(b.month || '', a.month || ''); });
+      var rows = [['เดือน', 'หมวดหมู่', 'รายละเอียด', 'จำนวนเงิน (บาท)', 'หมายเหตุ', 'บันทึกโดย', 'วันที่บันทึก']];
+      filtered.forEach(function(e) {
+        rows.push([e.month || '', e.category || '', e.description || '', e.amount || 0, e.note || '', e.createdByName || '', e.createdAtText || '']);
+      });
+      downloadCsv('idea-club-expenses-' + (month === 'ทั้งหมด' ? 'all' : month.replace(/\s+/g, '-')) + '.csv', rows);
+      addActivityLog('Export รายจ่าย CSV', 'เดือน: ' + month + ' · หมวด: ' + category);
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
 
     function copyTextToClipboard(text) {
       if (navigator.clipboard) {
