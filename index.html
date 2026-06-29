@@ -18494,7 +18494,14 @@
       const clipCount = getStudentGamificationEventCount('onDemandClip');
       const examCount = getStudentGamificationEventCount('onlineExamPass');
       const selectedCourse = getCurrentStudentCourse ? getCurrentStudentCourse() : null;
-      const approved = !!(currentStudent && currentStudent.courseId && selectedCourse && isCourseStatusApproved(currentStudent.courseStatus));
+      const canUseCourseRewards = studentCanUseCourseEntitlements(currentStudent);
+      const isPaused = isStudentOnLearningPause(currentStudent);
+      const courseActionHtml = canUseCourseRewards
+        ? '<button class="btn btn-blue" type="button" onclick="studentMobileGo(\'student-learning\')">เข้าเรียน On-demand</button>' +
+          '<button class="btn btn-green" type="button" onclick="studentMobileGoToOnlineExam()">ไปทำข้อสอบ</button>'
+        : '';
+      const clipQuestText = canUseCourseRewards ? 'เปิดคลิปเพื่อรับ +40 EXP และ +2 Coins ต่อคลิป' : (isPaused ? 'พักเรียนอยู่ จึงปิดกิจกรรม On-demand ชั่วคราว' : 'รออนุมัติคอร์สก่อนเข้าเรียน');
+      const examQuestText = canUseCourseRewards ? 'ผ่าน 60% ขึ้นไป รับ +150 EXP และ +30 Coins ต่อผลสอบ' : (isPaused ? 'พักเรียนอยู่ จึงปิดการทำข้อสอบออนไลน์ชั่วคราว' : 'รออนุมัติคอร์สก่อนทำข้อสอบ');
       const title = options.mobile ? 'Progress / Coins' : 'Progress / Level / Coins';
       const subtitle = currentStudent
         ? 'สะสมจากการเข้าเรียน On-demand และการทำข้อสอบออนไลน์ด้วยบัญชีนักเรียนนี้'
@@ -18577,13 +18584,12 @@
           '</div>' +
         '</div>' +
         '<div class="student-gamification-actions">' +
-          '<button class="btn btn-blue" type="button" onclick="studentMobileGo(\'student-learning\')">เข้าเรียน On-demand</button>' +
-          '<button class="btn btn-green" type="button" onclick="studentMobileGo(\'student-monthly-test\')">ไปทำข้อสอบ</button>' +
+          courseActionHtml +
           '<button class="btn btn-dark" type="button" onclick="goToStudentExamBestPage()">ประวัติคะแนน</button>' +
         '</div>' +
         '<div class="student-gamification-quests">' +
-          '<div class="student-gamification-quest"><span class="student-gamification-quest-icon">' + (clipCount ? '✓' : '▶') + '</span><div><strong>ดูคลิป On-demand</strong><p>' + (approved ? 'เปิดคลิปเพื่อรับ +40 EXP และ +2 Coins ต่อคลิป' : 'รออนุมัติคอร์สก่อนเข้าเรียน') + '</p></div></div>' +
-          '<div class="student-gamification-quest"><span class="student-gamification-quest-icon">' + (examCount ? '✓' : 'A+') + '</span><div><strong>สอบออนไลน์ผ่านเกณฑ์</strong><p>ผ่าน 60% ขึ้นไป รับ +150 EXP และ +30 Coins ต่อผลสอบ</p></div></div>' +
+          '<div class="student-gamification-quest"><span class="student-gamification-quest-icon">' + (clipCount ? '✓' : '▶') + '</span><div><strong>ดูคลิป On-demand</strong><p>' + clipQuestText + '</p></div></div>' +
+          '<div class="student-gamification-quest"><span class="student-gamification-quest-icon">' + (examCount ? '✓' : 'A+') + '</span><div><strong>สอบออนไลน์ผ่านเกณฑ์</strong><p>' + examQuestText + '</p></div></div>' +
         '</div>' +
         renderDailyQuestsHtml(profile) +
         renderStudentGamificationLeaderboardHtml() +
@@ -30673,6 +30679,10 @@ function receiptStatusText(status) {
     function openMonthlyExamPage() {
       if (!(currentStudent && currentStudent.courseId)) {
         alert('กรุณาสมัครคอร์สก่อนทำแบบทดสอบ');
+        return;
+      }
+      if (!studentCanUseCourseEntitlements(currentStudent)) {
+        alert(getPausedCourseAccessMessage());
         return;
       }
       studentMobileGoToOnlineExam();
