@@ -7414,6 +7414,10 @@
               <div id="adminRewardsTable"></div>
             </div>
             <div class="form-box" style="margin-top:16px;">
+              <h4 style="margin:0 0 12px;font-size:15px;color:#1e1b4b;">🎴 ความคืบหน้าบัตรสะสม</h4>
+              <div id="adminStampProgressTable"></div>
+            </div>
+            <div class="form-box" style="margin-top:16px;">
               <h4 style="margin:0 0 12px;font-size:15px;color:#1e1b4b;">ประวัติการแลกรางวัล</h4>
               <div id="adminRedemptionsTable"></div>
             </div>
@@ -15749,16 +15753,15 @@
     function renderOnlineClassCourseSelect() {
       const docLocationSelect = getElement('onlineDocLocationSelect');
       const docGradeSelect = getElement('onlineDocGradeSelect');
-      const firstCourse = (courses || [])[0];
       if (docLocationSelect) {
-        const currentLocation = docLocationSelect.value || (firstCourse ? firstCourse.location : '');
-        docLocationSelect.innerHTML = locationOptionsHtml(currentLocation);
-        if (currentLocation) docLocationSelect.value = currentLocation;
+        const currentLocation = docLocationSelect.value || '';
+        docLocationSelect.innerHTML = '<option value="">ศูนย์ทั้งหมด</option>' + locationOptionsHtml(currentLocation);
+        docLocationSelect.value = currentLocation;
       }
       if (docGradeSelect) {
-        const currentGrade = docGradeSelect.value || (firstCourse ? firstCourse.grade : '');
-        docGradeSelect.innerHTML = gradeOptionsHtml(currentGrade);
-        if (currentGrade) docGradeSelect.value = currentGrade;
+        const currentGrade = docGradeSelect.value || '';
+        docGradeSelect.innerHTML = '<option value="">ชั้นทั้งหมด</option>' + gradeOptionsHtml(currentGrade);
+        docGradeSelect.value = currentGrade;
       }
       renderOnlineDocTable();
     }
@@ -16192,34 +16195,37 @@
       if (getElement('onlineDocTopic')) getElement('onlineDocTopic').value = '';
       if (getElement('onlineDocFiles')) getElement('onlineDocFiles').value = '';
       if (getElement('onlineDocStatus')) getElement('onlineDocStatus').value = 'active';
-      if (!keepTarget && courses[0]) {
-        if (getElement('onlineDocLocationSelect')) getElement('onlineDocLocationSelect').value = courses[0].location || '';
-        if (getElement('onlineDocGradeSelect')) getElement('onlineDocGradeSelect').value = courses[0].grade || '';
+      if (!keepTarget) {
+        if (getElement('onlineDocLocationSelect')) getElement('onlineDocLocationSelect').value = '';
+        if (getElement('onlineDocGradeSelect')) getElement('onlineDocGradeSelect').value = '';
       }
       if (getElement('onlineDocResult')) getElement('onlineDocResult').textContent = '';
     }
 
-    async function saveOnlineClassDocument() {
-      const target = getSelectedOnlineDocTarget();
+    async function persistOnlineClassDocument(params) {
+      const target = params.target || {};
       const course = getOnlineDocTargetCourse(target.location, target.grade);
-      const result = getElement('onlineDocResult');
+      const result = params.resultEl || null;
+      const editingId = params.editingId || '';
+      const editingCourseId = params.editingCourseId || '';
+      const classDate = params.classDate || '';
+      const topic = params.topic || '';
+      const files = params.files || [];
+      const status = params.status || 'active';
+      if (!target.location || !target.grade) {
+        if (result) { result.textContent = 'กรุณาเลือกศูนย์และระดับชั้นก่อนบันทึกเอกสาร'; result.style.color = '#dc2626'; }
+        return false;
+      }
       if (!course) {
         if (result) { result.textContent = 'ไม่พบคอร์สของศูนย์และระดับชั้นที่เลือก กรุณาตั้งคอร์สให้ตรงก่อน'; result.style.color = '#dc2626'; }
-        return;
+        return false;
       }
-      const classDate = getElement('onlineDocDate') ? getElement('onlineDocDate').value : '';
-      const topic = getElement('onlineDocTopic') ? getElement('onlineDocTopic').value.trim() : '';
-      const files = parsePdfFilesFromText(getElement('onlineDocFiles') ? getElement('onlineDocFiles').value : '');
-      const status = getElement('onlineDocStatus') ? getElement('onlineDocStatus').value : 'active';
-      const editingId = getElement('editingOnlineDocId') ? getElement('editingOnlineDocId').value : '';
-      const editingCourseId = getElement('editingOnlineDocCourseId') ? getElement('editingOnlineDocCourseId').value : '';
-
       if (!classDate || !topic || !files.length) {
         if (result) {
           result.textContent = 'กรุณากรอกวันที่ หัวข้อ และลิงก์เอกสารอย่างน้อย 1 ไฟล์';
           result.style.color = '#dc2626';
         }
-        return;
+        return false;
       }
 
       course.onlineDocs = Array.isArray(course.onlineDocs) ? course.onlineDocs : [];
@@ -16258,12 +16264,28 @@
         renderOnlineDocTable();
         renderTeacherOnlineClasses();
         updateStudentCourseDisplay();
+        return true;
       } catch (error) {
         if (result) {
           result.textContent = 'บันทึกไม่สำเร็จ: ' + (error.message || error.code);
           result.style.color = '#dc2626';
         }
+        return false;
       }
+    }
+
+    async function saveOnlineClassDocument() {
+      const result = getElement('onlineDocResult');
+      await persistOnlineClassDocument({
+        target: getSelectedOnlineDocTarget(),
+        classDate: getElement('onlineDocDate') ? getElement('onlineDocDate').value : '',
+        topic: getElement('onlineDocTopic') ? getElement('onlineDocTopic').value.trim() : '',
+        files: parsePdfFilesFromText(getElement('onlineDocFiles') ? getElement('onlineDocFiles').value : ''),
+        status: getElement('onlineDocStatus') ? getElement('onlineDocStatus').value : 'active',
+        editingId: getElement('editingOnlineDocId') ? getElement('editingOnlineDocId').value : '',
+        editingCourseId: getElement('editingOnlineDocCourseId') ? getElement('editingOnlineDocCourseId').value : '',
+        resultEl: result
+      });
     }
 
     function editOnlineClassDocument(courseId, docId) {
@@ -16271,16 +16293,37 @@
       if (!course) return;
       const doc = (course.onlineDocs || []).find(function(item) { return String(item.id) === String(docId); });
       if (!doc) return;
-      if (getElement('onlineDocLocationSelect')) getElement('onlineDocLocationSelect').value = getOnlineDocLocation(doc, course);
-      if (getElement('onlineDocGradeSelect')) getElement('onlineDocGradeSelect').value = getOnlineDocGrade(doc, course);
-      if (getElement('editingOnlineDocId')) getElement('editingOnlineDocId').value = doc.id;
-      if (getElement('editingOnlineDocCourseId')) getElement('editingOnlineDocCourseId').value = course.id;
-      if (getElement('onlineDocDate')) getElement('onlineDocDate').value = doc.classDate || '';
-      if (getElement('onlineDocTopic')) getElement('onlineDocTopic').value = doc.topic || '';
-      if (getElement('onlineDocFiles')) getElement('onlineDocFiles').value = pdfFilesToText(doc.files || []);
-      if (getElement('onlineDocStatus')) getElement('onlineDocStatus').value = doc.status || 'active';
-      const box = getElement('onlineDocDate');
-      if (box) box.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      const currentLocation = getOnlineDocLocation(doc, course);
+      const currentGrade = getOnlineDocGrade(doc, course);
+      openEditBubble('แก้ไขเอกสาร Online รายครั้ง',
+        '<div class="form-row">' +
+          '<div><label>ศูนย์</label><select id="bubbleOnlineDocLocation">' + locationOptionsHtml(currentLocation) + '</select></div>' +
+          '<div><label>ระดับชั้น</label><select id="bubbleOnlineDocGrade">' + gradeOptionsHtml(currentGrade) + '</select></div>' +
+          '<div><label>วันที่เรียน</label><input id="bubbleOnlineDocDate" type="date" value="' + escapeHtml(doc.classDate || '') + '"></div>' +
+          '<div><label>สถานะ</label><select id="bubbleOnlineDocStatus"><option value="active"' + ((doc.status || 'active') === 'active' ? ' selected' : '') + '>เปิดแสดง</option><option value="inactive"' + ((doc.status || '') === 'inactive' ? ' selected' : '') + '>ปิดไว้ก่อน</option></select></div>' +
+        '</div>' +
+        '<label>หัวข้อครั้งเรียน</label>' +
+        '<input id="bubbleOnlineDocTopic" type="text" value="' + escapeHtml(doc.topic || '') + '" placeholder="เช่น ระบบย่อยอาหาร">' +
+        '<label style="margin-top:10px;">ลิงก์เอกสาร / เว็บประกอบ</label>' +
+        '<textarea id="bubbleOnlineDocFiles" rows="5" placeholder="ชีทเรียน | https://drive.google.com/...&#10;การบ้านออนไลน์ | https://example.com/...">' + escapeHtml(pdfFilesToText(doc.files || [])) + '</textarea>',
+        async function() {
+          const resultEl = getElement('editBubbleResult');
+          const saved = await persistOnlineClassDocument({
+            target: {
+              location: bubbleSelectValue('bubbleOnlineDocLocation'),
+              grade: bubbleSelectValue('bubbleOnlineDocGrade')
+            },
+            classDate: bubbleValue('bubbleOnlineDocDate'),
+            topic: bubbleValue('bubbleOnlineDocTopic'),
+            files: parsePdfFilesFromText(bubbleValue('bubbleOnlineDocFiles')),
+            status: bubbleSelectValue('bubbleOnlineDocStatus') || 'active',
+            editingId: doc.id,
+            editingCourseId: course.id,
+            resultEl: resultEl
+          });
+          if (saved) closeEditBubble();
+        }
+      );
     }
 
     async function deleteOnlineClassDocument(courseId, docId) {
@@ -18579,6 +18622,53 @@
           '</tr>';
         }).join('');
         rewardsEl.innerHTML = '<table class="data-table" style="font-size:13px;"><thead><tr><th>ชื่อรางวัล</th><th>หมวด</th><th>ประเภท</th><th>ราคา</th><th>สต็อก</th><th>รายละเอียด</th><th></th></tr></thead><tbody>' + rows + '</tbody></table>';
+      }
+
+      // Stamp card progress table
+      const stampEl = getElement('adminStampProgressTable');
+      if (stampEl) {
+        const stampCards = gamificationRewards.filter(function(r) { return !r.deleted && r.rewardType === 'stampCard'; });
+        if (!stampCards.length) {
+          stampEl.innerHTML = '<p style="color:#94a3b8;font-size:13px;">ยังไม่มีบัตรสะสม</p>';
+        } else {
+          const rows = [];
+          studentGamificationProfiles.forEach(function(profile) {
+            if (!profile || profile.deleted) return;
+            const sp = profile.stampProgress || {};
+            const name = escapeHtml(profile.studentName || profile.name || '-');
+            const memberId = escapeHtml(profile.memberId || '-');
+            stampCards.forEach(function(card) {
+              const cid = card.firebaseDocId || card.id || '';
+              const prog = sp[cid] || { stamps: 0, completed: false };
+              const cur = Math.min(Number(prog.stamps) || 0, Number(card.stampsRequired) || 5);
+              const req = Number(card.stampsRequired) || 5;
+              const completed = prog.completed || cur >= req;
+              const pct = Math.round((cur / req) * 100);
+              const barColor = completed ? '#16a34a' : (pct >= 60 ? '#f59e0b' : '#6366f1');
+              if (cur === 0 && !completed) return; // skip students with zero progress
+              rows.push(
+                '<tr>' +
+                '<td>' + name + '<br><span style="font-size:11px;color:#94a3b8;">' + memberId + '</span></td>' +
+                '<td>' + escapeHtml(card.title || '-') + '</td>' +
+                '<td>' +
+                  '<div style="display:flex;align-items:center;gap:6px;">' +
+                    '<div style="flex:1;min-width:80px;height:8px;border-radius:4px;background:#e2e8f0;">' +
+                      '<div style="width:' + pct + '%;height:8px;border-radius:4px;background:' + barColor + ';"></div>' +
+                    '</div>' +
+                    '<span style="font-size:12px;font-weight:700;white-space:nowrap;">' + cur + '/' + req + '</span>' +
+                  '</div>' +
+                '</td>' +
+                '<td style="text-align:center;">' + (completed ? '<span style="color:#16a34a;font-weight:700;">✓ ครบแล้ว</span>' : '<span style="color:#64748b;">' + pct + '%</span>') + '</td>' +
+                '</tr>'
+              );
+            });
+          });
+          if (!rows.length) {
+            stampEl.innerHTML = '<p style="color:#94a3b8;font-size:13px;">ยังไม่มีนักเรียนสะสมแสตมป์</p>';
+          } else {
+            stampEl.innerHTML = '<table class="data-table" style="font-size:13px;"><thead><tr><th>นักเรียน</th><th>บัตรสะสม</th><th>ความคืบหน้า</th><th>สถานะ</th></tr></thead><tbody>' + rows.join('') + '</tbody></table>';
+          }
+        }
       }
 
       const allRedemptions = gamificationRedemptions.filter(function(r) { return !r.deleted; })
