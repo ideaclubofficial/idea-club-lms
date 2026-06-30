@@ -7403,6 +7403,7 @@
                   <select id="shopRewardType" onchange="onShopRewardTypeChange()">
                     <option value="standard">รางวัลมาตรฐาน (แลกครั้งเดียว)</option>
                     <option value="stampCard">บัตรสะสม (สะสมแสตมป์)</option>
+                    <option value="wheelTickets">🎟 ตั๋วสุ่มวงล้อ</option>
                   </select>
                 </div>
               </div>
@@ -7416,6 +7417,15 @@
                     <label>จำนวนแสตมป์ที่ต้องสะสม</label>
                     <input type="number" id="shopStampRequired" min="2" max="50" value="5" style="width:100px;" />
                     <p style="font-size:11px;color:#92400e;margin:3px 0 0;">เมื่อนักเรียนสะสมครบ → ได้รับรางวัลจากแอดมินอัตโนมัติ</p>
+                  </div>
+                </div>
+              </div>
+              <div id="shopWheelTicketsRow" style="display:none;margin-bottom:10px;padding:10px 12px;border-radius:8px;background:#ede9fe;border:1px solid #a78bfa;">
+                <div class="form-row" style="margin-bottom:0;">
+                  <div>
+                    <label>จำนวนตั๋วสุ่มที่ได้รับ</label>
+                    <input type="number" id="shopTicketsAwarded" min="1" max="50" value="1" style="width:100px;" />
+                    <p style="font-size:11px;color:#5b21b6;margin:3px 0 0;">เมื่อแอดมินยืนยัน → ตั๋วสุ่มจะเพิ่มอัตโนมัติ</p>
                   </div>
                 </div>
               </div>
@@ -19113,8 +19123,10 @@
 
     function onShopRewardTypeChange() {
       const t = getElement('shopRewardType') ? getElement('shopRewardType').value : 'standard';
-      const row = getElement('shopStampCardRow');
-      if (row) row.style.display = t === 'stampCard' ? '' : 'none';
+      const stampRow = getElement('shopStampCardRow');
+      const ticketsRow = getElement('shopWheelTicketsRow');
+      if (stampRow) stampRow.style.display = t === 'stampCard' ? '' : 'none';
+      if (ticketsRow) ticketsRow.style.display = t === 'wheelTickets' ? '' : 'none';
     }
 
     function renderAdminGamificationShop() {
@@ -19128,7 +19140,8 @@
       } else {
         let rows = active.map(function(r) {
           const isStamp = r.rewardType === 'stampCard';
-          const typeLabel = isStamp ? '🎴 บัตรสะสม (' + (r.stampsRequired || '?') + ' แสตมป์)' : '🎁 มาตรฐาน';
+          const isTickets = r.rewardType === 'wheelTickets';
+          const typeLabel = isStamp ? '🎴 บัตรสะสม (' + (r.stampsRequired || '?') + ' แสตมป์)' : isTickets ? '🎟 ตั๋วสุ่ม (' + (r.ticketsAwarded || 1) + ' ตั๋ว)' : '🎁 มาตรฐาน';
           return '<tr>' +
             '<td>' + escapeHtml(r.title || '-') + '</td>' +
             '<td>' + escapeHtml(r.category || '-') + '</td>' +
@@ -19224,6 +19237,7 @@
       if (getElement('shopRewardStock')) getElement('shopRewardStock').value = '10';
       if (getElement('shopRewardDesc')) getElement('shopRewardDesc').value = '';
       if (getElement('shopStampRequired')) getElement('shopStampRequired').value = '5';
+      if (getElement('shopTicketsAwarded')) getElement('shopTicketsAwarded').value = '1';
       if (getElement('shopRewardType')) { getElement('shopRewardType').value = 'standard'; onShopRewardTypeChange(); }
       var r = getElement('shopRewardSaveResult'); if (r) r.textContent = '';
     }
@@ -19232,6 +19246,7 @@
       const r = gamificationRewards.find(function(x) { return String(x.firebaseDocId || x.id || '') === rewardId && !x.deleted; });
       if (!r) return;
       const isStamp = r.rewardType === 'stampCard';
+      const isTickets = r.rewardType === 'wheelTickets';
       const formHtml =
         '<div style="display:flex;flex-direction:column;gap:12px;padding:2px 0;">' +
           '<div><label style="font-size:13px;font-weight:700;display:block;margin-bottom:4px;">ชื่อรางวัล</label>' +
@@ -19240,9 +19255,10 @@
             '<div style="flex:1;min-width:130px;"><label style="font-size:13px;font-weight:700;display:block;margin-bottom:4px;">หมวดหมู่</label>' +
               '<input type="text" id="bGR_category" value="' + escapeHtml(r.category || '') + '" style="width:100%;" /></div>' +
             '<div><label style="font-size:13px;font-weight:700;display:block;margin-bottom:4px;">ประเภท</label>' +
-              '<select id="bGR_type" onchange="var s=document.getElementById(\'bGR_stampRow\');if(s)s.style.display=this.value===\'stampCard\'?\'\':\'none\';">' +
-                '<option value="standard"' + (!isStamp ? ' selected' : '') + '>รางวัลมาตรฐาน</option>' +
+              '<select id="bGR_type" onchange="var s=document.getElementById(\'bGR_stampRow\'),t=document.getElementById(\'bGR_ticketsRow\');if(s)s.style.display=this.value===\'stampCard\'?\'\':\'none\';if(t)t.style.display=this.value===\'wheelTickets\'?\'\':\'none\';">' +
+                '<option value="standard"' + (!isStamp && !isTickets ? ' selected' : '') + '>รางวัลมาตรฐาน</option>' +
                 '<option value="stampCard"' + (isStamp ? ' selected' : '') + '>บัตรสะสม</option>' +
+                '<option value="wheelTickets"' + (isTickets ? ' selected' : '') + '>🎟 ตั๋วสุ่มวงล้อ</option>' +
               '</select></div>' +
           '</div>' +
           '<div style="display:flex;gap:10px;flex-wrap:wrap;">' +
@@ -19255,6 +19271,10 @@
           '<div id="bGR_stampRow" style="display:' + (isStamp ? '' : 'none') + ';padding:8px 12px;border-radius:8px;background:#fef9c3;border:1px solid #fde047;">' +
             '<label style="font-size:13px;font-weight:700;display:block;margin-bottom:4px;">จำนวนแสตมป์ที่ต้องสะสม</label>' +
             '<input type="number" id="bGR_stampRequired" min="2" max="50" value="' + (r.stampsRequired || 5) + '" style="width:100px;" /></div>' +
+          '<div id="bGR_ticketsRow" style="display:' + (isTickets ? '' : 'none') + ';padding:8px 12px;border-radius:8px;background:#ede9fe;border:1px solid #a78bfa;">' +
+            '<label style="font-size:13px;font-weight:700;display:block;margin-bottom:4px;">จำนวนตั๋วสุ่มที่ได้รับ</label>' +
+            '<input type="number" id="bGR_ticketsAwarded" min="1" max="50" value="' + (r.ticketsAwarded || 1) + '" style="width:100px;" />' +
+            '<p style="font-size:11px;color:#5b21b6;margin:2px 0 0;">เมื่อแอดมินยืนยัน → ตั๋วสุ่มจะเพิ่มอัตโนมัติ</p></div>' +
           '<div><label style="font-size:13px;font-weight:700;display:block;margin-bottom:4px;">รายละเอียด</label>' +
             '<textarea id="bGR_desc" rows="2" style="width:100%;box-sizing:border-box;">' + escapeHtml(r.description || '') + '</textarea></div>' +
           '<div style="display:flex;gap:8px;padding-top:4px;">' +
@@ -19272,6 +19292,7 @@
       const cost = Math.max(0, parseInt(bubbleValue('bGR_cost')) || 0);
       const stock = Math.max(1, parseInt(bubbleValue('bGR_stock')) || 1);
       const stampsRequired = rewardType === 'stampCard' ? Math.min(50, Math.max(2, parseInt(bubbleValue('bGR_stampRequired')) || 5)) : 0;
+      const ticketsAwarded = rewardType === 'wheelTickets' ? Math.min(50, Math.max(1, parseInt(bubbleValue('bGR_ticketsAwarded')) || 1)) : 0;
       const description = bubbleValue('bGR_desc');
       if (!title) { alert('กรุณาใส่ชื่อรางวัล'); return; }
       if (!firebaseReady || !db) return;
@@ -19279,7 +19300,7 @@
       if (resultEl) { resultEl.textContent = 'กำลังบันทึก...'; resultEl.style.color = '#d97706'; }
       try {
         const now = firebase.firestore.FieldValue.serverTimestamp();
-        const updates = { title: title, category: category, rewardType: rewardType, stampsRequired: stampsRequired, cost: cost, stock: stock, description: description, updatedAt: now };
+        const updates = { title: title, category: category, rewardType: rewardType, stampsRequired: stampsRequired, ticketsAwarded: ticketsAwarded, cost: cost, stock: stock, description: description, updatedAt: now };
         await db.collection('gamificationRewards').doc(rewardId).set(updates, { merge: true });
         const existing = gamificationRewards.find(function(x) { return String(x.firebaseDocId || x.id || '') === rewardId; });
         if (existing) Object.assign(existing, updates);
@@ -19299,6 +19320,7 @@
       const cost = Math.max(0, parseInt(getElement('shopRewardCost') ? getElement('shopRewardCost').value : '0') || 0);
       const stock = Math.max(1, parseInt(getElement('shopRewardStock') ? getElement('shopRewardStock').value : '0') || 0);
       const stampsRequired = rewardType === 'stampCard' ? Math.min(50, Math.max(2, parseInt(getElement('shopStampRequired') ? getElement('shopStampRequired').value : '5') || 5)) : 0;
+      const ticketsAwarded = rewardType === 'wheelTickets' ? Math.min(50, Math.max(1, parseInt(getElement('shopTicketsAwarded') ? getElement('shopTicketsAwarded').value : '1') || 1)) : 0;
       const description = (getElement('shopRewardDesc') ? getElement('shopRewardDesc').value.trim() : '');
       const resultEl = getElement('shopRewardSaveResult');
       if (!title) { if (resultEl) { resultEl.textContent = 'กรุณาใส่ชื่อรางวัล'; resultEl.style.color = '#dc2626'; } return; }
@@ -19307,11 +19329,11 @@
       try {
         const id = createFirebaseDocId('gamificationRewards');
         const now = firebase.firestore.FieldValue.serverTimestamp();
-        const reward = { id: id, firebaseDocId: id, title: title, category: category, rewardType: rewardType, stampsRequired: stampsRequired, cost: cost, stock: stock, description: description, active: true, deleted: false, createdAt: now, createdAtText: new Date().toLocaleString('th-TH') };
+        const reward = { id: id, firebaseDocId: id, title: title, category: category, rewardType: rewardType, stampsRequired: stampsRequired, ticketsAwarded: ticketsAwarded, cost: cost, stock: stock, description: description, active: true, deleted: false, createdAt: now, createdAtText: new Date().toLocaleString('th-TH') };
         await db.collection('gamificationRewards').doc(id).set(reward);
         gamificationRewards.push(reward);
         if (resultEl) { resultEl.textContent = 'บันทึกรางวัลสำเร็จ!'; resultEl.style.color = '#16a34a'; }
-        addActivityLog('สร้างรางวัล', title + ' · ' + (rewardType === 'stampCard' ? 'บัตรสะสม ' + stampsRequired + ' แสตมป์' : cost + ' Coins · สต็อก ' + stock));
+        addActivityLog('สร้างรางวัล', title + ' · ' + (rewardType === 'stampCard' ? 'บัตรสะสม ' + stampsRequired + ' แสตมป์' : rewardType === 'wheelTickets' ? '🎟 ' + ticketsAwarded + ' ตั๋ว · สต็อก ' + stock : cost + ' Coins · สต็อก ' + stock));
         adminClearGamificationRewardForm();
         renderAdminGamificationShop();
       } catch (e) {
@@ -19333,9 +19355,27 @@
     async function adminFulfillRedemption(redemptionId) {
       if (!firebaseReady || !db) return;
       try {
-        await db.collection('gamificationRedemptions').doc(redemptionId).set({ status: 'fulfilled', updatedAt: firebase.firestore.FieldValue.serverTimestamp() }, { merge: true });
-        const item = gamificationRedemptions.find(function(r) { return String(r.firebaseDocId || r.id || '') === redemptionId; });
-        if (item) item.status = 'fulfilled';
+        const now = firebase.firestore.FieldValue.serverTimestamp();
+        const redemption = gamificationRedemptions.find(function(r) { return String(r.firebaseDocId || r.id || '') === redemptionId; });
+        const reward = redemption && redemption.rewardId
+          ? gamificationRewards.find(function(r) { return String(r.firebaseDocId || r.id || '') === String(redemption.rewardId || ''); })
+          : null;
+        if (reward && reward.rewardType === 'wheelTickets' && (reward.ticketsAwarded || 0) > 0) {
+          const profile = studentGamificationProfiles.find(function(p) {
+            return p && !p.deleted && (
+              (redemption.authUid && String(p.authUid || '') === String(redemption.authUid || '')) ||
+              (redemption.studentId && String(p.studentId || '') === String(redemption.studentId || ''))
+            );
+          });
+          if (profile) {
+            const profileId = String(profile.firebaseDocId || profile.id || '');
+            const nextTickets = Math.max(0, Number(profile.prizeWheelTickets) || 0) + (reward.ticketsAwarded || 1);
+            profile.prizeWheelTickets = nextTickets;
+            await db.collection('studentGamificationProfiles').doc(profileId).set({ prizeWheelTickets: nextTickets, updatedAt: now }, { merge: true });
+          }
+        }
+        await db.collection('gamificationRedemptions').doc(redemptionId).set({ status: 'fulfilled', updatedAt: now }, { merge: true });
+        if (redemption) redemption.status = 'fulfilled';
         renderAdminGamificationShop();
       } catch (e) { alert('อัปเดตสถานะไม่สำเร็จ: ' + (e.message || '')); }
     }
@@ -20501,8 +20541,10 @@
           '</div>';
         }
 
-        // Standard reward
-        const alreadyRedeemed = currentStudent && gamificationRedemptions.some(function(rd) {
+        // Wheel tickets reward
+        const isWheelTickets = r.rewardType === 'wheelTickets';
+        // Standard reward — alreadyRedeemed check (skip for wheelTickets to allow multiple purchases)
+        const alreadyRedeemed = !isWheelTickets && currentStudent && gamificationRedemptions.some(function(rd) {
           return !rd.deleted && String(rd.rewardId || '') === String(r.firebaseDocId || r.id || '') &&
             (String(rd.studentId || '') === getStudentRecordDocId(currentStudent) || String(rd.authUid || '') === String((currentStudent.authUid) || (firebaseUser && firebaseUser.uid) || ''));
         });
@@ -20514,13 +20556,14 @@
           btnHtml = '<span class="sgshop-status sgshop-status--out">หมดสต็อก</span>';
         } else {
           btnHtml = '<button type="button" class="sgshop-btn' + (canAfford ? '' : ' sgshop-btn--disabled') + '" onclick="redeemGamificationReward(\'' + rid + '\')" ' + (canAfford ? '' : 'disabled') + '>' +
-            (canAfford ? 'แลกรางวัล' : 'Coins ไม่พอ') + '</button>';
+            (canAfford ? (isWheelTickets ? '🎟 แลกตั๋ว' : 'แลกรางวัล') : 'Coins ไม่พอ') + '</button>';
         }
+        const ticketDesc = isWheelTickets ? '🎟 ' + (r.ticketsAwarded || 1) + ' ตั๋วสุ่มวงล้อ' + (r.description ? ' · ' + r.description : '') : (r.description || '');
         return '<div class="sgshop-card">' +
           '<div class="sgshop-info">' +
-            '<span class="sgshop-cat">' + escapeHtml(r.category || 'รางวัล') + '</span>' +
+            '<span class="sgshop-cat">' + (isWheelTickets ? '🎟 ตั๋วสุ่ม' : escapeHtml(r.category || 'รางวัล')) + escapeHtml(isWheelTickets && r.category ? ' · ' + r.category : '') + '</span>' +
             '<strong class="sgshop-title">' + escapeHtml(r.title || '-') + '</strong>' +
-            '<p class="sgshop-desc">' + escapeHtml(r.description || '') + '</p>' +
+            '<p class="sgshop-desc">' + escapeHtml(ticketDesc) + '</p>' +
           '</div>' +
           '<div class="sgshop-meta">' +
             '<span class="sgshop-cost">💰 ' + escapeHtml(r.cost) + '</span>' +
