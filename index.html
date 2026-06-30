@@ -6042,7 +6042,7 @@
                     <select id="onlineExamCourseLocation">
                       <option value="">-- ทุกศูนย์ (ค่าเริ่มต้น) --</option>
                     </select>
-                    <p style="font-size:10px;color:#9ca3af;margin:2px 0 0;">ทิ้งว่างไว้ = ทุกศูนย์ใช้ข้อสอบชุดเดียวกัน</p>
+                    <p style="font-size:10px;color:#9ca3af;margin:2px 0 0;">ทิ้งว่างไว้ = ทุกศูนย์ใช้ข้อสอบชุดเดียวกัน · เลือกศูนย์เพื่อสร้างชุดเฉพาะศูนย์ในเดือน/ชั้น/วิชาเดียวกัน</p>
                   </div>
                   <div>
                     <label>วิชา</label>
@@ -17446,15 +17446,14 @@
       const grade = currentStudent && currentStudent.grade ? currentStudent.grade : getProfileGrade();
       const studentLocation = String((currentStudent && (currentStudent.preferredLocation || currentStudent.location || currentStudent.center)) || '').trim();
       const studentDocId = currentStudent && (currentStudent.id || currentStudent.firebaseDocId) ? String(currentStudent.id || currentStudent.firebaseDocId) : '';
-      return (onlineExamCourseCache || []).filter(function(c) {
+      const matched = (onlineExamCourseCache || []).filter(function(c) {
         if (!c) return false;
         if (c.status === 'inactive') return false;
-        const examLocation = String(c.location || '').trim();
-        if (examLocation && studentLocation && examLocation !== studentLocation) return false;
         if (studentDocId && (c.exemptStudentIds || []).includes(studentDocId)) return false;
         if (opts.exactGradeOnly) return !!grade && c.grade === grade;
         return !c.grade || !grade || c.grade === grade;
       });
+      return filterOnlineExamCoursesForStudentLocation(matched, studentLocation);
     }
 
     function getStudentOnlineExamCount(options) {
@@ -34158,6 +34157,43 @@ function receiptStatusText(status) {
       return (course && (course.grade || getOnlineExamLinkedCourseGrade(course.linkedCourseId))) || '';
     }
 
+    function getOnlineExamCourseLocation(course) {
+      return String((course && course.location) || '').trim();
+    }
+
+    function getOnlineExamCourseLocationLabel(course) {
+      return getOnlineExamCourseLocation(course) || 'ทุกศูนย์';
+    }
+
+    function getOnlineExamCourseAudienceKey(course) {
+      return [
+        (course && course.examMonth) || '',
+        getOnlineExamCourseGrade(course) || '',
+        (course && course.subject) || ''
+      ].join('|');
+    }
+
+    function filterOnlineExamCoursesForStudentLocation(items, studentLocation) {
+      const location = String(studentLocation || '').trim();
+      const visible = (items || []).filter(function(course) {
+        const courseLocation = getOnlineExamCourseLocation(course);
+        if (!courseLocation) return true;
+        return !!location && courseLocation === location;
+      });
+      if (!location) return visible;
+
+      const locationSpecificKeys = {};
+      visible.forEach(function(course) {
+        if (getOnlineExamCourseLocation(course) === location) {
+          locationSpecificKeys[getOnlineExamCourseAudienceKey(course)] = true;
+        }
+      });
+      return visible.filter(function(course) {
+        const courseLocation = getOnlineExamCourseLocation(course);
+        return !!courseLocation || !locationSpecificKeys[getOnlineExamCourseAudienceKey(course)];
+      });
+    }
+
     function getCurrentThaiMonthYearLabel() {
       const names = getThaiCalendarMonthNames ? getThaiCalendarMonthNames() : ['มกราคม','กุมภาพันธ์','มีนาคม','เมษายน','พฤษภาคม','มิถุนายน','กรกฎาคม','สิงหาคม','กันยายน','ตุลาคม','พฤศจิกายน','ธันวาคม'];
       const now = new Date();
@@ -34234,8 +34270,8 @@ function receiptStatusText(status) {
         if ((c.examMonth || '') !== month) return false;
         if (getOnlineExamCourseGrade(c) !== grade) return false;
         if ((c.subject || '') !== subject) return false;
-        const cLoc = String(c.location || '').trim();
-        if (loc && cLoc && loc !== cLoc) return false;
+        const cLoc = getOnlineExamCourseLocation(c);
+        if (loc !== cLoc) return false;
         return true;
       }) || null;
     }
@@ -34421,7 +34457,7 @@ function receiptStatusText(status) {
             return;
           }
           if (duplicateCourse) {
-            if (resultEl) { resultEl.style.color = '#dc2626'; resultEl.textContent = 'มีชุดข้อสอบเดือน/ชั้น/วิชานี้อยู่แล้ว'; }
+            if (resultEl) { resultEl.style.color = '#dc2626'; resultEl.textContent = 'มีชุดข้อสอบเดือน/ชั้น/วิชา/ศูนย์นี้อยู่แล้ว'; }
             return;
           }
 
@@ -34945,7 +34981,7 @@ function receiptStatusText(status) {
         const gradeMatched = !selectedGrade || getOnlineExamCourseGrade(c) === selectedGrade;
         const subjectMatched = !selectedSubject || (c.subject || '') === selectedSubject;
         const activeMatched = !selectedActive || activeStatus === selectedActive;
-        const searchMatched = !searchText || String([c.title, c.examMonth, getOnlineExamCourseGrade(c), c.subject].join(' ')).toLowerCase().includes(searchText);
+        const searchMatched = !searchText || String([c.title, c.examMonth, getOnlineExamCourseGrade(c), c.subject, getOnlineExamCourseLocationLabel(c)].join(' ')).toLowerCase().includes(searchText);
         return monthMatched && gradeMatched && subjectMatched && activeMatched && searchMatched;
       });
 
@@ -34973,13 +35009,14 @@ function receiptStatusText(status) {
           c.openAt ? 'เปิด ' + formatThaiDateTime(parseOnlineExamDateTimeValue(c.openAt)) : '',
           c.closeAt ? 'ปิด ' + formatThaiDateTime(parseOnlineExamDateTimeValue(c.closeAt)) : ''
         ].filter(Boolean).join(' · ') || '-';
-        const courseMeta = (c.durationMinutes || 15) + ' นาที · ' + qCount + ' ข้อ' + (c.shuffleQuestions ? ' · สุ่มข้อ' : '');
+        const courseMeta = getOnlineExamCourseLocationLabel(c) + ' · ' + (c.durationMinutes || 15) + ' นาที · ' + qCount + ' ข้อ' + (c.shuffleQuestions ? ' · สุ่มข้อ' : '');
         const nowrapCellStyle = 'white-space:nowrap;word-break:keep-all;overflow-wrap:normal;';
         return '<tr>' +
           '<td style="' + nowrapCellStyle + '">' + escapeHtml(c.examMonth || '-') + '</td>' +
           '<td style="' + nowrapCellStyle + '">' + escapeHtml(getOnlineExamCourseGrade(c) || '-') + '</td>' +
           '<td style="' + nowrapCellStyle + '">' + escapeHtml(c.subject || '-') + '</td>' +
           '<td style="' + nowrapCellStyle + '"><strong>' + escapeHtml(c.title || '-') + '</strong> <span style="font-size:11px;color:#6b7280;">(' + escapeHtml(courseMeta) + ')</span></td>' +
+          '<td style="' + nowrapCellStyle + '">' + escapeHtml(getOnlineExamCourseLocationLabel(c)) + '</td>' +
           '<td style="' + nowrapCellStyle + '"><span style="font-size:10px;padding:2px 8px;border-radius:99px;' + (active ? 'background:#dbeafe;color:#1d4ed8;">Active' : 'background:#fee2e2;color:#991b1b;">Inactive') + '</span></td>' +
           '<td style="' + nowrapCellStyle + 'font-size:11px;color:#475569;">' + schedule + '</td>' +
           '<td style="' + nowrapCellStyle + '">' +
@@ -34998,7 +35035,7 @@ function receiptStatusText(status) {
           '<span style="font-size:11px;color:#6b7280;">' + filtered.length + ' ชุดข้อสอบ</span>' +
         '</div>' +
         '<div class="table-wrap" style="overflow-x:auto;-webkit-overflow-scrolling:touch;"><table style="white-space:nowrap;table-layout:auto;width:max-content;min-width:100%;"><thead><tr>' +
-          '<th style="white-space:nowrap;">เดือน</th><th style="white-space:nowrap;">ชั้น</th><th style="white-space:nowrap;">วิชา</th><th style="white-space:nowrap;">ชุดข้อสอบ</th><th style="white-space:nowrap;">สถานะ</th><th style="white-space:nowrap;">เวลาเปิด/ปิด</th><th style="white-space:nowrap;">จัดการ</th>' +
+          '<th style="white-space:nowrap;">เดือน</th><th style="white-space:nowrap;">ชั้น</th><th style="white-space:nowrap;">วิชา</th><th style="white-space:nowrap;">ชุดข้อสอบ</th><th style="white-space:nowrap;">ศูนย์</th><th style="white-space:nowrap;">สถานะ</th><th style="white-space:nowrap;">เวลาเปิด/ปิด</th><th style="white-space:nowrap;">จัดการ</th>' +
         '</tr></thead><tbody>' + sorted.map(renderCourseRow).join('') + '</tbody></table></div>';
     }
 
@@ -35023,6 +35060,7 @@ function receiptStatusText(status) {
           course.examMonth || '',
           getOnlineExamCourseGrade(course) || '',
           course.subject || '',
+          getOnlineExamCourseLocationLabel(course),
           course.title || ''
         ].filter(Boolean);
         return parts.join(' · ') || 'ไม่ระบุชื่อชุดข้อสอบ';
@@ -37405,12 +37443,14 @@ function receiptStatusText(status) {
       if (content) content.style.display = '';
 
       const grade = currentStudent ? (currentStudent.grade || '') : '';
-      const allVisible = onlineExamCourseCache.filter(function(c) {
+      const studentLocation = String((currentStudent && (currentStudent.preferredLocation || currentStudent.location || currentStudent.center)) || '').trim();
+      const gradeVisible = onlineExamCourseCache.filter(function(c) {
         const courseGrade = c.grade || getOnlineExamLinkedCourseGrade(c.linkedCourseId) || '';
         if (c.status === 'inactive') return false;
         if (courseGrade && grade && courseGrade !== grade) return false;
         return true;
       });
+      const allVisible = filterOnlineExamCoursesForStudentLocation(gradeVisible, studentLocation);
 
       // Build subject filter bar
       const subjectBar = getElement('onlineExamSubjectFilter');
