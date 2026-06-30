@@ -19560,6 +19560,24 @@
       '#a855f7': 15,
       '#f59e0b': 5
     };
+    const PW_RARITY_ORDER = { '#f59e0b': 0, '#a855f7': 1, '#22c55e': 2, '#94a3b8': 3 };
+    function pwSortByRarity(items) {
+      return items.slice().sort(function(a, b) {
+        var oa = PW_RARITY_ORDER[a.color] !== undefined ? PW_RARITY_ORDER[a.color] : 99;
+        var ob = PW_RARITY_ORDER[b.color] !== undefined ? PW_RARITY_ORDER[b.color] : 99;
+        return oa - ob;
+      });
+    }
+    function bEPW_onTypeChange() {
+      var t = getElement('bEPW_rewardType') ? getElement('bEPW_rewardType').value : '';
+      if (getElement('bEPW_valueWrap')) getElement('bEPW_valueWrap').style.display = t === 'custom' ? 'none' : '';
+      if (getElement('bEPW_linkedRow')) getElement('bEPW_linkedRow').style.display = t === 'custom' ? '' : 'none';
+    }
+    function bEPW_onColorChange() {
+      var color = getElement('bEPW_color') ? getElement('bEPW_color').value : '';
+      var def = PW_RARITY_DEFAULT_WEIGHT[color];
+      if (getElement('bEPW_weight') && def !== undefined) getElement('bEPW_weight').value = def;
+    }
     function getPwRarity(color) {
       return PW_RARITY_MAP[String(color || '').toLowerCase()] || null;
     }
@@ -19597,7 +19615,7 @@
     }
 
     function renderStudentPrizeWheelHtml(profile) {
-      const items = getPrizeWheelActiveItems();
+      const items = pwSortByRarity(getPrizeWheelActiveItems());
       if (!items.length) { console.log('[PrizeWheel] ไม่มีรายการรางวัล prizeWheelItems.length=' + prizeWheelItems.length); return ''; }
       if (!prizeWheelSettings.enabled) { console.log('[PrizeWheel] ปิดใช้งาน enabled=' + prizeWheelSettings.enabled); return ''; }
       const cost = Number(prizeWheelSettings.spinCost) || 0;
@@ -19886,7 +19904,7 @@
       // Prize items table
       const tableEl = getElement('adminPrizeWheelTable');
       if (tableEl) {
-        const items = getPrizeWheelActiveItems();
+        const items = pwSortByRarity(getPrizeWheelActiveItems());
         const totalWeight = getPrizeWheelTotalWeight(items);
         if (!items.length) {
           tableEl.innerHTML = '<p style="color:#94a3b8;font-size:13px;">ยังไม่มีรางวัล — เพิ่มรางวัลแรกได้เลย</p>';
@@ -20009,20 +20027,75 @@
     }
 
     function adminEditPrizeWheelItem(id) {
+      openEditPrizeWheelItemBubble(id);
+    }
+
+    function openEditPrizeWheelItemBubble(id) {
       const item = prizeWheelItems.find(function(p) { return (p.firebaseDocId || p.id) === id; });
-      if (!item) return;
-      if (getElement('editingPrizeWheelItemId')) getElement('editingPrizeWheelItemId').value = id;
-      if (getElement('pwItemName')) getElement('pwItemName').value = item.name || '';
-      if (getElement('pwItemIcon')) getElement('pwItemIcon').value = item.icon || '';
-      if (getElement('pwItemColor')) getElement('pwItemColor').value = item.color || '';
-      if (getElement('pwItemRewardType')) getElement('pwItemRewardType').value = item.rewardType || 'coins';
-      if (getElement('pwItemRewardValue')) getElement('pwItemRewardValue').value = item.rewardValue || 0;
-      if (getElement('pwItemWeight')) getElement('pwItemWeight').value = item.weight || 10;
-      onPwItemRewardTypeChange();
-      if (item.linkedRewardId && getElement('pwItemLinkedRewardId')) getElement('pwItemLinkedRewardId').value = item.linkedRewardId || '';
-      const resultEl = getElement('pwItemSaveResult');
-      if (resultEl) { resultEl.textContent = 'แก้ไข: ' + (item.name || ''); resultEl.style.color = '#d97706'; }
-      window.scrollTo({ top: 0, behavior: 'smooth' });
+      if (!item) { alert('ไม่พบรางวัล'); return; }
+      const activeRewards = gamificationRewards.filter(function(r) { return !r.deleted && r.active !== false; });
+      const linkedOpts = '<option value="">-- เลือกรางวัล --</option>' + activeRewards.map(function(r) {
+        const rid = escapeHtml(r.firebaseDocId || r.id || '');
+        const tag = r.rewardType === 'stampCard' ? ' [บัตรสะสม ' + (r.stampsRequired || '?') + ' แสตมป์]' : ' [บัตรแลก]';
+        return '<option value="' + rid + '"' + (String(item.linkedRewardId || '') === rid ? ' selected' : '') + '>' + escapeHtml((r.title || '-') + tag) + '</option>';
+      }).join('');
+      const isCustom = item.rewardType === 'custom';
+      const rarityOpts = [['#94a3b8','⬜ Common (เทา)'],['#22c55e','🟩 Uncommon (เขียว)'],['#a855f7','🟪 Rare (ม่วง)'],['#f59e0b','🟨 Legendary (ทอง)']];
+      openEditBubble('✏️ แก้ไขรางวัลวงล้อ: ' + escapeHtml(item.name || '-'),
+        '<div class="form-row">' +
+          '<div><label>ชื่อรางวัล</label><input id="bEPW_name" type="text" value="' + escapeHtml(item.name || '') + '" /></div>' +
+          '<div><label>Icon</label><input id="bEPW_icon" type="text" maxlength="4" style="width:70px;" value="' + escapeHtml(item.icon || '') + '" /></div>' +
+        '</div>' +
+        '<div class="form-row">' +
+          '<div><label>ระดับความหายาก</label><select id="bEPW_color" onchange="bEPW_onColorChange()">' +
+            rarityOpts.map(function(o) { return '<option value="' + o[0] + '"' + (item.color === o[0] ? ' selected' : '') + '>' + o[1] + '</option>'; }).join('') +
+          '</select></div>' +
+          '<div><label>น้ำหนักโอกาส (1–100)</label><input id="bEPW_weight" type="number" min="1" max="100" step="1" style="width:90px;" value="' + (Number(item.weight) || 10) + '" />' +
+            '<p style="font-size:11px;color:#94a3b8;margin:2px 0 0;">⬜70 🟩40 🟪15 🟨5</p></div>' +
+        '</div>' +
+        '<div class="form-row">' +
+          '<div><label>ประเภทรางวัล</label><select id="bEPW_rewardType" onchange="bEPW_onTypeChange()">' +
+            '<option value="coins"' + (item.rewardType === 'coins' ? ' selected' : '') + '>Coins</option>' +
+            '<option value="exp"' + (item.rewardType === 'exp' ? ' selected' : '') + '>EXP</option>' +
+            '<option value="custom"' + (item.rewardType === 'custom' ? ' selected' : '') + '>ของรางวัลพิเศษ (บัตรแลก)</option>' +
+          '</select></div>' +
+          '<div id="bEPW_valueWrap"' + (isCustom ? ' style="display:none;"' : '') + '><label>จำนวน / มูลค่า</label><input id="bEPW_value" type="number" min="0" step="1" style="width:90px;" value="' + (Number(item.rewardValue) || 0) + '" /></div>' +
+        '</div>' +
+        '<div id="bEPW_linkedRow"' + (isCustom ? '' : ' style="display:none;"') + '>' +
+          '<label>รางวัลในร้านที่เชื่อมโยง</label>' +
+          '<select id="bEPW_linkedRewardId" style="min-width:240px;">' + linkedOpts + '</select>' +
+        '</div>',
+        async function() {
+          const name = bubbleValue('bEPW_name') || item.name || 'รางวัล';
+          const icon = bubbleValue('bEPW_icon') || item.icon || '🎁';
+          const color = bubbleSelectValue('bEPW_color') || item.color || '#94a3b8';
+          const weight = Math.max(1, Math.min(100, Number(bubbleValue('bEPW_weight') || 10) || 10));
+          const rewardType = bubbleSelectValue('bEPW_rewardType') || 'coins';
+          const rewardValue = Number(bubbleValue('bEPW_value') || 0) || 0;
+          const linkedRewardId = bubbleSelectValue('bEPW_linkedRewardId') || '';
+          const linkedRewardDoc = gamificationRewards.find(function(r) { return String(r.firebaseDocId || r.id || '') === linkedRewardId; });
+          const linkedRewardTitle = linkedRewardDoc ? (linkedRewardDoc.title || '') : '';
+          const resultEl = getElement('editBubbleResult');
+          if (resultEl) { resultEl.textContent = 'กำลังบันทึก...'; resultEl.style.color = '#d97706'; }
+          try {
+            const docId = String(item.firebaseDocId || item.id || id);
+            const updates = {
+              name: name, icon: icon, color: color, weight: weight,
+              rewardType: rewardType,
+              rewardValue: rewardType !== 'custom' ? rewardValue : 0,
+              linkedRewardId: rewardType === 'custom' ? linkedRewardId : '',
+              linkedRewardTitle: rewardType === 'custom' ? linkedRewardTitle : '',
+              updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+            };
+            await db.collection('prizeWheelItems').doc(docId).set(updates, { merge: true });
+            Object.assign(item, updates);
+            if (resultEl) { resultEl.textContent = 'บันทึกเรียบร้อย'; resultEl.style.color = '#16a34a'; }
+            window.setTimeout(function() { closeEditBubble(); renderAdminPrizeWheel(); }, 500);
+          } catch (e) {
+            if (resultEl) { resultEl.textContent = 'บันทึกไม่สำเร็จ: ' + (e.message || ''); resultEl.style.color = '#dc2626'; }
+          }
+        }
+      );
     }
 
     async function adminDeletePrizeWheelItem(id) {
