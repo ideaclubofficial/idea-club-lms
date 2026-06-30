@@ -607,6 +607,21 @@
     .pw-prob-badge { display: inline-block; font-size: 10px; font-weight: 700; background: #dbeafe; color: #1d4ed8; border-radius: 4px; padding: 1px 6px; }
     .sgshop-status { font-size: 11px; font-weight: 700; color: #16a34a; }
     .sgshop-status--out { color: #dc2626; }
+    /* Student voucher wallet */
+    .sg-vouchers { margin-top: 14px; border-radius: 12px; border: 1.5px solid #d8b4fe; background: rgba(245,243,255,0.75); overflow: hidden; }
+    .sg-vouchers-header { padding: 9px 14px; font-size: 13px; font-weight: 700; color: #6b21a8; background: rgba(216,180,254,0.3); border-bottom: 1px solid #d8b4fe; display: flex; align-items: center; gap: 6px; }
+    .sg-vouchers-badge { background: #f59e0b; color: #fff; border-radius: 9px; padding: 1px 8px; font-size: 10px; font-weight: 800; line-height: 1.5; }
+    .sg-vouchers-list { padding: 8px 12px; display: flex; flex-direction: column; gap: 7px; }
+    .sg-vouchers-divider { font-size: 10px; color: #a78bfa; font-weight: 700; letter-spacing: 0.5px; margin: 4px 0 0; }
+    .sg-voucher-card { display: flex; align-items: center; gap: 10px; background: #fff; border: 1.5px solid #e9d5ff; border-radius: 10px; padding: 9px 11px; }
+    .sg-voucher-card--fulfilled { background: #fafafa; border-color: #e2e8f0; opacity: 0.72; }
+    .sg-voucher-icon { font-size: 20px; flex-shrink: 0; width: 28px; text-align: center; }
+    .sg-voucher-info { flex: 1; min-width: 0; }
+    .sg-voucher-title { font-size: 12px; font-weight: 800; color: #1e293b; }
+    .sg-voucher-meta { font-size: 10px; color: #94a3b8; margin-top: 2px; }
+    .sg-voucher-status { font-size: 11px; font-weight: 700; flex-shrink: 0; text-align: right; }
+    .sg-voucher-status--pending { color: #d97706; }
+    .sg-voucher-status--fulfilled { color: #16a34a; }
 
     .student-gamification-leaderboard {
       margin-top: 14px;
@@ -19315,6 +19330,7 @@
         renderStudentPersonalQuestsHtml() +
         renderStudentGamificationLeaderboardHtml() +
         renderStudentPrizeWheelHtml(profile) +
+        renderStudentVouchersHtml() +
         renderStudentGamificationShopHtml(profile) +
       '</div>';
     }
@@ -20151,6 +20167,51 @@
     }
 
     // ─── End Prize Wheel ──────────────────────────────────────────────────────
+
+    function renderStudentVouchersHtml() {
+      if (!currentStudent) return '';
+      const studentDocId = getStudentRecordDocId(currentStudent);
+      const authUid = String((currentStudent.authUid) || (firebaseUser && firebaseUser.uid) || '').trim();
+      const myVouchers = gamificationRedemptions
+        .filter(function(r) {
+          if (r.deleted || r.status === 'cancelled') return false;
+          if (String(r.rewardType || '') === 'professionChangeTicket') return false;
+          return String(r.studentId || '') === studentDocId || String(r.authUid || '') === authUid;
+        })
+        .sort(function(a, b) {
+          var sa = a.status === 'fulfilled' ? 1 : 0, sb = b.status === 'fulfilled' ? 1 : 0;
+          if (sa !== sb) return sa - sb;
+          return String(b.createdAtText || '') > String(a.createdAtText || '') ? 1 : -1;
+        });
+      if (!myVouchers.length) return '';
+      const pending = myVouchers.filter(function(r) { return r.status !== 'fulfilled'; });
+      const fulfilled = myVouchers.filter(function(r) { return r.status === 'fulfilled'; });
+      function renderVoucherCard(r) {
+        const isFulfilled = r.status === 'fulfilled';
+        const src = r.fromPrizeWheel ? '🎰 วงล้อ' : '🛒 ร้านค้า';
+        return '<div class="sg-voucher-card' + (isFulfilled ? ' sg-voucher-card--fulfilled' : '') + '">' +
+          '<span class="sg-voucher-icon">🎟</span>' +
+          '<div class="sg-voucher-info">' +
+            '<div class="sg-voucher-title">' + escapeHtml(r.rewardTitle || 'ของรางวัลพิเศษ') + '</div>' +
+            '<div class="sg-voucher-meta">' + src + ' · ' + escapeHtml(r.createdAtText || '') + '</div>' +
+          '</div>' +
+          '<span class="sg-voucher-status ' + (isFulfilled ? 'sg-voucher-status--fulfilled' : 'sg-voucher-status--pending') + '">' +
+            (isFulfilled ? '✓ รับแล้ว' : '⏳ รอรับ') +
+          '</span>' +
+        '</div>';
+      }
+      return '<div class="sg-vouchers">' +
+        '<div class="sg-vouchers-header">🎟 บัตรแลกของสะสม' +
+          (pending.length ? ' <span class="sg-vouchers-badge">' + pending.length + ' รอรับ</span>' : '') +
+        '</div>' +
+        '<div class="sg-vouchers-list">' +
+          pending.map(renderVoucherCard).join('') +
+          (fulfilled.length
+            ? '<div class="sg-vouchers-divider">รับแล้ว</div>' + fulfilled.slice(0, 5).map(renderVoucherCard).join('')
+            : '') +
+        '</div>' +
+      '</div>';
+    }
 
     function renderStudentGamificationShopHtml(profile) {
       const active = gamificationRewards.filter(function(r) { return !r.deleted && r.active !== false; });
