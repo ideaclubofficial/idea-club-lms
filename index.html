@@ -34610,6 +34610,65 @@ function receiptStatusText(status) {
       }
     }
 
+    function getSelectedOnlineExamQuestionIds() {
+      return Array.from(document.querySelectorAll('.online-exam-question-check:checked')).map(function(cb) {
+        return cb.value;
+      }).filter(Boolean);
+    }
+
+    function updateOnlineExamQuestionBulkDeleteState() {
+      const selectedIds = getSelectedOnlineExamQuestionIds();
+      const deleteBtn = getElement('onlineExamQuestionBulkDeleteBtn');
+      const countEl = getElement('onlineExamQuestionSelectedCount');
+      const allCheck = getElement('onlineExamQuestionSelectAll');
+      const checks = Array.from(document.querySelectorAll('.online-exam-question-check'));
+      if (deleteBtn) {
+        deleteBtn.disabled = !selectedIds.length;
+        deleteBtn.style.opacity = selectedIds.length ? '1' : '.55';
+      }
+      if (countEl) countEl.textContent = selectedIds.length ? ('เลือกแล้ว ' + selectedIds.length + ' ข้อ') : 'ยังไม่ได้เลือกข้อสอบ';
+      if (allCheck) {
+        allCheck.checked = !!checks.length && selectedIds.length === checks.length;
+        allCheck.indeterminate = selectedIds.length > 0 && selectedIds.length < checks.length;
+      }
+    }
+
+    function toggleAllOnlineExamQuestionSelection(checked) {
+      Array.from(document.querySelectorAll('.online-exam-question-check')).forEach(function(cb) {
+        cb.checked = !!checked;
+      });
+      updateOnlineExamQuestionBulkDeleteState();
+    }
+
+    async function deleteSelectedOnlineExamQuestions(courseId) {
+      if (!hasPermission('admin.onlineExams')) { alert('ไม่มีสิทธิ์'); return; }
+      const selectedIds = getSelectedOnlineExamQuestionIds();
+      if (!selectedIds.length) { alert('กรุณาติ๊กข้อสอบที่ต้องการลบก่อน'); return; }
+      if (!confirm('ลบข้อสอบที่เลือก ' + selectedIds.length + ' ข้อ?')) return;
+      try {
+        const course = onlineExamCourseCache.find(function(c) { return c.firebaseDocId === courseId; });
+        if (!course) return;
+        const selectedSet = {};
+        selectedIds.forEach(function(id) { selectedSet[id] = true; });
+        const questions = (course.questions || []).filter(function(q) { return !selectedSet[q.questionId]; });
+        const totalScore = questions.reduce(function(sum, q) { return sum + (q.score || 1); }, 0);
+        await db.collection('onlineExamCourses').doc(courseId).set(
+          { questions: questions, totalScore: totalScore, updatedAt: firebase.firestore.FieldValue.serverTimestamp() },
+          { merge: true }
+        );
+        course.questions = questions;
+        course.totalScore = totalScore;
+        addActivityLog('ลบข้อสอบ Interactive หลายข้อ', (course.title || courseId) + ' - ' + selectedIds.length + ' ข้อ');
+        resetOnlineExamQuestionForm();
+        renderOnlineExamQuestionList();
+        renderOnlineExamCourseList();
+        renderOnlineExamSelectedCourseSummary();
+        exportOnlineExamJson();
+      } catch (e) {
+        alert('ลบไม่สำเร็จ: ' + (e.message || e));
+      }
+    }
+
     function openAddOnlineExamQuestionBubble() {
       const courseId = (getElement('onlineExamQuestionCourseSelect') || {}).value || '';
       if (!courseId) { alert('กรุณาเลือกชั้นและวิชาของชุดข้อสอบก่อน'); return; }
@@ -35151,7 +35210,17 @@ function receiptStatusText(status) {
         container.innerHTML = '<p style="color:#9ca3af;font-size:13px;">ยังไม่มีข้อสอบในชุดนี้</p>';
         return;
       }
-      container.innerHTML = questions.map(function(q, idx) {
+      const bulkToolbar =
+        '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;padding:8px 10px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;margin-bottom:10px;">' +
+          '<label style="display:flex;align-items:center;gap:8px;font-size:12px;font-weight:700;color:#334155;margin:0;">' +
+            '<input id="onlineExamQuestionSelectAll" type="checkbox" onchange="toggleAllOnlineExamQuestionSelection(this.checked)" style="width:16px;height:16px;accent-color:#dc2626;"> เลือกทั้งหมด' +
+          '</label>' +
+          '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">' +
+            '<span id="onlineExamQuestionSelectedCount" style="font-size:12px;color:#64748b;">ยังไม่ได้เลือกข้อสอบ</span>' +
+            '<button id="onlineExamQuestionBulkDeleteBtn" class="btn btn-red" type="button" onclick="deleteSelectedOnlineExamQuestions(\'' + jsArg(courseId) + '\')" disabled style="font-size:11px;padding:4px 10px;opacity:.55;">ลบข้อที่เลือก</button>' +
+          '</div>' +
+        '</div>';
+      container.innerHTML = bulkToolbar + questions.map(function(q, idx) {
         const choicesList = (q.choices || []).map(function(ch, ci) {
           const choiceImage = (q.choiceImages || [])[ci];
           const choiceImageHtml = choiceImage
@@ -35166,10 +35235,12 @@ function receiptStatusText(status) {
           : '';
         return '<div style="padding:10px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;margin-bottom:8px;">' +
           '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;flex-wrap:wrap;">' +
-            '<p style="font-size:12px;font-weight:700;color:#4f46e5;margin:0;">ข้อที่ ' + (idx+1) + '</p>' +
+            '<label style="display:flex;align-items:center;gap:8px;font-size:12px;font-weight:700;color:#4f46e5;margin:0;">' +
+              '<input class="online-exam-question-check" type="checkbox" value="' + escapeHtml(q.questionId || '') + '" onchange="updateOnlineExamQuestionBulkDeleteState()" style="width:16px;height:16px;accent-color:#dc2626;"> ข้อที่ ' + (idx+1) +
+            '</label>' +
             '<div style="display:flex;gap:6px;">' +
-              '<button class="btn btn-blue" onclick="editOnlineExamQuestion(\'' + courseId + '\',\'' + q.questionId + '\')" style="font-size:10px;padding:3px 8px;">✏️</button>' +
-              '<button class="btn btn-red" onclick="deleteOnlineExamQuestion(\'' + courseId + '\',\'' + q.questionId + '\')" style="font-size:10px;padding:3px 8px;">🗑️</button>' +
+              '<button class="btn btn-blue" onclick="editOnlineExamQuestion(\'' + jsArg(courseId) + '\',\'' + jsArg(q.questionId || '') + '\')" style="font-size:10px;padding:3px 8px;">✏️</button>' +
+              '<button class="btn btn-red" onclick="deleteOnlineExamQuestion(\'' + jsArg(courseId) + '\',\'' + jsArg(q.questionId || '') + '\')" style="font-size:10px;padding:3px 8px;">🗑️</button>' +
             '</div>' +
           '</div>' +
           '<p style="font-size:13px;margin:4px 0 6px;white-space:pre-wrap;">' + onlineExamRichTextHtml(q.text || '', q.textHtml) + '</p>' +
@@ -35177,6 +35248,7 @@ function receiptStatusText(status) {
           choicesList +
         '</div>';
       }).join('');
+      updateOnlineExamQuestionBulkDeleteState();
     }
 
     function buildOnlineExamPrintableHtml(course) {
