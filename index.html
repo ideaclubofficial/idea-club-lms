@@ -7442,7 +7442,15 @@
               <div class="form-row">
                 <div><label>ชื่อรางวัล</label><input type="text" id="pwItemName" placeholder="เช่น 50 Coins" /></div>
                 <div><label>Icon (Emoji)</label><input type="text" id="pwItemIcon" placeholder="🎁" style="width:70px;" maxlength="4" /></div>
-                <div><label>สีพื้นหลัง (HEX)</label><input type="text" id="pwItemColor" placeholder="#6366f1" style="width:100px;" /></div>
+                <div>
+                  <label>ระดับความหายาก</label>
+                  <select id="pwItemColor" style="min-width:160px;">
+                    <option value="#94a3b8">⬜ Common (เทา)</option>
+                    <option value="#22c55e">🟩 Uncommon (เขียว)</option>
+                    <option value="#a855f7">🟪 Rare (ม่วง)</option>
+                    <option value="#f59e0b">🟨 Legendary (ทอง)</option>
+                  </select>
+                </div>
               </div>
               <div class="form-row">
                 <div>
@@ -18988,6 +18996,16 @@
 
     // ─── Prize Wheel ──────────────────────────────────────────────────────────
 
+    const PW_RARITY_MAP = {
+      '#94a3b8': { label: 'Common',    textColor: '#64748b' },
+      '#22c55e': { label: 'Uncommon',  textColor: '#16a34a' },
+      '#a855f7': { label: 'Rare',      textColor: '#7c3aed' },
+      '#f59e0b': { label: 'Legendary', textColor: '#b45309' }
+    };
+    function getPwRarity(color) {
+      return PW_RARITY_MAP[String(color || '').toLowerCase()] || null;
+    }
+
     function getPrizeWheelActiveItems() {
       return prizeWheelItems.filter(function(p) { return !p.deleted; });
     }
@@ -19018,10 +19036,11 @@
         .slice(0, 3);
 
       const itemHtml = items.map(function(p) {
+        const rarity = getPwRarity(p.color);
         return '<div class="prize-wheel-reel-item" style="background:' + escapeHtml(p.color || '#f8fafc') + '20;">' +
           '<span class="prize-wheel-reel-item-icon">' + escapeHtml(p.icon || '🎁') + '</span>' +
           '<span><div class="prize-wheel-reel-item-name">' + escapeHtml(p.name || '-') + '</div>' +
-          '<div class="prize-wheel-reel-item-val">' + (p.rewardType === 'coins' ? '+' + p.rewardValue + ' Coins' : p.rewardType === 'exp' ? '+' + p.rewardValue + ' EXP' : p.linkedRewardTitle ? escapeHtml('บัตรแลก: ' + p.linkedRewardTitle) : 'ของรางวัลพิเศษ') + '</div></span>' +
+          '<div class="prize-wheel-reel-item-val">' + (p.rewardType === 'coins' ? '+' + p.rewardValue + ' Coins' : p.rewardType === 'exp' ? '+' + p.rewardValue + ' EXP' : p.linkedRewardTitle ? escapeHtml('บัตรแลก: ' + p.linkedRewardTitle) : 'ของรางวัลพิเศษ') + (rarity ? ' <span style="color:' + rarity.textColor + ';font-size:9px;font-weight:700;">' + rarity.label + '</span>' : '') + '</div></span>' +
         '</div>';
       }).join('');
 
@@ -19079,10 +19098,11 @@
 
       // Render full reel
       track.innerHTML = trackItems.map(function(p) {
+        const rarity = getPwRarity(p.color);
         return '<div class="prize-wheel-reel-item" style="background:' + escapeHtml(p.color || '#f8fafc') + '20;">' +
           '<span class="prize-wheel-reel-item-icon">' + escapeHtml(p.icon || '🎁') + '</span>' +
           '<span><div class="prize-wheel-reel-item-name">' + escapeHtml(p.name || '-') + '</div>' +
-          '<div class="prize-wheel-reel-item-val">' + (p.rewardType === 'coins' ? '+' + p.rewardValue + ' Coins' : p.rewardType === 'exp' ? '+' + p.rewardValue + ' EXP' : p.linkedRewardTitle ? escapeHtml('บัตรแลก: ' + p.linkedRewardTitle) : 'ของรางวัลพิเศษ') + '</div></span>' +
+          '<div class="prize-wheel-reel-item-val">' + (p.rewardType === 'coins' ? '+' + p.rewardValue + ' Coins' : p.rewardType === 'exp' ? '+' + p.rewardValue + ' EXP' : p.linkedRewardTitle ? escapeHtml('บัตรแลก: ' + p.linkedRewardTitle) : 'ของรางวัลพิเศษ') + (rarity ? ' <span style="color:' + rarity.textColor + ';font-size:9px;font-weight:700;">' + rarity.label + '</span>' : '') + '</div></span>' +
         '</div>';
       }).join('');
 
@@ -19238,9 +19258,14 @@
         } else {
           const rows = items.map(function(p) {
             const prob = totalWeight > 0 ? (((Number(p.weight) || 1) / totalWeight) * 100).toFixed(1) : '0';
+            const rarity = getPwRarity(p.color);
+            const rarityHtml = rarity
+              ? '<span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:' + p.color + ';margin-right:4px;vertical-align:middle;"></span><span style="color:' + rarity.textColor + ';font-weight:700;">' + rarity.label + '</span>'
+              : '';
             return '<tr>' +
               '<td>' + escapeHtml(p.icon || '') + '</td>' +
               '<td>' + escapeHtml(p.name || '-') + '</td>' +
+              '<td style="font-size:12px;">' + rarityHtml + '</td>' +
               '<td>' + escapeHtml(p.rewardType === 'coins' ? '+' + p.rewardValue + ' Coins' : p.rewardType === 'exp' ? '+' + p.rewardValue + ' EXP' : p.linkedRewardTitle ? 'บัตรแลก: ' + p.linkedRewardTitle : 'ของรางวัลพิเศษ') + '</td>' +
               '<td style="text-align:center;">' + escapeHtml(String(p.weight || 1)) + '</td>' +
               '<td style="text-align:center;"><span class="pw-prob-badge">' + prob + '%</span></td>' +
@@ -19250,7 +19275,7 @@
               '</td>' +
             '</tr>';
           }).join('');
-          tableEl.innerHTML = '<table class="data-table" style="font-size:13px;"><thead><tr><th>Icon</th><th>ชื่อรางวัล</th><th>รางวัล</th><th>น้ำหนัก</th><th>โอกาส</th><th></th></tr></thead><tbody>' + rows + '</tbody></table>';
+          tableEl.innerHTML = '<table class="data-table" style="font-size:13px;"><thead><tr><th>Icon</th><th>ชื่อรางวัล</th><th>ระดับ</th><th>รางวัล</th><th>น้ำหนัก</th><th>โอกาส</th><th></th></tr></thead><tbody>' + rows + '</tbody></table>';
         }
       }
 
@@ -19399,7 +19424,7 @@
 
     function adminClearPrizeWheelForm() {
       ['editingPrizeWheelItemId','pwItemName','pwItemIcon','pwItemColor','pwItemRewardValue','pwItemWeight'].forEach(function(id) {
-        var el = getElement(id); if (el) el.value = id === 'pwItemIcon' ? '🎁' : id === 'pwItemColor' ? '#6366f1' : id === 'pwItemWeight' ? '10' : '';
+        var el = getElement(id); if (el) el.value = id === 'pwItemIcon' ? '🎁' : id === 'pwItemColor' ? '#94a3b8' : id === 'pwItemWeight' ? '10' : '';
       });
       if (getElement('pwItemRewardType')) getElement('pwItemRewardType').value = 'coins';
       if (getElement('pwItemLinkedRewardId')) getElement('pwItemLinkedRewardId').value = '';
