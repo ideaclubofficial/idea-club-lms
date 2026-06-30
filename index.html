@@ -593,6 +593,9 @@
     .prize-wheel-indicator { position: absolute; left: 0; right: 0; top: 80px; height: 80px; border: 3px solid #6366f1; border-radius: 8px; pointer-events: none; background: rgba(99,102,241,0.06); z-index: 2; transition: border-color 0.12s, background 0.12s; }
     .prize-wheel-indicator::before { content: '▶'; position: absolute; left: -22px; top: 50%; transform: translateY(-50%); font-size: 16px; color: #6366f1; }
     .prize-wheel-indicator::after  { content: '◀'; position: absolute; right: -22px; top: 50%; transform: translateY(-50%); font-size: 16px; color: #6366f1; }
+    .prize-wheel-canvas-wrap { position: relative; display: inline-flex; flex-direction: column; align-items: center; }
+    .prize-wheel-pointer { width: 0; height: 0; border-left: 14px solid transparent; border-right: 14px solid transparent; border-top: 26px solid #6366f1; margin-bottom: -6px; z-index: 1; filter: drop-shadow(0 2px 6px rgba(99,102,241,0.5)); }
+    #prizeWheelCanvas { display: block; border-radius: 50%; box-shadow: 0 4px 24px rgba(99,102,241,0.18); }
     .prize-wheel-cost-tag { font-size: 12px; color: #6b7280; font-weight: 600; }
     .prize-wheel-cost-tag strong { color: #78350f; }
     .prize-wheel-spin-btn { font-size: 14px; font-weight: 800; padding: 10px 28px; background: linear-gradient(90deg, #6366f1, #8b5cf6); color: #fff; border: none; border-radius: 10px; cursor: pointer; transition: opacity 0.15s; }
@@ -9273,6 +9276,8 @@
     const prizeWheelSpins = [];
     let prizeWheelSettings = { spinCost: 30, enabled: true };
     let prizeWheelSpinning = false;
+    let pwCurrentRotation = 0;
+    let pwSegmentItems = [];
     let studentGamificationAvatarAnimations = {};
     let dailyLoginQuestTriggeredThisSession = false;
 
@@ -13243,8 +13248,12 @@
 
     function getPendingWebSlipUploads() {
       const paymentUploads = getPendingPaymentRecords()
-        .filter(function(p) { return p.driveViewUrl || p.slipUploadedByUid || p.slipUploadedByName; })
-        .map(function(p) { return Object.assign({ uploadKind: 'payment' }, p); });
+        .filter(function(p) { return getPaymentSlipUrl(p) || p.slipUploadedByUid || p.slipUploadedByName; })
+        .map(function(p) {
+          return Object.assign({ uploadKind: 'payment' }, p, {
+            driveViewUrl: getPaymentSlipUrl(p)
+          });
+        });
       const bundleUploads = getPendingPaymentBundles(false)
         .filter(function(bundle) { return getPaymentSlipUrl(bundle) || bundle.slipUploadedByUid || bundle.slipUploadedByName; })
         .map(function(bundle) {
@@ -13264,7 +13273,7 @@
 
     function getOverduePaymentRecords(month) {
       return payments.filter(function(p) {
-        const statusMatched = (p.status || '') === 'ค้างชำระ';
+        const statusMatched = getPaymentDisplayStatus(p) === 'ค้างชำระ';
         const monthMatched = !month || month === 'ทั้งหมด' || p.month === month;
         return statusMatched && monthMatched;
       });
@@ -19318,6 +19327,7 @@
       if (mobile) mobile.innerHTML = renderStudentGamificationHtml({ mobile: true });
       mountStudentGamificationAvatars();
       if (currentStudent) triggerDailyLoginQuestIfNeeded();
+      window.setTimeout(pwInitCanvas, 0);
     }
 
     function openProfessionChooser() {
@@ -19568,6 +19578,77 @@
         return oa - ob;
       });
     }
+    function pwComputeSegments(items) {
+      var total = items.reduce(function(s, p) { return s + Math.max(1, Number(p.weight) || 1); }, 0);
+      var angle = 0;
+      return items.map(function(item) {
+        var seg = (Math.max(1, Number(item.weight) || 1) / total) * 2 * Math.PI;
+        var s = { item: item, startAngle: angle, midAngle: angle + seg / 2, endAngle: angle + seg };
+        angle += seg;
+        return s;
+      });
+    }
+    function pwDrawCanvas(rotRad) {
+      var canvas = getElement('prizeWheelCanvas');
+      if (!canvas || !canvas.getContext) return;
+      if (!pwSegmentItems || !pwSegmentItems.length) return;
+      var ctx = canvas.getContext('2d');
+      var W = canvas.width, H = canvas.height, cx = W / 2, cy = H / 2;
+      var outerR = Math.min(cx, cy) - 4;
+      var hubR = 22;
+      ctx.clearRect(0, 0, W, H);
+      // Outer shadow ring
+      ctx.save();
+      ctx.shadowColor = 'rgba(99,102,241,0.25)';
+      ctx.shadowBlur = 14;
+      ctx.beginPath(); ctx.arc(cx, cy, outerR, 0, 2*Math.PI); ctx.fillStyle = '#e0e7ff'; ctx.fill();
+      ctx.restore();
+      // Segments
+      pwSegmentItems.forEach(function(seg) {
+        var sa = seg.startAngle - Math.PI/2 + rotRad;
+        var ea = seg.endAngle - Math.PI/2 + rotRad;
+        var ma = seg.midAngle - Math.PI/2 + rotRad;
+        var color = seg.item.color || '#94a3b8';
+        ctx.beginPath(); ctx.moveTo(cx,cy); ctx.arc(cx,cy,outerR,sa,ea); ctx.closePath();
+        ctx.fillStyle = color; ctx.fill();
+        ctx.strokeStyle = 'rgba(255,255,255,0.75)'; ctx.lineWidth = 2; ctx.stroke();
+        var span = seg.endAngle - seg.startAngle;
+        if (span > 0.12) {
+          var tr = outerR * 0.65;
+          var tx = cx + Math.cos(ma) * tr, ty = cy + Math.sin(ma) * tr;
+          ctx.save();
+          ctx.translate(tx, ty);
+          ctx.rotate(ma + Math.PI/2);
+          ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+          ctx.shadowColor = 'rgba(0,0,0,0.45)'; ctx.shadowBlur = 3;
+          ctx.fillStyle = '#fff';
+          var iconSize = span > 0.5 ? 17 : span > 0.3 ? 14 : 11;
+          ctx.font = iconSize + 'px serif';
+          ctx.fillText(seg.item.icon || '🎁', 0, span > 0.28 ? -8 : 0);
+          if (span > 0.28) {
+            ctx.font = 'bold ' + (span > 0.5 ? 9 : 8) + 'px sans-serif';
+            ctx.shadowBlur = 2;
+            ctx.fillText((seg.item.name || '').slice(0, span > 0.55 ? 8 : 5), 0, 6);
+          }
+          ctx.restore();
+        }
+      });
+      // Outer ring border
+      ctx.beginPath(); ctx.arc(cx,cy,outerR,0,2*Math.PI);
+      ctx.strokeStyle = 'rgba(99,102,241,0.45)'; ctx.lineWidth = 5; ctx.stroke();
+      // Hub
+      ctx.beginPath(); ctx.arc(cx,cy,hubR,0,2*Math.PI);
+      ctx.fillStyle = '#fff'; ctx.shadowColor = 'rgba(99,102,241,0.3)'; ctx.shadowBlur = 8; ctx.fill();
+      ctx.shadowBlur = 0; ctx.strokeStyle = '#6366f1'; ctx.lineWidth = 3; ctx.stroke();
+      ctx.font = '15px serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillStyle = '#6366f1'; ctx.fillText('★', cx, cy);
+    }
+    function pwInitCanvas() {
+      var items = pwSortByRarity(getPrizeWheelActiveItems());
+      if (!items.length) return;
+      pwSegmentItems = pwComputeSegments(items);
+      pwDrawCanvas(pwCurrentRotation);
+    }
     function bEPW_onTypeChange() {
       var t = getElement('bEPW_rewardType') ? getElement('bEPW_rewardType').value : '';
       if (getElement('bEPW_valueWrap')) getElement('bEPW_valueWrap').style.display = t === 'custom' ? 'none' : '';
@@ -19627,15 +19708,6 @@
         .slice().sort(function(a, b) { return String(b.createdAtText || '') > String(a.createdAtText || '') ? 1 : -1; })
         .slice(0, 3);
 
-      const itemHtml = items.map(function(p) {
-        const rarity = getPwRarity(p.color);
-        return '<div class="prize-wheel-reel-item" style="background:' + escapeHtml(p.color || '#f8fafc') + '20;">' +
-          '<span class="prize-wheel-reel-item-icon">' + escapeHtml(p.icon || '🎁') + '</span>' +
-          '<span><div class="prize-wheel-reel-item-name">' + escapeHtml(p.name || '-') + '</div>' +
-          '<div class="prize-wheel-reel-item-val">' + (p.rewardType === 'coins' ? '+' + p.rewardValue + ' Coins' : p.rewardType === 'exp' ? '+' + p.rewardValue + ' EXP' : p.linkedRewardTitle ? escapeHtml('บัตรแลก: ' + p.linkedRewardTitle) : 'ของรางวัลพิเศษ') + (rarity ? ' <span style="color:' + rarity.textColor + ';font-size:9px;font-weight:700;">' + rarity.label + '</span>' : '') + '</div></span>' +
-        '</div>';
-      }).join('');
-
       const historyHtml = recentSpins.length
         ? '<div class="prize-wheel-history">' + recentSpins.map(function(s) {
             return '<div class="prize-wheel-history-row"><span>' + escapeHtml(s.prizeIcon || '🎁') + ' ' + escapeHtml(s.prizeName || '-') + '</span><span>' + escapeHtml(s.createdAtText || '') + '</span></div>';
@@ -19645,11 +19717,9 @@
       return '<div class="prize-wheel-section" id="prizeWheelSection">' +
         '<div class="prize-wheel-header">🎰 วงล้อสุ่มรางวัล</div>' +
         '<div class="prize-wheel-body">' +
-          '<div class="prize-wheel-reel-wrap">' +
-            '<div class="prize-wheel-reel-window" id="prizeWheelWindow">' +
-              '<div class="prize-wheel-reel-track" id="prizeWheelTrack">' + itemHtml + '</div>' +
-              '<div class="prize-wheel-indicator"></div>' +
-            '</div>' +
+          '<div class="prize-wheel-canvas-wrap">' +
+            '<div class="prize-wheel-pointer"></div>' +
+            '<canvas id="prizeWheelCanvas" width="280" height="280"></canvas>' +
           '</div>' +
           '<p class="prize-wheel-cost-tag">ค่าหมุน: <strong>' + cost + ' Coins</strong> · คุณมี <strong>' + coins + ' Coins</strong></p>' +
           (wheelTickets > 0 ? '<div style="text-align:center;margin:-4px 0 8px;font-size:13px;color:#7c3aed;font-weight:600;">🎟 บัตรหมุนวงล้อของคุณ: <strong>' + wheelTickets + ' ใบ</strong></div>' : '') +
@@ -19676,207 +19746,152 @@
       const winner = weightedRandomPrize(items);
       prizeWheelSpinning = true;
 
-      const ITEM_H = 80;
-      const FILLER_COUNT = 20;
-      // Build track: FILLER_COUNT random fillers, then winner, then 2 padding
-      const fillers = [];
-      for (var i = 0; i < FILLER_COUNT; i++) {
-        fillers.push(items[Math.floor(Math.random() * items.length)]);
-      }
-      const trackItems = fillers.concat([winner, items[Math.floor(Math.random() * items.length)], items[Math.floor(Math.random() * items.length)]]);
-      const winnerIndex = FILLER_COUNT; // 0-indexed, winner is at position FILLER_COUNT
-
-      const track = getElement('prizeWheelTrack');
-      const resultEl = getElement('prizeWheelResult');
       const spinBtn = getElement('prizeWheelSpinBtn');
-      if (!track) { prizeWheelSpinning = false; return; }
-
-      // Render full reel
-      track.innerHTML = trackItems.map(function(p) {
-        const rarity = getPwRarity(p.color);
-        return '<div class="prize-wheel-reel-item" style="background:' + escapeHtml(p.color || '#f8fafc') + '20;">' +
-          '<span class="prize-wheel-reel-item-icon">' + escapeHtml(p.icon || '🎁') + '</span>' +
-          '<span><div class="prize-wheel-reel-item-name">' + escapeHtml(p.name || '-') + '</div>' +
-          '<div class="prize-wheel-reel-item-val">' + (p.rewardType === 'coins' ? '+' + p.rewardValue + ' Coins' : p.rewardType === 'exp' ? '+' + p.rewardValue + ' EXP' : p.linkedRewardTitle ? escapeHtml('บัตรแลก: ' + p.linkedRewardTitle) : 'ของรางวัลพิเศษ') + (rarity ? ' <span style="color:' + rarity.textColor + ';font-size:9px;font-weight:700;">' + rarity.label + '</span>' : '') + '</div></span>' +
-        '</div>';
-      }).join('');
-
-      // Reset position instantly, then animate
-      track.style.transition = 'none';
-      track.style.transform = 'translateY(0)';
       if (spinBtn) { spinBtn.disabled = true; spinBtn.textContent = '🎰 กำลังหมุน...'; }
+      const resultEl = getElement('prizeWheelResult');
       if (resultEl) resultEl.textContent = '';
 
-      // Final Y: center winner → top of window at (winnerIndex-1)*ITEM_H
-      const finalY = -((winnerIndex - 1) * ITEM_H);
-      const sectionEl = getElement('prizeWheelSection');
-      const windowEl = getElement('prizeWheelWindow');
-      var pwBgRafId = null;
-      var pwLastColorIdx = -1;
-      function pwUpdateReelBg() {
-        if (!track || !prizeWheelSpinning) { pwBgRafId = null; return; }
-        try {
-          var ts = window.getComputedStyle(track).transform;
-          var currentY = 0;
-          if (ts && ts !== 'none') {
-            var vals = ts.match(/matrix\(([^)]+)\)/);
-            if (vals) { var ns = vals[1].split(','); currentY = parseFloat(ns[5]) || 0; }
-          }
-          var idx = Math.max(0, Math.min(trackItems.length - 1, Math.floor((120 - currentY) / ITEM_H)));
-          if (idx !== pwLastColorIdx) {
-            pwLastColorIdx = idx;
-            var color = (trackItems[idx] && trackItems[idx].color) || '#94a3b8';
-            if (sectionEl) {
-              sectionEl.style.background = 'linear-gradient(135deg, ' + pwHexToRgba(color, 0.18) + ' 0%, ' + pwHexToRgba(color, 0.09) + ' 100%)';
-              sectionEl.style.borderColor = pwHexToRgba(color, 0.6);
-            }
-            if (windowEl) {
-              windowEl.style.borderColor = pwHexToRgba(color, 0.7);
-              windowEl.style.boxShadow = 'inset 0 2px 8px ' + pwHexToRgba(color, 0.18);
-            }
-            var indEl = windowEl ? windowEl.querySelector('.prize-wheel-indicator') : null;
-            if (indEl) {
-              indEl.style.borderColor = pwHexToRgba(color, 0.85);
-              indEl.style.background = pwHexToRgba(color, 0.1);
-            }
-          }
-        } catch(e) {}
-        pwBgRafId = requestAnimationFrame(pwUpdateReelBg);
-      }
+      // Find winner segment (canvas wheel uses sorted items = pwSegmentItems)
+      var winnerSeg = pwSegmentItems.find(function(seg) {
+        return (seg.item.firebaseDocId || seg.item.id) === (winner.firebaseDocId || winner.id);
+      }) || pwSegmentItems[0];
 
-      // Delay to allow reset to paint, then animate
-      setTimeout(function() {
-        track.style.transition = 'transform 2.6s cubic-bezier(0.17, 0.67, 0.12, 0.99)';
-        track.style.transform = 'translateY(' + finalY + 'px)';
-        pwBgRafId = requestAnimationFrame(pwUpdateReelBg);
-      }, 30);
+      // Calculate target rotation: bring winnerSeg.midAngle to top (pointer at angle 0 = top in our convention)
+      var wMid = winnerSeg ? winnerSeg.midAngle : 0;
+      var addRot = ((-wMid - pwCurrentRotation % (2*Math.PI)) % (2*Math.PI) + 2*Math.PI) % (2*Math.PI);
+      if (addRot < 0.35) addRot += 2 * Math.PI;
+      var targetRot = pwCurrentRotation + 6 * 2 * Math.PI + addRot;
+      var startRot = pwCurrentRotation;
+      var spinStart = null;
+      var SPIN_DURATION = 4000;
+      var sectionEl = getElement('prizeWheelSection');
 
-      // After animation ends
-      setTimeout(async function() {
+      function easeOutCubic(t) { return 1 - Math.pow(1 - t, 3); }
+
+      function pwSpinTick(ts) {
+        if (!spinStart) spinStart = ts;
+        var elapsed = ts - spinStart;
+        var progress = Math.min(elapsed / SPIN_DURATION, 1);
+        var eased = easeOutCubic(progress);
+        var rot = startRot + (targetRot - startRot) * eased;
+        pwCurrentRotation = rot;
+        pwDrawCanvas(rot);
+        // Update section bg based on which segment is under pointer
+        var normalizedAngle = (((-rot) % (2*Math.PI)) + 2*Math.PI) % (2*Math.PI);
+        var segNow = pwSegmentItems.find(function(s) { return normalizedAngle >= s.startAngle && normalizedAngle < s.endAngle; });
+        if (!segNow && pwSegmentItems.length) segNow = pwSegmentItems[pwSegmentItems.length - 1];
+        if (segNow && sectionEl) {
+          var bc = segNow.item.color || '#94a3b8';
+          sectionEl.style.background = 'linear-gradient(135deg,' + pwHexToRgba(bc,0.18) + ' 0%,' + pwHexToRgba(bc,0.09) + ' 100%)';
+          sectionEl.style.borderColor = pwHexToRgba(bc, 0.6);
+        }
+        if (progress < 1) { requestAnimationFrame(pwSpinTick); return; }
+
+        // Animation done — apply winner glow
         prizeWheelSpinning = false;
-        if (pwBgRafId) { cancelAnimationFrame(pwBgRafId); pwBgRafId = null; }
-        // Apply winner color as final glow
         var wc = winner.color || '#94a3b8';
         if (sectionEl) {
-          sectionEl.style.background = 'linear-gradient(135deg, ' + pwHexToRgba(wc, 0.32) + ' 0%, ' + pwHexToRgba(wc, 0.16) + ' 100%)';
-          sectionEl.style.borderColor = pwHexToRgba(wc, 0.85);
+          sectionEl.style.background = 'linear-gradient(135deg,' + pwHexToRgba(wc,0.35) + ' 0%,' + pwHexToRgba(wc,0.18) + ' 100%)';
+          sectionEl.style.borderColor = pwHexToRgba(wc, 0.9);
         }
-        if (windowEl) {
-          windowEl.style.borderColor = pwHexToRgba(wc, 0.9);
-          windowEl.style.boxShadow = 'inset 0 2px 12px ' + pwHexToRgba(wc, 0.28);
-        }
-        // Deduct cost: wheel ticket first, else coins
-        const profileId = String(profile.firebaseDocId || profile.id || '');
-        if (usingWheelTicket) {
-          profile.prizeWheelTickets = Math.max(0, wheelTicketsAvail - 1);
-          profile.freeSpins = profile.prizeWheelTickets;
-          profile.updatedAtText = new Date().toLocaleString('th-TH');
-          if (firebaseReady && db && profileId) {
-            db.collection('studentGamificationProfiles').doc(profileId).set(
-              { prizeWheelTickets: profile.prizeWheelTickets, freeSpins: profile.freeSpins, updatedAt: firebase.firestore.FieldValue.serverTimestamp() }, { merge: true }
-            ).catch(function(e) { console.warn('prize wheel ticket deduct error:', e); });
+        // Run reward logic
+        window.setTimeout(async function() {
+          const profileId = String(profile.firebaseDocId || profile.id || '');
+          if (usingWheelTicket) {
+            profile.prizeWheelTickets = Math.max(0, wheelTicketsAvail - 1);
+            profile.freeSpins = profile.prizeWheelTickets;
+            if (firebaseReady && db && profileId) {
+              db.collection('studentGamificationProfiles').doc(profileId).set(
+                { prizeWheelTickets: profile.prizeWheelTickets, freeSpins: profile.freeSpins, updatedAt: firebase.firestore.FieldValue.serverTimestamp() }, { merge: true }
+              ).catch(function(e) { console.warn('pw ticket deduct:', e); });
+            }
+          } else if (cost > 0) {
+            profile.coins = Math.max(0, Number(profile.coins) - cost);
+            if (firebaseReady && db && profileId) {
+              db.collection('studentGamificationProfiles').doc(profileId).set(
+                { coins: profile.coins, updatedAt: firebase.firestore.FieldValue.serverTimestamp() }, { merge: true }
+              ).catch(function(e) { console.warn('pw coin deduct:', e); });
+            }
           }
-        } else if (cost > 0) {
-          profile.coins = Math.max(0, Number(profile.coins) - cost);
-          profile.updatedAtText = new Date().toLocaleString('th-TH');
-          if (firebaseReady && db && profileId) {
-            db.collection('studentGamificationProfiles').doc(profileId).set(
-              { coins: profile.coins, updatedAt: firebase.firestore.FieldValue.serverTimestamp() }, { merge: true }
-            ).catch(function(e) { console.warn('prize wheel coin deduct error:', e); });
+          const expGain = winner.rewardType === 'exp' ? (Number(winner.rewardValue) || 0) : 0;
+          const coinsGain = winner.rewardType === 'coins' ? (Number(winner.rewardValue) || 0) : 0;
+          if (expGain > 0 || coinsGain > 0) {
+            await awardStudentGamification('prizeWheel', 'spin_' + Date.now(), expGain, coinsGain, 'วงล้อสุ่มรางวัล: ' + (winner.name || '-'));
           }
-        }
-        // Award the prize
-        const expGain = winner.rewardType === 'exp' ? (Number(winner.rewardValue) || 0) : 0;
-        const coinsGain = winner.rewardType === 'coins' ? (Number(winner.rewardValue) || 0) : 0;
-        if (expGain > 0 || coinsGain > 0) {
-          await awardStudentGamification('prizeWheel', 'spin_' + Date.now(), expGain, coinsGain, 'วงล้อสุ่มรางวัล: ' + (winner.name || '-'));
-        }
-        // Save spin record
-        const authUid = String((currentStudent && currentStudent.authUid) || (firebaseUser && firebaseUser.uid) || '').trim();
-        const spinRecord = {
-          id: '', firebaseDocId: '',
-          studentId: getStudentRecordDocId(currentStudent),
-          authUid: authUid,
-          memberId: currentStudent.memberId || currentStudent.studentId || '',
-          studentName: currentStudent.name || '',
-          prizeId: winner.id || winner.firebaseDocId || '',
-          prizeName: winner.name || '',
-          prizeIcon: winner.icon || '🎁',
-          rewardType: winner.rewardType || 'custom',
-          rewardValue: Number(winner.rewardValue) || 0,
-          linkedRewardId: winner.linkedRewardId || '',
-          linkedRewardTitle: winner.linkedRewardTitle || '',
-          coinsPaid: usingWheelTicket ? 0 : cost,
-          ticketUsed: usingWheelTicket,
-          usedFreeSpin: usingWheelTicket,
-          createdAtText: new Date().toLocaleString('th-TH'),
-          deleted: false
-        };
-        if (firebaseReady && db) {
-          try {
-            const spinId = createFirebaseDocId('prizeWheelSpins');
-            spinRecord.id = spinId;
-            spinRecord.firebaseDocId = spinId;
-            await db.collection('prizeWheelSpins').doc(spinId).set(Object.assign({}, spinRecord, { createdAt: firebase.firestore.FieldValue.serverTimestamp() }));
-            prizeWheelSpins.push(spinRecord);
-          } catch (e) { console.warn('prize wheel spin save error:', e); }
-        }
-        // If custom prize with linked shop reward → add stamp or create redemption
-        if (winner.rewardType === 'custom' && winner.linkedRewardId && firebaseReady && db) {
-          try {
-            const linkedRewardDoc = gamificationRewards.find(function(r) { return String(r.firebaseDocId || r.id || '') === String(winner.linkedRewardId) && !r.deleted; });
-            if (linkedRewardDoc && linkedRewardDoc.rewardType === 'stampCard') {
-              // Stamp card → add 1 stamp
-              await addStudentStampMark(winner.linkedRewardId, linkedRewardDoc, true, spinRecord.id || '');
-            } else {
-              // Standard linked reward → create redemption voucher
-              const nowTs = firebase.firestore.FieldValue.serverTimestamp();
-              const redemptionId = createFirebaseDocId('gamificationRedemptions');
-              const redemption = {
-                id: redemptionId, firebaseDocId: redemptionId,
-                studentId: getStudentRecordDocId(currentStudent),
-                authUid: authUid,
-                memberId: currentStudent.memberId || currentStudent.studentId || '',
-                studentName: currentStudent.name || '',
-                rewardId: winner.linkedRewardId,
-                rewardTitle: winner.linkedRewardTitle || (linkedRewardDoc ? linkedRewardDoc.title : '') || '',
-                coinsPaid: 0, fromPrizeWheel: true, prizeWheelSpinId: spinRecord.id || '',
-                status: 'pending', deleted: false, createdAt: nowTs, createdAtText: new Date().toLocaleString('th-TH')
-              };
-              const rdBatch = db.batch();
-              rdBatch.set(db.collection('gamificationRedemptions').doc(redemptionId), redemption);
-              if (linkedRewardDoc && (linkedRewardDoc.stock || 0) > 0) {
-                const newStock = Math.max(0, (linkedRewardDoc.stock || 0) - 1);
-                rdBatch.set(db.collection('gamificationRewards').doc(winner.linkedRewardId), { stock: newStock, updatedAt: nowTs }, { merge: true });
-                linkedRewardDoc.stock = newStock;
+          const authUid = String((currentStudent && currentStudent.authUid) || (firebaseUser && firebaseUser.uid) || '').trim();
+          const spinRecord = {
+            id: '', firebaseDocId: '',
+            studentId: getStudentRecordDocId(currentStudent), authUid: authUid,
+            memberId: currentStudent.memberId || currentStudent.studentId || '',
+            studentName: currentStudent.name || '',
+            prizeId: winner.id || winner.firebaseDocId || '',
+            prizeName: winner.name || '', prizeIcon: winner.icon || '🎁',
+            rewardType: winner.rewardType || 'custom', rewardValue: Number(winner.rewardValue) || 0,
+            linkedRewardId: winner.linkedRewardId || '', linkedRewardTitle: winner.linkedRewardTitle || '',
+            coinsPaid: usingWheelTicket ? 0 : cost, ticketUsed: usingWheelTicket, usedFreeSpin: usingWheelTicket,
+            createdAtText: new Date().toLocaleString('th-TH'), deleted: false
+          };
+          if (firebaseReady && db) {
+            try {
+              const spinId = createFirebaseDocId('prizeWheelSpins');
+              spinRecord.id = spinId; spinRecord.firebaseDocId = spinId;
+              await db.collection('prizeWheelSpins').doc(spinId).set(Object.assign({}, spinRecord, { createdAt: firebase.firestore.FieldValue.serverTimestamp() }));
+              prizeWheelSpins.push(spinRecord);
+            } catch (e) { console.warn('pw spin save:', e); }
+          }
+          if (winner.rewardType === 'custom' && winner.linkedRewardId && firebaseReady && db) {
+            try {
+              const linkedRewardDoc = gamificationRewards.find(function(r) { return String(r.firebaseDocId || r.id || '') === String(winner.linkedRewardId) && !r.deleted; });
+              if (linkedRewardDoc && linkedRewardDoc.rewardType === 'stampCard') {
+                await addStudentStampMark(winner.linkedRewardId, linkedRewardDoc, true, spinRecord.id || '');
+              } else {
+                const nowTs = firebase.firestore.FieldValue.serverTimestamp();
+                const redemptionId = createFirebaseDocId('gamificationRedemptions');
+                const redemption = {
+                  id: redemptionId, firebaseDocId: redemptionId,
+                  studentId: getStudentRecordDocId(currentStudent), authUid: authUid,
+                  memberId: currentStudent.memberId || currentStudent.studentId || '',
+                  studentName: currentStudent.name || '',
+                  rewardId: winner.linkedRewardId,
+                  rewardTitle: winner.linkedRewardTitle || (linkedRewardDoc ? linkedRewardDoc.title : '') || '',
+                  coinsPaid: 0, fromPrizeWheel: true, prizeWheelSpinId: spinRecord.id || '',
+                  status: 'pending', deleted: false, createdAt: nowTs, createdAtText: new Date().toLocaleString('th-TH')
+                };
+                const rdBatch = db.batch();
+                rdBatch.set(db.collection('gamificationRedemptions').doc(redemptionId), redemption);
+                if (linkedRewardDoc && (linkedRewardDoc.stock || 0) > 0) {
+                  const newStock = Math.max(0, (linkedRewardDoc.stock || 0) - 1);
+                  rdBatch.set(db.collection('gamificationRewards').doc(winner.linkedRewardId), { stock: newStock, updatedAt: nowTs }, { merge: true });
+                  linkedRewardDoc.stock = newStock;
+                }
+                await rdBatch.commit();
+                gamificationRedemptions.push(redemption);
               }
-              await rdBatch.commit();
-              gamificationRedemptions.push(redemption);
-            }
-          } catch (e) { console.warn('prize wheel custom redemption error:', e); }
-        }
-        // Show result
-        if (resultEl) {
-          let customLabel = '';
-          if (winner.rewardType === 'custom' && winner.linkedRewardId) {
-            const linkedDoc = gamificationRewards.find(function(r) { return String(r.firebaseDocId || r.id || '') === String(winner.linkedRewardId) && !r.deleted; });
-            if (linkedDoc && linkedDoc.rewardType === 'stampCard') {
-              const sp = (getCurrentStudentGamificationProfile().stampProgress || {})[winner.linkedRewardId] || { stamps: 0 };
-              const req = Math.max(2, Number(linkedDoc.stampsRequired) || 5);
-              const cur = Math.min(req, Number(sp.stamps) || 0);
-              customLabel = ' — 🎴 บัตรสะสม: ' + (winner.linkedRewardTitle || linkedDoc.title) + ' (' + cur + '/' + req + ' แสตมป์' + (cur >= req ? ' ✓ ครบแล้ว!' : '') + ')';
-            } else {
-              customLabel = ' — บัตรแลก: ' + (winner.linkedRewardTitle || 'ของรางวัลพิเศษ') + ' (รอรับรางวัลจากแอดมิน)';
-            }
+            } catch (e) { console.warn('pw custom redemption:', e); }
           }
-          resultEl.textContent = '🎉 ได้รับ: ' + (winner.icon || '') + ' ' + (winner.name || '-') +
-            (coinsGain ? ' (+' + coinsGain + ' Coins)' : '') +
-            (expGain ? ' (+' + expGain + ' EXP)' : '') +
-            customLabel;
-          resultEl.style.color = '#16a34a';
-        }
-        renderStudentGamificationPanel();
-      }, 2700);
+          // Show result then re-render
+          const newResultEl = getElement('prizeWheelResult');
+          if (newResultEl) {
+            var customLabel = '';
+            if (winner.rewardType === 'custom' && winner.linkedRewardId) {
+              const linkedDoc = gamificationRewards.find(function(r) { return String(r.firebaseDocId || r.id || '') === String(winner.linkedRewardId) && !r.deleted; });
+              if (linkedDoc && linkedDoc.rewardType === 'stampCard') {
+                const sp = (getCurrentStudentGamificationProfile().stampProgress || {})[winner.linkedRewardId] || { stamps: 0 };
+                const req = Math.max(2, Number(linkedDoc.stampsRequired) || 5);
+                const cur = Math.min(req, Number(sp.stamps) || 0);
+                customLabel = ' — 🎴 ' + (winner.linkedRewardTitle || linkedDoc.title) + ' (' + cur + '/' + req + ' แสตมป์' + (cur >= req ? ' ✓' : '') + ')';
+              } else {
+                customLabel = ' — บัตรแลก: ' + (winner.linkedRewardTitle || 'ของรางวัลพิเศษ');
+              }
+            }
+            newResultEl.textContent = '🎉 ได้รับ: ' + (winner.icon || '') + ' ' + (winner.name || '-') +
+              (coinsGain ? ' (+' + coinsGain + ' Coins)' : '') + (expGain ? ' (+' + expGain + ' EXP)' : '') + customLabel;
+            newResultEl.style.color = '#16a34a';
+          }
+          window.setTimeout(function() { renderStudentGamificationPanel(); }, 2000);
+        }, 50);
+      }
+      requestAnimationFrame(pwSpinTick);
     }
 
     function renderAdminPrizeWheelToggle() {
@@ -23123,6 +23138,7 @@
             slipStorageType: 'google_drive',
             driveFileId: driveData.fileId || '',
             driveFileUrl: driveData.fileUrl || driveData.viewUrl || driveData.driveViewUrl || '',
+            driveViewUrl: driveData.viewUrl || driveData.driveViewUrl || driveData.fileUrl || '',
             driveFolderId: driveData.folderId || '',
             driveFolderName: driveData.folderName || '',
             slipUploadedByUid: firebaseUser ? firebaseUser.uid : '',
@@ -23389,7 +23405,7 @@
         month: payment ? (payment.month || '-') : (row && row.children[3] ? row.children[3].innerText.trim() : '-'),
         amount: payment ? String(getPaymentFinalAmount(payment)) : (row && row.children[4] ? row.children[4].innerText.trim().replace(' บาท', '') : '0'),
         lineItems: payment && Array.isArray(payment.lineItems) ? payment.lineItems : [],
-        slip: payment ? (payment.slipUrl ? 'มีสลิป' : (payment.slipSource || '-')) : (row && row.children[5] ? row.children[5].innerText.trim() : '-'),
+        slip: payment ? (getPaymentSlipUrl(payment) ? 'มีสลิป' : (payment.slipSource || '-')) : (row && row.children[5] ? row.children[5].innerText.trim() : '-'),
         slipNote: payment ? (payment.slipNote || ('นักเรียนแจ้งส่งสลิปของเดือน ' + (payment.month || '-'))) : '',
         sentAt: payment ? (payment.createdAtText || '-') : '-',
         status: payment ? (payment.status || '-') : (row && row.children[6] ? row.children[6].innerText.trim() : '-')
@@ -24958,6 +24974,7 @@ function receiptStatusText(status) {
         slipStorageType: 'google_drive',
         driveFileId: driveData.fileId || '',
         driveFileUrl: driveData.fileUrl || driveData.viewUrl || driveData.driveViewUrl || '',
+        driveViewUrl: driveData.viewUrl || driveData.driveViewUrl || driveData.fileUrl || '',
         driveFolderId: driveData.folderId || '',
         driveFolderName: driveData.folderName || '',
         slipUploadedByUid: firebaseUser ? firebaseUser.uid : (currentStudent.authUid || ''),
@@ -32836,7 +32853,8 @@ function receiptStatusText(status) {
           pendingWebSlipUploads.map(function(p) {
             const uploadedAt = parseRecordDate(p.slipUploadedAt || p.updatedAt || p.createdAtText);
             const uploadedText = uploadedAt ? uploadedAt.toLocaleString('th-TH') : (p.createdAtText || '-');
-            const driveButton = p.driveViewUrl ? '<a class="btn btn-blue" href="' + escapeHtml(p.driveViewUrl) + '" target="_blank" rel="noopener">เปิดสลิป</a>' : '';
+            const slipUrl = getPaymentSlipUrl(p);
+            const driveButton = slipUrl ? '<a class="btn btn-blue" href="' + escapeHtml(slipUrl) + '" target="_blank" rel="noopener">เปิดสลิป</a>' : '';
             const kindText = p.uploadKind === 'bundle' ? 'ยอดรวม' : (p.driveGradeFolderName || p.grade || p.studentGrade || '-');
             return '<div class="status-display-row"><span><strong>' + escapeHtml(p.studentName || p.student || '-') + '</strong><br><span style="color:#6b7280;">' +
               escapeHtml((p.month || '-') + ' · ' + kindText + ' · อัปโหลดโดย ' + (p.slipUploadedByName || p.slipUploadedByUid || '-')) +
@@ -32881,10 +32899,10 @@ function receiptStatusText(status) {
         return !month || months.includes(month);
       });
       const enrolledStudents = students.filter(function(s) { return isActiveStudentForDashboard(s) && s.courseId; });
-      const paid = monthPayments.filter(function(p) { return p.status === 'ชำระแล้ว'; });
-      const pending = monthPayments.filter(function(p) { return p.status === 'รอตรวจสลิป'; });
+      const paid = monthPayments.filter(function(p) { return getPaymentDisplayStatus(p) === 'ชำระแล้ว'; });
+      const pending = monthPayments.filter(function(p) { return getPaymentDisplayStatus(p) === 'รอตรวจสลิป'; });
       const pendingBundles = monthBundles.filter(function(bundle) { return getPaymentBundleDisplayStatus(bundle) === 'รอตรวจสลิป'; });
-      const overdue = monthPayments.filter(function(p) { return p.status === 'ค้างชำระ'; });
+      const overdue = monthPayments.filter(function(p) { return getPaymentDisplayStatus(p) === 'ค้างชำระ'; });
       const paidAmount = paid.reduce(function(sum, p) { return sum + getPaymentFinalAmount(p); }, 0);
       let expectedAmount = 0;
       enrolledStudents.forEach(function(s) { expectedAmount += getExpectedPaymentAmountForStudent(s, month); });
