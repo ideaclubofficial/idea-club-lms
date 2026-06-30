@@ -9278,6 +9278,7 @@
     let prizeWheelSpinning = false;
     let pwCurrentRotation = 0;
     let pwSegmentItems = [];
+    let pwLastSpinResult = null;
     let studentGamificationAvatarAnimations = {};
     let dailyLoginQuestTriggeredThisSession = false;
 
@@ -19588,8 +19589,8 @@
         return s;
       });
     }
-    function pwDrawCanvas(rotRad) {
-      var canvas = getElement('prizeWheelCanvas');
+    function pwDrawCanvas(rotRad, canvasEl) {
+      var canvas = canvasEl || getElement('prizeWheelCanvas');
       if (!canvas || !canvas.getContext) return;
       if (!pwSegmentItems || !pwSegmentItems.length) return;
       var ctx = canvas.getContext('2d');
@@ -19643,11 +19644,16 @@
       ctx.font = '15px serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
       ctx.fillStyle = '#6366f1'; ctx.fillText('★', cx, cy);
     }
+    function pwDrawAllCanvases(rotRad) {
+      var all = document.querySelectorAll('.prize-wheel-canvas');
+      if (all && all.length) { all.forEach(function(c) { pwDrawCanvas(rotRad, c); }); }
+      else { pwDrawCanvas(rotRad); }
+    }
     function pwInitCanvas() {
       var items = pwSortByRarity(getPrizeWheelActiveItems());
       if (!items.length) return;
       pwSegmentItems = pwComputeSegments(items);
-      pwDrawCanvas(pwCurrentRotation);
+      pwDrawAllCanvases(pwCurrentRotation);
     }
     function bEPW_onTypeChange() {
       var t = getElement('bEPW_rewardType') ? getElement('bEPW_rewardType').value : '';
@@ -19719,14 +19725,14 @@
         '<div class="prize-wheel-body">' +
           '<div class="prize-wheel-canvas-wrap">' +
             '<div class="prize-wheel-pointer"></div>' +
-            '<canvas id="prizeWheelCanvas" width="280" height="280"></canvas>' +
+            '<canvas id="prizeWheelCanvas" class="prize-wheel-canvas" width="280" height="280"></canvas>' +
           '</div>' +
           '<p class="prize-wheel-cost-tag">ค่าหมุน: <strong>' + cost + ' Coins</strong> · คุณมี <strong>' + coins + ' Coins</strong></p>' +
           (wheelTickets > 0 ? '<div style="text-align:center;margin:-4px 0 8px;font-size:13px;color:#7c3aed;font-weight:600;">🎟 บัตรหมุนวงล้อของคุณ: <strong>' + wheelTickets + ' ใบ</strong></div>' : '') +
           '<button class="prize-wheel-spin-btn" id="prizeWheelSpinBtn" type="button" onclick="spinPrizeWheel()" ' + (canSpin ? '' : 'disabled') + '>' +
             (wheelTickets > 0 ? '🎟 ใช้บัตรหมุนวงล้อ' : coins < cost ? '🔒 Coins ไม่พอ' : '🎰 หมุนวงล้อ') +
           '</button>' +
-          '<div class="prize-wheel-result" id="prizeWheelResult"></div>' +
+          '<div class="prize-wheel-result" id="prizeWheelResult">' + (pwLastSpinResult ? '<span style="color:' + escapeHtml(pwLastSpinResult.color) + '">' + escapeHtml(pwLastSpinResult.text) + '</span>' : '') + '</div>' +
           historyHtml +
         '</div>' +
       '</div>';
@@ -19775,7 +19781,7 @@
         var eased = easeOutCubic(progress);
         var rot = startRot + (targetRot - startRot) * eased;
         pwCurrentRotation = rot;
-        pwDrawCanvas(rot);
+        pwDrawAllCanvases(rot);
         // Update section bg based on which segment is under pointer
         var normalizedAngle = (((-rot) % (2*Math.PI)) + 2*Math.PI) % (2*Math.PI);
         var segNow = pwSegmentItems.find(function(s) { return normalizedAngle >= s.startAngle && normalizedAngle < s.endAngle; });
@@ -19797,19 +19803,22 @@
         // Run reward logic
         window.setTimeout(async function() {
           const profileId = String(profile.firebaseDocId || profile.id || '');
+          // Mutate the actual array entry so re-renders read the updated value
+          const actualProfile = findCurrentStudentGamificationProfile();
           if (usingWheelTicket) {
-            profile.prizeWheelTickets = Math.max(0, wheelTicketsAvail - 1);
-            profile.freeSpins = profile.prizeWheelTickets;
+            const newTickets = Math.max(0, wheelTicketsAvail - 1);
+            if (actualProfile) { actualProfile.prizeWheelTickets = newTickets; actualProfile.freeSpins = newTickets; }
             if (firebaseReady && db && profileId) {
               db.collection('studentGamificationProfiles').doc(profileId).set(
-                { prizeWheelTickets: profile.prizeWheelTickets, freeSpins: profile.freeSpins, updatedAt: firebase.firestore.FieldValue.serverTimestamp() }, { merge: true }
+                { prizeWheelTickets: newTickets, freeSpins: newTickets, updatedAt: firebase.firestore.FieldValue.serverTimestamp() }, { merge: true }
               ).catch(function(e) { console.warn('pw ticket deduct:', e); });
             }
           } else if (cost > 0) {
-            profile.coins = Math.max(0, Number(profile.coins) - cost);
+            const newCoins = Math.max(0, Number(profile.coins) - cost);
+            if (actualProfile) { actualProfile.coins = newCoins; }
             if (firebaseReady && db && profileId) {
               db.collection('studentGamificationProfiles').doc(profileId).set(
-                { coins: profile.coins, updatedAt: firebase.firestore.FieldValue.serverTimestamp() }, { merge: true }
+                { coins: newCoins, updatedAt: firebase.firestore.FieldValue.serverTimestamp() }, { merge: true }
               ).catch(function(e) { console.warn('pw coin deduct:', e); });
             }
           }
@@ -19869,26 +19878,28 @@
               }
             } catch (e) { console.warn('pw custom redemption:', e); }
           }
-          // Show result then re-render
-          const newResultEl = getElement('prizeWheelResult');
-          if (newResultEl) {
-            var customLabel = '';
-            if (winner.rewardType === 'custom' && winner.linkedRewardId) {
-              const linkedDoc = gamificationRewards.find(function(r) { return String(r.firebaseDocId || r.id || '') === String(winner.linkedRewardId) && !r.deleted; });
-              if (linkedDoc && linkedDoc.rewardType === 'stampCard') {
-                const sp = (getCurrentStudentGamificationProfile().stampProgress || {})[winner.linkedRewardId] || { stamps: 0 };
-                const req = Math.max(2, Number(linkedDoc.stampsRequired) || 5);
-                const cur = Math.min(req, Number(sp.stamps) || 0);
-                customLabel = ' — 🎴 ' + (winner.linkedRewardTitle || linkedDoc.title) + ' (' + cur + '/' + req + ' แสตมป์' + (cur >= req ? ' ✓' : '') + ')';
-              } else {
-                customLabel = ' — บัตรแลก: ' + (winner.linkedRewardTitle || 'ของรางวัลพิเศษ');
-              }
+          // Build result text, store in module-level var so it survives re-render
+          var customLabel = '';
+          if (winner.rewardType === 'custom' && winner.linkedRewardId) {
+            const linkedDoc = gamificationRewards.find(function(r) { return String(r.firebaseDocId || r.id || '') === String(winner.linkedRewardId) && !r.deleted; });
+            if (linkedDoc && linkedDoc.rewardType === 'stampCard') {
+              const sp = (getCurrentStudentGamificationProfile().stampProgress || {})[winner.linkedRewardId] || { stamps: 0 };
+              const req = Math.max(2, Number(linkedDoc.stampsRequired) || 5);
+              const cur = Math.min(req, Number(sp.stamps) || 0);
+              customLabel = ' — 🎴 ' + (winner.linkedRewardTitle || linkedDoc.title) + ' (' + cur + '/' + req + ' แสตมป์' + (cur >= req ? ' ✓' : '') + ')';
+            } else {
+              customLabel = ' — บัตรแลก: ' + (winner.linkedRewardTitle || 'ของรางวัลพิเศษ');
             }
-            newResultEl.textContent = '🎉 ได้รับ: ' + (winner.icon || '') + ' ' + (winner.name || '-') +
-              (coinsGain ? ' (+' + coinsGain + ' Coins)' : '') + (expGain ? ' (+' + expGain + ' EXP)' : '') + customLabel;
-            newResultEl.style.color = '#16a34a';
           }
-          window.setTimeout(function() { renderStudentGamificationPanel(); }, 2000);
+          pwLastSpinResult = {
+            text: '🎉 ได้รับ: ' + (winner.icon || '') + ' ' + (winner.name || '-') +
+              (coinsGain ? ' (+' + coinsGain + ' Coins)' : '') + (expGain ? ' (+' + expGain + ' EXP)' : '') + customLabel,
+            color: '#16a34a'
+          };
+          // Re-render immediately with updated counts; result persists via pwLastSpinResult
+          renderStudentGamificationPanel();
+          // Clear result after 6 seconds
+          window.setTimeout(function() { pwLastSpinResult = null; renderStudentGamificationPanel(); }, 6000);
         }, 50);
       }
       requestAnimationFrame(pwSpinTick);
