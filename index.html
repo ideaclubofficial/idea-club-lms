@@ -11485,7 +11485,7 @@
           '<td' + tdNw + '><span class="' + statusClass + '">' + (s.pickupStatus || 'ไม่มา') + '</span></td>' +
           '<td' + tdNw + '>' + escapeHtml(gamificationText) + '</td>' +
           '<td' + tdNw + '><button class="btn btn-blue" type="button" onclick="previewSingleStudentIdCard(\'' + sid + '\')" style="font-size:11px;padding:3px 8px;">🪪 บัตร</button></td>' +
-          '<td' + tdNw + '><button class="btn btn-green" type="button" onclick="openTeacherGiveExpBubble(\'' + sid + '\')" style="font-size:11px;padding:3px 8px;">ให้ EXP</button></td>' +
+          '<td' + tdNw + '><button class="btn btn-green" type="button" onclick="openTeacherGiveExpBubble(\'' + sid + '\')" style="font-size:11px;padding:3px 8px;">ให้รางวัล</button></td>' +
         '</tr>';
       }).join('') : '<tr><td colspan="11">ยังไม่มีนักเรียนในเงื่อนไขที่เลือก</td></tr>';
       renderTablePagination('teacherStudentsPagination', teacherStudentsCurrentPage, tsTotalPages, filtered.length, 'changeTeacherStudentsPage');
@@ -11548,7 +11548,7 @@
           '<span class="' + statusClass + '">' + escapeHtml(status) + '</span>' +
           '<span class="teacher-mobile-actions" style="margin:0;justify-content:flex-end;">' +
             '<button class="btn btn-blue" type="button" onclick="previewSingleStudentIdCard(\'' + sid + '\')" style="font-size:11px;padding:3px 10px;">🪪 ดูบัตร</button>' +
-            '<button class="btn btn-green" type="button" onclick="openTeacherGiveExpBubble(\'' + sid + '\')" style="font-size:11px;padding:3px 10px;">ให้ EXP</button>' +
+            '<button class="btn btn-green" type="button" onclick="openTeacherGiveExpBubble(\'' + sid + '\')" style="font-size:11px;padding:3px 10px;">ให้รางวัล</button>' +
           '</span>' +
         '</div>' +
       '</div>';
@@ -13339,7 +13339,7 @@
         '<button class="btn btn-blue" type="button" onclick="' + actionCall('editStudent', s.id) + '">แก้ไข</button>' +
         approvalBtns +
         privateLessonBtn +
-        '<button class="btn btn-green" type="button" onclick="' + actionCall('openAdminGiveExpBubble', s.id) + '">ให้ EXP</button>' +
+        '<button class="btn btn-green" type="button" onclick="' + actionCall('openAdminGiveExpBubble', s.id) + '">ให้รางวัล</button>' +
         '<button class="btn btn-blue" type="button" onclick="' + actionCall('openStudentApplicationAdmin', s.id) + '">ใบสมัคร</button>' +
         '<button class="btn btn-dark" type="button" onclick="' + actionCall('downloadStudentApplicationPdfAdmin', s.id) + '">PDF</button>' +
         '<button class="btn btn-dark" type="button" onclick="' + actionCall('openResetStudentPassword', s.id) + '">Reset รหัสผ่าน</button>' +
@@ -18478,39 +18478,58 @@
 
     function openGiveExpBubbleForStudent(student) {
       const profile = getStudentGamificationProfile(student);
-      openEditBubble('ให้ EXP / Coins นักเรียน',
+      const curFreeSpins = Number(profile.freeSpins) || 0;
+      openEditBubble('ให้รางวัล นักเรียน',
         '<div class="notice" style="margin-bottom:14px;">' +
           '<p><strong>' + escapeHtml(student.name || '-') + '</strong> · Member ID: ' + escapeHtml(student.memberId || student.studentId || '-') + '</p>' +
-          '<p class="mini-muted">ปัจจุบัน: LV.' + escapeHtml(profile.level) + ' · ' + escapeHtml(profile.exp) + '/' + escapeHtml(getStudentGamificationLevelMaxExp(profile.level)) + ' EXP · ' + escapeHtml(profile.coins) + ' Coins</p>' +
+          '<p class="mini-muted">ปัจจุบัน: LV.' + escapeHtml(profile.level) + ' · ' + escapeHtml(profile.exp) + '/' + escapeHtml(getStudentGamificationLevelMaxExp(profile.level)) + ' EXP · ' + escapeHtml(profile.coins) + ' Coins · 🎟 ' + curFreeSpins + ' บัตรหมุนฟรี</p>' +
         '</div>' +
         '<div class="form-row">' +
           '<div><label>EXP ที่ให้</label><input id="bubbleTeacherAwardExp" type="number" min="0" max="1000" step="1" value="20" /></div>' +
           '<div><label>Coins ที่ให้</label><input id="bubbleTeacherAwardCoins" type="number" min="0" max="500" step="1" value="0" /></div>' +
+          '<div><label>🎟 บัตรหมุนวงล้อฟรี</label><input id="bubbleTeacherAwardFreeSpins" type="number" min="0" max="10" step="1" value="0" /><p style="font-size:11px;color:#94a3b8;margin:2px 0 0;">ใส่บัตรหมุนฟรีเพิ่ม</p></div>' +
         '</div>' +
         '<label>เหตุผล / กิจกรรม</label>' +
         '<input id="bubbleTeacherAwardReason" type="text" placeholder="เช่น ตอบคำถามดี / ช่วยเพื่อน / ส่งงานครบ" />',
         async function() {
           const exp = Math.max(0, Math.min(1000, Number(bubbleValue('bubbleTeacherAwardExp') || 0) || 0));
           const coins = Math.max(0, Math.min(500, Number(bubbleValue('bubbleTeacherAwardCoins') || 0) || 0));
+          const freeSpinsToGive = Math.max(0, Math.min(10, Number(bubbleValue('bubbleTeacherAwardFreeSpins') || 0) || 0));
           const reason = bubbleValue('bubbleTeacherAwardReason') || 'ครูให้รางวัลจากรายชื่อนักเรียน';
           const resultEl = getElement('editBubbleResult');
-          if (!exp && !coins) {
+          if (!exp && !coins && !freeSpinsToGive) {
             if (resultEl) {
-              resultEl.textContent = 'กรุณาใส่ EXP หรือ Coins อย่างน้อย 1 ค่า';
+              resultEl.textContent = 'กรุณาใส่ EXP, Coins หรือบัตรหมุนฟรีอย่างน้อย 1 ค่า';
               resultEl.style.color = '#dc2626';
             }
             return;
           }
           if (resultEl) {
-            resultEl.textContent = 'กำลังบันทึกคะแนนสะสม...';
+            resultEl.textContent = 'กำลังบันทึก...';
             resultEl.style.color = '#d97706';
           }
           try {
-            const sourceId = createFirebaseDocId('studentGamificationEvents');
-            await awardGamificationForStudent(student, 'teacherAward', sourceId, exp, coins, reason);
-            addActivityLog('ครูให้ EXP นักเรียน', (student.name || '-') + ' · +' + exp + ' EXP · +' + coins + ' Coins · ' + reason);
+            if (exp > 0 || coins > 0) {
+              const sourceId = createFirebaseDocId('studentGamificationEvents');
+              await awardGamificationForStudent(student, 'teacherAward', sourceId, exp, coins, reason);
+            }
+            if (freeSpinsToGive > 0) {
+              const profileDocId = String(profile.firebaseDocId || profile.id || '');
+              const newFreeSpins = Math.max(0, curFreeSpins + freeSpinsToGive);
+              profile.freeSpins = newFreeSpins;
+              if (firebaseReady && db && profileDocId) {
+                await db.collection('studentGamificationProfiles').doc(profileDocId).set(
+                  { freeSpins: newFreeSpins, updatedAt: firebase.firestore.FieldValue.serverTimestamp() }, { merge: true }
+                );
+              }
+            }
+            const parts = [];
+            if (exp > 0) parts.push('+' + exp + ' EXP');
+            if (coins > 0) parts.push('+' + coins + ' Coins');
+            if (freeSpinsToGive > 0) parts.push('+' + freeSpinsToGive + ' 🎟 บัตรหมุนฟรี');
+            addActivityLog('ครูให้รางวัลนักเรียน', (student.name || '-') + ' · ' + parts.join(' · ') + ' · ' + reason);
             if (resultEl) {
-              resultEl.textContent = 'บันทึก EXP / Coins ให้ ' + (student.name || '-') + ' เรียบร้อย';
+              resultEl.textContent = 'บันทึกรางวัลให้ ' + (student.name || '-') + ' เรียบร้อย';
               resultEl.style.color = '#16a34a';
             }
             window.setTimeout(function() { closeEditBubble(); }, 600);
@@ -19211,7 +19230,8 @@
       if (!prizeWheelSettings.enabled) { console.log('[PrizeWheel] ปิดใช้งาน enabled=' + prizeWheelSettings.enabled); return ''; }
       const cost = Number(prizeWheelSettings.spinCost) || 0;
       const coins = Number(profile && profile.coins) || 0;
-      const canSpin = coins >= cost && !prizeWheelSpinning;
+      const freeSpins = Number(profile && profile.freeSpins) || 0;
+      const canSpin = (freeSpins > 0 || coins >= cost) && !prizeWheelSpinning;
       const recentSpins = prizeWheelSpins
         .filter(function(s) { return !s.deleted; })
         .slice().sort(function(a, b) { return String(b.createdAtText || '') > String(a.createdAtText || '') ? 1 : -1; })
@@ -19242,8 +19262,9 @@
             '</div>' +
           '</div>' +
           '<p class="prize-wheel-cost-tag">ค่าหมุน: <strong>' + cost + ' Coins</strong> · คุณมี <strong>' + coins + ' Coins</strong></p>' +
+          (freeSpins > 0 ? '<div style="text-align:center;margin:-4px 0 8px;font-size:13px;color:#7c3aed;font-weight:600;">🎟 บัตรหมุนวงล้อฟรีของคุณ: <strong>' + freeSpins + ' ใบ</strong></div>' : '') +
           '<button class="prize-wheel-spin-btn" id="prizeWheelSpinBtn" type="button" onclick="spinPrizeWheel()" ' + (canSpin ? '' : 'disabled') + '>' +
-            (coins < cost ? '🔒 Coins ไม่พอ' : '🎰 หมุนวงล้อ') +
+            (freeSpins > 0 ? '🎟 ใช้บัตรหมุนฟรี' : coins < cost ? '🔒 Coins ไม่พอ' : '🎰 หมุนวงล้อ') +
           '</button>' +
           '<div class="prize-wheel-result" id="prizeWheelResult"></div>' +
           historyHtml +
@@ -19258,7 +19279,9 @@
       if (!items.length) return;
       const cost = Number(prizeWheelSettings.spinCost) || 0;
       const profile = getCurrentStudentGamificationProfile();
-      if (Number(profile.coins) < cost) { alert('Coins ไม่พอสำหรับการหมุน'); return; }
+      const freeSpinsAvail = Number(profile.freeSpins) || 0;
+      const usingFreeSpin = freeSpinsAvail > 0;
+      if (!usingFreeSpin && Number(profile.coins) < cost) { alert('Coins ไม่พอสำหรับการหมุน'); return; }
 
       const winner = weightedRandomPrize(items);
       prizeWheelSpinning = true;
@@ -19305,11 +19328,19 @@
       // After animation ends
       setTimeout(async function() {
         prizeWheelSpinning = false;
-        // Deduct cost
-        if (cost > 0) {
+        // Deduct cost: free spin ticket first, else coins
+        const profileId = String(profile.firebaseDocId || profile.id || '');
+        if (usingFreeSpin) {
+          profile.freeSpins = Math.max(0, freeSpinsAvail - 1);
+          profile.updatedAtText = new Date().toLocaleString('th-TH');
+          if (firebaseReady && db && profileId) {
+            db.collection('studentGamificationProfiles').doc(profileId).set(
+              { freeSpins: profile.freeSpins, updatedAt: firebase.firestore.FieldValue.serverTimestamp() }, { merge: true }
+            ).catch(function(e) { console.warn('prize wheel free spin deduct error:', e); });
+          }
+        } else if (cost > 0) {
           profile.coins = Math.max(0, Number(profile.coins) - cost);
           profile.updatedAtText = new Date().toLocaleString('th-TH');
-          const profileId = String(profile.firebaseDocId || profile.id || '');
           if (firebaseReady && db && profileId) {
             db.collection('studentGamificationProfiles').doc(profileId).set(
               { coins: profile.coins, updatedAt: firebase.firestore.FieldValue.serverTimestamp() }, { merge: true }
@@ -19337,7 +19368,8 @@
           rewardValue: Number(winner.rewardValue) || 0,
           linkedRewardId: winner.linkedRewardId || '',
           linkedRewardTitle: winner.linkedRewardTitle || '',
-          coinsPaid: cost,
+          coinsPaid: usingFreeSpin ? 0 : cost,
+          usedFreeSpin: usingFreeSpin,
           createdAtText: new Date().toLocaleString('th-TH'),
           deleted: false
         };
