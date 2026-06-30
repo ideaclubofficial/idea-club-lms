@@ -18597,6 +18597,7 @@
             '<p><strong>รางวัล:</strong> ' + escapeHtml(getPersonalQuestRewardText(q)) + '</p>' +
             '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px;">' +
               '<button class="btn btn-green" type="button" onclick="completePersonalQuest(\'' + qid + '\')">ยืนยันสำเร็จ</button>' +
+              '<button class="btn btn-blue" type="button" onclick="openEditPersonalQuestBubble(\'' + qid + '\')">✏️ แก้ไข</button>' +
               '<button class="btn btn-red" type="button" onclick="cancelPersonalQuest(\'' + qid + '\')">ยกเลิก</button>' +
             '</div>' +
           '</div>' +
@@ -18828,6 +18829,52 @@
         console.error('completePersonalQuest error:', error);
         if (resultEl) { resultEl.textContent = 'ยืนยันไม่สำเร็จ: ' + (error.message || error.code || ''); resultEl.style.color = '#dc2626'; }
       }
+    }
+
+    function openEditPersonalQuestBubble(questId) {
+      const quest = findPersonalQuestById(questId);
+      if (!quest || quest.deleted) { alert('ไม่พบ Quest'); return; }
+      if (String(quest.status || 'pending') !== 'pending') { alert('แก้ไขได้เฉพาะ Quest ที่ยังรอยืนยัน'); return; }
+      const student = students.find(function(s) { return personalQuestMatchesStudent(quest, s); });
+      openEditBubble('✏️ แก้ไข Quest: ' + escapeHtml(quest.title || '-'),
+        '<div class="form-row" style="margin-bottom:0;">' +
+          '<div style="flex:1;"><label>ชื่อ Quest</label>' +
+            '<input id="bEPQ_title" type="text" value="' + escapeHtml(quest.title || '') + '" /></div>' +
+        '</div>' +
+        '<label>รายละเอียด</label>' +
+        '<textarea id="bEPQ_desc" rows="2">' + escapeHtml(quest.description || '') + '</textarea>' +
+        '<div class="form-row">' +
+          '<div><label>EXP รางวัล</label><input id="bEPQ_exp" type="number" min="0" max="1000" step="1" value="' + (Number(quest.rewardExp) || 0) + '" /></div>' +
+          '<div><label>Coins รางวัล</label><input id="bEPQ_coins" type="number" min="0" max="500" step="1" value="' + (Number(quest.rewardCoins) || 0) + '" /></div>' +
+          '<div><label>🎟 บัตรหมุนวงล้อ</label><input id="bEPQ_tickets" type="number" min="0" max="10" step="1" value="' + (Number(quest.rewardWheelTickets) || 0) + '" /></div>' +
+        '</div>',
+        async function() {
+          const title = bubbleValue('bEPQ_title') || quest.title || 'Quest รายบุคคล';
+          const description = bubbleValue('bEPQ_desc') || '';
+          const exp = Math.max(0, Math.min(1000, Number(bubbleValue('bEPQ_exp') || 0) || 0));
+          const coins = Math.max(0, Math.min(500, Number(bubbleValue('bEPQ_coins') || 0) || 0));
+          const tickets = Math.max(0, Math.min(10, Number(bubbleValue('bEPQ_tickets') || 0) || 0));
+          const resultEl = getElement('editBubbleResult');
+          if (resultEl) { resultEl.textContent = 'กำลังบันทึก...'; resultEl.style.color = '#d97706'; }
+          try {
+            const questDocId = String(quest.firebaseDocId || quest.id || questId);
+            const updates = {
+              title: title, description: description,
+              rewardExp: exp, rewardCoins: coins, rewardWheelTickets: tickets,
+              updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
+              updatedAtText: new Date().toLocaleString('th-TH')
+            };
+            await db.collection('studentPersonalQuests').doc(questDocId).set(updates, { merge: true });
+            Object.assign(quest, updates);
+            if (resultEl) { resultEl.textContent = 'บันทึกการแก้ไขเรียบร้อย'; resultEl.style.color = '#16a34a'; }
+            window.setTimeout(function() {
+              if (student) openGiveExpBubbleForStudent(student); else closeEditBubble();
+            }, 500);
+          } catch (error) {
+            if (resultEl) { resultEl.textContent = 'บันทึกไม่สำเร็จ: ' + (error.message || error.code || ''); resultEl.style.color = '#dc2626'; }
+          }
+        }
+      );
     }
 
     async function cancelPersonalQuest(questId) {
