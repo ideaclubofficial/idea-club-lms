@@ -580,17 +580,17 @@
     .sgshop-btn:hover { opacity: 0.88; }
     .sgshop-btn--disabled { background: #e2e8f0; color: #94a3b8; cursor: default; }
     /* Prize Wheel (vertical slot reel) */
-    .prize-wheel-section { margin-top: 14px; border-radius: 12px; border: 1.5px solid #c7d2fe; background: linear-gradient(135deg, #eef2ff 0%, #f0fdf4 100%); overflow: hidden; }
+    .prize-wheel-section { margin-top: 14px; border-radius: 12px; border: 1.5px solid #c7d2fe; background: linear-gradient(135deg, #eef2ff 0%, #f0fdf4 100%); overflow: hidden; transition: background 0.12s, border-color 0.12s; }
     .prize-wheel-header { padding: 9px 14px; font-size: 13px; font-weight: 700; color: #3730a3; background: rgba(199,210,254,0.35); border-bottom: 1px solid #c7d2fe; }
     .prize-wheel-body { padding: 14px; display: flex; flex-direction: column; align-items: center; gap: 12px; }
     .prize-wheel-reel-wrap { position: relative; width: 220px; }
-    .prize-wheel-reel-window { height: 240px; overflow: hidden; border-radius: 10px; border: 2px solid #a5b4fc; background: #fff; position: relative; box-shadow: inset 0 2px 8px rgba(99,102,241,0.08); }
+    .prize-wheel-reel-window { height: 240px; overflow: hidden; border-radius: 10px; border: 2px solid #a5b4fc; background: #fff; position: relative; box-shadow: inset 0 2px 8px rgba(99,102,241,0.08); transition: border-color 0.12s, box-shadow 0.12s; }
     .prize-wheel-reel-track { display: flex; flex-direction: column; will-change: transform; }
     .prize-wheel-reel-item { height: 80px; display: flex; align-items: center; padding: 0 14px; gap: 10px; border-bottom: 1px solid #e2e8f0; flex-shrink: 0; box-sizing: border-box; }
     .prize-wheel-reel-item-icon { font-size: 26px; width: 36px; text-align: center; flex-shrink: 0; }
     .prize-wheel-reel-item-name { font-size: 13px; font-weight: 700; color: #1e293b; line-height: 1.3; }
     .prize-wheel-reel-item-val { font-size: 11px; color: #64748b; }
-    .prize-wheel-indicator { position: absolute; left: 0; right: 0; top: 80px; height: 80px; border: 3px solid #6366f1; border-radius: 8px; pointer-events: none; background: rgba(99,102,241,0.06); z-index: 2; }
+    .prize-wheel-indicator { position: absolute; left: 0; right: 0; top: 80px; height: 80px; border: 3px solid #6366f1; border-radius: 8px; pointer-events: none; background: rgba(99,102,241,0.06); z-index: 2; transition: border-color 0.12s, background 0.12s; }
     .prize-wheel-indicator::before { content: '▶'; position: absolute; left: -22px; top: 50%; transform: translateY(-50%); font-size: 16px; color: #6366f1; }
     .prize-wheel-indicator::after  { content: '◀'; position: absolute; right: -22px; top: 50%; transform: translateY(-50%); font-size: 16px; color: #6366f1; }
     .prize-wheel-cost-tag { font-size: 12px; color: #6b7280; font-weight: 600; }
@@ -7913,6 +7913,7 @@
       const receiptsQueries = buildStudentOwnedQueries('receipts');
       const gamificationProfileQueries = buildStudentOwnedQueries('studentGamificationProfiles');
       const gamificationEventQueries = buildStudentOwnedQueries('studentGamificationEvents');
+      const personalQuestQueries = buildStudentOwnedQueries('studentPersonalQuests');
 
       const paymentUnsubs = paymentsQueries.map(function(q) {
         return q.onSnapshot(function(snapshot) {
@@ -7954,11 +7955,19 @@
         }, function(err) { console.warn('studentGamificationEvents listener error:', err); });
       });
 
+      const personalQuestUnsubs = personalQuestQueries.map(function(q) {
+        return q.onSnapshot(function(snapshot) {
+          if (snapshot.metadata && snapshot.metadata.hasPendingWrites) return;
+          const changes = snapshot.docChanges();
+          if (applyDocChanges(studentPersonalQuests, changes)) refreshStudentUI();
+        }, function(err) { console.warn('studentPersonalQuests listener error:', err); });
+      });
+
       studentPaymentsUnsubscribe = function() { paymentUnsubs.forEach(function(u) { try { u(); } catch(e) {} }); };
       studentReceiptsUnsubscribe = function() { receiptUnsubs.forEach(function(u) { try { u(); } catch(e) {} }); };
       studentPaymentBundlesUnsubscribe = function() { bundleUnsubs.forEach(function(u) { try { u(); } catch(e) {} }); };
       studentGamificationUnsubscribe = function() {
-        gamificationProfileUnsubs.concat(gamificationEventUnsubs).forEach(function(u) { try { u(); } catch(e) {} });
+        gamificationProfileUnsubs.concat(gamificationEventUnsubs, personalQuestUnsubs).forEach(function(u) { try { u(); } catch(e) {} });
       };
     }
 
@@ -7996,6 +8005,7 @@
         getFirebaseCollectionQuiet('monthlyPlanSessions'),
         loadStudentOwnCollection('studentGamificationProfiles', studentDocIds, firebaseUser.uid),
         loadStudentOwnCollection('studentGamificationEvents', studentDocIds, firebaseUser.uid),
+        loadStudentOwnCollection('studentPersonalQuests', studentDocIds, firebaseUser.uid),
         (firebaseReady && db ? db.collection('gamificationLeaderboard').orderBy('level', 'desc').orderBy('exp', 'desc').limit(10).get().then(function(snap) { return snap.docs.map(function(d) { return Object.assign({ firebaseDocId: d.id }, d.data()); }).filter(function(x) { return x.deleted !== true; }); }).catch(function() { return []; }) : Promise.resolve([])),
         getFirebaseCollectionQuiet('gamificationRewards'),
         loadStudentOwnCollection('gamificationRedemptions', studentDocIds, firebaseUser.uid),
@@ -8018,14 +8028,15 @@
       replaceArray(monthlyPlanSessions, results[11]);
       replaceArray(studentGamificationProfiles, results[12]);
       replaceArray(studentGamificationEvents, results[13]);
-      replaceArray(leaderboardProfiles, results[14] || []);
-      replaceArray(gamificationRewards, results[15] || []);
-      replaceArray(gamificationRedemptions, results[16] || []);
-      replaceArray(prizeWheelItems, results[17] || []);
-      const pwSettingsArr = results[18] || [];
+      replaceArray(studentPersonalQuests, results[14] || []);
+      replaceArray(leaderboardProfiles, results[15] || []);
+      replaceArray(gamificationRewards, results[16] || []);
+      replaceArray(gamificationRedemptions, results[17] || []);
+      replaceArray(prizeWheelItems, results[18] || []);
+      const pwSettingsArr = results[19] || [];
       const pwMainStu = pwSettingsArr.find(function(s) { return s.id === 'main' || s.firebaseDocId === 'main'; });
       if (pwMainStu) prizeWheelSettings = Object.assign({ spinCost: 30, enabled: true }, pwMainStu);
-      replaceArray(prizeWheelSpins, results[19] || []);
+      replaceArray(prizeWheelSpins, results[20] || []);
 
       console.log('student-data-load-success', {
         uid: firebaseUser.uid,
@@ -8039,7 +8050,7 @@
         monthlyPlanSessionsLoaded: results[11].length,
         gamificationProfilesLoaded: results[12].length,
         gamificationEventsLoaded: results[13].length,
-        collections: ['students:own', 'courses', 'onDemandClips', 'announcements', 'scoreReports', 'adminScoreRecords', 'paymentMonths', 'lineGroups', 'payments:own', 'receipts:own', 'paymentBundles:own', 'monthlyExamLinks', 'monthlyPlanSessions', 'studentGamificationProfiles:own', 'studentGamificationEvents:own']
+        collections: ['students:own', 'courses', 'onDemandClips', 'announcements', 'scoreReports', 'adminScoreRecords', 'paymentMonths', 'lineGroups', 'payments:own', 'receipts:own', 'paymentBundles:own', 'monthlyExamLinks', 'monthlyPlanSessions', 'studentGamificationProfiles:own', 'studentGamificationEvents:own', 'studentPersonalQuests:own']
       });
       startStudentPaymentListeners(studentDocIds, firebaseUser.uid);
       return studentRecord;
@@ -8579,6 +8590,7 @@
         getFirebaseCollection('activityLogs'),
         getFirebaseCollection('studentGamificationProfiles'),
         getFirebaseCollection('studentGamificationEvents'),
+        getFirebaseCollection('studentPersonalQuests'),
         getFirebaseCollection('settings'),
         getFirebaseCollection('gamificationRewards'),
         getFirebaseCollection('gamificationRedemptions'),
@@ -8609,13 +8621,14 @@
       replaceArray(activityLogs, results[18]);
       replaceArray(studentGamificationProfiles, results[19]);
       replaceArray(studentGamificationEvents, results[20]);
-      const settingsItems = results[21];
-      replaceArray(gamificationRewards, results[22] || []);
-      replaceArray(gamificationRedemptions, results[23] || []);
-      replaceArray(expenses, results[24] || []);
-      replaceArray(prizeWheelItems, results[25] || []);
-      replaceArray(prizeWheelSpins, results[26] || []);
-      const pwSettingsItems = results[27] || [];
+      replaceArray(studentPersonalQuests, results[21] || []);
+      const settingsItems = results[22];
+      replaceArray(gamificationRewards, results[23] || []);
+      replaceArray(gamificationRedemptions, results[24] || []);
+      replaceArray(expenses, results[25] || []);
+      replaceArray(prizeWheelItems, results[26] || []);
+      replaceArray(prizeWheelSpins, results[27] || []);
+      const pwSettingsItems = results[28] || [];
       const pwMain = pwSettingsItems.find(function(s) { return s.id === 'main' || s.firebaseDocId === 'main'; });
       if (pwMain) prizeWheelSettings = Object.assign({ spinCost: 30, enabled: true }, pwMain);
       const mainSettings = settingsItems.find(function(item) { return item.id === 'main' || item.firebaseDocId === 'main'; });
@@ -9252,6 +9265,7 @@
     let currentStudent = null;
     const studentGamificationProfiles = [];
     const studentGamificationEvents = [];
+    const studentPersonalQuests = [];
     const leaderboardProfiles = [];
     const gamificationRewards = [];
     const gamificationRedemptions = [];
@@ -17684,6 +17698,7 @@
       const coins = Math.max(0, Number(profile && profile.coins) || 0);
       const sp = Math.max(0, Number(profile && profile.sp) || 0);
       const professionChangeTickets = Math.max(0, Number(profile && profile.professionChangeTickets) || 0);
+      const prizeWheelTickets = Math.max(0, Number(profile && (profile.prizeWheelTickets !== undefined ? profile.prizeWheelTickets : profile.freeSpins)) || 0);
       const rawSkill = (profile && profile.skillLevels) || {};
       const passiveLevel = Math.min(5, Math.max(1, Number(rawSkill.passive) || 1));
       const rawDqp = (profile && profile.dailyQuestProgress) || {};
@@ -17694,6 +17709,7 @@
         coins: coins,
         sp: sp,
         professionChangeTickets: professionChangeTickets,
+        prizeWheelTickets: prizeWheelTickets,
         profession: (profile && profile.profession) || 'IDEA Explorer',
         skillLevels: { passive: passiveLevel },
         dailyQuestProgress: { date: rawDqp.date || '', quests: rawDqp.quests || {} },
@@ -17712,6 +17728,10 @@
 
     function getProfessionChangeTickets(profile) {
       return Math.max(0, Number(profile && profile.professionChangeTickets) || 0);
+    }
+
+    function getPrizeWheelTickets(profile) {
+      return Math.max(0, Number(profile && (profile.prizeWheelTickets !== undefined ? profile.prizeWheelTickets : profile.freeSpins)) || 0);
     }
 
     function canChangeStudentProfession(profile) {
@@ -18324,6 +18344,67 @@
       return prof.icon + ' ' + prof.thaiLabel + ' · LV.' + profile.level + ' · ' + profile.exp + '/' + getStudentGamificationLevelMaxExp(profile.level) + ' EXP · ' + profile.coins + ' Coins';
     }
 
+    function personalQuestMatchesStudent(quest, student) {
+      if (!quest || !student) return false;
+      const studentDocId = getStudentRecordDocId(student);
+      const authUid = String(student.authUid || student.studentAuthUid || '').trim();
+      return String(quest.studentId || '') === studentDocId ||
+        (authUid && String(quest.authUid || '') === authUid);
+    }
+
+    function getPersonalQuestsForStudent(student, status) {
+      return studentPersonalQuests.filter(function(quest) {
+        return quest && quest.deleted !== true &&
+          personalQuestMatchesStudent(quest, student) &&
+          (!status || String(quest.status || 'pending') === status);
+      }).slice().sort(function(a, b) {
+        return String(b.createdAtText || '') > String(a.createdAtText || '') ? 1 : -1;
+      });
+    }
+
+    function getCurrentStudentPersonalQuests(status) {
+      return currentStudent ? getPersonalQuestsForStudent(currentStudent, status) : [];
+    }
+
+    function getPersonalQuestRewardText(quest) {
+      const parts = [];
+      const exp = Math.max(0, Number(quest && quest.rewardExp) || 0);
+      const coins = Math.max(0, Number(quest && quest.rewardCoins) || 0);
+      const tickets = Math.max(0, Number(quest && quest.rewardWheelTickets) || 0);
+      if (exp) parts.push('+' + exp + ' EXP');
+      if (coins) parts.push('+' + coins + ' Coins');
+      if (tickets) parts.push('+' + tickets + ' บัตรหมุนวงล้อ');
+      return parts.length ? parts.join(' · ') : '-';
+    }
+
+    function renderStudentPersonalQuestsHtml() {
+      if (!currentStudent) return '';
+      const pending = getCurrentStudentPersonalQuests('pending');
+      const completed = getCurrentStudentPersonalQuests('completed').slice(0, 3);
+      if (!pending.length && !completed.length) return '';
+      const pendingRows = pending.map(function(q) {
+        return '<div class="student-gamification-quest">' +
+          '<span class="student-gamification-quest-icon">🎯</span>' +
+          '<div><strong>' + escapeHtml(q.title || 'Quest รายบุคคล') + '</strong>' +
+            '<p>' + escapeHtml(q.description || 'รอครูยืนยันเมื่อทำสำเร็จ') + '</p>' +
+            '<p><strong>รางวัล:</strong> ' + escapeHtml(getPersonalQuestRewardText(q)) + ' · รอยืนยันสำเร็จ</p>' +
+          '</div>' +
+        '</div>';
+      }).join('');
+      const completedRows = completed.map(function(q) {
+        return '<div class="student-gamification-quest">' +
+          '<span class="student-gamification-quest-icon">✓</span>' +
+          '<div><strong>' + escapeHtml(q.title || 'Quest รายบุคคล') + '</strong>' +
+            '<p>สำเร็จแล้ว · ' + escapeHtml(getPersonalQuestRewardText(q)) + '</p>' +
+          '</div>' +
+        '</div>';
+      }).join('');
+      return '<div class="student-gamification-daily-quests">' +
+        '<div class="sgdq-header">🎯 Quest รายบุคคล <span class="sgdq-count">' + pending.length + ' pending</span></div>' +
+        '<div class="student-gamification-quests" style="margin-top:10px;">' + pendingRows + completedRows + '</div>' +
+      '</div>';
+    }
+
     function getActiveTeacherAwardInfo() {
       const teacher = currentTeacher || getActiveAccessRecord() || {};
       return {
@@ -18478,28 +18559,57 @@
 
     function openGiveExpBubbleForStudent(student) {
       const profile = getStudentGamificationProfile(student);
-      const curFreeSpins = Number(profile.freeSpins) || 0;
-      openEditBubble('ให้รางวัล นักเรียน',
+      const wheelTickets = getPrizeWheelTickets(profile);
+      const pendingQuests = getPersonalQuestsForStudent(student, 'pending');
+      const completedQuests = getPersonalQuestsForStudent(student, 'completed').slice(0, 3);
+      const questRows = pendingQuests.length ? pendingQuests.map(function(q) {
+        const qid = jsArg(q.firebaseDocId || q.id || '');
+        return '<div class="student-gamification-quest" style="margin-bottom:8px;">' +
+          '<span class="student-gamification-quest-icon">🎯</span>' +
+          '<div style="flex:1;min-width:0;">' +
+            '<strong>' + escapeHtml(q.title || '-') + '</strong>' +
+            '<p>' + escapeHtml(q.description || '') + '</p>' +
+            '<p><strong>รางวัล:</strong> ' + escapeHtml(getPersonalQuestRewardText(q)) + '</p>' +
+            '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px;">' +
+              '<button class="btn btn-green" type="button" onclick="completePersonalQuest(\'' + qid + '\')">ยืนยันสำเร็จ</button>' +
+              '<button class="btn btn-red" type="button" onclick="cancelPersonalQuest(\'' + qid + '\')">ยกเลิก</button>' +
+            '</div>' +
+          '</div>' +
+        '</div>';
+      }).join('') : '<p class="mini-muted">ยังไม่มี quest ที่รอยืนยัน</p>';
+      const completedRows = completedQuests.length
+        ? '<div style="margin-top:8px;"><p class="mini-muted" style="font-weight:700;">สำเร็จล่าสุด</p>' + completedQuests.map(function(q) {
+            return '<p class="mini-muted">✓ ' + escapeHtml(q.title || '-') + ' · ' + escapeHtml(getPersonalQuestRewardText(q)) + '</p>';
+          }).join('') + '</div>'
+        : '';
+      openEditBubble('มอบ Quest / ให้รางวัล',
         '<div class="notice" style="margin-bottom:14px;">' +
           '<p><strong>' + escapeHtml(student.name || '-') + '</strong> · Member ID: ' + escapeHtml(student.memberId || student.studentId || '-') + '</p>' +
-          '<p class="mini-muted">ปัจจุบัน: LV.' + escapeHtml(profile.level) + ' · ' + escapeHtml(profile.exp) + '/' + escapeHtml(getStudentGamificationLevelMaxExp(profile.level)) + ' EXP · ' + escapeHtml(profile.coins) + ' Coins · 🎟 ' + curFreeSpins + ' บัตรหมุนฟรี</p>' +
+          '<p class="mini-muted">ปัจจุบัน: LV.' + escapeHtml(profile.level) + ' · ' + escapeHtml(profile.exp) + '/' + escapeHtml(getStudentGamificationLevelMaxExp(profile.level)) + ' EXP · ' + escapeHtml(profile.coins) + ' Coins · 🎟 ' + wheelTickets + ' บัตรหมุนวงล้อ</p>' +
         '</div>' +
+        '<label>ชื่อ Quest</label>' +
+        '<input id="bubblePersonalQuestTitle" type="text" placeholder="เช่น ส่งงานครบ / ฝึกโจทย์เพิ่ม / ช่วยเพื่อนในคลาส" />' +
+        '<label>รายละเอียด Quest</label>' +
+        '<textarea id="bubblePersonalQuestDesc" rows="2" placeholder="อธิบายสิ่งที่นักเรียนต้องทำ"></textarea>' +
         '<div class="form-row">' +
-          '<div><label>EXP ที่ให้</label><input id="bubbleTeacherAwardExp" type="number" min="0" max="1000" step="1" value="20" /></div>' +
-          '<div><label>Coins ที่ให้</label><input id="bubbleTeacherAwardCoins" type="number" min="0" max="500" step="1" value="0" /></div>' +
-          '<div><label>🎟 บัตรหมุนวงล้อฟรี</label><input id="bubbleTeacherAwardFreeSpins" type="number" min="0" max="10" step="1" value="0" /><p style="font-size:11px;color:#94a3b8;margin:2px 0 0;">ใส่บัตรหมุนฟรีเพิ่ม</p></div>' +
+          '<div><label>EXP รางวัล</label><input id="bubbleTeacherAwardExp" type="number" min="0" max="1000" step="1" value="20" /></div>' +
+          '<div><label>Coins รางวัล</label><input id="bubbleTeacherAwardCoins" type="number" min="0" max="500" step="1" value="0" /></div>' +
+          '<div><label>🎟 บัตรหมุนวงล้อ</label><input id="bubbleTeacherAwardWheelTickets" type="number" min="0" max="10" step="1" value="0" /></div>' +
         '</div>' +
-        '<label>เหตุผล / กิจกรรม</label>' +
-        '<input id="bubbleTeacherAwardReason" type="text" placeholder="เช่น ตอบคำถามดี / ช่วยเพื่อน / ส่งงานครบ" />',
+        '<div class="student-gamification-daily-quests" style="margin-top:14px;">' +
+          '<div class="sgdq-header">Quest ที่รอยืนยัน <span class="sgdq-count">' + pendingQuests.length + '</span></div>' +
+          '<div style="padding:10px 0 0;">' + questRows + completedRows + '</div>' +
+        '</div>',
         async function() {
+          const title = bubbleValue('bubblePersonalQuestTitle') || 'Quest รายบุคคล';
+          const description = bubbleValue('bubblePersonalQuestDesc') || '';
           const exp = Math.max(0, Math.min(1000, Number(bubbleValue('bubbleTeacherAwardExp') || 0) || 0));
           const coins = Math.max(0, Math.min(500, Number(bubbleValue('bubbleTeacherAwardCoins') || 0) || 0));
-          const freeSpinsToGive = Math.max(0, Math.min(10, Number(bubbleValue('bubbleTeacherAwardFreeSpins') || 0) || 0));
-          const reason = bubbleValue('bubbleTeacherAwardReason') || 'ครูให้รางวัลจากรายชื่อนักเรียน';
+          const wheelTickets = Math.max(0, Math.min(10, Number(bubbleValue('bubbleTeacherAwardWheelTickets') || 0) || 0));
           const resultEl = getElement('editBubbleResult');
-          if (!exp && !coins && !freeSpinsToGive) {
+          if (!exp && !coins && !wheelTickets) {
             if (resultEl) {
-              resultEl.textContent = 'กรุณาใส่ EXP, Coins หรือบัตรหมุนฟรีอย่างน้อย 1 ค่า';
+              resultEl.textContent = 'กรุณาใส่ EXP, Coins หรือบัตรหมุนวงล้ออย่างน้อย 1 ค่า';
               resultEl.style.color = '#dc2626';
             }
             return;
@@ -18509,27 +18619,10 @@
             resultEl.style.color = '#d97706';
           }
           try {
-            if (exp > 0 || coins > 0) {
-              const sourceId = createFirebaseDocId('studentGamificationEvents');
-              await awardGamificationForStudent(student, 'teacherAward', sourceId, exp, coins, reason);
-            }
-            if (freeSpinsToGive > 0) {
-              const profileDocId = String(profile.firebaseDocId || profile.id || '');
-              const newFreeSpins = Math.max(0, curFreeSpins + freeSpinsToGive);
-              profile.freeSpins = newFreeSpins;
-              if (firebaseReady && db && profileDocId) {
-                await db.collection('studentGamificationProfiles').doc(profileDocId).set(
-                  { freeSpins: newFreeSpins, updatedAt: firebase.firestore.FieldValue.serverTimestamp() }, { merge: true }
-                );
-              }
-            }
-            const parts = [];
-            if (exp > 0) parts.push('+' + exp + ' EXP');
-            if (coins > 0) parts.push('+' + coins + ' Coins');
-            if (freeSpinsToGive > 0) parts.push('+' + freeSpinsToGive + ' 🎟 บัตรหมุนฟรี');
-            addActivityLog('ครูให้รางวัลนักเรียน', (student.name || '-') + ' · ' + parts.join(' · ') + ' · ' + reason);
+            await createPersonalQuestForStudent(student, title, description, exp, coins, wheelTickets);
+            addActivityLog('มอบ Quest รายบุคคล', (student.name || '-') + ' · ' + title + ' · ' + exp + ' EXP · ' + coins + ' Coins · ' + wheelTickets + ' บัตรหมุนวงล้อ');
             if (resultEl) {
-              resultEl.textContent = 'บันทึกรางวัลให้ ' + (student.name || '-') + ' เรียบร้อย';
+              resultEl.textContent = 'มอบ Quest ให้ ' + (student.name || '-') + ' เรียบร้อย · รอครู/แอดมินยืนยันสำเร็จ';
               resultEl.style.color = '#16a34a';
             }
             window.setTimeout(function() { closeEditBubble(); }, 600);
@@ -18541,6 +18634,143 @@
           }
         }
       );
+    }
+
+    async function createPersonalQuestForStudent(student, title, description, rewardExp, rewardCoins, rewardWheelTickets) {
+      if (!student || !firebaseReady || !db || !firebaseUser) throw new Error('Firebase ยังไม่พร้อมสำหรับมอบ Quest');
+      const actor = getActiveTeacherAwardInfo();
+      const questId = createFirebaseDocId('studentPersonalQuests');
+      const now = firebase.firestore.FieldValue.serverTimestamp();
+      const quest = {
+        id: questId,
+        firebaseDocId: questId,
+        studentId: getStudentRecordDocId(student),
+        authUid: String(student.authUid || student.studentAuthUid || '').trim(),
+        memberId: student.memberId || student.studentId || '',
+        studentName: student.name || '',
+        title: title || 'Quest รายบุคคล',
+        description: description || '',
+        rewardExp: Math.max(0, Number(rewardExp) || 0),
+        rewardCoins: Math.max(0, Number(rewardCoins) || 0),
+        rewardWheelTickets: Math.max(0, Number(rewardWheelTickets) || 0),
+        status: 'pending',
+        assignedByUid: actor.uid,
+        assignedByTeacherId: actor.teacherId,
+        assignedByName: actor.teacherName,
+        deleted: false,
+        createdAt: now,
+        createdAtText: new Date().toLocaleString('th-TH')
+      };
+      await db.collection('studentPersonalQuests').doc(questId).set(quest);
+      studentPersonalQuests.push(quest);
+      renderTeacherStudents();
+      renderStudentGamificationPanel();
+      return quest;
+    }
+
+    function findPersonalQuestById(questId) {
+      return studentPersonalQuests.find(function(q) {
+        return String(q && (q.firebaseDocId || q.id) || '') === String(questId || '');
+      }) || null;
+    }
+
+    async function completePersonalQuest(questId) {
+      const quest = findPersonalQuestById(questId);
+      if (!quest || quest.deleted === true) { alert('ไม่พบ Quest นี้'); return; }
+      if (String(quest.status || 'pending') !== 'pending') { alert('Quest นี้ถูกปิดไปแล้ว'); return; }
+      const student = students.find(function(s) {
+        return personalQuestMatchesStudent(quest, s);
+      });
+      if (!student) { alert('ไม่พบนักเรียนของ Quest นี้'); return; }
+      if (currentTeacher && !isStudentInTeacherCourseList(student, getTeacherVisibleCourses())) {
+        alert('บัญชีครูนี้ไม่มีสิทธิ์จัดการ Quest ของนักเรียนคนนี้');
+        return;
+      }
+      if (!confirm('ยืนยันว่า Quest "' + (quest.title || '-') + '" สำเร็จ และจ่ายรางวัลให้นักเรียน?')) return;
+      const actor = getActiveTeacherAwardInfo();
+      const resultEl = getElement('editBubbleResult');
+      if (resultEl) { resultEl.textContent = 'กำลังยืนยัน Quest...'; resultEl.style.color = '#d97706'; }
+      try {
+        const questDocId = String(quest.firebaseDocId || quest.id || questId);
+        const rewardExp = Math.max(0, Number(quest.rewardExp) || 0);
+        const rewardCoins = Math.max(0, Number(quest.rewardCoins) || 0);
+        const rewardTickets = Math.max(0, Number(quest.rewardWheelTickets) || 0);
+        const alreadyAwarded = studentGamificationEvents.some(function(event) {
+          return event && event.deleted !== true &&
+            String(event.sourceType || '') === 'personalQuest' &&
+            String(event.sourceId || '') === questDocId;
+        });
+        if (!alreadyAwarded && (rewardExp > 0 || rewardCoins > 0)) {
+          await awardGamificationForStudent(student, 'personalQuest', questDocId, rewardExp, rewardCoins, quest.title || 'Quest รายบุคคล');
+        }
+        if (rewardTickets > 0) {
+          const profile = getStudentGamificationProfile(student);
+          const existingProfile = findStudentGamificationProfile(student);
+          const profileId = String(profile.firebaseDocId || profile.id || getStudentGamificationProfileId(student));
+          const nextTickets = getPrizeWheelTickets(profile) + rewardTickets;
+          profile.prizeWheelTickets = nextTickets;
+          if (existingProfile) existingProfile.prizeWheelTickets = nextTickets;
+          else studentGamificationProfiles.push(profile);
+          await db.collection('studentGamificationProfiles').doc(profileId).set({
+            firebaseDocId: profileId,
+            id: profileId,
+            studentId: getStudentRecordDocId(student),
+            authUid: String(student.authUid || student.studentAuthUid || '').trim(),
+            memberId: student.memberId || student.studentId || '',
+            studentName: student.name || '',
+            nickname: student.nickname || '',
+            prizeWheelTickets: nextTickets,
+            deleted: false,
+            updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+          }, { merge: true });
+          updateLeaderboardProfileInMemory(profileId, getStudentGamificationProfile(student));
+        }
+        const updates = {
+          status: 'completed',
+          completedByUid: actor.uid,
+          completedByTeacherId: actor.teacherId,
+          completedByName: actor.teacherName,
+          completedAt: firebase.firestore.FieldValue.serverTimestamp(),
+          completedAtText: new Date().toLocaleString('th-TH')
+        };
+        await db.collection('studentPersonalQuests').doc(questDocId).set(updates, { merge: true });
+        Object.assign(quest, updates);
+        renderTeacherStudents();
+        renderStudentGamificationPanel();
+        openGiveExpBubbleForStudent(student);
+      } catch (error) {
+        console.error('completePersonalQuest error:', error);
+        if (resultEl) { resultEl.textContent = 'ยืนยันไม่สำเร็จ: ' + (error.message || error.code || ''); resultEl.style.color = '#dc2626'; }
+      }
+    }
+
+    async function cancelPersonalQuest(questId) {
+      const quest = findPersonalQuestById(questId);
+      if (!quest || quest.deleted === true) { alert('ไม่พบ Quest นี้'); return; }
+      if (String(quest.status || 'pending') !== 'pending') { alert('Quest นี้ถูกปิดไปแล้ว'); return; }
+      const student = students.find(function(s) { return personalQuestMatchesStudent(quest, s); });
+      if (student && currentTeacher && !isStudentInTeacherCourseList(student, getTeacherVisibleCourses())) {
+        alert('บัญชีครูนี้ไม่มีสิทธิ์จัดการ Quest ของนักเรียนคนนี้');
+        return;
+      }
+      if (!confirm('ยกเลิก Quest "' + (quest.title || '-') + '"?')) return;
+      try {
+        const actor = getActiveTeacherAwardInfo();
+        const updates = {
+          status: 'cancelled',
+          cancelledByUid: actor.uid,
+          cancelledByName: actor.teacherName,
+          cancelledAt: firebase.firestore.FieldValue.serverTimestamp(),
+          cancelledAtText: new Date().toLocaleString('th-TH')
+        };
+        await db.collection('studentPersonalQuests').doc(String(quest.firebaseDocId || quest.id || questId)).set(updates, { merge: true });
+        Object.assign(quest, updates);
+        renderTeacherStudents();
+        renderStudentGamificationPanel();
+        if (student) openGiveExpBubbleForStudent(student);
+      } catch (error) {
+        alert('ยกเลิก Quest ไม่สำเร็จ: ' + (error.message || error.code || ''));
+      }
     }
 
     // ===== Daily Quest System =====
@@ -18941,6 +19171,7 @@
           '<div class="student-gamification-quest"><span class="student-gamification-quest-icon">' + (examCount ? '✓' : 'A+') + '</span><div><strong>สอบออนไลน์ผ่านเกณฑ์</strong><p>' + examQuestText + '</p></div></div>' +
         '</div>' +
         renderDailyQuestsHtml(profile) +
+        renderStudentPersonalQuestsHtml() +
         renderStudentGamificationLeaderboardHtml() +
         renderStudentPrizeWheelHtml(profile) +
         renderStudentGamificationShopHtml(profile) +
@@ -19199,6 +19430,14 @@
     function getPwRarity(color) {
       return PW_RARITY_MAP[String(color || '').toLowerCase()] || null;
     }
+    function pwHexToRgba(hex, alpha) {
+      var h = String(hex || '#94a3b8').replace('#', '');
+      if (h.length === 3) h = h[0]+h[0]+h[1]+h[1]+h[2]+h[2];
+      var r = parseInt(h.slice(0,2), 16) || 148;
+      var g = parseInt(h.slice(2,4), 16) || 163;
+      var b = parseInt(h.slice(4,6), 16) || 184;
+      return 'rgba(' + r + ',' + g + ',' + b + ',' + alpha + ')';
+    }
     function onPwItemColorChange() {
       var color = getElement('pwItemColor') ? getElement('pwItemColor').value : '';
       var def = PW_RARITY_DEFAULT_WEIGHT[color];
@@ -19230,8 +19469,8 @@
       if (!prizeWheelSettings.enabled) { console.log('[PrizeWheel] ปิดใช้งาน enabled=' + prizeWheelSettings.enabled); return ''; }
       const cost = Number(prizeWheelSettings.spinCost) || 0;
       const coins = Number(profile && profile.coins) || 0;
-      const freeSpins = Number(profile && profile.freeSpins) || 0;
-      const canSpin = (freeSpins > 0 || coins >= cost) && !prizeWheelSpinning;
+      const wheelTickets = getPrizeWheelTickets(profile);
+      const canSpin = (wheelTickets > 0 || coins >= cost) && !prizeWheelSpinning;
       const recentSpins = prizeWheelSpins
         .filter(function(s) { return !s.deleted; })
         .slice().sort(function(a, b) { return String(b.createdAtText || '') > String(a.createdAtText || '') ? 1 : -1; })
@@ -19252,7 +19491,7 @@
           }).join('') + '</div>'
         : '';
 
-      return '<div class="prize-wheel-section">' +
+      return '<div class="prize-wheel-section" id="prizeWheelSection">' +
         '<div class="prize-wheel-header">🎰 วงล้อสุ่มรางวัล</div>' +
         '<div class="prize-wheel-body">' +
           '<div class="prize-wheel-reel-wrap">' +
@@ -19262,9 +19501,9 @@
             '</div>' +
           '</div>' +
           '<p class="prize-wheel-cost-tag">ค่าหมุน: <strong>' + cost + ' Coins</strong> · คุณมี <strong>' + coins + ' Coins</strong></p>' +
-          (freeSpins > 0 ? '<div style="text-align:center;margin:-4px 0 8px;font-size:13px;color:#7c3aed;font-weight:600;">🎟 บัตรหมุนวงล้อฟรีของคุณ: <strong>' + freeSpins + ' ใบ</strong></div>' : '') +
+          (wheelTickets > 0 ? '<div style="text-align:center;margin:-4px 0 8px;font-size:13px;color:#7c3aed;font-weight:600;">🎟 บัตรหมุนวงล้อของคุณ: <strong>' + wheelTickets + ' ใบ</strong></div>' : '') +
           '<button class="prize-wheel-spin-btn" id="prizeWheelSpinBtn" type="button" onclick="spinPrizeWheel()" ' + (canSpin ? '' : 'disabled') + '>' +
-            (freeSpins > 0 ? '🎟 ใช้บัตรหมุนฟรี' : coins < cost ? '🔒 Coins ไม่พอ' : '🎰 หมุนวงล้อ') +
+            (wheelTickets > 0 ? '🎟 ใช้บัตรหมุนวงล้อ' : coins < cost ? '🔒 Coins ไม่พอ' : '🎰 หมุนวงล้อ') +
           '</button>' +
           '<div class="prize-wheel-result" id="prizeWheelResult"></div>' +
           historyHtml +
@@ -19279,9 +19518,9 @@
       if (!items.length) return;
       const cost = Number(prizeWheelSettings.spinCost) || 0;
       const profile = getCurrentStudentGamificationProfile();
-      const freeSpinsAvail = Number(profile.freeSpins) || 0;
-      const usingFreeSpin = freeSpinsAvail > 0;
-      if (!usingFreeSpin && Number(profile.coins) < cost) { alert('Coins ไม่พอสำหรับการหมุน'); return; }
+      const wheelTicketsAvail = getPrizeWheelTickets(profile);
+      const usingWheelTicket = wheelTicketsAvail > 0;
+      if (!usingWheelTicket && Number(profile.coins) < cost) { alert('Coins ไม่พอสำหรับการหมุน'); return; }
 
       const winner = weightedRandomPrize(items);
       prizeWheelSpinning = true;
@@ -19319,24 +19558,72 @@
 
       // Final Y: center winner → top of window at (winnerIndex-1)*ITEM_H
       const finalY = -((winnerIndex - 1) * ITEM_H);
+      const sectionEl = getElement('prizeWheelSection');
+      const windowEl = getElement('prizeWheelWindow');
+      var pwBgRafId = null;
+      var pwLastColorIdx = -1;
+      function pwUpdateReelBg() {
+        if (!track || !prizeWheelSpinning) { pwBgRafId = null; return; }
+        try {
+          var ts = window.getComputedStyle(track).transform;
+          var currentY = 0;
+          if (ts && ts !== 'none') {
+            var vals = ts.match(/matrix\(([^)]+)\)/);
+            if (vals) { var ns = vals[1].split(','); currentY = parseFloat(ns[5]) || 0; }
+          }
+          var idx = Math.max(0, Math.min(trackItems.length - 1, Math.floor((120 - currentY) / ITEM_H)));
+          if (idx !== pwLastColorIdx) {
+            pwLastColorIdx = idx;
+            var color = (trackItems[idx] && trackItems[idx].color) || '#94a3b8';
+            if (sectionEl) {
+              sectionEl.style.background = 'linear-gradient(135deg, ' + pwHexToRgba(color, 0.18) + ' 0%, ' + pwHexToRgba(color, 0.09) + ' 100%)';
+              sectionEl.style.borderColor = pwHexToRgba(color, 0.6);
+            }
+            if (windowEl) {
+              windowEl.style.borderColor = pwHexToRgba(color, 0.7);
+              windowEl.style.boxShadow = 'inset 0 2px 8px ' + pwHexToRgba(color, 0.18);
+            }
+            var indEl = windowEl ? windowEl.querySelector('.prize-wheel-indicator') : null;
+            if (indEl) {
+              indEl.style.borderColor = pwHexToRgba(color, 0.85);
+              indEl.style.background = pwHexToRgba(color, 0.1);
+            }
+          }
+        } catch(e) {}
+        pwBgRafId = requestAnimationFrame(pwUpdateReelBg);
+      }
+
       // Delay to allow reset to paint, then animate
       setTimeout(function() {
         track.style.transition = 'transform 2.6s cubic-bezier(0.17, 0.67, 0.12, 0.99)';
         track.style.transform = 'translateY(' + finalY + 'px)';
+        pwBgRafId = requestAnimationFrame(pwUpdateReelBg);
       }, 30);
 
       // After animation ends
       setTimeout(async function() {
         prizeWheelSpinning = false;
-        // Deduct cost: free spin ticket first, else coins
+        if (pwBgRafId) { cancelAnimationFrame(pwBgRafId); pwBgRafId = null; }
+        // Apply winner color as final glow
+        var wc = winner.color || '#94a3b8';
+        if (sectionEl) {
+          sectionEl.style.background = 'linear-gradient(135deg, ' + pwHexToRgba(wc, 0.32) + ' 0%, ' + pwHexToRgba(wc, 0.16) + ' 100%)';
+          sectionEl.style.borderColor = pwHexToRgba(wc, 0.85);
+        }
+        if (windowEl) {
+          windowEl.style.borderColor = pwHexToRgba(wc, 0.9);
+          windowEl.style.boxShadow = 'inset 0 2px 12px ' + pwHexToRgba(wc, 0.28);
+        }
+        // Deduct cost: wheel ticket first, else coins
         const profileId = String(profile.firebaseDocId || profile.id || '');
-        if (usingFreeSpin) {
-          profile.freeSpins = Math.max(0, freeSpinsAvail - 1);
+        if (usingWheelTicket) {
+          profile.prizeWheelTickets = Math.max(0, wheelTicketsAvail - 1);
+          profile.freeSpins = profile.prizeWheelTickets;
           profile.updatedAtText = new Date().toLocaleString('th-TH');
           if (firebaseReady && db && profileId) {
             db.collection('studentGamificationProfiles').doc(profileId).set(
-              { freeSpins: profile.freeSpins, updatedAt: firebase.firestore.FieldValue.serverTimestamp() }, { merge: true }
-            ).catch(function(e) { console.warn('prize wheel free spin deduct error:', e); });
+              { prizeWheelTickets: profile.prizeWheelTickets, freeSpins: profile.freeSpins, updatedAt: firebase.firestore.FieldValue.serverTimestamp() }, { merge: true }
+            ).catch(function(e) { console.warn('prize wheel ticket deduct error:', e); });
           }
         } else if (cost > 0) {
           profile.coins = Math.max(0, Number(profile.coins) - cost);
@@ -19368,8 +19655,9 @@
           rewardValue: Number(winner.rewardValue) || 0,
           linkedRewardId: winner.linkedRewardId || '',
           linkedRewardTitle: winner.linkedRewardTitle || '',
-          coinsPaid: usingFreeSpin ? 0 : cost,
-          usedFreeSpin: usingFreeSpin,
+          coinsPaid: usingWheelTicket ? 0 : cost,
+          ticketUsed: usingWheelTicket,
+          usedFreeSpin: usingWheelTicket,
           createdAtText: new Date().toLocaleString('th-TH'),
           deleted: false
         };
@@ -33276,7 +33564,8 @@ function receiptStatusText(status) {
         announcements: announcements || [],
         onDemandClips: onDemandClips || [],
         studentGamificationProfiles: studentGamificationProfiles || [],
-        studentGamificationEvents: studentGamificationEvents || []
+        studentGamificationEvents: studentGamificationEvents || [],
+        studentPersonalQuests: studentPersonalQuests || []
       };
       const blob = new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json;charset=utf-8;' });
       const url = URL.createObjectURL(blob);
@@ -33391,7 +33680,7 @@ function receiptStatusText(status) {
     }
 
     const HARD_WIPE_TARGETS = [
-      { key: 'wipeAllSystem', label: 'Wipe ทั้งหมด', collections: ['students', 'payments', 'paymentBundles', 'receipts', 'paymentMonths', 'monthlyQuestions', 'monthlyExamLinks', 'monthlyPlans', 'monthlyPlanSessions', 'holidays', 'scoreReports', 'adminScoreRecords', 'announcements', 'activityLogs', 'onDemandClips', 'studentGamificationProfiles', 'studentGamificationEvents', 'attendanceHistory', 'courses', 'teachers', 'lineGroups', 'settings'], studentUsers: true, dangerous: true },
+      { key: 'wipeAllSystem', label: 'Wipe ทั้งหมด', collections: ['students', 'payments', 'paymentBundles', 'receipts', 'paymentMonths', 'monthlyQuestions', 'monthlyExamLinks', 'monthlyPlans', 'monthlyPlanSessions', 'holidays', 'scoreReports', 'adminScoreRecords', 'announcements', 'activityLogs', 'onDemandClips', 'studentGamificationProfiles', 'studentGamificationEvents', 'studentPersonalQuests', 'attendanceHistory', 'courses', 'teachers', 'lineGroups', 'settings'], studentUsers: true, dangerous: true },
       { key: 'students', label: 'นักเรียน', collections: ['students'] },
       { key: 'studentUsers', label: 'บัญชี users ของนักเรียน', studentUsers: true },
       { key: 'finance', label: 'การเงิน / ใบเสร็จ / รอบชำระเงิน', collections: ['payments', 'paymentBundles', 'receipts', 'paymentMonths'] },
@@ -33400,7 +33689,7 @@ function receiptStatusText(status) {
       { key: 'announcements', label: 'ประกาศ', collections: ['announcements'] },
       { key: 'activityLogs', label: 'ประวัติการแก้ไข', collections: ['activityLogs'] },
       { key: 'onDemandClips', label: 'คลิป On-demand', collections: ['onDemandClips'] },
-      { key: 'studentGamification', label: 'Progress / Coins นักเรียน', collections: ['studentGamificationProfiles', 'studentGamificationEvents'] },
+      { key: 'studentGamification', label: 'Progress / Coins นักเรียน', collections: ['studentGamificationProfiles', 'studentGamificationEvents', 'studentPersonalQuests'] },
       { key: 'attendanceHistory', label: 'ประวัติเข้าเรียน', collections: ['attendanceHistory'] }
     ];
 
