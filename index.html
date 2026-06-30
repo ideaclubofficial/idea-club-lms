@@ -11499,7 +11499,10 @@
           '<td' + tdNw + '><span class="' + statusClass + '">' + (s.pickupStatus || 'ไม่มา') + '</span></td>' +
           '<td' + tdNw + '>' + escapeHtml(gamificationText) + '</td>' +
           '<td' + tdNw + '><button class="btn btn-blue" type="button" onclick="previewSingleStudentIdCard(\'' + sid + '\')" style="font-size:11px;padding:3px 8px;">🪪 บัตร</button></td>' +
-          '<td' + tdNw + '><button class="btn btn-green" type="button" onclick="openTeacherGiveExpBubble(\'' + sid + '\')" style="font-size:11px;padding:3px 8px;">ให้รางวัล</button></td>' +
+          '<td' + tdNw + ' style="white-space:nowrap;">' +
+            '<button class="btn btn-blue" type="button" onclick="openTeacherGiveExpBubble(\'' + sid + '\')" style="font-size:11px;padding:3px 8px;">🎯 Quest</button> ' +
+            '<button class="btn btn-green" type="button" onclick="openTeacherGiveRewardDirectBubble(\'' + sid + '\')" style="font-size:11px;padding:3px 8px;">🎁 ให้รางวัล</button>' +
+          '</td>' +
         '</tr>';
       }).join('') : '<tr><td colspan="11">ยังไม่มีนักเรียนในเงื่อนไขที่เลือก</td></tr>';
       renderTablePagination('teacherStudentsPagination', teacherStudentsCurrentPage, tsTotalPages, filtered.length, 'changeTeacherStudentsPage');
@@ -11562,7 +11565,8 @@
           '<span class="' + statusClass + '">' + escapeHtml(status) + '</span>' +
           '<span class="teacher-mobile-actions" style="margin:0;justify-content:flex-end;">' +
             '<button class="btn btn-blue" type="button" onclick="previewSingleStudentIdCard(\'' + sid + '\')" style="font-size:11px;padding:3px 10px;">🪪 ดูบัตร</button>' +
-            '<button class="btn btn-green" type="button" onclick="openTeacherGiveExpBubble(\'' + sid + '\')" style="font-size:11px;padding:3px 10px;">ให้รางวัล</button>' +
+            '<button class="btn btn-blue" type="button" onclick="openTeacherGiveExpBubble(\'' + sid + '\')" style="font-size:11px;padding:3px 10px;">🎯 Quest</button>' +
+            '<button class="btn btn-green" type="button" onclick="openTeacherGiveRewardDirectBubble(\'' + sid + '\')" style="font-size:11px;padding:3px 10px;">🎁 ให้รางวัล</button>' +
           '</span>' +
         '</div>' +
       '</div>';
@@ -13353,7 +13357,8 @@
         '<button class="btn btn-blue" type="button" onclick="' + actionCall('editStudent', s.id) + '">แก้ไข</button>' +
         approvalBtns +
         privateLessonBtn +
-        '<button class="btn btn-green" type="button" onclick="' + actionCall('openAdminGiveExpBubble', s.id) + '">ให้รางวัล</button>' +
+        '<button class="btn btn-blue" type="button" onclick="' + actionCall('openAdminGiveExpBubble', s.id) + '">🎯 มอบ Quest</button>' +
+        '<button class="btn btn-green" type="button" onclick="' + actionCall('openAdminGiveRewardDirectBubble', s.id) + '">🎁 ให้รางวัล</button>' +
         '<button class="btn btn-blue" type="button" onclick="' + actionCall('openStudentApplicationAdmin', s.id) + '">ใบสมัคร</button>' +
         '<button class="btn btn-dark" type="button" onclick="' + actionCall('downloadStudentApplicationPdfAdmin', s.id) + '">PDF</button>' +
         '<button class="btn btn-dark" type="button" onclick="' + actionCall('openResetStudentPassword', s.id) + '">Reset รหัสผ่าน</button>' +
@@ -18541,20 +18546,40 @@
       const student = students.find(function(item) {
         return String(item.id || item.firebaseDocId || '') === String(studentId || '');
       });
-      if (!student) { alert('ไม่พบนักเรียนที่ต้องการให้ EXP'); return; }
+      if (!student) { alert('ไม่พบนักเรียน'); return; }
       openGiveExpBubbleForStudent(student);
+    }
+
+    function openAdminGiveRewardDirectBubble(studentId) {
+      const student = students.find(function(item) {
+        return String(item.id || item.firebaseDocId || '') === String(studentId || '');
+      });
+      if (!student) { alert('ไม่พบนักเรียน'); return; }
+      openGiveRewardDirectBubble(student);
     }
 
     function openTeacherGiveExpBubble(studentId) {
       const student = students.find(function(item) {
         return String(item.id || item.firebaseDocId || '') === String(studentId || '');
       });
-      if (!student) { alert('ไม่พบนักเรียนที่ต้องการให้ EXP'); return; }
+      if (!student) { alert('ไม่พบนักเรียน'); return; }
       if (!isStudentInTeacherCourseList(student, getTeacherVisibleCourses())) {
-        alert('บัญชีครูนี้ไม่มีสิทธิ์ให้ EXP นักเรียนคนนี้');
+        alert('บัญชีครูนี้ไม่มีสิทธิ์ให้รางวัลนักเรียนคนนี้');
         return;
       }
       openGiveExpBubbleForStudent(student);
+    }
+
+    function openTeacherGiveRewardDirectBubble(studentId) {
+      const student = students.find(function(item) {
+        return String(item.id || item.firebaseDocId || '') === String(studentId || '');
+      });
+      if (!student) { alert('ไม่พบนักเรียน'); return; }
+      if (!isStudentInTeacherCourseList(student, getTeacherVisibleCourses())) {
+        alert('บัญชีครูนี้ไม่มีสิทธิ์ให้รางวัลนักเรียนคนนี้');
+        return;
+      }
+      openGiveRewardDirectBubble(student);
     }
 
     function openGiveExpBubbleForStudent(student) {
@@ -18582,7 +18607,7 @@
             return '<p class="mini-muted">✓ ' + escapeHtml(q.title || '-') + ' · ' + escapeHtml(getPersonalQuestRewardText(q)) + '</p>';
           }).join('') + '</div>'
         : '';
-      openEditBubble('มอบ Quest / ให้รางวัล',
+      openEditBubble('🎯 มอบ Quest รายบุคคล',
         '<div class="notice" style="margin-bottom:14px;">' +
           '<p><strong>' + escapeHtml(student.name || '-') + '</strong> · Member ID: ' + escapeHtml(student.memberId || student.studentId || '-') + '</p>' +
           '<p class="mini-muted">ปัจจุบัน: LV.' + escapeHtml(profile.level) + ' · ' + escapeHtml(profile.exp) + '/' + escapeHtml(getStudentGamificationLevelMaxExp(profile.level)) + ' EXP · ' + escapeHtml(profile.coins) + ' Coins · 🎟 ' + wheelTickets + ' บัตรหมุนวงล้อ</p>' +
@@ -18631,6 +18656,67 @@
               resultEl.textContent = 'บันทึกไม่สำเร็จ: ' + (error.message || error.code || 'ไม่ทราบสาเหตุ');
               resultEl.style.color = '#dc2626';
             }
+          }
+        }
+      );
+    }
+
+    function openGiveRewardDirectBubble(student) {
+      const profile = getStudentGamificationProfile(student);
+      const wheelTickets = getPrizeWheelTickets(profile);
+      openEditBubble('🎁 ให้รางวัล นักเรียน',
+        '<div class="notice" style="margin-bottom:14px;">' +
+          '<p><strong>' + escapeHtml(student.name || '-') + '</strong> · Member ID: ' + escapeHtml(student.memberId || student.studentId || '-') + '</p>' +
+          '<p class="mini-muted">ปัจจุบัน: LV.' + escapeHtml(profile.level) + ' · ' + escapeHtml(profile.exp) + '/' + escapeHtml(getStudentGamificationLevelMaxExp(profile.level)) + ' EXP · ' + escapeHtml(profile.coins) + ' Coins · 🎟 ' + wheelTickets + ' บัตรหมุนวงล้อ</p>' +
+        '</div>' +
+        '<div class="form-row">' +
+          '<div><label>EXP ที่ให้</label><input id="bubbleDirectAwardExp" type="number" min="0" max="1000" step="1" value="20" /></div>' +
+          '<div><label>Coins ที่ให้</label><input id="bubbleDirectAwardCoins" type="number" min="0" max="500" step="1" value="0" /></div>' +
+          '<div><label>🎟 บัตรหมุนวงล้อ</label><input id="bubbleDirectAwardTickets" type="number" min="0" max="10" step="1" value="0" /></div>' +
+        '</div>' +
+        '<label>เหตุผล / กิจกรรม</label>' +
+        '<input id="bubbleDirectAwardReason" type="text" placeholder="เช่น ตอบคำถามดี / ช่วยเพื่อน / ส่งงานครบ" />',
+        async function() {
+          const exp = Math.max(0, Math.min(1000, Number(bubbleValue('bubbleDirectAwardExp') || 0) || 0));
+          const coins = Math.max(0, Math.min(500, Number(bubbleValue('bubbleDirectAwardCoins') || 0) || 0));
+          const tickets = Math.max(0, Math.min(10, Number(bubbleValue('bubbleDirectAwardTickets') || 0) || 0));
+          const reason = bubbleValue('bubbleDirectAwardReason') || 'ครูให้รางวัลโดยตรง';
+          const resultEl = getElement('editBubbleResult');
+          if (!exp && !coins && !tickets) {
+            if (resultEl) { resultEl.textContent = 'กรุณาใส่ EXP, Coins หรือบัตรหมุนวงล้ออย่างน้อย 1 ค่า'; resultEl.style.color = '#dc2626'; }
+            return;
+          }
+          if (resultEl) { resultEl.textContent = 'กำลังบันทึก...'; resultEl.style.color = '#d97706'; }
+          try {
+            if (exp > 0 || coins > 0) {
+              const sourceId = createFirebaseDocId('studentGamificationEvents');
+              await awardGamificationForStudent(student, 'teacherAward', sourceId, exp, coins, reason);
+            }
+            if (tickets > 0) {
+              const existingProfile = findStudentGamificationProfile(student);
+              const profileId = String(profile.firebaseDocId || profile.id || getStudentGamificationProfileId(student));
+              const nextTickets = getPrizeWheelTickets(profile) + tickets;
+              profile.prizeWheelTickets = nextTickets;
+              if (existingProfile) existingProfile.prizeWheelTickets = nextTickets;
+              await db.collection('studentGamificationProfiles').doc(profileId).set({
+                firebaseDocId: profileId, id: profileId,
+                studentId: getStudentRecordDocId(student),
+                authUid: String(student.authUid || student.studentAuthUid || '').trim(),
+                memberId: student.memberId || student.studentId || '',
+                studentName: student.name || '', nickname: student.nickname || '',
+                prizeWheelTickets: nextTickets, deleted: false,
+                updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+              }, { merge: true });
+            }
+            const parts = [];
+            if (exp > 0) parts.push('+' + exp + ' EXP');
+            if (coins > 0) parts.push('+' + coins + ' Coins');
+            if (tickets > 0) parts.push('+' + tickets + ' 🎟');
+            addActivityLog('ให้รางวัลนักเรียนโดยตรง', (student.name || '-') + ' · ' + parts.join(' · ') + ' · ' + reason);
+            if (resultEl) { resultEl.textContent = 'ให้รางวัล ' + (student.name || '-') + ' เรียบร้อย'; resultEl.style.color = '#16a34a'; }
+            window.setTimeout(function() { closeEditBubble(); }, 600);
+          } catch (error) {
+            if (resultEl) { resultEl.textContent = 'บันทึกไม่สำเร็จ: ' + (error.message || error.code || 'ไม่ทราบสาเหตุ'); resultEl.style.color = '#dc2626'; }
           }
         }
       );
