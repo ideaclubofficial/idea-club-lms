@@ -18428,14 +18428,39 @@
     function renderStudentPersonalQuestsHtml() {
       if (!currentStudent) return '';
       const pending = getCurrentStudentPersonalQuests('pending');
+      const failed = getCurrentStudentPersonalQuests('failed').slice(0, 3);
       const completed = getCurrentStudentPersonalQuests('completed').slice(0, 3);
-      if (!pending.length && !completed.length) return '';
-      const pendingRows = pending.map(function(q) {
+      if (!pending.length && !failed.length && !completed.length) return '';
+      const activePending = pending.filter(function(q) { return !isQuestExpired(q); });
+      const expiredPending = pending.filter(function(q) { return isQuestExpired(q); });
+      const pendingRows = activePending.map(function(q) {
+        const dueDateLine = q.dueDate
+          ? '<p style="font-size:10px;color:#6b7280;margin:2px 0 0;">📅 ส่งภายใน ' + formatQuestDueDate(q.dueDate) + '</p>'
+          : '';
         return '<div class="student-gamification-quest">' +
           '<span class="student-gamification-quest-icon">🎯</span>' +
           '<div><strong>' + escapeHtml(q.title || 'Quest รายบุคคล') + '</strong>' +
             '<p>' + escapeHtml(q.description || 'รอครูยืนยันเมื่อทำสำเร็จ') + '</p>' +
-            '<p><strong>รางวัล:</strong> ' + escapeHtml(getPersonalQuestRewardText(q)) + ' · รอยืนยันสำเร็จ</p>' +
+            dueDateLine +
+            '<p><strong>รางวัล:</strong> ' + escapeHtml(getPersonalQuestRewardText(q)) + ' · รอยืนยัน</p>' +
+          '</div>' +
+        '</div>';
+      }).join('');
+      const expiredRows = expiredPending.map(function(q) {
+        return '<div class="student-gamification-quest" style="border-color:#fca5a5;">' +
+          '<span class="student-gamification-quest-icon">⏰</span>' +
+          '<div><strong>' + escapeHtml(q.title || 'Quest รายบุคคล') + '</strong>' +
+            ' <span style="background:#fca5a5;color:#dc2626;border-radius:4px;padding:1px 5px;font-size:10px;font-weight:700;">หมดอายุ</span>' +
+            (q.dueDate ? '<p style="font-size:10px;color:#dc2626;margin:2px 0 0;">📅 ' + formatQuestDueDate(q.dueDate) + '</p>' : '') +
+            '<p><strong>รางวัล:</strong> ' + escapeHtml(getPersonalQuestRewardText(q)) + ' · รอครูประเมิน</p>' +
+          '</div>' +
+        '</div>';
+      }).join('');
+      const failedRows = failed.map(function(q) {
+        return '<div class="student-gamification-quest" style="border-color:#d1d5db;opacity:0.7;">' +
+          '<span class="student-gamification-quest-icon">❌</span>' +
+          '<div><strong>' + escapeHtml(q.title || 'Quest รายบุคคล') + '</strong>' +
+            '<p>ไม่ผ่าน</p>' +
           '</div>' +
         '</div>';
       }).join('');
@@ -18448,8 +18473,8 @@
         '</div>';
       }).join('');
       return '<div class="student-gamification-daily-quests">' +
-        '<div class="sgdq-header">🎯 Quest รายบุคคล <span class="sgdq-count">' + pending.length + ' pending</span></div>' +
-        '<div class="student-gamification-quests" style="margin-top:10px;">' + pendingRows + completedRows + '</div>' +
+        '<div class="sgdq-header">🎯 Quest รายบุคคล <span class="sgdq-count">' + activePending.length + ' pending</span></div>' +
+        '<div class="student-gamification-quests" style="margin-top:10px;">' + pendingRows + expiredRows + failedRows + completedRows + '</div>' +
       '</div>';
     }
 
@@ -18630,26 +18655,39 @@
       const wheelTickets = getPrizeWheelTickets(profile);
       const pendingQuests = getPersonalQuestsForStudent(student, 'pending');
       const completedQuests = getPersonalQuestsForStudent(student, 'completed').slice(0, 3);
+      const failedQuests = getPersonalQuestsForStudent(student, 'failed').slice(0, 3);
       const questRows = pendingQuests.length ? pendingQuests.map(function(q) {
         const qid = jsArg(q.firebaseDocId || q.id || '');
-        return '<div class="student-gamification-quest" style="margin-bottom:8px;">' +
-          '<span class="student-gamification-quest-icon">🎯</span>' +
+        const expired = isQuestExpired(q);
+        const dueDateLine = q.dueDate
+          ? '<p style="font-size:10px;color:' + (expired ? '#dc2626' : '#6b7280') + ';margin:2px 0 0;">📅 ' + (expired ? 'หมดอายุ ' : 'ส่งภายใน ') + formatQuestDueDate(q.dueDate) + '</p>'
+          : '';
+        return '<div class="student-gamification-quest" style="margin-bottom:8px;' + (expired ? 'border-color:#fca5a5;background:#fff5f5;' : '') + '">' +
+          '<span class="student-gamification-quest-icon">' + (expired ? '⏰' : '🎯') + '</span>' +
           '<div style="flex:1;min-width:0;">' +
             '<strong>' + escapeHtml(q.title || '-') + '</strong>' +
+            (expired ? ' <span style="background:#fca5a5;color:#dc2626;border-radius:4px;padding:1px 5px;font-size:10px;font-weight:700;">หมดอายุ</span>' : '') +
             '<p>' + escapeHtml(q.description || '') + '</p>' +
+            dueDateLine +
             '<p><strong>รางวัล:</strong> ' + escapeHtml(getPersonalQuestRewardText(q)) + '</p>' +
             '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px;">' +
-              '<button class="btn btn-green" type="button" onclick="completePersonalQuest(\'' + qid + '\')">ยืนยันสำเร็จ</button>' +
+              '<button class="btn btn-green" type="button" onclick="completePersonalQuest(\'' + qid + '\')">✅ ผ่าน</button>' +
+              '<button class="btn btn-red" type="button" onclick="failPersonalQuest(\'' + qid + '\')">❌ ไม่ผ่าน</button>' +
               '<button class="btn btn-blue" type="button" onclick="openEditPersonalQuestBubble(\'' + qid + '\')">✏️ แก้ไข</button>' +
-              '<button class="btn btn-red" type="button" onclick="cancelPersonalQuest(\'' + qid + '\')">ยกเลิก</button>' +
+              '<button class="btn" type="button" onclick="cancelPersonalQuest(\'' + qid + '\')">ยกเลิก</button>' +
             '</div>' +
           '</div>' +
         '</div>';
       }).join('') : '<p class="mini-muted">ยังไม่มี quest ที่รอยืนยัน</p>';
-      const completedRows = completedQuests.length
-        ? '<div style="margin-top:8px;"><p class="mini-muted" style="font-weight:700;">สำเร็จล่าสุด</p>' + completedQuests.map(function(q) {
-            return '<p class="mini-muted">✓ ' + escapeHtml(q.title || '-') + ' · ' + escapeHtml(getPersonalQuestRewardText(q)) + '</p>';
-          }).join('') + '</div>'
+      const historyRows = (completedQuests.length || failedQuests.length)
+        ? '<div style="margin-top:8px;"><p class="mini-muted" style="font-weight:700;">ประวัติล่าสุด</p>' +
+          completedQuests.map(function(q) {
+            return '<p class="mini-muted">✅ ' + escapeHtml(q.title || '-') + ' · ' + escapeHtml(getPersonalQuestRewardText(q)) + '</p>';
+          }).join('') +
+          failedQuests.map(function(q) {
+            return '<p class="mini-muted" style="color:#dc2626;">❌ ' + escapeHtml(q.title || '-') + ' · ไม่ผ่าน</p>';
+          }).join('') +
+          '</div>'
         : '';
       openEditBubble('🎯 มอบ Quest รายบุคคล',
         '<div class="notice" style="margin-bottom:14px;">' +
@@ -18665,9 +18703,11 @@
           '<div><label>Coins รางวัล</label><input id="bubbleTeacherAwardCoins" type="number" min="0" max="500" step="1" value="0" /></div>' +
           '<div><label>🎟 บัตรหมุนวงล้อ</label><input id="bubbleTeacherAwardWheelTickets" type="number" min="0" max="10" step="1" value="0" /></div>' +
         '</div>' +
+        '<label>วันส่ง Quest (ไม่บังคับ)</label>' +
+        '<input id="bubblePersonalQuestDue" type="date" />' +
         '<div class="student-gamification-daily-quests" style="margin-top:14px;">' +
           '<div class="sgdq-header">Quest ที่รอยืนยัน <span class="sgdq-count">' + pendingQuests.length + '</span></div>' +
-          '<div style="padding:10px 0 0;">' + questRows + completedRows + '</div>' +
+          '<div style="padding:10px 0 0;">' + questRows + historyRows + '</div>' +
         '</div>',
         async function() {
           const title = bubbleValue('bubblePersonalQuestTitle') || 'Quest รายบุคคล';
@@ -18675,6 +18715,7 @@
           const exp = Math.max(0, Math.min(1000, Number(bubbleValue('bubbleTeacherAwardExp') || 0) || 0));
           const coins = Math.max(0, Math.min(500, Number(bubbleValue('bubbleTeacherAwardCoins') || 0) || 0));
           const wheelTickets = Math.max(0, Math.min(10, Number(bubbleValue('bubbleTeacherAwardWheelTickets') || 0) || 0));
+          const dueDate = bubbleValue('bubblePersonalQuestDue') || '';
           const resultEl = getElement('editBubbleResult');
           if (!exp && !coins && !wheelTickets) {
             if (resultEl) {
@@ -18688,7 +18729,7 @@
             resultEl.style.color = '#d97706';
           }
           try {
-            await createPersonalQuestForStudent(student, title, description, exp, coins, wheelTickets);
+            await createPersonalQuestForStudent(student, title, description, exp, coins, wheelTickets, dueDate);
             addActivityLog('มอบ Quest รายบุคคล', (student.name || '-') + ' · ' + title + ' · ' + exp + ' EXP · ' + coins + ' Coins · ' + wheelTickets + ' บัตรหมุนวงล้อ');
             if (resultEl) {
               resultEl.textContent = 'มอบ Quest ให้ ' + (student.name || '-') + ' เรียบร้อย · รอครู/แอดมินยืนยันสำเร็จ';
@@ -18766,7 +18807,7 @@
       );
     }
 
-    async function createPersonalQuestForStudent(student, title, description, rewardExp, rewardCoins, rewardWheelTickets) {
+    async function createPersonalQuestForStudent(student, title, description, rewardExp, rewardCoins, rewardWheelTickets, dueDate) {
       if (!student || !firebaseReady || !db || !firebaseUser) throw new Error('Firebase ยังไม่พร้อมสำหรับมอบ Quest');
       const actor = getActiveTeacherAwardInfo();
       const questId = createFirebaseDocId('studentPersonalQuests');
@@ -18783,6 +18824,7 @@
         rewardExp: Math.max(0, Number(rewardExp) || 0),
         rewardCoins: Math.max(0, Number(rewardCoins) || 0),
         rewardWheelTickets: Math.max(0, Number(rewardWheelTickets) || 0),
+        dueDate: dueDate || '',
         status: 'pending',
         assignedByUid: actor.uid,
         assignedByTeacherId: actor.teacherId,
@@ -18804,6 +18846,22 @@
       }) || null;
     }
 
+    function isQuestExpired(quest) {
+      if (!quest || !quest.dueDate || String(quest.status || 'pending') !== 'pending') return false;
+      return String(quest.dueDate) < getTodayDateString();
+    }
+
+    function formatQuestDueDate(dueDate) {
+      if (!dueDate) return '';
+      const parts = String(dueDate).split('-');
+      if (parts.length !== 3) return dueDate;
+      const months = ['ม.ค.','ก.พ.','มี.ค.','เม.ย.','พ.ค.','มิ.ย.','ก.ค.','ส.ค.','ก.ย.','ต.ค.','พ.ย.','ธ.ค.'];
+      const d = parseInt(parts[2], 10);
+      const m = parseInt(parts[1], 10) - 1;
+      const y = parseInt(parts[0], 10) + 543;
+      return d + ' ' + (months[m] || '') + ' ' + y;
+    }
+
     async function completePersonalQuest(questId) {
       const quest = findPersonalQuestById(questId);
       if (!quest || quest.deleted === true) { alert('ไม่พบ Quest นี้'); return; }
@@ -18816,7 +18874,7 @@
         alert('บัญชีครูนี้ไม่มีสิทธิ์จัดการ Quest ของนักเรียนคนนี้');
         return;
       }
-      if (!confirm('ยืนยันว่า Quest "' + (quest.title || '-') + '" สำเร็จ และจ่ายรางวัลให้นักเรียน?')) return;
+      if (!confirm('ยืนยันว่า Quest "' + (quest.title || '-') + '" ผ่าน และจ่ายรางวัลให้นักเรียน?')) return;
       const actor = getActiveTeacherAwardInfo();
       const resultEl = getElement('editBubbleResult');
       if (resultEl) { resultEl.textContent = 'กำลังยืนยัน Quest...'; resultEl.style.color = '#d97706'; }
@@ -18874,6 +18932,40 @@
       }
     }
 
+    async function failPersonalQuest(questId) {
+      const quest = findPersonalQuestById(questId);
+      if (!quest || quest.deleted === true) { alert('ไม่พบ Quest นี้'); return; }
+      if (String(quest.status || 'pending') !== 'pending') { alert('Quest นี้ถูกปิดไปแล้ว'); return; }
+      const student = students.find(function(s) { return personalQuestMatchesStudent(quest, s); });
+      if (!student) { alert('ไม่พบนักเรียนของ Quest นี้'); return; }
+      if (currentTeacher && !isStudentInTeacherCourseList(student, getTeacherVisibleCourses())) {
+        alert('บัญชีครูนี้ไม่มีสิทธิ์จัดการ Quest ของนักเรียนคนนี้'); return;
+      }
+      if (!confirm('ยืนยันว่า Quest "' + (quest.title || '-') + '" ไม่ผ่าน? (ไม่ได้รับรางวัล)')) return;
+      const actor = getActiveTeacherAwardInfo();
+      const resultEl = getElement('editBubbleResult');
+      if (resultEl) { resultEl.textContent = 'กำลังบันทึก...'; resultEl.style.color = '#d97706'; }
+      try {
+        const questDocId = String(quest.firebaseDocId || quest.id || questId);
+        const updates = {
+          status: 'failed',
+          failedByUid: actor.uid,
+          failedByTeacherId: actor.teacherId,
+          failedByName: actor.teacherName,
+          failedAt: firebase.firestore.FieldValue.serverTimestamp(),
+          failedAtText: new Date().toLocaleString('th-TH')
+        };
+        await db.collection('studentPersonalQuests').doc(questDocId).set(updates, { merge: true });
+        Object.assign(quest, updates);
+        renderTeacherStudents();
+        renderStudentGamificationPanel();
+        openGiveExpBubbleForStudent(student);
+      } catch (error) {
+        console.error('failPersonalQuest error:', error);
+        if (resultEl) { resultEl.textContent = 'บันทึกไม่สำเร็จ: ' + (error.message || error.code || ''); resultEl.style.color = '#dc2626'; }
+      }
+    }
+
     function openEditPersonalQuestBubble(questId) {
       const quest = findPersonalQuestById(questId);
       if (!quest || quest.deleted) { alert('ไม่พบ Quest'); return; }
@@ -18890,13 +18982,16 @@
           '<div><label>EXP รางวัล</label><input id="bEPQ_exp" type="number" min="0" max="1000" step="1" value="' + (Number(quest.rewardExp) || 0) + '" /></div>' +
           '<div><label>Coins รางวัล</label><input id="bEPQ_coins" type="number" min="0" max="500" step="1" value="' + (Number(quest.rewardCoins) || 0) + '" /></div>' +
           '<div><label>🎟 บัตรหมุนวงล้อ</label><input id="bEPQ_tickets" type="number" min="0" max="10" step="1" value="' + (Number(quest.rewardWheelTickets) || 0) + '" /></div>' +
-        '</div>',
+        '</div>' +
+        '<label>วันส่ง Quest (ไม่บังคับ)</label>' +
+        '<input id="bEPQ_due" type="date" value="' + escapeHtml(quest.dueDate || '') + '" />',
         async function() {
           const title = bubbleValue('bEPQ_title') || quest.title || 'Quest รายบุคคล';
           const description = bubbleValue('bEPQ_desc') || '';
           const exp = Math.max(0, Math.min(1000, Number(bubbleValue('bEPQ_exp') || 0) || 0));
           const coins = Math.max(0, Math.min(500, Number(bubbleValue('bEPQ_coins') || 0) || 0));
           const tickets = Math.max(0, Math.min(10, Number(bubbleValue('bEPQ_tickets') || 0) || 0));
+          const dueDate = bubbleValue('bEPQ_due') || '';
           const resultEl = getElement('editBubbleResult');
           if (resultEl) { resultEl.textContent = 'กำลังบันทึก...'; resultEl.style.color = '#d97706'; }
           try {
@@ -18904,6 +18999,7 @@
             const updates = {
               title: title, description: description,
               rewardExp: exp, rewardCoins: coins, rewardWheelTickets: tickets,
+              dueDate: dueDate,
               updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
               updatedAtText: new Date().toLocaleString('th-TH')
             };
