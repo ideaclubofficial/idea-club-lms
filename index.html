@@ -6154,35 +6154,12 @@
               <div class="form-box">
                 <h3>นำเข้าข้อสอบจาก Excel</h3>
                 <p style="font-size:12px;color:#6b7280;margin-bottom:12px;">
-                  ดาวน์โหลด Template แล้วกรอกข้อสอบ จากนั้นเลือกชั้นและวิชาเพื่อเพิ่มเข้าชุดข้อสอบของเดือนที่กำลังจัดการ
+                  ดาวน์โหลด Template แล้วกรอกข้อสอบ จากนั้นเลือกชุดข้อสอบจากรายการด้านบนก่อนอัปโหลดไฟล์
                 </p>
                 <div class="form-row" style="margin-bottom:10px;">
                   <div>
-                    <label>ระดับชั้น</label>
-                    <select id="onlineExamXlsxGradeSelect" style="width:100%;">
-                      <option value="">-- เลือกระดับชั้น --</option>
-                      <option value="ป.4">ป.4</option>
-                      <option value="ป.5">ป.5</option>
-                      <option value="ป.6">ป.6</option>
-                      <option value="ม.1">ม.1</option>
-                      <option value="ม.2">ม.2</option>
-                      <option value="ม.3">ม.3</option>
-                      <option value="ม.4">ม.4</option>
-                      <option value="ม.5">ม.5</option>
-                      <option value="ม.6">ม.6</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label>วิชา</label>
-                    <select id="onlineExamXlsxSubjectSelect" style="width:100%;">
-                      <option value="">-- เลือกวิชา --</option>
-                      <option>คณิตศาสตร์</option>
-                      <option>วิทยาศาสตร์</option>
-                      <option>ภาษาอังกฤษ</option>
-                      <option>ภาษาไทย</option>
-                      <option>สังคมศึกษา</option>
-                      <option>อื่นๆ</option>
-                    </select>
+                    <label>ชุดข้อสอบเป้าหมาย</label>
+                    <div id="onlineExamXlsxTargetSummary" style="padding:10px 12px;border:1px dashed #cbd5e1;border-radius:8px;background:#f8fafc;color:#64748b;font-size:12px;">ยังไม่ได้เลือกชุดข้อสอบ</div>
                   </div>
                   <div style="align-self:flex-end;">
                     <button class="btn btn-dark" type="button" onclick="downloadExamTemplate()">📄 ดาวน์โหลด Template Excel</button>
@@ -17444,7 +17421,7 @@
       if (!studentCanUseCourseEntitlements(currentStudent)) return [];
       const opts = options || {};
       const grade = currentStudent && currentStudent.grade ? currentStudent.grade : getProfileGrade();
-      const studentLocation = String((currentStudent && (currentStudent.preferredLocation || currentStudent.location || currentStudent.center)) || '').trim();
+      const studentLocation = getStudentOnlineExamLocation(currentStudent);
       const studentDocId = currentStudent && (currentStudent.id || currentStudent.firebaseDocId) ? String(currentStudent.id || currentStudent.firebaseDocId) : '';
       const matched = (onlineExamCourseCache || []).filter(function(c) {
         if (!c) return false;
@@ -34165,6 +34142,10 @@ function receiptStatusText(status) {
       return getOnlineExamCourseLocation(course) || 'ทุกศูนย์';
     }
 
+    function getStudentOnlineExamLocation(student) {
+      return String((student && (student.preferredLocation || student.location || student.center || student.courseLocation)) || '').trim();
+    }
+
     function getOnlineExamCourseAudienceKey(course) {
       return [
         (course && course.examMonth) || '',
@@ -35094,8 +35075,29 @@ function receiptStatusText(status) {
       renderOnlineExamQuestionList();
     }
 
+    function updateOnlineExamXlsxTargetSummary() {
+      const el = getElement('onlineExamXlsxTargetSummary');
+      if (!el) return;
+      const courseId = (getElement('onlineExamQuestionCourseSelect') || {}).value || '';
+      const course = courseId
+        ? (onlineExamCourseCache || []).find(function(c) { return c.firebaseDocId === courseId; })
+        : null;
+      if (!course) {
+        el.style.borderColor = '#cbd5e1';
+        el.style.background = '#f8fafc';
+        el.style.color = '#64748b';
+        el.textContent = 'ยังไม่ได้เลือกชุดข้อสอบ';
+        return;
+      }
+      el.style.borderColor = '#bfdbfe';
+      el.style.background = '#eff6ff';
+      el.style.color = '#1e40af';
+      el.textContent = [course.title || '-', course.examMonth || '-', getOnlineExamCourseGrade(course) || '-', course.subject || '-', getOnlineExamCourseLocationLabel(course)].join(' · ');
+    }
+
     function renderOnlineExamSelectedCourseSummary() {
       const container = getElement('onlineExamSelectedCourseSummary');
+      updateOnlineExamXlsxTargetSummary();
       if (!container) return;
       const courseId = (getElement('onlineExamQuestionCourseSelect') || {}).value || '';
       if (!courseId) {
@@ -35123,7 +35125,7 @@ function receiptStatusText(status) {
             '<div style="font-size:11px;color:#4f46e5;font-weight:800;text-transform:uppercase;">กำลังจัดการ</div>' +
             '<div style="font-size:14px;font-weight:800;color:#0f172a;">' + escapeHtml(course.title || '-') + '</div>' +
             '<div style="font-size:12px;color:#475569;margin-top:2px;">' +
-              escapeHtml([course.examMonth || '-', getOnlineExamCourseGrade(course) || '-', course.subject || '-'].join(' · ')) +
+              escapeHtml([course.examMonth || '-', getOnlineExamCourseGrade(course) || '-', course.subject || '-', getOnlineExamCourseLocationLabel(course)].join(' · ')) +
               ' · ' + qCount + ' ข้อ · ' + (active ? 'Active' : 'Inactive') +
             '</div>' +
           '</div>' +
@@ -35416,6 +35418,8 @@ function receiptStatusText(status) {
     }
 
     function getOnlineExamExpectedStudents(gradeFilter, targetCourses) {
+      const courses = targetCourses || [];
+      if (!courses.length) return [];
       const targetGrades = Array.from(new Set((targetCourses || []).map(function(course) {
         return getOnlineExamCourseGrade(course);
       }).filter(Boolean)));
@@ -35424,6 +35428,11 @@ function receiptStatusText(status) {
         if (!studentCanParticipateInExams(student)) return false;
         if (gradeFilter && student.grade !== gradeFilter) return false;
         if (!gradeFilter && targetGrades.length && !targetGrades.includes(student.grade || '')) return false;
+        const studentCourses = courses.filter(function(course) {
+          const courseGrade = getOnlineExamCourseGrade(course);
+          return !courseGrade || !student.grade || courseGrade === student.grade;
+        });
+        if (!filterOnlineExamCoursesForStudentLocation(studentCourses, getStudentOnlineExamLocation(student)).length) return false;
         return true;
       }).slice().sort(function(a, b) {
         return String(a.memberId || a.studentId || '').localeCompare(String(b.memberId || b.studentId || ''), undefined, { numeric: true, sensitivity: 'base' });
@@ -35938,10 +35947,11 @@ function receiptStatusText(status) {
         if (nameKey) submittedKeysByCourseId[courseId]['name:' + nameKey] = true;
       });
       return expectedStudents.map(function(student) {
-        const studentTargetCourses = (targetCourses || []).filter(function(course) {
+        const gradeTargetCourses = (targetCourses || []).filter(function(course) {
           const courseGrade = getOnlineExamCourseGrade(course);
           return !courseGrade || !student.grade || courseGrade === student.grade;
         });
+        const studentTargetCourses = filterOnlineExamCoursesForStudentLocation(gradeTargetCourses, getStudentOnlineExamLocation(student));
         const studentKeys = getStudentOnlineExamIdentitySet(student);
         const studentNameKey = String(student.name || '').trim();
         if (studentNameKey) studentKeys.push('name:' + studentNameKey);
@@ -35971,7 +35981,7 @@ function receiptStatusText(status) {
       if (!item) return;
       const student = item.student || {};
       const lines = (item.missingCourses || []).map(function(course, i) {
-        return (i + 1) + '. ' + [course.examMonth || '', getOnlineExamCourseGrade(course) || '', course.subject || '', course.title || ''].filter(Boolean).join(' · ');
+        return (i + 1) + '. ' + [course.examMonth || '', getOnlineExamCourseGrade(course) || '', course.subject || '', getOnlineExamCourseLocationLabel(course), course.title || ''].filter(Boolean).join(' · ');
       });
       alert('ชุดข้อสอบที่ยังไม่ได้ทำของ ' + (student.name || '-') + '\n\n' + (lines.join('\n') || 'ไม่พบรายการ'));
     }
@@ -35985,7 +35995,7 @@ function receiptStatusText(status) {
         const student = item.student || {};
         const missingCount = (item.missingCourses || []).length;
         const courseRows = (item.missingCourses || []).map(function(course, ci) {
-          const courseLabel = [course.examMonth || '', getOnlineExamCourseGrade(course) || '', course.subject || '', course.title || ''].filter(Boolean).join(' · ');
+          const courseLabel = [course.examMonth || '', getOnlineExamCourseGrade(course) || '', course.subject || '', getOnlineExamCourseLocationLabel(course), course.title || ''].filter(Boolean).join(' · ');
           return '<div style="display:flex;align-items:center;gap:6px;padding:4px 0;border-bottom:1px solid #f1f5f9;">' +
             '<span style="font-size:12px;flex:1;">' + escapeHtml(courseLabel) + '</span>' +
             '<button class="btn btn-red" type="button" style="font-size:11px;padding:3px 8px;white-space:nowrap;" onclick="markStudentExamAbsent(' + index + ',\'' + jsArg(course.firebaseDocId || '') + '\')">ขาดสอบ</button>' +
@@ -36593,6 +36603,9 @@ function receiptStatusText(status) {
       const center = (getElement('manualExamCenterSel') || {}).value || '';
       const grade = (getElement('manualExamGradeSel') || {}).value || '';
       const courseId = (getElement('manualExamCourseSel') || {}).value || '';
+      const selectedCourse = (onlineExamCourseCache || []).find(function(c) { return String(c.firebaseDocId || '') === String(courseId || ''); }) || null;
+      const courseLocation = getOnlineExamCourseLocation(selectedCourse);
+      const effectiveCenter = courseLocation || center;
 
       const studentSel = getElement('manualExamStudentSel');
       if (!studentSel) return;
@@ -36601,8 +36614,12 @@ function receiptStatusText(status) {
       const filteredStudents = (students || []).filter(function(s) {
         if (!s || s.deleted || !s.name) return false;
         if (!studentCanParticipateInExams(s)) return false;
-        if (center && String(s.preferredLocation || '').trim() !== center) return false;
+        if (effectiveCenter && getStudentOnlineExamLocation(s) !== effectiveCenter) return false;
         if (grade && String(s.grade || '').trim() !== grade) return false;
+        if (selectedCourse) {
+          const courseGrade = getOnlineExamCourseGrade(selectedCourse);
+          if (courseGrade && String(s.grade || '').trim() !== courseGrade) return false;
+        }
         if (courseId) {
           const sId = String(s.id || s.firebaseDocId || '');
           const sUid = String(s.authUid || '');
@@ -36639,18 +36656,20 @@ function receiptStatusText(status) {
       const center = (getElement('manualExamCenterSel') || {}).value || '';
       const grade = (getElement('manualExamGradeSel') || {}).value || '';
 
-      const filteredCourses = (onlineExamCourseCache || []).filter(function(c) {
+      const baseCourses = (onlineExamCourseCache || []).filter(function(c) {
         if (!c || c.deleted || c.status === 'inactive' || c.isActive === false) return false;
-        if (center && String(c.location || '').trim() !== center) return false;
         if (grade && getOnlineExamCourseGrade(c) !== grade) return false;
         return true;
       });
+      const filteredCourses = center
+        ? filterOnlineExamCoursesForStudentLocation(baseCourses, center)
+        : baseCourses;
 
       const courseSel = getElement('manualExamCourseSel');
       if (courseSel) {
         courseSel.innerHTML = '<option value="">-- เลือกชุดข้อสอบ --</option>' +
           filteredCourses.map(function(c) {
-            const label = [c.examMonth || '', getOnlineExamCourseGrade(c) || '', c.subject || '', c.title || ''].filter(Boolean).join(' · ');
+            const label = [c.examMonth || '', getOnlineExamCourseGrade(c) || '', c.subject || '', getOnlineExamCourseLocationLabel(c), c.title || ''].filter(Boolean).join(' · ');
             return '<option value="' + escapeHtml(c.firebaseDocId || '') + '">' + escapeHtml(label) + '</option>';
           }).join('');
       }
@@ -37252,30 +37271,17 @@ function receiptStatusText(status) {
       // reset file input เพื่อให้ upload ไฟล์เดิมซ้ำได้
       input.value = '';
 
-      const examMonth = getSelectedOnlineExamManageMonth();
-      const selectedGrade = (getElement('onlineExamXlsxGradeSelect') || {}).value || '';
-      const selectedSubject = (getElement('onlineExamXlsxSubjectSelect') || {}).value || '';
-      if (!examMonth) {
-        if (resultEl) { resultEl.style.color = '#dc2626'; resultEl.textContent = '❌ กรุณาเลือกเดือนสอบก่อน'; }
-        return;
-      }
-      if (!selectedGrade) {
-        if (resultEl) { resultEl.style.color = '#dc2626'; resultEl.textContent = '❌ กรุณาเลือกระดับชั้นก่อน'; }
-        return;
-      }
-      if (!selectedSubject) {
-        if (resultEl) { resultEl.style.color = '#dc2626'; resultEl.textContent = '❌ กรุณาเลือกวิชาก่อน'; }
-        return;
-      }
-      const targetCourse = findOnlineExamCourseByMonthGradeSubject(examMonth, selectedGrade, selectedSubject);
+      const courseId = (getElement('onlineExamQuestionCourseSelect') || {}).value || '';
+      const targetCourse = courseId
+        ? (onlineExamCourseCache || []).find(function(c) { return c.firebaseDocId === courseId; })
+        : null;
       if (!targetCourse) {
         if (resultEl) {
           resultEl.style.color = '#dc2626';
-          resultEl.textContent = '❌ ไม่พบชุดข้อสอบของ ' + examMonth + ' · ' + selectedGrade + ' · ' + selectedSubject + ' กรุณาสร้างชุดข้อสอบก่อน';
+          resultEl.textContent = '❌ กรุณากดเลือกชุดข้อสอบจากรายการก่อนนำเข้า Excel';
         }
         return;
       }
-      const courseId = targetCourse.firebaseDocId || '';
       if (!hasPermission('admin.onlineExams')) {
         if (resultEl) { resultEl.style.color = '#dc2626'; resultEl.textContent = '❌ ไม่มีสิทธิ์ admin.onlineExams'; }
         return;
@@ -37443,7 +37449,7 @@ function receiptStatusText(status) {
       if (content) content.style.display = '';
 
       const grade = currentStudent ? (currentStudent.grade || '') : '';
-      const studentLocation = String((currentStudent && (currentStudent.preferredLocation || currentStudent.location || currentStudent.center)) || '').trim();
+      const studentLocation = getStudentOnlineExamLocation(currentStudent);
       const gradeVisible = onlineExamCourseCache.filter(function(c) {
         const courseGrade = c.grade || getOnlineExamLinkedCourseGrade(c.linkedCourseId) || '';
         if (c.status === 'inactive') return false;
