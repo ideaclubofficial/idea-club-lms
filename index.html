@@ -19722,12 +19722,23 @@
       if (!allHTracks.length) { prizeWheelSpinning = false; return; }
       allHTracks.forEach(function(t) { t.innerHTML = hTrackItems.map(pwRenderHItem).join(''); });
 
-      var hWrap0 = allHWraps[0] || null;
-      var W = hWrap0 ? hWrap0.offsetWidth : 300;
-      var startX = W / 2 - 0.5 * ITEM_W;
-      var endX = W / 2 - (winnerIdx + 0.5) * ITEM_W;
-
-      allHTracks.forEach(function(t) { t.style.transition = 'none'; t.style.transform = 'translateX(' + startX + 'px)'; });
+      // Each track may live in a panel with a different container width
+      var trackData = [];
+      allHTracks.forEach(function(t, i) {
+        var wrap = allHWraps[i] || allHWraps[0];
+        var tw = wrap ? wrap.offsetWidth : 0;
+        if (tw <= 0) {
+          allHWraps.forEach(function(w) { if (tw <= 0 && w.offsetWidth > 0) tw = w.offsetWidth; });
+        }
+        if (tw <= 0) tw = 300;
+        var sx = tw / 2 - 0.5 * ITEM_W;
+        var ex = tw / 2 - (winnerIdx + 0.5) * ITEM_W;
+        trackData.push({ t: t, W: tw, startX: sx, endX: ex });
+        t.style.transition = 'none';
+        t.style.transform = 'translateX(' + sx + 'px)';
+      });
+      var refTrack = trackData.find(function(d) { return d.W > 50; }) || trackData[0] || { W: 300, startX: 102, endX: 102 - 14 * ITEM_W };
+      var W = refTrack.W;
       if (allHTracks[0]) allHTracks[0].getBoundingClientRect();
 
       var spinStart = null;
@@ -19741,11 +19752,15 @@
         var elapsed = ts - spinStart;
         var progress = Math.min(elapsed / SPIN_DURATION, 1);
         var eased = easeOutCubic(progress);
-        var x = startX + (endX - startX) * eased;
-        allHTracks.forEach(function(t) { t.style.transform = 'translateX(' + x + 'px)'; });
+        // Animate each track with its own correct start/end based on container width
+        trackData.forEach(function(d) {
+          var x = d.startX + (d.endX - d.startX) * eased;
+          d.t.style.transform = 'translateX(' + x + 'px)';
+        });
+        var refX = refTrack.startX + (refTrack.endX - refTrack.startX) * eased;
 
         // Detect item under center indicator
-        var centerIdx = Math.max(0, Math.min(hTrackItems.length - 1, Math.round((W / 2 - x) / ITEM_W - 0.5)));
+        var centerIdx = Math.max(0, Math.min(hTrackItems.length - 1, Math.round((W / 2 - refX) / ITEM_W - 0.5)));
         var centerItem = hTrackItems[centerIdx];
         if (centerItem && sectionEl) {
           var bc = centerItem.color || '#94a3b8';
