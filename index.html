@@ -7495,6 +7495,7 @@
                   <select id="pwItemRewardType" onchange="onPwItemRewardTypeChange()">
                     <option value="coins">Coins</option>
                     <option value="exp">EXP</option>
+                    <option value="wheelTickets">🎟 ตั๋วสุ่มวงล้อ</option>
                     <option value="custom">ของรางวัลพิเศษ (บัตรแลก)</option>
                   </select>
                 </div>
@@ -20081,8 +20082,19 @@
           }
           const expGain = winner.rewardType === 'exp' ? (Number(winner.rewardValue) || 0) : 0;
           const coinsGain = winner.rewardType === 'coins' ? (Number(winner.rewardValue) || 0) : 0;
+          const ticketsGain = winner.rewardType === 'wheelTickets' ? Math.max(1, Number(winner.rewardValue) || 1) : 0;
           if (expGain > 0 || coinsGain > 0) {
             await awardStudentGamification('prizeWheel', 'spin_' + Date.now(), expGain, coinsGain, 'วงล้อสุ่มรางวัล: ' + (winner.name || '-'));
+          }
+          if (ticketsGain > 0 && firebaseReady && db) {
+            try {
+              const pIdT = String(profile.firebaseDocId || profile.id || getStudentGamificationProfileId(currentStudent));
+              const curTickets = Math.max(0, Number((findCurrentStudentGamificationProfile() || profile).prizeWheelTickets) || 0);
+              const newTickets = curTickets + ticketsGain;
+              const tProf = findCurrentStudentGamificationProfile() || profile;
+              tProf.prizeWheelTickets = newTickets;
+              await db.collection('studentGamificationProfiles').doc(pIdT).set({ prizeWheelTickets: newTickets, updatedAt: firebase.firestore.FieldValue.serverTimestamp() }, { merge: true });
+            } catch (e) { console.warn('pw ticket award:', e); }
           }
           const authUid = String((currentStudent && currentStudent.authUid) || (firebaseUser && firebaseUser.uid) || '').trim();
           const spinRecord = {
@@ -20150,7 +20162,8 @@
           }
           pwLastSpinResult = {
             text: '🎉 ได้รับ: ' + (winner.icon || '') + ' ' + (winner.name || '-') +
-              (coinsGain ? ' (+' + coinsGain + ' Coins)' : '') + (expGain ? ' (+' + expGain + ' EXP)' : '') + customLabel,
+              (coinsGain ? ' (+' + coinsGain + ' Coins)' : '') + (expGain ? ' (+' + expGain + ' EXP)' : '') +
+              (ticketsGain ? ' (+' + ticketsGain + ' 🎟 ตั๋วสุ่ม)' : '') + customLabel,
             color: '#16a34a'
           };
           pwLastWinner = winner; // persist winner so reel stays on it; cleared only on page reload
@@ -20203,7 +20216,7 @@
               '<td>' + escapeHtml(p.icon || '') + '</td>' +
               '<td>' + escapeHtml(p.name || '-') + '</td>' +
               '<td style="font-size:12px;">' + rarityHtml + '</td>' +
-              '<td>' + escapeHtml(p.rewardType === 'coins' ? '+' + p.rewardValue + ' Coins' : p.rewardType === 'exp' ? '+' + p.rewardValue + ' EXP' : p.linkedRewardTitle ? 'บัตรแลก: ' + p.linkedRewardTitle : 'ของรางวัลพิเศษ') + '</td>' +
+              '<td>' + escapeHtml(p.rewardType === 'coins' ? '+' + p.rewardValue + ' Coins' : p.rewardType === 'exp' ? '+' + p.rewardValue + ' EXP' : p.rewardType === 'wheelTickets' ? '🎟 +' + (p.rewardValue || 1) + ' ตั๋วสุ่ม' : p.linkedRewardTitle ? 'บัตรแลก: ' + p.linkedRewardTitle : 'ของรางวัลพิเศษ') + '</td>' +
               '<td style="text-align:center;">' + escapeHtml(String(p.weight || 1)) + '</td>' +
               '<td style="text-align:center;"><span class="pw-prob-badge">' + prob + '%</span></td>' +
               '<td>' +
@@ -20229,7 +20242,7 @@
             return '<tr>' +
               '<td>' + escapeHtml(s.studentName || '-') + '</td>' +
               '<td>' + escapeHtml(s.prizeIcon || '') + ' ' + escapeHtml(s.prizeName || '-') + '</td>' +
-              '<td>' + escapeHtml(s.rewardType === 'coins' ? '+' + s.rewardValue + ' Coins' : s.rewardType === 'exp' ? '+' + s.rewardValue + ' EXP' : s.linkedRewardTitle ? 'บัตรแลก: ' + s.linkedRewardTitle : 'ของรางวัลพิเศษ') + '</td>' +
+              '<td>' + escapeHtml(s.rewardType === 'coins' ? '+' + s.rewardValue + ' Coins' : s.rewardType === 'exp' ? '+' + s.rewardValue + ' EXP' : s.rewardType === 'wheelTickets' ? '🎟 +' + (s.rewardValue || 1) + ' ตั๋วสุ่ม' : s.linkedRewardTitle ? 'บัตรแลก: ' + s.linkedRewardTitle : 'ของรางวัลพิเศษ') + '</td>' +
               '<td style="text-align:center;">' + escapeHtml(String(s.coinsPaid || 0)) + ' 💰</td>' +
               '<td style="font-size:11px;color:#64748b;">' + escapeHtml(s.createdAtText || '-') + '</td>' +
             '</tr>';
@@ -20341,6 +20354,7 @@
           '<div><label>ประเภทรางวัล</label><select id="bEPW_rewardType" onchange="bEPW_onTypeChange()">' +
             '<option value="coins"' + (item.rewardType === 'coins' ? ' selected' : '') + '>Coins</option>' +
             '<option value="exp"' + (item.rewardType === 'exp' ? ' selected' : '') + '>EXP</option>' +
+            '<option value="wheelTickets"' + (item.rewardType === 'wheelTickets' ? ' selected' : '') + '>🎟 ตั๋วสุ่มวงล้อ</option>' +
             '<option value="custom"' + (item.rewardType === 'custom' ? ' selected' : '') + '>ของรางวัลพิเศษ (บัตรแลก)</option>' +
           '</select></div>' +
           '<div id="bEPW_valueWrap"' + (isCustom ? ' style="display:none;"' : '') + '><label>จำนวน / มูลค่า</label><input id="bEPW_value" type="number" min="0" step="1" style="width:90px;" value="' + (Number(item.rewardValue) || 0) + '" /></div>' +
