@@ -7429,10 +7429,10 @@
               <div class="form-row">
                 <div>
                   <label>ประเภทรางวัล</label>
-                  <select id="pwItemRewardType">
+                  <select id="pwItemRewardType" onchange="onPwItemRewardTypeChange()">
                     <option value="coins">Coins</option>
                     <option value="exp">EXP</option>
-                    <option value="custom">ของรางวัลพิเศษ</option>
+                    <option value="custom">ของรางวัลพิเศษ (บัตรแลก)</option>
                   </select>
                 </div>
                 <div><label>จำนวน / มูลค่า</label><input type="number" id="pwItemRewardValue" min="0" step="1" placeholder="50" style="width:100px;" /></div>
@@ -7442,9 +7442,16 @@
                   <p style="font-size:11px;color:#94a3b8;margin:2px 0 0;">ยิ่งมาก ยิ่งออกบ่อย</p>
                 </div>
               </div>
-              <button class="btn btn-green" type="button" onclick="adminSavePrizeWheelItem()">บันทึกรางวัล</button>
-              <button class="btn btn-dark" type="button" onclick="adminClearPrizeWheelForm()" style="margin-left:6px;">ล้างฟอร์ม</button>
-              <span id="pwItemSaveResult" style="font-size:13px;margin-left:8px;"></span>
+              <div id="pwItemLinkedRewardRow" style="display:none;margin-top:10px;">
+                <label style="display:block;font-size:13px;font-weight:600;margin-bottom:4px;">รางวัลในร้านที่เชื่อมโยง</label>
+                <select id="pwItemLinkedRewardId" style="min-width:240px;"><option value="">-- เลือกรางวัล --</option></select>
+                <p style="font-size:11px;color:#94a3b8;margin:3px 0 0;">นักเรียนที่หมุนได้รางวัลนี้จะได้รับบัตรแลกรางวัลอัตโนมัติ</p>
+              </div>
+              <div style="margin-top:12px;">
+                <button class="btn btn-green" type="button" onclick="adminSavePrizeWheelItem()">บันทึกรางวัล</button>
+                <button class="btn btn-dark" type="button" onclick="adminClearPrizeWheelForm()" style="margin-left:6px;">ล้างฟอร์ม</button>
+                <span id="pwItemSaveResult" style="font-size:13px;margin-left:8px;"></span>
+              </div>
             </div>
             <div class="form-box" style="margin-top:16px;">
               <h4 style="margin:0 0 12px;font-size:15px;color:#1e1b4b;">รายการรางวัลทั้งหมด</h4>
@@ -18984,7 +18991,7 @@
         return '<div class="prize-wheel-reel-item" style="background:' + escapeHtml(p.color || '#f8fafc') + '20;">' +
           '<span class="prize-wheel-reel-item-icon">' + escapeHtml(p.icon || '🎁') + '</span>' +
           '<span><div class="prize-wheel-reel-item-name">' + escapeHtml(p.name || '-') + '</div>' +
-          '<div class="prize-wheel-reel-item-val">' + (p.rewardType === 'coins' ? '+' + p.rewardValue + ' Coins' : p.rewardType === 'exp' ? '+' + p.rewardValue + ' EXP' : escapeHtml(p.rewardType || '')) + '</div></span>' +
+          '<div class="prize-wheel-reel-item-val">' + (p.rewardType === 'coins' ? '+' + p.rewardValue + ' Coins' : p.rewardType === 'exp' ? '+' + p.rewardValue + ' EXP' : p.linkedRewardTitle ? escapeHtml('บัตรแลก: ' + p.linkedRewardTitle) : 'ของรางวัลพิเศษ') + '</div></span>' +
         '</div>';
       }).join('');
 
@@ -19045,7 +19052,7 @@
         return '<div class="prize-wheel-reel-item" style="background:' + escapeHtml(p.color || '#f8fafc') + '20;">' +
           '<span class="prize-wheel-reel-item-icon">' + escapeHtml(p.icon || '🎁') + '</span>' +
           '<span><div class="prize-wheel-reel-item-name">' + escapeHtml(p.name || '-') + '</div>' +
-          '<div class="prize-wheel-reel-item-val">' + (p.rewardType === 'coins' ? '+' + p.rewardValue + ' Coins' : p.rewardType === 'exp' ? '+' + p.rewardValue + ' EXP' : escapeHtml(p.rewardType || '')) + '</div></span>' +
+          '<div class="prize-wheel-reel-item-val">' + (p.rewardType === 'coins' ? '+' + p.rewardValue + ' Coins' : p.rewardType === 'exp' ? '+' + p.rewardValue + ' EXP' : p.linkedRewardTitle ? escapeHtml('บัตรแลก: ' + p.linkedRewardTitle) : 'ของรางวัลพิเศษ') + '</div></span>' +
         '</div>';
       }).join('');
 
@@ -19096,6 +19103,8 @@
           prizeIcon: winner.icon || '🎁',
           rewardType: winner.rewardType || 'custom',
           rewardValue: Number(winner.rewardValue) || 0,
+          linkedRewardId: winner.linkedRewardId || '',
+          linkedRewardTitle: winner.linkedRewardTitle || '',
           coinsPaid: cost,
           createdAtText: new Date().toLocaleString('th-TH'),
           deleted: false
@@ -19109,12 +19118,45 @@
             prizeWheelSpins.push(spinRecord);
           } catch (e) { console.warn('prize wheel spin save error:', e); }
         }
+        // If custom prize with linked shop reward → auto-create redemption entry
+        if (winner.rewardType === 'custom' && winner.linkedRewardId && firebaseReady && db) {
+          try {
+            const linkedRewardDoc = gamificationRewards.find(function(r) { return String(r.firebaseDocId || r.id || '') === String(winner.linkedRewardId) && !r.deleted; });
+            const redemptionId = createFirebaseDocId('gamificationRedemptions');
+            const nowTs = firebase.firestore.FieldValue.serverTimestamp();
+            const redemption = {
+              id: redemptionId, firebaseDocId: redemptionId,
+              studentId: getStudentRecordDocId(currentStudent),
+              authUid: authUid,
+              memberId: currentStudent.memberId || currentStudent.studentId || '',
+              studentName: currentStudent.name || '',
+              rewardId: winner.linkedRewardId,
+              rewardTitle: winner.linkedRewardTitle || (linkedRewardDoc ? linkedRewardDoc.title : '') || '',
+              coinsPaid: 0,
+              fromPrizeWheel: true,
+              prizeWheelSpinId: spinRecord.id || '',
+              status: 'pending', deleted: false, createdAt: nowTs, createdAtText: new Date().toLocaleString('th-TH')
+            };
+            const rdBatch = db.batch();
+            rdBatch.set(db.collection('gamificationRedemptions').doc(redemptionId), redemption);
+            if (linkedRewardDoc && (linkedRewardDoc.stock || 0) > 0) {
+              const newStock = Math.max(0, (linkedRewardDoc.stock || 0) - 1);
+              rdBatch.set(db.collection('gamificationRewards').doc(winner.linkedRewardId), { stock: newStock, updatedAt: nowTs }, { merge: true });
+              linkedRewardDoc.stock = newStock;
+            }
+            await rdBatch.commit();
+            gamificationRedemptions.push(redemption);
+          } catch (e) { console.warn('prize wheel custom redemption error:', e); }
+        }
         // Show result
         if (resultEl) {
+          const customLabel = winner.rewardType === 'custom'
+            ? ' — บัตรแลก: ' + (winner.linkedRewardTitle || 'ของรางวัลพิเศษ') + ' (รอรับรางวัลจากแอดมิน)'
+            : '';
           resultEl.textContent = '🎉 ได้รับ: ' + (winner.icon || '') + ' ' + (winner.name || '-') +
             (coinsGain ? ' (+' + coinsGain + ' Coins)' : '') +
             (expGain ? ' (+' + expGain + ' EXP)' : '') +
-            (winner.rewardType === 'custom' ? ' — รอรับรางวัลจากแอดมิน' : '');
+            customLabel;
           resultEl.style.color = '#16a34a';
         }
         renderStudentGamificationPanel();
@@ -19156,7 +19198,7 @@
             return '<tr>' +
               '<td>' + escapeHtml(p.icon || '') + '</td>' +
               '<td>' + escapeHtml(p.name || '-') + '</td>' +
-              '<td>' + escapeHtml(p.rewardType === 'coins' ? '+' + p.rewardValue + ' Coins' : p.rewardType === 'exp' ? '+' + p.rewardValue + ' EXP' : 'พิเศษ') + '</td>' +
+              '<td>' + escapeHtml(p.rewardType === 'coins' ? '+' + p.rewardValue + ' Coins' : p.rewardType === 'exp' ? '+' + p.rewardValue + ' EXP' : p.linkedRewardTitle ? 'บัตรแลก: ' + p.linkedRewardTitle : 'ของรางวัลพิเศษ') + '</td>' +
               '<td style="text-align:center;">' + escapeHtml(String(p.weight || 1)) + '</td>' +
               '<td style="text-align:center;"><span class="pw-prob-badge">' + prob + '%</span></td>' +
               '<td>' +
@@ -19182,7 +19224,7 @@
             return '<tr>' +
               '<td>' + escapeHtml(s.studentName || '-') + '</td>' +
               '<td>' + escapeHtml(s.prizeIcon || '') + ' ' + escapeHtml(s.prizeName || '-') + '</td>' +
-              '<td>' + escapeHtml(s.rewardType === 'coins' ? '+' + s.rewardValue + ' Coins' : s.rewardType === 'exp' ? '+' + s.rewardValue + ' EXP' : 'พิเศษ') + '</td>' +
+              '<td>' + escapeHtml(s.rewardType === 'coins' ? '+' + s.rewardValue + ' Coins' : s.rewardType === 'exp' ? '+' + s.rewardValue + ' EXP' : s.linkedRewardTitle ? 'บัตรแลก: ' + s.linkedRewardTitle : 'ของรางวัลพิเศษ') + '</td>' +
               '<td style="text-align:center;">' + escapeHtml(String(s.coinsPaid || 0)) + ' 💰</td>' +
               '<td style="font-size:11px;color:#64748b;">' + escapeHtml(s.createdAtText || '-') + '</td>' +
             '</tr>';
@@ -19235,6 +19277,9 @@
       const rewardType = getElement('pwItemRewardType') ? getElement('pwItemRewardType').value : 'coins';
       const rewardValue = Math.max(0, parseInt(getElement('pwItemRewardValue') ? getElement('pwItemRewardValue').value : '0') || 0);
       const weight = Math.min(100, Math.max(1, parseInt(getElement('pwItemWeight') ? getElement('pwItemWeight').value : '10') || 10));
+      const linkedRewardId = rewardType === 'custom' && getElement('pwItemLinkedRewardId') ? getElement('pwItemLinkedRewardId').value.trim() : '';
+      const linkedRewardObj = linkedRewardId ? gamificationRewards.find(function(r) { return String(r.firebaseDocId || r.id || '') === linkedRewardId && !r.deleted; }) : null;
+      const linkedRewardTitle = linkedRewardObj ? (linkedRewardObj.title || '') : '';
       if (!name) { if (resultEl) { resultEl.textContent = 'กรุณาใส่ชื่อรางวัล'; resultEl.style.color = '#dc2626'; } return; }
       if (!firebaseReady || !db) return;
       if (resultEl) { resultEl.textContent = 'กำลังบันทึก...'; resultEl.style.color = '#d97706'; }
@@ -19243,12 +19288,12 @@
         if (editingId) {
           const existing = prizeWheelItems.find(function(p) { return (p.firebaseDocId || p.id) === editingId; });
           if (existing) {
-            Object.assign(existing, { name: name, icon: icon, color: color, rewardType: rewardType, rewardValue: rewardValue, weight: weight });
+            Object.assign(existing, { name: name, icon: icon, color: color, rewardType: rewardType, rewardValue: rewardValue, weight: weight, linkedRewardId: linkedRewardId, linkedRewardTitle: linkedRewardTitle });
             await db.collection('prizeWheelItems').doc(editingId).set(Object.assign({}, existing, { updatedAt: now }), { merge: true });
           }
         } else {
           const id = createFirebaseDocId('prizeWheelItems');
-          const item = { id: id, firebaseDocId: id, name: name, icon: icon, color: color, rewardType: rewardType, rewardValue: rewardValue, weight: weight, deleted: false, createdAt: now, createdAtText: new Date().toLocaleString('th-TH') };
+          const item = { id: id, firebaseDocId: id, name: name, icon: icon, color: color, rewardType: rewardType, rewardValue: rewardValue, weight: weight, linkedRewardId: linkedRewardId, linkedRewardTitle: linkedRewardTitle, deleted: false, createdAt: now, createdAtText: new Date().toLocaleString('th-TH') };
           await db.collection('prizeWheelItems').doc(id).set(item);
           prizeWheelItems.push(item);
         }
@@ -19270,6 +19315,8 @@
       if (getElement('pwItemRewardType')) getElement('pwItemRewardType').value = item.rewardType || 'coins';
       if (getElement('pwItemRewardValue')) getElement('pwItemRewardValue').value = item.rewardValue || 0;
       if (getElement('pwItemWeight')) getElement('pwItemWeight').value = item.weight || 10;
+      onPwItemRewardTypeChange();
+      if (item.linkedRewardId && getElement('pwItemLinkedRewardId')) getElement('pwItemLinkedRewardId').value = item.linkedRewardId || '';
       const resultEl = getElement('pwItemSaveResult');
       if (resultEl) { resultEl.textContent = 'แก้ไข: ' + (item.name || ''); resultEl.style.color = '#d97706'; }
       window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -19286,11 +19333,34 @@
       } catch (e) { alert('ลบไม่สำเร็จ: ' + (e.message || '')); }
     }
 
+    function onPwItemRewardTypeChange() {
+      const rewardType = getElement('pwItemRewardType') ? getElement('pwItemRewardType').value : 'coins';
+      const linkedRow = getElement('pwItemLinkedRewardRow');
+      const linkedSelect = getElement('pwItemLinkedRewardId');
+      if (!linkedRow) return;
+      if (rewardType === 'custom') {
+        linkedRow.style.display = '';
+        if (linkedSelect) {
+          const active = gamificationRewards.filter(function(r) { return !r.deleted && r.active !== false; });
+          const currentVal = linkedSelect.value;
+          linkedSelect.innerHTML = '<option value="">-- เลือกรางวัล --</option>' +
+            active.map(function(r) {
+              const rid = escapeHtml(r.firebaseDocId || r.id || '');
+              return '<option value="' + rid + '"' + (currentVal === rid ? ' selected' : '') + '>' + escapeHtml(r.title || '-') + '</option>';
+            }).join('');
+        }
+      } else {
+        linkedRow.style.display = 'none';
+      }
+    }
+
     function adminClearPrizeWheelForm() {
       ['editingPrizeWheelItemId','pwItemName','pwItemIcon','pwItemColor','pwItemRewardValue','pwItemWeight'].forEach(function(id) {
         var el = getElement(id); if (el) el.value = id === 'pwItemIcon' ? '🎁' : id === 'pwItemColor' ? '#6366f1' : id === 'pwItemWeight' ? '10' : '';
       });
       if (getElement('pwItemRewardType')) getElement('pwItemRewardType').value = 'coins';
+      if (getElement('pwItemLinkedRewardId')) getElement('pwItemLinkedRewardId').value = '';
+      onPwItemRewardTypeChange();
       var r = getElement('pwItemSaveResult'); if (r) r.textContent = '';
     }
 
