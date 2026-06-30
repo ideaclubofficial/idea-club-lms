@@ -9306,6 +9306,7 @@
     let prizeWheelSpinning = false;
     let pwHCurrentX = 0;
     let pwLastSpinResult = null;
+    let pwLastWinner = null; // persists until page reload — keeps reel centered on last prize
     let studentGamificationAvatarAnimations = {};
     let dailyLoginQuestTriggeredThisSession = false;
 
@@ -19707,14 +19708,38 @@
         var W = wrap ? wrap.offsetWidth : 300;
         var ITEM_W = 96;
         var count = Math.ceil(W / ITEM_W) + 4;
-        var display = [];
-        for (var j = 0; j < count; j++) display.push(items[j % items.length]);
-        track.innerHTML = display.map(pwRenderHItem).join('');
         var mid = Math.floor(count / 2);
+        var display = [];
+        if (pwLastWinner) {
+          // Keep last winner centered; fill surrounding slots from item list
+          for (var j = 0; j < count; j++) {
+            if (j === mid) {
+              display.push(pwLastWinner);
+            } else {
+              var offset = j < mid ? (mid - j - 1) : (j - mid - 1);
+              display.push(items[((offset % items.length) + items.length) % items.length]);
+            }
+          }
+        } else {
+          for (var j = 0; j < count; j++) display.push(items[j % items.length]);
+        }
+        track.innerHTML = display.map(pwRenderHItem).join('');
         pwHCurrentX = W / 2 - (mid + 0.5) * ITEM_W;
         track.style.transition = 'none';
         track.style.transform = 'translateX(' + pwHCurrentX + 'px)';
       });
+      // Re-apply winner glow so it persists across re-renders
+      if (pwLastWinner) {
+        var wc = pwLastWinner.color || '#94a3b8';
+        document.querySelectorAll('.prize-wheel-section').forEach(function(sec) {
+          sec.style.background = 'linear-gradient(135deg,' + pwHexToRgba(wc,0.35) + ' 0%,' + pwHexToRgba(wc,0.18) + ' 100%)';
+          sec.style.borderColor = pwHexToRgba(wc, 0.9);
+        });
+        document.querySelectorAll('.pw-hreel-wrap').forEach(function(w) {
+          w.style.borderColor = pwHexToRgba(wc, 0.9);
+          w.style.boxShadow = '0 2px 20px ' + pwHexToRgba(wc, 0.38);
+        });
+      }
     }
     function bEPW_onTypeChange() {
       var t = getElement('bEPW_rewardType') ? getElement('bEPW_rewardType').value : '';
@@ -19818,15 +19843,17 @@
       const resultEl = getElement('prizeWheelResult');
       if (resultEl) resultEl.textContent = '';
 
-      // Build horizontal reel: fillers → winner → 2 padding
+      // Build horizontal reel: [last winner] → fillers → winner → 2 padding
+      // If pwLastWinner exists, item 0 is the previous prize so animation starts from there
       const ITEM_W = 96;
       const FILLER_COUNT = 14;
       var hTrackItems = [];
+      if (pwLastWinner) hTrackItems.push(pwLastWinner);
       for (var fi = 0; fi < FILLER_COUNT; fi++) hTrackItems.push(items[Math.floor(Math.random() * items.length)]);
       hTrackItems.push(winner);
       hTrackItems.push(items[Math.floor(Math.random() * items.length)]);
       hTrackItems.push(items[Math.floor(Math.random() * items.length)]);
-      var winnerIdx = FILLER_COUNT;
+      var winnerIdx = (pwLastWinner ? 1 : 0) + FILLER_COUNT;
 
       var allHTracks = document.querySelectorAll('.pw-hreel-track');
       var allHWraps = document.querySelectorAll('.pw-hreel-wrap');
@@ -19985,9 +20012,10 @@
               (coinsGain ? ' (+' + coinsGain + ' Coins)' : '') + (expGain ? ' (+' + expGain + ' EXP)' : '') + customLabel,
             color: '#16a34a'
           };
+          pwLastWinner = winner; // persist winner so reel stays on it; cleared only on page reload
           // Re-render immediately with updated counts; result persists via pwLastSpinResult
           renderStudentGamificationPanel();
-          // Clear result after 6 seconds
+          // Clear result text after 6 seconds but keep pwLastWinner so reel stays on the prize
           window.setTimeout(function() { pwLastSpinResult = null; renderStudentGamificationPanel(); }, 6000);
         }, 50);
       }
