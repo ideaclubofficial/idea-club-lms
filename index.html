@@ -7435,7 +7435,10 @@
               <div id="adminStampProgressTable"></div>
             </div>
             <div class="form-box" style="margin-top:16px;">
-              <h4 style="margin:0 0 12px;font-size:15px;color:#1e1b4b;">ประวัติการแลกรางวัล</h4>
+              <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
+                <h4 style="margin:0;font-size:15px;color:#1e1b4b;">ประวัติการแลกรางวัล</h4>
+                <button class="btn btn-blue btn-sm" onclick="adminGiveVoucher()">➕ แจกบัตรแลกของ</button>
+              </div>
               <div id="adminRedemptionsTable"></div>
             </div>
           </section>
@@ -19094,10 +19097,13 @@
       } else {
         let rows = allRedemptions.map(function(r) {
           const isFulfilled = r.status === 'fulfilled';
+          const sourceTag = r.fromAdmin
+            ? '<span style="font-size:10px;background:#dbeafe;color:#1d4ed8;border-radius:4px;padding:1px 5px;font-weight:700;margin-left:4px;">👤 Admin</span>'
+            : (r.fromPrizeWheel ? '<span style="font-size:10px;background:#ede9fe;color:#6d28d9;border-radius:4px;padding:1px 5px;font-weight:700;margin-left:4px;">🎰 วงล้อ</span>' : '');
           return '<tr>' +
             '<td>' + escapeHtml(r.studentName || '-') + '</td>' +
-            '<td>' + escapeHtml(r.rewardTitle || '-') + '</td>' +
-            '<td style="text-align:center;">' + escapeHtml(r.coinsPaid) + ' 💰</td>' +
+            '<td>' + escapeHtml(r.rewardTitle || '-') + sourceTag + '</td>' +
+            '<td style="text-align:center;">' + (r.coinsPaid ? escapeHtml(r.coinsPaid) + ' 💰' : '—') + '</td>' +
             '<td>' + escapeHtml(r.createdAtText || '-') + '</td>' +
             '<td>' + (isFulfilled
               ? '<span style="color:#16a34a;font-weight:700;">✓ จัดส่งแล้ว</span>'
@@ -19230,6 +19236,84 @@
         if (item) item.status = 'fulfilled';
         renderAdminGamificationShop();
       } catch (e) { alert('อัปเดตสถานะไม่สำเร็จ: ' + (e.message || '')); }
+    }
+
+    function adminGiveVoucher() {
+      if (!firebaseUserProfile || firebaseUserProfile.role !== 'admin') {
+        alert('เฉพาะ Admin เท่านั้นที่สามารถแจกบัตรแลกของได้');
+        return;
+      }
+      const activeRewards = gamificationRewards.filter(function(r) { return !r.deleted; });
+      if (!activeRewards.length) { alert('ยังไม่มีรางวัลในระบบ กรุณาสร้างรางวัลก่อน'); return; }
+      const activeStudents = students.filter(function(s) { return s && !s.deleted; })
+        .slice().sort(function(a, b) { return String(a.name || '').localeCompare(String(b.name || ''), 'th'); });
+      if (!activeStudents.length) { alert('ไม่พบข้อมูลนักเรียน'); return; }
+
+      const studentOptions = activeStudents.map(function(s) {
+        const id = escapeHtml(String(s.firebaseDocId || s.id || s.studentId || ''));
+        const label = escapeHtml((s.name || '-') + (s.memberId ? ' (' + s.memberId + ')' : ''));
+        return '<option value="' + id + '">' + label + '</option>';
+      }).join('');
+      const rewardOptions = activeRewards.map(function(r) {
+        const id = escapeHtml(String(r.firebaseDocId || r.id || ''));
+        return '<option value="' + id + '">' + escapeHtml(r.title || '-') + '</option>';
+      }).join('');
+
+      openEditBubble('🎟 แจกบัตรแลกของ',
+        '<div style="display:flex;flex-direction:column;gap:14px;padding:2px 0;">' +
+          '<div><label style="font-size:13px;font-weight:700;display:block;margin-bottom:4px;">นักเรียน</label>' +
+            '<select id="gv_studentId" style="width:100%;">' + studentOptions + '</select></div>' +
+          '<div><label style="font-size:13px;font-weight:700;display:block;margin-bottom:4px;">รางวัล</label>' +
+            '<select id="gv_rewardId" style="width:100%;">' + rewardOptions + '</select></div>' +
+          '<div><label style="font-size:13px;font-weight:700;display:block;margin-bottom:4px;">หมายเหตุ (ถ้ามี)</label>' +
+            '<input type="text" id="gv_note" placeholder="เช่น รางวัลพิเศษประจำเดือน" style="width:100%;" /></div>' +
+        '</div>',
+        adminSaveGiveVoucher
+      );
+    }
+
+    async function adminSaveGiveVoucher() {
+      const studentId = (getElement('gv_studentId') || {}).value || '';
+      const rewardId = (getElement('gv_rewardId') || {}).value || '';
+      const note = String((getElement('gv_note') || {}).value || '').trim();
+      if (!studentId || !rewardId) { alert('กรุณาเลือกนักเรียนและรางวัล'); return; }
+
+      const student = students.find(function(s) { return String(s.firebaseDocId || s.id || s.studentId || '') === studentId; });
+      const reward = gamificationRewards.find(function(r) { return String(r.firebaseDocId || r.id || '') === rewardId && !r.deleted; });
+      if (!student || !reward) { alert('ไม่พบข้อมูลนักเรียนหรือรางวัล'); return; }
+      if (!firebaseReady || !db || !firebaseUser) { alert('ยังไม่พร้อม'); return; }
+
+      const resultEl = getElement('editBubbleResult');
+      if (resultEl) resultEl.textContent = 'กำลังบันทึก…';
+
+      const redemptionId = createFirebaseDocId('gamificationRedemptions');
+      const studentAuthUid = String(student.authUid || '').trim();
+      const redemption = {
+        id: redemptionId, firebaseDocId: redemptionId,
+        studentId: getStudentRecordDocId(student),
+        authUid: studentAuthUid,
+        memberId: student.memberId || student.studentId || '',
+        studentName: student.name || student.studentName || '',
+        rewardId: rewardId, rewardTitle: reward.title || '',
+        coinsPaid: 0, status: 'pending', deleted: false,
+        fromAdmin: true, adminNote: note,
+        createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+        createdAtText: new Date().toLocaleString('th-TH'),
+        createdByUid: String(firebaseUser.uid),
+        createdByName: String((firebaseUserProfile && (firebaseUserProfile.name || firebaseUserProfile.displayName)) || ''),
+      };
+      try {
+        await db.collection('gamificationRedemptions').doc(redemptionId).set(redemption);
+        gamificationRedemptions.push(redemption);
+        if (resultEl) resultEl.textContent = studentAuthUid ? '✅ แจกบัตรแลกของสำเร็จ' : '✅ บันทึกแล้ว (นักเรียนยังไม่ผูกบัญชี — จะไม่แสดงในหน้านักเรียน)';
+        window.setTimeout(function() {
+          getElement('editBubbleOverlay').classList.add('hidden');
+          editBubbleSaveHandler = null;
+          renderAdminGamificationShop();
+        }, 900);
+      } catch (e) {
+        if (resultEl) resultEl.textContent = '❌ ไม่สำเร็จ: ' + (e.message || e.code || '');
+      }
     }
 
     function renderStudentGamificationHtml(options) {
