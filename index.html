@@ -7401,7 +7401,13 @@
           <section id="admin-prize-wheel" class="admin-tab hidden">
             <div class="form-box">
               <h3>🎰 วงล้อสุ่มรางวัล</h3>
-              <p style="margin-bottom:18px;color:#6b7280;">ตั้งค่าวงล้อแนวตั้ง ใส่รางวัลและน้ำหนักโอกาสออก นักเรียนใช้ Coins หมุนรับรางวัล</p>
+              <p style="margin-bottom:14px;color:#6b7280;">ตั้งค่าวงล้อแนวตั้ง ใส่รางวัลและน้ำหนักโอกาสออก นักเรียนใช้ Coins หมุนรับรางวัล</p>
+
+              <div style="display:flex;align-items:center;gap:14px;margin-bottom:20px;padding:14px 16px;border-radius:10px;border:2px solid #e2e8f0;background:#f8fafc;">
+                <div id="pwToggleStatus" style="font-size:15px;font-weight:700;flex:1;"></div>
+                <button id="pwToggleBtn" type="button" onclick="adminTogglePrizeWheelEnabled()" style="font-size:13px;font-weight:700;padding:8px 20px;border:none;border-radius:8px;cursor:pointer;"></button>
+                <span id="pwToggleResult" style="font-size:12px;color:#64748b;"></span>
+              </div>
 
               <h4 style="margin:0 0 10px;font-size:15px;color:#1e1b4b;">⚙️ ตั้งค่าทั่วไป</h4>
               <div class="form-row">
@@ -7409,13 +7415,8 @@
                   <label>ค่าใช้จ่ายต่อการหมุน (Coins)</label>
                   <input type="number" id="pwSpinCost" min="0" step="1" placeholder="เช่น 30" style="width:120px;" />
                 </div>
-                <div style="display:flex;align-items:flex-end;gap:10px;">
-                  <label style="display:flex;align-items:center;gap:6px;cursor:pointer;margin-bottom:0;">
-                    <input type="checkbox" id="pwEnabled" style="width:16px;height:16px;" /> เปิดใช้งานวงล้อ
-                  </label>
-                </div>
               </div>
-              <button class="btn btn-blue" type="button" onclick="adminSavePrizeWheelSettings()" style="margin-bottom:20px;">บันทึกการตั้งค่า</button>
+              <button class="btn btn-blue" type="button" onclick="adminSavePrizeWheelSettings()" style="margin-bottom:20px;">บันทึกค่าหมุน</button>
               <span id="pwSettingsSaveResult" style="font-size:13px;margin-left:8px;"></span>
 
               <h4 style="margin:0 0 10px;font-size:15px;color:#1e1b4b;">🎁 เพิ่ม / แก้ไขรางวัล</h4>
@@ -19120,12 +19121,27 @@
       }, 2700);
     }
 
+    function renderAdminPrizeWheelToggle() {
+      const isEnabled = prizeWheelSettings.enabled !== false;
+      const statusEl = getElement('pwToggleStatus');
+      const btnEl = getElement('pwToggleBtn');
+      if (statusEl) {
+        statusEl.innerHTML = isEnabled
+          ? '<span style="color:#16a34a;">● เปิดใช้งานอยู่</span> — นักเรียนสามารถหมุนวงล้อได้'
+          : '<span style="color:#dc2626;">● ปิดใช้งานอยู่</span> — วงล้อซ่อนอยู่ในหน้านักเรียน';
+      }
+      if (btnEl) {
+        btnEl.textContent = isEnabled ? '🔴 ปิดวงล้อ' : '🟢 เปิดวงล้อ';
+        btnEl.style.background = isEnabled ? '#fee2e2' : '#dcfce7';
+        btnEl.style.color = isEnabled ? '#dc2626' : '#16a34a';
+      }
+    }
+
     function renderAdminPrizeWheel() {
       // Populate settings form
       const costEl = getElement('pwSpinCost');
-      const enabledEl = getElement('pwEnabled');
       if (costEl) costEl.value = prizeWheelSettings.spinCost !== undefined ? prizeWheelSettings.spinCost : 30;
-      if (enabledEl) enabledEl.checked = prizeWheelSettings.enabled !== false;
+      renderAdminPrizeWheelToggle();
 
       // Prize items table
       const tableEl = getElement('adminPrizeWheelTable');
@@ -19176,17 +19192,34 @@
       }
     }
 
+    async function adminTogglePrizeWheelEnabled() {
+      if (!firebaseReady || !db) return;
+      const newEnabled = prizeWheelSettings.enabled === false; // flip
+      const resultEl = getElement('pwToggleResult');
+      if (resultEl) { resultEl.textContent = 'กำลังบันทึก...'; }
+      try {
+        await db.collection('prizeWheelSettings').doc('main').set(
+          { id: 'main', firebaseDocId: 'main', enabled: newEnabled, deleted: false, updatedAt: firebase.firestore.FieldValue.serverTimestamp() },
+          { merge: true }
+        );
+        prizeWheelSettings.enabled = newEnabled;
+        if (resultEl) { resultEl.textContent = newEnabled ? 'เปิดแล้ว' : 'ปิดแล้ว'; setTimeout(function() { if (resultEl) resultEl.textContent = ''; }, 2000); }
+        renderAdminPrizeWheelToggle();
+      } catch (e) {
+        if (resultEl) { resultEl.textContent = 'ผิดพลาด: ' + (e.message || ''); }
+      }
+    }
+
     async function adminSavePrizeWheelSettings() {
       const resultEl = getElement('pwSettingsSaveResult');
       const cost = Math.max(0, parseInt(getElement('pwSpinCost') ? getElement('pwSpinCost').value : '0') || 0);
-      const enabled = getElement('pwEnabled') ? getElement('pwEnabled').checked : true;
       if (!firebaseReady || !db) return;
       if (resultEl) { resultEl.textContent = 'กำลังบันทึก...'; resultEl.style.color = '#d97706'; }
       try {
         const now = firebase.firestore.FieldValue.serverTimestamp();
-        const settings = { id: 'main', firebaseDocId: 'main', spinCost: cost, enabled: enabled, deleted: false, updatedAt: now };
+        const settings = { id: 'main', firebaseDocId: 'main', spinCost: cost, deleted: false, updatedAt: now };
         await db.collection('prizeWheelSettings').doc('main').set(settings, { merge: true });
-        prizeWheelSettings = Object.assign(prizeWheelSettings, { spinCost: cost, enabled: enabled });
+        prizeWheelSettings = Object.assign(prizeWheelSettings, { spinCost: cost });
         if (resultEl) { resultEl.textContent = 'บันทึกสำเร็จ!'; resultEl.style.color = '#16a34a'; }
       } catch (e) {
         if (resultEl) { resultEl.textContent = 'บันทึกไม่สำเร็จ: ' + (e.message || ''); resultEl.style.color = '#dc2626'; }
@@ -35032,6 +35065,65 @@ function receiptStatusText(status) {
       }
     }
 
+    function getSelectedOnlineExamQuestionIds() {
+      return Array.from(document.querySelectorAll('.online-exam-question-check:checked')).map(function(cb) {
+        return cb.value;
+      }).filter(Boolean);
+    }
+
+    function updateOnlineExamQuestionBulkDeleteState() {
+      const selectedIds = getSelectedOnlineExamQuestionIds();
+      const deleteBtn = getElement('onlineExamQuestionBulkDeleteBtn');
+      const countEl = getElement('onlineExamQuestionSelectedCount');
+      const allCheck = getElement('onlineExamQuestionSelectAll');
+      const checks = Array.from(document.querySelectorAll('.online-exam-question-check'));
+      if (deleteBtn) {
+        deleteBtn.disabled = !selectedIds.length;
+        deleteBtn.style.opacity = selectedIds.length ? '1' : '.55';
+      }
+      if (countEl) countEl.textContent = selectedIds.length ? ('เลือกแล้ว ' + selectedIds.length + ' ข้อ') : 'ยังไม่ได้เลือกข้อสอบ';
+      if (allCheck) {
+        allCheck.checked = !!checks.length && selectedIds.length === checks.length;
+        allCheck.indeterminate = selectedIds.length > 0 && selectedIds.length < checks.length;
+      }
+    }
+
+    function toggleAllOnlineExamQuestionSelection(checked) {
+      Array.from(document.querySelectorAll('.online-exam-question-check')).forEach(function(cb) {
+        cb.checked = !!checked;
+      });
+      updateOnlineExamQuestionBulkDeleteState();
+    }
+
+    async function deleteSelectedOnlineExamQuestions(courseId) {
+      if (!hasPermission('admin.onlineExams')) { alert('ไม่มีสิทธิ์'); return; }
+      const selectedIds = getSelectedOnlineExamQuestionIds();
+      if (!selectedIds.length) { alert('กรุณาติ๊กข้อสอบที่ต้องการลบก่อน'); return; }
+      if (!confirm('ลบข้อสอบที่เลือก ' + selectedIds.length + ' ข้อ?')) return;
+      try {
+        const course = onlineExamCourseCache.find(function(c) { return c.firebaseDocId === courseId; });
+        if (!course) return;
+        const selectedSet = {};
+        selectedIds.forEach(function(id) { selectedSet[id] = true; });
+        const questions = (course.questions || []).filter(function(q) { return !selectedSet[q.questionId]; });
+        const totalScore = questions.reduce(function(sum, q) { return sum + (q.score || 1); }, 0);
+        await db.collection('onlineExamCourses').doc(courseId).set(
+          { questions: questions, totalScore: totalScore, updatedAt: firebase.firestore.FieldValue.serverTimestamp() },
+          { merge: true }
+        );
+        course.questions = questions;
+        course.totalScore = totalScore;
+        addActivityLog('ลบข้อสอบ Interactive หลายข้อ', (course.title || courseId) + ' - ' + selectedIds.length + ' ข้อ');
+        resetOnlineExamQuestionForm();
+        renderOnlineExamQuestionList();
+        renderOnlineExamCourseList();
+        renderOnlineExamSelectedCourseSummary();
+        exportOnlineExamJson();
+      } catch (e) {
+        alert('ลบไม่สำเร็จ: ' + (e.message || e));
+      }
+    }
+
     function openAddOnlineExamQuestionBubble() {
       const courseId = (getElement('onlineExamQuestionCourseSelect') || {}).value || '';
       if (!courseId) { alert('กรุณาเลือกชั้นและวิชาของชุดข้อสอบก่อน'); return; }
@@ -35573,7 +35665,17 @@ function receiptStatusText(status) {
         container.innerHTML = '<p style="color:#9ca3af;font-size:13px;">ยังไม่มีข้อสอบในชุดนี้</p>';
         return;
       }
-      container.innerHTML = questions.map(function(q, idx) {
+      const bulkToolbar =
+        '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;padding:8px 10px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;margin-bottom:10px;">' +
+          '<label style="display:flex;align-items:center;gap:8px;font-size:12px;font-weight:700;color:#334155;margin:0;">' +
+            '<input id="onlineExamQuestionSelectAll" type="checkbox" onchange="toggleAllOnlineExamQuestionSelection(this.checked)" style="width:16px;height:16px;accent-color:#dc2626;"> เลือกทั้งหมด' +
+          '</label>' +
+          '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">' +
+            '<span id="onlineExamQuestionSelectedCount" style="font-size:12px;color:#64748b;">ยังไม่ได้เลือกข้อสอบ</span>' +
+            '<button id="onlineExamQuestionBulkDeleteBtn" class="btn btn-red" type="button" onclick="deleteSelectedOnlineExamQuestions(\'' + jsArg(courseId) + '\')" disabled style="font-size:11px;padding:4px 10px;opacity:.55;">ลบข้อที่เลือก</button>' +
+          '</div>' +
+        '</div>';
+      container.innerHTML = bulkToolbar + questions.map(function(q, idx) {
         const choicesList = (q.choices || []).map(function(ch, ci) {
           const choiceImage = (q.choiceImages || [])[ci];
           const choiceImageHtml = choiceImage
@@ -35588,10 +35690,12 @@ function receiptStatusText(status) {
           : '';
         return '<div style="padding:10px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;margin-bottom:8px;">' +
           '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;flex-wrap:wrap;">' +
-            '<p style="font-size:12px;font-weight:700;color:#4f46e5;margin:0;">ข้อที่ ' + (idx+1) + '</p>' +
+            '<label style="display:flex;align-items:center;gap:8px;font-size:12px;font-weight:700;color:#4f46e5;margin:0;">' +
+              '<input class="online-exam-question-check" type="checkbox" value="' + escapeHtml(q.questionId || '') + '" onchange="updateOnlineExamQuestionBulkDeleteState()" style="width:16px;height:16px;accent-color:#dc2626;"> ข้อที่ ' + (idx+1) +
+            '</label>' +
             '<div style="display:flex;gap:6px;">' +
-              '<button class="btn btn-blue" onclick="editOnlineExamQuestion(\'' + courseId + '\',\'' + q.questionId + '\')" style="font-size:10px;padding:3px 8px;">✏️</button>' +
-              '<button class="btn btn-red" onclick="deleteOnlineExamQuestion(\'' + courseId + '\',\'' + q.questionId + '\')" style="font-size:10px;padding:3px 8px;">🗑️</button>' +
+              '<button class="btn btn-blue" onclick="editOnlineExamQuestion(\'' + jsArg(courseId) + '\',\'' + jsArg(q.questionId || '') + '\')" style="font-size:10px;padding:3px 8px;">✏️</button>' +
+              '<button class="btn btn-red" onclick="deleteOnlineExamQuestion(\'' + jsArg(courseId) + '\',\'' + jsArg(q.questionId || '') + '\')" style="font-size:10px;padding:3px 8px;">🗑️</button>' +
             '</div>' +
           '</div>' +
           '<p style="font-size:13px;margin:4px 0 6px;white-space:pre-wrap;">' + onlineExamRichTextHtml(q.text || '', q.textHtml) + '</p>' +
@@ -35599,6 +35703,7 @@ function receiptStatusText(status) {
           choicesList +
         '</div>';
       }).join('');
+      updateOnlineExamQuestionBulkDeleteState();
     }
 
     function buildOnlineExamPrintableHtml(course) {
