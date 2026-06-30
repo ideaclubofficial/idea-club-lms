@@ -21189,6 +21189,7 @@
       }
       const ocrBtn = p && paymentHasOcrData(p) ? '<button class="btn btn-blue" type="button" onclick="' + actionCall('viewPaymentOcrDetail', paymentId) + '">OCR</button>' : '';
       const moveSlipBtn = p && canMovePaymentSlipToAnotherMonth(p) ? '<button class="btn btn-dark" type="button" onclick="' + actionCall('openMovePaymentSlipMonthModal', paymentId) + '">ย้ายสลิปไปเดือนอื่น</button>' : '';
+      const deleteSlipBtn = p && canDeletePaymentSlip(p) ? '<button class="btn btn-red" type="button" onclick="' + actionCall('deletePaymentSlipOnly', paymentId) + '">ลบสลิป</button>' : '';
       const isOverdue = displayStatus === 'ค้างชำระ';
       const overdueNoticeBtn = isOverdue && paymentId ? '<button class="btn btn-orange" type="button" onclick="' + actionCall('printOverdueNotice', paymentId) + '">ใบแจ้งหนี้</button>' : '';
       if (isPaid) {
@@ -21210,6 +21211,7 @@
         '<button class="btn btn-red" type="button" onclick="setPaymentOverdue(this)">ค้างชำระ</button>' +
         overdueNoticeBtn +
         moveSlipBtn +
+        deleteSlipBtn +
         '<button class="btn ' + (isPaid ? 'btn-green' : 'btn-dark') + '" type="button" onclick="createReceiptFromPaymentRow(this)">ใบเสร็จ</button>' +
         '<button class="btn btn-blue" type="button" onclick="showPaymentDetail(this)">ดูข้อมูล</button>' +
         ocrBtn +
@@ -21688,6 +21690,9 @@
       const moveSlipBtn = canMovePaymentSlipToAnotherMonth(payment)
         ? '<button class="btn btn-dark" type="button" onclick="openMovePaymentSlipMonthModal(\'' + jsArg(String(paymentId)) + '\')">ย้ายสลิปไปเดือนอื่น</button>'
         : '';
+      const deleteSlipBtn = canDeletePaymentSlip(payment)
+        ? '<button class="btn btn-red" type="button" onclick="deletePaymentSlipOnly(\'' + jsArg(String(paymentId)) + '\')">ลบสลิป</button>'
+        : '';
       openViewBubble('ตรวจสลิปการชำระเงิน',
         '<div style="display:flex;gap:20px;flex-wrap:wrap;align-items:flex-start;">' +
         '<div style="flex:1 1 220px;">' + slipHtml + '</div>' +
@@ -21703,6 +21708,7 @@
         '<button id="slipModalApproveBtn" class="btn btn-green" type="button" onclick="approvePaymentByIdFromModal(\'' + jsArg(String(paymentId)) + '\')">✓ อนุมัติ</button>' +
         '<button id="slipModalRejectBtn" class="btn btn-red" type="button" onclick="rejectPaymentByIdFromModal(\'' + jsArg(String(paymentId)) + '\')">✗ ไม่ผ่าน</button>' +
         moveSlipBtn +
+        deleteSlipBtn +
         (slipUrl ? '<a class="btn btn-blue" href="' + escapeHtml(slipUrl) + '" target="_blank" rel="noopener">เปิดสลิปเต็ม</a>' : '') +
         '<button class="btn btn-dark" type="button" onclick="closeEditBubble()">ปิด</button>' +
         '</div>'
@@ -23245,6 +23251,19 @@
       return true;
     }
 
+    function canManagePaymentSlipDeletion() {
+      return hasPermission('admin.finance') || hasPermission('admin.payments') || hasPermission('admin.full') || isStaffAccount(firebaseUserProfile);
+    }
+
+    function canDeletePaymentSlip(payment) {
+      if (!canManagePaymentSlipDeletion()) return false;
+      if (!payment || !paymentHasUploadedSlip(payment)) return false;
+      if (isPaymentInActiveBundle(payment)) return false;
+      if (getPaymentDisplayStatus(payment) === 'ชำระแล้ว') return false;
+      if (payment.receiptId || payment.receiptNo || payment.receiptStatus) return false;
+      return true;
+    }
+
     function canReceiveMovedPaymentSlip(payment) {
       if (!payment || payment.deleted === true) return false;
       if (isPaymentInActiveBundle(payment)) return false;
@@ -23302,6 +23321,40 @@
       });
       payment.slipStatus = '';
       payment.adminReviewStatus = '';
+    }
+
+    async function deletePaymentSlipOnly(paymentId) {
+      const payment = findPaymentByAnyId(paymentId);
+      if (!payment) { alert('ไม่พบรายการชำระเงิน'); return; }
+      if (!canDeletePaymentSlip(payment)) {
+        alert('รายการนี้ไม่สามารถลบสลิปได้ เพราะชำระแล้ว มีใบเสร็จ อยู่ในยอดรวม หรือยังไม่มีสลิป');
+        return;
+      }
+      const month = payment.month || payment.paymentMonth || '-';
+      if (!confirm('ลบสลิปออกจากรายการของ ' + (payment.student || '-') + ' เดือน ' + month + '?\n\nระบบจะลบเฉพาะข้อมูลสลิปในระบบ ไม่ลบไฟล์จริงใน Google Drive')) return;
+
+      const nowText = new Date().toLocaleString('th-TH');
+      const note = 'Admin ลบสลิปออกจากรายการเดือน ' + month + ' เมื่อ ' + nowText;
+      clearPaymentSlipFields(payment);
+      payment.status = 'รอชำระเงิน';
+      payment.paymentStatus = 'รอชำระเงิน';
+      payment.slipNote = note;
+      appendPaymentAdminNote(payment, note);
+      payment.updatedAtText = nowText;
+
+      try {
+        await setFirebaseDocument('payments', payment);
+        await syncStudentPaymentStatusFromPayment(payment, 'รอชำระเงิน');
+        await addActivityLog('ลบสลิปออกจากรายการชำระเงิน', (payment.student || '-') + ' · ' + month + ' · ลบเฉพาะข้อมูลในระบบ ไม่ลบไฟล์ Drive');
+        renderPaymentTable();
+        renderAdminDashboard();
+        renderStudentReceipts();
+        safeRun(renderStudentMobilePayment, 'delete-payment-slip-mobile');
+        closeEditBubble();
+      } catch (error) {
+        console.error('delete payment slip only error:', error);
+        alert('ลบสลิปไม่สำเร็จ: ' + (error.message || error.code || error));
+      }
     }
 
     function openMovePaymentSlipMonthModal(paymentId) {
