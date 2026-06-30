@@ -17215,7 +17215,7 @@
           mimeType: file.type,
           folderType: 'payment-slips',
           studentId: (bundle.memberIds || [])[0] || currentStudent.memberId || currentStudent.studentId || currentStudent.id || '',
-          studentName: (bundle.studentNames || []).join(', ') || currentStudent.name || '',
+          studentName: getBundleSlipUploadStudentName(bundle),
           paymentId: bundle.id || bundle.firebaseDocId || '',
           month: (bundle.months || []).join(', '),
           courseId: currentStudent.courseId || '',
@@ -21188,6 +21188,7 @@
         '</div>';
       }
       const ocrBtn = p && paymentHasOcrData(p) ? '<button class="btn btn-blue" type="button" onclick="' + actionCall('viewPaymentOcrDetail', paymentId) + '">OCR</button>' : '';
+      const moveSlipBtn = p && canMovePaymentSlipToAnotherMonth(p) ? '<button class="btn btn-dark" type="button" onclick="' + actionCall('openMovePaymentSlipMonthModal', paymentId) + '">ย้ายสลิปไปเดือนอื่น</button>' : '';
       const isOverdue = displayStatus === 'ค้างชำระ';
       const overdueNoticeBtn = isOverdue && paymentId ? '<button class="btn btn-orange" type="button" onclick="' + actionCall('printOverdueNotice', paymentId) + '">ใบแจ้งหนี้</button>' : '';
       if (isPaid) {
@@ -21208,6 +21209,7 @@
         '<button class="btn btn-dark" type="button" onclick="paymentCash(this)">💵 จ่ายเงินสด</button>' +
         '<button class="btn btn-red" type="button" onclick="setPaymentOverdue(this)">ค้างชำระ</button>' +
         overdueNoticeBtn +
+        moveSlipBtn +
         '<button class="btn ' + (isPaid ? 'btn-green' : 'btn-dark') + '" type="button" onclick="createReceiptFromPaymentRow(this)">ใบเสร็จ</button>' +
         '<button class="btn btn-blue" type="button" onclick="showPaymentDetail(this)">ดูข้อมูล</button>' +
         ocrBtn +
@@ -21683,6 +21685,9 @@
         : '<div style="padding:40px;text-align:center;color:#9ca3af;background:#f8fafc;border-radius:8px;border:1.5px dashed #e2e8f0;">ยังไม่มีสลิป</div>';
       const ocrNote = payment.ocrCheckNote ? '<div class="receipt-line"><strong>OCR</strong><span class="mini-muted">' + escapeHtml(payment.ocrCheckNote) + '</span></div>' : '';
       const adminNote = payment.adminNote ? '<div class="receipt-line"><strong>หมายเหตุ</strong><span>' + escapeHtml(payment.adminNote) + '</span></div>' : '';
+      const moveSlipBtn = canMovePaymentSlipToAnotherMonth(payment)
+        ? '<button class="btn btn-dark" type="button" onclick="openMovePaymentSlipMonthModal(\'' + jsArg(String(paymentId)) + '\')">ย้ายสลิปไปเดือนอื่น</button>'
+        : '';
       openViewBubble('ตรวจสลิปการชำระเงิน',
         '<div style="display:flex;gap:20px;flex-wrap:wrap;align-items:flex-start;">' +
         '<div style="flex:1 1 220px;">' + slipHtml + '</div>' +
@@ -21697,6 +21702,7 @@
         '<div class="test-actions" style="margin-top:18px;">' +
         '<button id="slipModalApproveBtn" class="btn btn-green" type="button" onclick="approvePaymentByIdFromModal(\'' + jsArg(String(paymentId)) + '\')">✓ อนุมัติ</button>' +
         '<button id="slipModalRejectBtn" class="btn btn-red" type="button" onclick="rejectPaymentByIdFromModal(\'' + jsArg(String(paymentId)) + '\')">✗ ไม่ผ่าน</button>' +
+        moveSlipBtn +
         (slipUrl ? '<a class="btn btn-blue" href="' + escapeHtml(slipUrl) + '" target="_blank" rel="noopener">เปิดสลิปเต็ม</a>' : '') +
         '<button class="btn btn-dark" type="button" onclick="closeEditBubble()">ปิด</button>' +
         '</div>'
@@ -23193,6 +23199,203 @@
       return '';
     }
 
+    function formatSlipUploadStudentName(name, nickname) {
+      const fullName = String(name || '').trim();
+      const nick = String(nickname || '').trim();
+      if (!nick || nick === '-' || (fullName && fullName.indexOf(nick) !== -1)) return fullName || nick;
+      return (fullName || 'ไม่ระบุชื่อนักเรียน') + ' (' + nick + ')';
+    }
+
+    function getPaymentSlipUploadStudentName(student, payment) {
+      const record = student || getPaymentStudentRecord(payment) || {};
+      return formatSlipUploadStudentName(
+        record.name || (payment && (payment.studentName || payment.student)) || '',
+        record.nickname || (payment && (payment.nickname || payment.studentNickname)) || ''
+      );
+    }
+
+    function getBundleSlipUploadStudentName(bundle) {
+      const items = Array.isArray(bundle && bundle.paymentItems) ? bundle.paymentItems : [];
+      const names = items.map(function(item) {
+        const payment = findPaymentByAnyId(item.paymentId) || item;
+        const student = getPaymentStudentRecord(payment) || getPaymentStudentRecord(item) || {};
+        return getPaymentSlipUploadStudentName(student, payment || item);
+      }).filter(Boolean);
+      if (names.length) return Array.from(new Set(names)).join(', ');
+      return formatSlipUploadStudentName(
+        (bundle && (bundle.studentNames || []).join(', ')) || (bundle && bundle.student) || (currentStudent && currentStudent.name) || '',
+        currentStudent && currentStudent.nickname
+      );
+    }
+
+    function paymentHasUploadedSlip(payment) {
+      return !!(payment && (getPaymentSlipUrl(payment) || payment.slipSource || payment.slipFileId || payment.slipUploadedByUid || payment.slipUploadedByName));
+    }
+
+    function isPaymentInActiveBundle(payment) {
+      const bundle = getPaymentBundleForPayment(payment);
+      return !!(bundle && getPaymentBundleDisplayStatus(bundle) !== 'ยกเลิก');
+    }
+
+    function canMovePaymentSlipToAnotherMonth(payment) {
+      if (!payment || !paymentHasUploadedSlip(payment)) return false;
+      if (isPaymentInActiveBundle(payment)) return false;
+      if (getPaymentDisplayStatus(payment) === 'ชำระแล้ว') return false;
+      if (payment.receiptId || payment.receiptNo || payment.receiptStatus) return false;
+      return true;
+    }
+
+    function canReceiveMovedPaymentSlip(payment) {
+      if (!payment || payment.deleted === true) return false;
+      if (isPaymentInActiveBundle(payment)) return false;
+      const status = getPaymentDisplayStatus(payment);
+      if (status === 'ชำระแล้ว' || status === 'ยกเว้น') return false;
+      if (payment.receiptId || payment.receiptNo || payment.receiptStatus) return false;
+      if (paymentHasUploadedSlip(payment)) return false;
+      return true;
+    }
+
+    function getMoveSlipTargetPayments(sourcePayment) {
+      if (!sourcePayment) return [];
+      const sourceId = getPaymentRecordId(sourcePayment);
+      const student = getPaymentStudentRecord(sourcePayment);
+      return (payments || []).filter(function(payment) {
+        if (!payment || getPaymentRecordId(payment) === sourceId) return false;
+        if (!canReceiveMovedPaymentSlip(payment)) return false;
+        if (student) return isStudentPaymentRecord(student, payment);
+        return (
+          (sourcePayment.studentId && String(payment.studentId || '') === String(sourcePayment.studentId || '')) ||
+          (sourcePayment.memberId && String(payment.memberId || '') === String(sourcePayment.memberId || '')) ||
+          (sourcePayment.authUid && String(payment.authUid || payment.studentAuthUid || '') === String(sourcePayment.authUid || ''))
+        );
+      }).sort(function(a, b) {
+        return compareThaiMonthYear(b.month || b.paymentMonth || '', a.month || a.paymentMonth || '');
+      });
+    }
+
+    function appendPaymentAdminNote(payment, note) {
+      if (!payment || !note) return;
+      payment.adminNote = payment.adminNote ? (payment.adminNote + '\n' + note) : note;
+    }
+
+    function copyPaymentSlipFields(sourcePayment, targetPayment) {
+      [
+        'slipStorageType', 'driveFileId', 'driveFileUrl', 'driveViewUrl', 'driveFolderId', 'driveFolderName',
+        'slipUrl', 'fileUrl', 'slipFileId', 'slipSource',
+        'slipUploadedByUid', 'slipUploadedByName', 'slipUploadedAt', 'slipUploadedAtText',
+        'ocrRawText', 'ocrCheckNote', 'ocrReferenceNo', 'ocrAmount', 'ocrPayerName', 'ocrReceiverName',
+        'ocrTransferDateText', 'ocrTransferTime', 'ocrCheckStatus'
+      ].forEach(function(key) {
+        if (sourcePayment[key] !== undefined) targetPayment[key] = sourcePayment[key];
+      });
+    }
+
+    function clearPaymentSlipFields(payment) {
+      [
+        'slipStorageType', 'driveFileId', 'driveFileUrl', 'driveViewUrl', 'driveFolderId', 'driveFolderName',
+        'slipUrl', 'fileUrl', 'slipFileId', 'slipSource',
+        'slipUploadedByUid', 'slipUploadedByName', 'slipUploadedAt', 'slipUploadedAtText',
+        'ocrRawText', 'ocrCheckNote', 'ocrReferenceNo', 'ocrAmount', 'ocrPayerName', 'ocrReceiverName',
+        'ocrTransferDateText', 'ocrTransferTime', 'ocrCheckStatus'
+      ].forEach(function(key) {
+        payment[key] = '';
+      });
+      payment.slipStatus = '';
+      payment.adminReviewStatus = '';
+    }
+
+    function openMovePaymentSlipMonthModal(paymentId) {
+      const sourcePayment = findPaymentByAnyId(paymentId);
+      if (!sourcePayment) { alert('ไม่พบรายการชำระเงิน'); return; }
+      if (!canMovePaymentSlipToAnotherMonth(sourcePayment)) {
+        alert('รายการนี้ไม่สามารถย้ายสลิปได้ เพราะชำระแล้ว อยู่ในยอดรวม หรือยังไม่มีสลิป');
+        return;
+      }
+      const targets = getMoveSlipTargetPayments(sourcePayment);
+      if (!targets.length) {
+        alert('ยังไม่มีรายการชำระเงินเดือนอื่นที่ย้ายสลิปไปได้ กรุณาสร้างยอดชำระเดือนที่ถูกต้องก่อน');
+        return;
+      }
+      const targetOptions = targets.map(function(payment) {
+        return '<option value="' + escapeHtml(getPaymentRecordId(payment)) + '">' +
+          escapeHtml((payment.month || payment.paymentMonth || '-') + ' · ' + formatPrice(getPaymentFinalAmount(payment)) + ' · ' + getPaymentDisplayStatus(payment)) +
+        '</option>';
+      }).join('');
+      openEditBubble(
+        'ย้ายสลิปไปเดือนอื่น',
+        '<div class="notice" style="margin-bottom:12px;">ระบบจะย้ายลิงก์สลิปเดิมจากเดือน <strong>' + escapeHtml(sourcePayment.month || '-') + '</strong> ไปยังเดือนที่เลือก โดยไม่ย้ายไฟล์จริงใน Google Drive</div>' +
+        '<label>เดือนที่ถูกต้อง</label>' +
+        '<select id="moveSlipTargetPaymentId">' + targetOptions + '</select>' +
+        '<label style="margin-top:8px;">หมายเหตุ</label>' +
+        '<textarea id="moveSlipAdminNote" placeholder="เช่น ผู้ปกครองเลือกเดือนผิด">' + escapeHtml('ย้ายสลิปจากเดือน ' + (sourcePayment.month || '-') + ' ไปเดือนที่ถูกต้อง') + '</textarea>' +
+        '<p id="moveSlipResult" style="font-weight:600;margin-top:8px;min-height:20px;"></p>',
+        async function() {
+          await movePaymentSlipToAnotherMonth(getPaymentRecordId(sourcePayment), bubbleValue('moveSlipTargetPaymentId'), bubbleValue('moveSlipAdminNote'));
+        }
+      );
+    }
+
+    async function movePaymentSlipToAnotherMonth(sourcePaymentId, targetPaymentId, adminNote) {
+      const result = getElement('moveSlipResult');
+      const sourcePayment = findPaymentByAnyId(sourcePaymentId);
+      const targetPayment = findPaymentByAnyId(targetPaymentId);
+      if (!sourcePayment || !targetPayment) {
+        if (result) { result.textContent = 'ไม่พบรายการต้นทางหรือปลายทาง'; result.style.color = '#dc2626'; }
+        return;
+      }
+      if (!canMovePaymentSlipToAnotherMonth(sourcePayment)) {
+        if (result) { result.textContent = 'รายการต้นทางไม่สามารถย้ายสลิปได้'; result.style.color = '#dc2626'; }
+        return;
+      }
+      if (!canReceiveMovedPaymentSlip(targetPayment)) {
+        if (result) { result.textContent = 'เดือนปลายทางมีสลิป/ชำระแล้ว/อยู่ในยอดรวม จึงย้ายไปไม่ได้'; result.style.color = '#dc2626'; }
+        return;
+      }
+      if (getPaymentStudentRecord(sourcePayment) && !isStudentPaymentRecord(getPaymentStudentRecord(sourcePayment), targetPayment)) {
+        if (result) { result.textContent = 'รายการปลายทางไม่ใช่นักเรียนคนเดียวกัน'; result.style.color = '#dc2626'; }
+        return;
+      }
+
+      const sourceMonth = sourcePayment.month || sourcePayment.paymentMonth || '-';
+      const targetMonth = targetPayment.month || targetPayment.paymentMonth || '-';
+      const movedNote = adminNote || ('ย้ายสลิปจากเดือน ' + sourceMonth + ' ไปเดือน ' + targetMonth);
+      const nowText = new Date().toLocaleString('th-TH');
+      if (result) { result.textContent = 'กำลังย้ายสลิป...'; result.style.color = '#0f4cbd'; }
+
+      copyPaymentSlipFields(sourcePayment, targetPayment);
+      targetPayment.status = 'รอตรวจสลิป';
+      targetPayment.paymentStatus = 'รอตรวจสลิป';
+      targetPayment.slipStatus = 'waiting_admin_review';
+      targetPayment.adminReviewStatus = 'pending';
+      targetPayment.slipNote = 'ย้ายสลิปจากเดือน ' + sourceMonth + ' เมื่อ ' + nowText;
+      appendPaymentAdminNote(targetPayment, movedNote);
+      targetPayment.updatedAtText = nowText;
+
+      clearPaymentSlipFields(sourcePayment);
+      sourcePayment.status = 'รอชำระเงิน';
+      sourcePayment.paymentStatus = 'รอชำระเงิน';
+      sourcePayment.slipNote = 'สลิปถูกย้ายไปเดือน ' + targetMonth + ' เมื่อ ' + nowText;
+      appendPaymentAdminNote(sourcePayment, movedNote);
+      sourcePayment.updatedAtText = nowText;
+
+      try {
+        await setFirebaseDocument('payments', sourcePayment);
+        await setFirebaseDocument('payments', targetPayment);
+        await syncStudentPaymentStatusFromPayment(sourcePayment, 'รอชำระเงิน');
+        await syncStudentPaymentStatusFromPayment(targetPayment, 'รอตรวจสลิป');
+        await addActivityLog('ย้ายสลิปไปเดือนอื่น', (sourcePayment.student || targetPayment.student || '-') + ' · จาก ' + sourceMonth + ' ไป ' + targetMonth + ' · ' + movedNote);
+        if (result) { result.textContent = 'ย้ายสลิปเรียบร้อย'; result.style.color = '#16a34a'; }
+        renderPaymentTable();
+        renderAdminDashboard();
+        renderStudentReceipts();
+        safeRun(renderStudentMobilePayment, 'move-slip-month-mobile');
+        setTimeout(function() { closeEditBubble(); }, 900);
+      } catch (error) {
+        console.error('move payment slip month error:', error);
+        if (result) { result.textContent = 'ย้ายสลิปไม่สำเร็จ: ' + (error.message || error.code || error); result.style.color = '#dc2626'; }
+      }
+    }
+
     function formatPaymentSlipReviewCell(payment) {
       if (!payment) return 'ยังไม่มีสลิป';
       const noteText = payment.ocrCheckNote ? '<br><span class="mini-muted">' + escapeHtml(payment.ocrCheckNote) + '</span>' : '';
@@ -23267,7 +23470,7 @@
               mimeType: file.type,
               folderType: 'payment-slips',
               studentId: student.memberId || student.studentId || student.id || payment.memberId || '',
-              studentName: student.name || payment.student || '',
+              studentName: getPaymentSlipUploadStudentName(student, payment),
               paymentId: String(paymentId),
               month: payment.month || '',
               courseId: payment.courseId || student.courseId || '',
@@ -25102,7 +25305,7 @@ function receiptStatusText(status) {
           mimeType: file.type,
           folderType: 'payment-slips',
           studentId: currentStudent.memberId || currentStudent.studentId || currentStudent.id || '',
-          studentName: currentStudent.name || '',
+          studentName: getPaymentSlipUploadStudentName(currentStudent, payment),
           paymentId: paymentId,
           month: payment.month || month,
           courseId: payment.courseId || currentStudent.courseId || '',
