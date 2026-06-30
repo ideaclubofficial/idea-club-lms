@@ -7980,11 +7980,22 @@
         }, function(err) { console.warn('studentPersonalQuests listener error:', err); });
       });
 
+      // Real-time listener for gamificationRedemptions — authUid only (studentId query blocked by Firestore rules for students)
+      const redemptionQuery = (authUid && firebaseReady && db)
+        ? db.collection('gamificationRedemptions').where('authUid', '==', String(authUid))
+        : null;
+      const redemptionUnsub = redemptionQuery ? redemptionQuery.onSnapshot(function(snapshot) {
+        if (snapshot.metadata && snapshot.metadata.hasPendingWrites) return;
+        const changes = snapshot.docChanges();
+        if (applyDocChanges(gamificationRedemptions, changes)) renderStudentGamificationPanel();
+      }, function(err) { console.warn('gamificationRedemptions listener error:', err); }) : function() {};
+
       studentPaymentsUnsubscribe = function() { paymentUnsubs.forEach(function(u) { try { u(); } catch(e) {} }); };
       studentReceiptsUnsubscribe = function() { receiptUnsubs.forEach(function(u) { try { u(); } catch(e) {} }); };
       studentPaymentBundlesUnsubscribe = function() { bundleUnsubs.forEach(function(u) { try { u(); } catch(e) {} }); };
       studentGamificationUnsubscribe = function() {
         gamificationProfileUnsubs.concat(gamificationEventUnsubs, personalQuestUnsubs).forEach(function(u) { try { u(); } catch(e) {} });
+        try { redemptionUnsub(); } catch(e) {}
       };
     }
 
@@ -20183,7 +20194,10 @@
           if (sa !== sb) return sa - sb;
           return String(b.createdAtText || '') > String(a.createdAtText || '') ? 1 : -1;
         });
-      if (!myVouchers.length) return '';
+      if (!myVouchers.length) return '<div class="sg-vouchers">' +
+        '<div class="sg-vouchers-header">🎟 บัตรแลกของสะสม</div>' +
+        '<div style="padding:10px 14px;font-size:11px;color:#a78bfa;text-align:center;">ยังไม่มีบัตรสะสม</div>' +
+        '</div>';
       const pending = myVouchers.filter(function(r) { return r.status !== 'fulfilled'; });
       const fulfilled = myVouchers.filter(function(r) { return r.status === 'fulfilled'; });
       function renderVoucherCard(r) {
