@@ -7381,8 +7381,26 @@
                 <div><label>หมวดหมู่</label><input type="text" id="shopRewardCategory" placeholder="เช่น ค่ายเรียน / ของรางวัล" /></div>
               </div>
               <div class="form-row">
-                <div><label>ราคา (Coins)</label><input type="number" id="shopRewardCost" min="1" max="9999" value="100" /></div>
-                <div><label>จำนวนสต็อก</label><input type="number" id="shopRewardStock" min="1" max="999" value="10" /></div>
+                <div>
+                  <label>ประเภทรางวัล</label>
+                  <select id="shopRewardType" onchange="onShopRewardTypeChange()">
+                    <option value="standard">รางวัลมาตรฐาน (แลกครั้งเดียว)</option>
+                    <option value="stampCard">บัตรสะสม (สะสมแสตมป์)</option>
+                  </select>
+                </div>
+              </div>
+              <div class="form-row">
+                <div><label>ราคา (Coins)</label><input type="number" id="shopRewardCost" min="0" max="9999" value="100" /><p style="font-size:11px;color:#94a3b8;margin:2px 0 0;">0 = ได้จากวงล้อเท่านั้น</p></div>
+                <div><label>จำนวนสต็อก</label><input type="number" id="shopRewardStock" min="1" max="9999" value="10" /></div>
+              </div>
+              <div id="shopStampCardRow" style="display:none;margin-bottom:10px;padding:10px 12px;border-radius:8px;background:#fef9c3;border:1px solid #fde047;">
+                <div class="form-row" style="margin-bottom:0;">
+                  <div>
+                    <label>จำนวนแสตมป์ที่ต้องสะสม</label>
+                    <input type="number" id="shopStampRequired" min="2" max="50" value="5" style="width:100px;" />
+                    <p style="font-size:11px;color:#92400e;margin:3px 0 0;">เมื่อนักเรียนสะสมครบ → ได้รับรางวัลจากแอดมินอัตโนมัติ</p>
+                  </div>
+                </div>
               </div>
               <div><label>รายละเอียด</label><textarea id="shopRewardDesc" rows="2" placeholder="อธิบายรางวัลนี้"></textarea></div>
               <div style="margin-top:10px;"><button class="btn btn-blue" onclick="adminSaveGamificationReward()">บันทึกรางวัล</button></div>
@@ -18518,6 +18536,12 @@
 
     // ===========================
 
+    function onShopRewardTypeChange() {
+      const t = getElement('shopRewardType') ? getElement('shopRewardType').value : 'standard';
+      const row = getElement('shopStampCardRow');
+      if (row) row.style.display = t === 'stampCard' ? '' : 'none';
+    }
+
     function renderAdminGamificationShop() {
       const rewardsEl = getElement('adminRewardsTable');
       const redemptionsEl = getElement('adminRedemptionsTable');
@@ -18528,16 +18552,19 @@
         rewardsEl.innerHTML = '<p style="color:#94a3b8;font-size:13px;">ยังไม่มีรางวัล — สร้างรางวัลแรกได้เลย</p>';
       } else {
         let rows = active.map(function(r) {
+          const isStamp = r.rewardType === 'stampCard';
+          const typeLabel = isStamp ? '🎴 บัตรสะสม (' + (r.stampsRequired || '?') + ' แสตมป์)' : '🎁 มาตรฐาน';
           return '<tr>' +
             '<td>' + escapeHtml(r.title || '-') + '</td>' +
             '<td>' + escapeHtml(r.category || '-') + '</td>' +
-            '<td style="text-align:center;">' + escapeHtml(r.cost) + ' 💰</td>' +
+            '<td style="font-size:11px;">' + typeLabel + '</td>' +
+            '<td style="text-align:center;">' + (r.cost > 0 ? escapeHtml(r.cost) + ' 💰' : '—') + '</td>' +
             '<td style="text-align:center;">' + escapeHtml(r.stock) + '</td>' +
-            '<td style="font-size:12px;color:#64748b;max-width:200px;">' + escapeHtml(r.description || '') + '</td>' +
+            '<td style="font-size:12px;color:#64748b;max-width:160px;">' + escapeHtml(r.description || '') + '</td>' +
             '<td><button class="btn btn-sm btn-danger" onclick="adminDeleteGamificationReward(\'' + escapeHtml(r.firebaseDocId || r.id) + '\')">ลบ</button></td>' +
           '</tr>';
         }).join('');
-        rewardsEl.innerHTML = '<table class="data-table" style="font-size:13px;"><thead><tr><th>ชื่อรางวัล</th><th>หมวด</th><th>ราคา</th><th>สต็อก</th><th>รายละเอียด</th><th></th></tr></thead><tbody>' + rows + '</tbody></table>';
+        rewardsEl.innerHTML = '<table class="data-table" style="font-size:13px;"><thead><tr><th>ชื่อรางวัล</th><th>หมวด</th><th>ประเภท</th><th>ราคา</th><th>สต็อก</th><th>รายละเอียด</th><th></th></tr></thead><tbody>' + rows + '</tbody></table>';
       }
 
       const allRedemptions = gamificationRedemptions.filter(function(r) { return !r.deleted; })
@@ -18565,8 +18592,10 @@
     async function adminSaveGamificationReward() {
       const title = (getElement('shopRewardTitle') ? getElement('shopRewardTitle').value.trim() : '');
       const category = (getElement('shopRewardCategory') ? getElement('shopRewardCategory').value.trim() : '');
-      const cost = Math.max(1, parseInt(getElement('shopRewardCost') ? getElement('shopRewardCost').value : '0') || 0);
+      const rewardType = (getElement('shopRewardType') ? getElement('shopRewardType').value : 'standard') || 'standard';
+      const cost = Math.max(0, parseInt(getElement('shopRewardCost') ? getElement('shopRewardCost').value : '0') || 0);
       const stock = Math.max(1, parseInt(getElement('shopRewardStock') ? getElement('shopRewardStock').value : '0') || 0);
+      const stampsRequired = rewardType === 'stampCard' ? Math.min(50, Math.max(2, parseInt(getElement('shopStampRequired') ? getElement('shopStampRequired').value : '5') || 5)) : 0;
       const description = (getElement('shopRewardDesc') ? getElement('shopRewardDesc').value.trim() : '');
       const resultEl = getElement('shopRewardSaveResult');
       if (!title) { if (resultEl) { resultEl.textContent = 'กรุณาใส่ชื่อรางวัล'; resultEl.style.color = '#dc2626'; } return; }
@@ -18575,14 +18604,15 @@
       try {
         const id = createFirebaseDocId('gamificationRewards');
         const now = firebase.firestore.FieldValue.serverTimestamp();
-        const reward = { id: id, firebaseDocId: id, title: title, category: category, cost: cost, stock: stock, description: description, active: true, deleted: false, createdAt: now, createdAtText: new Date().toLocaleString('th-TH') };
+        const reward = { id: id, firebaseDocId: id, title: title, category: category, rewardType: rewardType, stampsRequired: stampsRequired, cost: cost, stock: stock, description: description, active: true, deleted: false, createdAt: now, createdAtText: new Date().toLocaleString('th-TH') };
         await db.collection('gamificationRewards').doc(id).set(reward);
         gamificationRewards.push(reward);
         if (resultEl) { resultEl.textContent = 'บันทึกรางวัลสำเร็จ!'; resultEl.style.color = '#16a34a'; }
         if (getElement('shopRewardTitle')) getElement('shopRewardTitle').value = '';
         if (getElement('shopRewardDesc')) getElement('shopRewardDesc').value = '';
+        if (getElement('shopRewardType')) { getElement('shopRewardType').value = 'standard'; onShopRewardTypeChange(); }
         renderAdminGamificationShop();
-        addActivityLog('สร้างรางวัล', title + ' · ' + cost + ' Coins · สต็อก ' + stock);
+        addActivityLog('สร้างรางวัล', title + ' · ' + (rewardType === 'stampCard' ? 'บัตรสะสม ' + stampsRequired + ' แสตมป์' : cost + ' Coins · สต็อก ' + stock));
       } catch (e) {
         if (resultEl) { resultEl.textContent = 'บันทึกไม่สำเร็จ: ' + (e.message || e.code || ''); resultEl.style.color = '#dc2626'; }
       }
@@ -19118,41 +19148,54 @@
             prizeWheelSpins.push(spinRecord);
           } catch (e) { console.warn('prize wheel spin save error:', e); }
         }
-        // If custom prize with linked shop reward → auto-create redemption entry
+        // If custom prize with linked shop reward → add stamp or create redemption
         if (winner.rewardType === 'custom' && winner.linkedRewardId && firebaseReady && db) {
           try {
             const linkedRewardDoc = gamificationRewards.find(function(r) { return String(r.firebaseDocId || r.id || '') === String(winner.linkedRewardId) && !r.deleted; });
-            const redemptionId = createFirebaseDocId('gamificationRedemptions');
-            const nowTs = firebase.firestore.FieldValue.serverTimestamp();
-            const redemption = {
-              id: redemptionId, firebaseDocId: redemptionId,
-              studentId: getStudentRecordDocId(currentStudent),
-              authUid: authUid,
-              memberId: currentStudent.memberId || currentStudent.studentId || '',
-              studentName: currentStudent.name || '',
-              rewardId: winner.linkedRewardId,
-              rewardTitle: winner.linkedRewardTitle || (linkedRewardDoc ? linkedRewardDoc.title : '') || '',
-              coinsPaid: 0,
-              fromPrizeWheel: true,
-              prizeWheelSpinId: spinRecord.id || '',
-              status: 'pending', deleted: false, createdAt: nowTs, createdAtText: new Date().toLocaleString('th-TH')
-            };
-            const rdBatch = db.batch();
-            rdBatch.set(db.collection('gamificationRedemptions').doc(redemptionId), redemption);
-            if (linkedRewardDoc && (linkedRewardDoc.stock || 0) > 0) {
-              const newStock = Math.max(0, (linkedRewardDoc.stock || 0) - 1);
-              rdBatch.set(db.collection('gamificationRewards').doc(winner.linkedRewardId), { stock: newStock, updatedAt: nowTs }, { merge: true });
-              linkedRewardDoc.stock = newStock;
+            if (linkedRewardDoc && linkedRewardDoc.rewardType === 'stampCard') {
+              // Stamp card → add 1 stamp
+              await addStudentStampMark(winner.linkedRewardId, linkedRewardDoc, true, spinRecord.id || '');
+            } else {
+              // Standard linked reward → create redemption voucher
+              const nowTs = firebase.firestore.FieldValue.serverTimestamp();
+              const redemptionId = createFirebaseDocId('gamificationRedemptions');
+              const redemption = {
+                id: redemptionId, firebaseDocId: redemptionId,
+                studentId: getStudentRecordDocId(currentStudent),
+                authUid: authUid,
+                memberId: currentStudent.memberId || currentStudent.studentId || '',
+                studentName: currentStudent.name || '',
+                rewardId: winner.linkedRewardId,
+                rewardTitle: winner.linkedRewardTitle || (linkedRewardDoc ? linkedRewardDoc.title : '') || '',
+                coinsPaid: 0, fromPrizeWheel: true, prizeWheelSpinId: spinRecord.id || '',
+                status: 'pending', deleted: false, createdAt: nowTs, createdAtText: new Date().toLocaleString('th-TH')
+              };
+              const rdBatch = db.batch();
+              rdBatch.set(db.collection('gamificationRedemptions').doc(redemptionId), redemption);
+              if (linkedRewardDoc && (linkedRewardDoc.stock || 0) > 0) {
+                const newStock = Math.max(0, (linkedRewardDoc.stock || 0) - 1);
+                rdBatch.set(db.collection('gamificationRewards').doc(winner.linkedRewardId), { stock: newStock, updatedAt: nowTs }, { merge: true });
+                linkedRewardDoc.stock = newStock;
+              }
+              await rdBatch.commit();
+              gamificationRedemptions.push(redemption);
             }
-            await rdBatch.commit();
-            gamificationRedemptions.push(redemption);
           } catch (e) { console.warn('prize wheel custom redemption error:', e); }
         }
         // Show result
         if (resultEl) {
-          const customLabel = winner.rewardType === 'custom'
-            ? ' — บัตรแลก: ' + (winner.linkedRewardTitle || 'ของรางวัลพิเศษ') + ' (รอรับรางวัลจากแอดมิน)'
-            : '';
+          let customLabel = '';
+          if (winner.rewardType === 'custom' && winner.linkedRewardId) {
+            const linkedDoc = gamificationRewards.find(function(r) { return String(r.firebaseDocId || r.id || '') === String(winner.linkedRewardId) && !r.deleted; });
+            if (linkedDoc && linkedDoc.rewardType === 'stampCard') {
+              const sp = (getCurrentStudentGamificationProfile().stampProgress || {})[winner.linkedRewardId] || { stamps: 0 };
+              const req = Math.max(2, Number(linkedDoc.stampsRequired) || 5);
+              const cur = Math.min(req, Number(sp.stamps) || 0);
+              customLabel = ' — 🎴 บัตรสะสม: ' + (winner.linkedRewardTitle || linkedDoc.title) + ' (' + cur + '/' + req + ' แสตมป์' + (cur >= req ? ' ✓ ครบแล้ว!' : '') + ')';
+            } else {
+              customLabel = ' — บัตรแลก: ' + (winner.linkedRewardTitle || 'ของรางวัลพิเศษ') + ' (รอรับรางวัลจากแอดมิน)';
+            }
+          }
           resultEl.textContent = '🎉 ได้รับ: ' + (winner.icon || '') + ' ' + (winner.name || '-') +
             (coinsGain ? ' (+' + coinsGain + ' Coins)' : '') +
             (expGain ? ' (+' + expGain + ' EXP)' : '') +
@@ -19385,14 +19428,54 @@
           '</button>' +
         '</div>' +
       '</div>';
+      const myStampProgress = (profile.stampProgress) || {};
       let cards = systemTicketCard + active.map(function(r) {
         const rid = escapeHtml(r.firebaseDocId || r.id || '');
+        const isStampCard = r.rewardType === 'stampCard';
+        const inStock = (r.stock || 0) > 0;
+
+        if (isStampCard) {
+          const stampsRequired = Math.max(2, Number(r.stampsRequired) || 5);
+          const cardProg = myStampProgress[r.firebaseDocId || r.id || ''] || { stamps: 0, completed: false };
+          const curStamps = Math.min(stampsRequired, Number(cardProg.stamps) || 0);
+          const completed = cardProg.completed || curStamps >= stampsRequired;
+          const stampCost = Number(r.cost) || 0;
+          const canBuy = stampCost > 0 && coins >= stampCost && !completed && inStock;
+          const stampsDotsHtml = Array.from({ length: stampsRequired }, function(_, i) {
+            return i < curStamps ? '🟡' : '⚪';
+          }).join('');
+          let btnHtml;
+          if (completed) {
+            btnHtml = '<span class="sgshop-status">✓ ครบแล้ว! รอรับรางวัล</span>';
+          } else if (!inStock) {
+            btnHtml = '<span class="sgshop-status sgshop-status--out">หมดสต็อก</span>';
+          } else if (stampCost <= 0) {
+            btnHtml = '<span class="sgshop-status" style="color:#7c3aed;">🎰 รับจากวงล้อเท่านั้น</span>';
+          } else {
+            btnHtml = '<button type="button" class="sgshop-btn' + (canBuy ? '' : ' sgshop-btn--disabled') + '" onclick="redeemGamificationReward(\'' + rid + '\')" ' + (canBuy ? '' : 'disabled') + '>' +
+              (canBuy ? 'สะสมแสตมป์' : 'Coins ไม่พอ') + '</button>';
+          }
+          return '<div class="sgshop-card">' +
+            '<div class="sgshop-info">' +
+              '<span class="sgshop-cat">🎴 บัตรสะสม' + escapeHtml(r.category ? ' · ' + r.category : '') + '</span>' +
+              '<strong class="sgshop-title">' + escapeHtml(r.title || '-') + '</strong>' +
+              '<div style="font-size:16px;letter-spacing:2px;margin:4px 0;">' + stampsDotsHtml + '</div>' +
+              '<p class="sgshop-desc">' + curStamps + '/' + stampsRequired + ' แสตมป์' + (r.description ? ' · ' + escapeHtml(r.description) : '') + '</p>' +
+            '</div>' +
+            '<div class="sgshop-meta">' +
+              (stampCost > 0 ? '<span class="sgshop-cost">💰 ' + stampCost + '/แสตมป์</span>' : '<span class="sgshop-cost" style="color:#7c3aed;">วงล้อ</span>') +
+              '<span class="sgshop-stock">สต็อก: ' + escapeHtml(r.stock) + '</span>' +
+              btnHtml +
+            '</div>' +
+          '</div>';
+        }
+
+        // Standard reward
         const alreadyRedeemed = currentStudent && gamificationRedemptions.some(function(rd) {
           return !rd.deleted && String(rd.rewardId || '') === String(r.firebaseDocId || r.id || '') &&
             (String(rd.studentId || '') === getStudentRecordDocId(currentStudent) || String(rd.authUid || '') === String((currentStudent.authUid) || (firebaseUser && firebaseUser.uid) || ''));
         });
         const canAfford = coins >= (r.cost || 0);
-        const inStock = (r.stock || 0) > 0;
         let btnHtml;
         if (alreadyRedeemed) {
           btnHtml = '<span class="sgshop-status">✓ แลกแล้ว</span>';
@@ -19487,16 +19570,86 @@
       }
     }
 
+    async function addStudentStampMark(rewardId, rewardDoc, fromPrizeWheel, prizeWheelSpinId) {
+      if (!currentStudent || !firebaseReady || !db || !firebaseUser) return null;
+      const profile = getCurrentStudentGamificationProfile();
+      const profileId = String(profile.firebaseDocId || profile.id || '');
+      if (!profileId) return null;
+      const stampProgress = Object.assign({}, (profile.stampProgress) || {});
+      const cardProgress = Object.assign({ stamps: 0, completed: false }, stampProgress[rewardId] || {});
+      if (cardProgress.completed) return { alreadyCompleted: true };
+      const stampsRequired = Math.max(2, Number(rewardDoc.stampsRequired) || 5);
+      const newStamps = cardProgress.stamps + 1;
+      const nowCompleted = newStamps >= stampsRequired;
+      stampProgress[rewardId] = { stamps: newStamps, completed: nowCompleted };
+      profile.stampProgress = stampProgress;
+      const now = firebase.firestore.FieldValue.serverTimestamp();
+      const batch = db.batch();
+      batch.set(db.collection('studentGamificationProfiles').doc(profileId), { stampProgress: stampProgress, updatedAt: now }, { merge: true });
+      const newStock = Math.max(0, (rewardDoc.stock || 0) - 1);
+      batch.set(db.collection('gamificationRewards').doc(rewardId), { stock: newStock, updatedAt: now }, { merge: true });
+      rewardDoc.stock = newStock;
+      if (nowCompleted) {
+        const redemptionId = createFirebaseDocId('gamificationRedemptions');
+        const redemption = {
+          id: redemptionId, firebaseDocId: redemptionId,
+          studentId: getStudentRecordDocId(currentStudent),
+          authUid: String((currentStudent.authUid) || (firebaseUser && firebaseUser.uid) || '').trim(),
+          memberId: currentStudent.memberId || currentStudent.studentId || '',
+          studentName: currentStudent.name || '',
+          rewardId: rewardId, rewardTitle: rewardDoc.title || '', rewardType: 'stampCard',
+          coinsPaid: 0, fromPrizeWheel: fromPrizeWheel || false, prizeWheelSpinId: prizeWheelSpinId || '',
+          status: 'pending', deleted: false, createdAt: now, createdAtText: new Date().toLocaleString('th-TH')
+        };
+        batch.set(db.collection('gamificationRedemptions').doc(redemptionId), redemption);
+        gamificationRedemptions.push(redemption);
+      }
+      await batch.commit();
+      updateLeaderboardProfileInMemory(profileId, getCurrentStudentGamificationProfile());
+      return { newStamps: newStamps, stampsRequired: stampsRequired, nowCompleted: nowCompleted };
+    }
+
     async function redeemGamificationReward(rewardId) {
       if (!currentStudent || !firebaseReady || !db) return;
       const reward = gamificationRewards.find(function(r) { return String(r.firebaseDocId || r.id || '') === rewardId && !r.deleted; });
       if (!reward) { alert('ไม่พบรางวัลนี้'); return; }
       const profile = getCurrentStudentGamificationProfile();
-      if ((profile.coins || 0) < (reward.cost || 0)) { alert('Coins ไม่เพียงพอ! ต้องการ ' + reward.cost + ' Coins'); return; }
       if ((reward.stock || 0) <= 0) { alert('รางวัลนี้หมดสต็อกแล้ว'); return; }
-      if (!confirm('ยืนยันแลกรางวัล "' + reward.title + '" ด้วย ' + reward.cost + ' Coins?')) return;
       if (!firebaseReady || !db || !firebaseUser) return;
 
+      // Stamp card flow
+      if (reward.rewardType === 'stampCard') {
+        const stampCost = Number(reward.cost) || 0;
+        if (stampCost <= 0) { alert('บัตรสะสมนี้รับได้จากวงล้อสุ่มรางวัลเท่านั้น'); return; }
+        if ((profile.coins || 0) < stampCost) { alert('Coins ไม่เพียงพอ! ต้องการ ' + stampCost + ' Coins'); return; }
+        const sp = (profile.stampProgress || {});
+        const curCard = sp[rewardId] || { stamps: 0, completed: false };
+        if (curCard.completed) { alert('คุณสะสมแสตมป์ครบแล้ว รอรับรางวัลจากทีมงาน!'); return; }
+        const stampsRequired = Math.max(2, Number(reward.stampsRequired) || 5);
+        if (!confirm('ยืนยันสะสมแสตมป์ "' + reward.title + '" ด้วย ' + stampCost + ' Coins?\n(ปัจจุบัน: ' + (curCard.stamps || 0) + '/' + stampsRequired + ' แสตมป์)')) return;
+        // Deduct coins first
+        const profileId = String(profile.firebaseDocId || profile.id || getStudentGamificationProfileId(currentStudent));
+        const newCoins = Math.max(0, (profile.coins || 0) - stampCost);
+        profile.coins = newCoins;
+        try {
+          await db.collection('studentGamificationProfiles').doc(profileId).set({ coins: newCoins, updatedAt: firebase.firestore.FieldValue.serverTimestamp() }, { merge: true });
+          const result = await addStudentStampMark(rewardId, reward, false, '');
+          const existingProfile = findCurrentStudentGamificationProfile();
+          if (existingProfile) existingProfile.coins = newCoins;
+          updateLeaderboardProfileInMemory(profileId, getCurrentStudentGamificationProfile());
+          renderStudentGamificationPanel();
+          if (result && result.nowCompleted) {
+            alert('🎉 สะสมแสตมป์ครบ ' + result.stampsRequired + '/' + result.stampsRequired + '! ทีมงานจะติดต่อรับรางวัลเร็วๆ นี้');
+          } else if (result) {
+            alert('✅ สะสมแสตมป์สำเร็จ! (' + result.newStamps + '/' + result.stampsRequired + ' แสตมป์)');
+          }
+        } catch (e) { alert('สะสมแสตมป์ไม่สำเร็จ: ' + (e.message || e.code || '')); }
+        return;
+      }
+
+      // Standard reward flow
+      if ((profile.coins || 0) < (reward.cost || 0)) { alert('Coins ไม่เพียงพอ! ต้องการ ' + reward.cost + ' Coins'); return; }
+      if (!confirm('ยืนยันแลกรางวัล "' + reward.title + '" ด้วย ' + reward.cost + ' Coins?')) return;
       const profileId = String(profile.firebaseDocId || profile.id || getStudentGamificationProfileId(currentStudent));
       const redemptionId = createFirebaseDocId('gamificationRedemptions');
       const now = firebase.firestore.FieldValue.serverTimestamp();
