@@ -7375,8 +7375,7 @@
             <div class="form-box">
               <h3>🎁 ร้านแลกรางวัล (Rewards Shop)</h3>
               <p style="margin-bottom:16px;color:#6b7280;">สร้างและจัดการรางวัลที่นักเรียนสามารถแลกด้วย Coins ที่สะสมจากกิจกรรม</p>
-              <h4 style="margin:0 0 10px;font-size:15px;color:#1e1b4b;" id="shopRewardFormTitle">➕ สร้างรางวัลใหม่</h4>
-              <input type="hidden" id="editingGamificationRewardId" value="" />
+              <h4 style="margin:0 0 10px;font-size:15px;color:#1e1b4b;">➕ สร้างรางวัลใหม่</h4>
               <div class="form-row">
                 <div><label>ชื่อรางวัล</label><input type="text" id="shopRewardTitle" placeholder="เช่น Exclusive Workshop 1 วัน" /></div>
                 <div><label>หมวดหมู่</label><input type="text" id="shopRewardCategory" placeholder="เช่น ค่ายเรียน / ของรางวัล" /></div>
@@ -18605,7 +18604,6 @@
     }
 
     function adminClearGamificationRewardForm() {
-      if (getElement('editingGamificationRewardId')) getElement('editingGamificationRewardId').value = '';
       if (getElement('shopRewardTitle')) getElement('shopRewardTitle').value = '';
       if (getElement('shopRewardCategory')) getElement('shopRewardCategory').value = '';
       if (getElement('shopRewardCost')) getElement('shopRewardCost').value = '100';
@@ -18613,30 +18611,74 @@
       if (getElement('shopRewardDesc')) getElement('shopRewardDesc').value = '';
       if (getElement('shopStampRequired')) getElement('shopStampRequired').value = '5';
       if (getElement('shopRewardType')) { getElement('shopRewardType').value = 'standard'; onShopRewardTypeChange(); }
-      var titleEl = getElement('shopRewardFormTitle'); if (titleEl) titleEl.textContent = '➕ สร้างรางวัลใหม่';
       var r = getElement('shopRewardSaveResult'); if (r) r.textContent = '';
     }
 
     function adminEditGamificationReward(rewardId) {
       const r = gamificationRewards.find(function(x) { return String(x.firebaseDocId || x.id || '') === rewardId && !x.deleted; });
       if (!r) return;
-      if (getElement('editingGamificationRewardId')) getElement('editingGamificationRewardId').value = rewardId;
-      if (getElement('shopRewardTitle')) getElement('shopRewardTitle').value = r.title || '';
-      if (getElement('shopRewardCategory')) getElement('shopRewardCategory').value = r.category || '';
-      if (getElement('shopRewardCost')) getElement('shopRewardCost').value = r.cost !== undefined ? r.cost : 100;
-      if (getElement('shopRewardStock')) getElement('shopRewardStock').value = r.stock !== undefined ? r.stock : 10;
-      if (getElement('shopRewardDesc')) getElement('shopRewardDesc').value = r.description || '';
-      if (getElement('shopRewardType')) { getElement('shopRewardType').value = r.rewardType || 'standard'; onShopRewardTypeChange(); }
-      if (getElement('shopStampRequired')) getElement('shopStampRequired').value = r.stampsRequired || 5;
-      var titleEl = getElement('shopRewardFormTitle'); if (titleEl) titleEl.textContent = '✏️ แก้ไขรางวัล: ' + (r.title || '');
-      var res = getElement('shopRewardSaveResult'); if (res) { res.textContent = 'แก้ไข: ' + (r.title || ''); res.style.color = '#d97706'; }
-      const section = getElement('admin-gamification-shop');
-      if (section) section.scrollTop = 0;
-      window.scrollTo({ top: 0, behavior: 'smooth' });
+      const isStamp = r.rewardType === 'stampCard';
+      const formHtml =
+        '<div style="display:flex;flex-direction:column;gap:12px;padding:2px 0;">' +
+          '<div><label style="font-size:13px;font-weight:700;display:block;margin-bottom:4px;">ชื่อรางวัล</label>' +
+            '<input type="text" id="bGR_title" value="' + escapeHtml(r.title || '') + '" style="width:100%;" /></div>' +
+          '<div style="display:flex;gap:10px;flex-wrap:wrap;">' +
+            '<div style="flex:1;min-width:130px;"><label style="font-size:13px;font-weight:700;display:block;margin-bottom:4px;">หมวดหมู่</label>' +
+              '<input type="text" id="bGR_category" value="' + escapeHtml(r.category || '') + '" style="width:100%;" /></div>' +
+            '<div><label style="font-size:13px;font-weight:700;display:block;margin-bottom:4px;">ประเภท</label>' +
+              '<select id="bGR_type" onchange="var s=document.getElementById(\'bGR_stampRow\');if(s)s.style.display=this.value===\'stampCard\'?\'\':\'none\';">' +
+                '<option value="standard"' + (!isStamp ? ' selected' : '') + '>รางวัลมาตรฐาน</option>' +
+                '<option value="stampCard"' + (isStamp ? ' selected' : '') + '>บัตรสะสม</option>' +
+              '</select></div>' +
+          '</div>' +
+          '<div style="display:flex;gap:10px;flex-wrap:wrap;">' +
+            '<div><label style="font-size:13px;font-weight:700;display:block;margin-bottom:4px;">ราคา (Coins)</label>' +
+              '<input type="number" id="bGR_cost" min="0" value="' + (r.cost !== undefined ? r.cost : 0) + '" style="width:100px;" />' +
+              '<p style="font-size:11px;color:#94a3b8;margin:2px 0 0;">0 = วงล้อเท่านั้น</p></div>' +
+            '<div><label style="font-size:13px;font-weight:700;display:block;margin-bottom:4px;">สต็อก</label>' +
+              '<input type="number" id="bGR_stock" min="1" value="' + (r.stock !== undefined ? r.stock : 1) + '" style="width:100px;" /></div>' +
+          '</div>' +
+          '<div id="bGR_stampRow" style="display:' + (isStamp ? '' : 'none') + ';padding:8px 12px;border-radius:8px;background:#fef9c3;border:1px solid #fde047;">' +
+            '<label style="font-size:13px;font-weight:700;display:block;margin-bottom:4px;">จำนวนแสตมป์ที่ต้องสะสม</label>' +
+            '<input type="number" id="bGR_stampRequired" min="2" max="50" value="' + (r.stampsRequired || 5) + '" style="width:100px;" /></div>' +
+          '<div><label style="font-size:13px;font-weight:700;display:block;margin-bottom:4px;">รายละเอียด</label>' +
+            '<textarea id="bGR_desc" rows="2" style="width:100%;box-sizing:border-box;">' + escapeHtml(r.description || '') + '</textarea></div>' +
+          '<div style="display:flex;gap:8px;padding-top:4px;">' +
+            '<button class="btn btn-green" type="button" onclick="adminSaveGamificationRewardBubble(\'' + escapeHtml(rewardId) + '\')">บันทึก</button>' +
+            '<button class="btn btn-dark" type="button" onclick="closeEditBubble()">ยกเลิก</button>' +
+          '</div>' +
+        '</div>';
+      openViewBubble('✏️ แก้ไขรางวัล: ' + escapeHtml(r.title || ''), formHtml);
+    }
+
+    async function adminSaveGamificationRewardBubble(rewardId) {
+      const title = bubbleValue('bGR_title');
+      const category = bubbleValue('bGR_category');
+      const rewardType = bubbleSelectValue('bGR_type') || 'standard';
+      const cost = Math.max(0, parseInt(bubbleValue('bGR_cost')) || 0);
+      const stock = Math.max(1, parseInt(bubbleValue('bGR_stock')) || 1);
+      const stampsRequired = rewardType === 'stampCard' ? Math.min(50, Math.max(2, parseInt(bubbleValue('bGR_stampRequired')) || 5)) : 0;
+      const description = bubbleValue('bGR_desc');
+      if (!title) { alert('กรุณาใส่ชื่อรางวัล'); return; }
+      if (!firebaseReady || !db) return;
+      const resultEl = getElement('editBubbleResult');
+      if (resultEl) { resultEl.textContent = 'กำลังบันทึก...'; resultEl.style.color = '#d97706'; }
+      try {
+        const now = firebase.firestore.FieldValue.serverTimestamp();
+        const updates = { title: title, category: category, rewardType: rewardType, stampsRequired: stampsRequired, cost: cost, stock: stock, description: description, updatedAt: now };
+        await db.collection('gamificationRewards').doc(rewardId).set(updates, { merge: true });
+        const existing = gamificationRewards.find(function(x) { return String(x.firebaseDocId || x.id || '') === rewardId; });
+        if (existing) Object.assign(existing, updates);
+        if (resultEl) { resultEl.textContent = 'แก้ไขสำเร็จ!'; resultEl.style.color = '#16a34a'; }
+        renderAdminGamificationShop();
+        addActivityLog('แก้ไขรางวัล', title);
+        setTimeout(function() { closeEditBubble(); }, 700);
+      } catch (e) {
+        if (resultEl) { resultEl.textContent = 'บันทึกไม่สำเร็จ: ' + (e.message || ''); resultEl.style.color = '#dc2626'; }
+      }
     }
 
     async function adminSaveGamificationReward() {
-      const editingId = getElement('editingGamificationRewardId') ? getElement('editingGamificationRewardId').value.trim() : '';
       const title = (getElement('shopRewardTitle') ? getElement('shopRewardTitle').value.trim() : '');
       const category = (getElement('shopRewardCategory') ? getElement('shopRewardCategory').value.trim() : '');
       const rewardType = (getElement('shopRewardType') ? getElement('shopRewardType').value : 'standard') || 'standard';
@@ -18649,22 +18691,13 @@
       if (!firebaseReady || !db) return;
       if (resultEl) { resultEl.textContent = 'กำลังบันทึก...'; resultEl.style.color = '#d97706'; }
       try {
+        const id = createFirebaseDocId('gamificationRewards');
         const now = firebase.firestore.FieldValue.serverTimestamp();
-        if (editingId) {
-          const existing = gamificationRewards.find(function(x) { return String(x.firebaseDocId || x.id || '') === editingId; });
-          const updates = { title: title, category: category, rewardType: rewardType, stampsRequired: stampsRequired, cost: cost, stock: stock, description: description, updatedAt: now };
-          await db.collection('gamificationRewards').doc(editingId).set(updates, { merge: true });
-          if (existing) Object.assign(existing, updates);
-          if (resultEl) { resultEl.textContent = 'แก้ไขสำเร็จ!'; resultEl.style.color = '#16a34a'; }
-          addActivityLog('แก้ไขรางวัล', title);
-        } else {
-          const id = createFirebaseDocId('gamificationRewards');
-          const reward = { id: id, firebaseDocId: id, title: title, category: category, rewardType: rewardType, stampsRequired: stampsRequired, cost: cost, stock: stock, description: description, active: true, deleted: false, createdAt: now, createdAtText: new Date().toLocaleString('th-TH') };
-          await db.collection('gamificationRewards').doc(id).set(reward);
-          gamificationRewards.push(reward);
-          if (resultEl) { resultEl.textContent = 'บันทึกรางวัลสำเร็จ!'; resultEl.style.color = '#16a34a'; }
-          addActivityLog('สร้างรางวัล', title + ' · ' + (rewardType === 'stampCard' ? 'บัตรสะสม ' + stampsRequired + ' แสตมป์' : cost + ' Coins · สต็อก ' + stock));
-        }
+        const reward = { id: id, firebaseDocId: id, title: title, category: category, rewardType: rewardType, stampsRequired: stampsRequired, cost: cost, stock: stock, description: description, active: true, deleted: false, createdAt: now, createdAtText: new Date().toLocaleString('th-TH') };
+        await db.collection('gamificationRewards').doc(id).set(reward);
+        gamificationRewards.push(reward);
+        if (resultEl) { resultEl.textContent = 'บันทึกรางวัลสำเร็จ!'; resultEl.style.color = '#16a34a'; }
+        addActivityLog('สร้างรางวัล', title + ' · ' + (rewardType === 'stampCard' ? 'บัตรสะสม ' + stampsRequired + ' แสตมป์' : cost + ' Coins · สต็อก ' + stock));
         adminClearGamificationRewardForm();
         renderAdminGamificationShop();
       } catch (e) {
