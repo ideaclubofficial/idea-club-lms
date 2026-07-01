@@ -8504,6 +8504,46 @@
       }, { merge: true });
     }
 
+    async function hardDeleteFirebaseDocument(collectionName, item) {
+      if (!firebaseReady || !db || !item) throw new Error('Firebase ยังไม่พร้อมใช้งาน');
+      if (PRODUCTION_MODE && !firebaseUser) throw new Error('กรุณาเข้าสู่ระบบก่อนลบข้อมูล');
+      const docId = String(item.firebaseDocId || item.id || '').trim();
+      if (!docId) throw new Error('ไม่พบรหัสเอกสารที่ต้องลบ');
+      await db.collection(collectionName).doc(docId).delete();
+    }
+
+    async function deleteStudentUserProfileDocument(student) {
+      if (!firebaseReady || !db || !student) return;
+      const uid = String(student.authUid || student.uid || '').trim();
+      if (!uid) return;
+      await db.collection('users').doc(uid).delete();
+    }
+
+    async function recalibrateMemberCounterAfterHardDelete(student) {
+      if (!PRODUCTION_MODE || !firebaseReady || !db || !student) return false;
+      const parts = getMemberRunningFromId(student.memberId || student.studentId || '');
+      if (!parts || !parts.prefix || !parts.running) return false;
+      const counterId = 'memberIds_' + parts.prefix;
+      const nextCurrent = getMaxMemberRunningByPrefix(parts.prefix, student);
+      try {
+        await db.runTransaction(async function(transaction) {
+          const ref = db.collection('counters').doc(counterId);
+          const snapshot = await transaction.get(ref);
+          const current = snapshot.exists ? Number(snapshot.data().current || 0) || 0 : 0;
+          if (current <= nextCurrent || current !== parts.running) return;
+          transaction.set(ref, {
+            current: nextCurrent,
+            updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
+            updatedBy: firebaseUser && firebaseUser.uid ? firebaseUser.uid : ''
+          }, { merge: true });
+        });
+        return true;
+      } catch (error) {
+        console.warn('recalibrateMemberCounterAfterHardDelete failed:', error && (error.code || error.message));
+        return false;
+      }
+    }
+
     function buildStudentAuthCleanupQueueData(student, source, olderThanDays) {
       if (!student || !student.authUid) return null;
       const days = Number.isFinite(Number(olderThanDays)) ? Math.max(0, Number(olderThanDays)) : 30;
@@ -9433,6 +9473,36 @@
       const numbers = students
         .filter(function(s) { return String(s.memberId || '').indexOf(parts.prefix) === 0; })
         .map(function(s) { return Number(String(s.memberId || '').replace(parts.prefix, '')) || 0; });
+      return numbers.length ? Math.max.apply(null, numbers) : 0;
+    }
+
+    function getMemberRunningFromId(memberId) {
+      const text = String(memberId || '').trim();
+      const match = text.match(/^(\d{3})(\d{4})$/);
+      if (!match) return null;
+      return { prefix: match[1], running: Number(match[2]) || 0 };
+    }
+
+    function getMaxMemberRunningByPrefix(prefix, excludedStudent) {
+      const excludeKeys = [
+        excludedStudent && excludedStudent.id,
+        excludedStudent && excludedStudent.firebaseDocId,
+        excludedStudent && excludedStudent.authUid,
+        excludedStudent && excludedStudent.uid
+      ].map(function(value) { return String(value || '').trim(); }).filter(Boolean);
+      const numbers = (students || [])
+        .filter(function(s) {
+          if (!s) return false;
+          const keys = [s.id, s.firebaseDocId, s.authUid, s.memberId, s.studentId]
+            .map(function(value) { return String(value || '').trim(); })
+            .filter(Boolean);
+          if (keys.some(function(key) { return excludeKeys.includes(key); })) return false;
+          return String(s.memberId || s.studentId || '').indexOf(prefix) === 0;
+        })
+        .map(function(s) {
+          const parts = getMemberRunningFromId(s.memberId || s.studentId || '');
+          return parts && parts.prefix === prefix ? parts.running : 0;
+        });
       return numbers.length ? Math.max.apply(null, numbers) : 0;
     }
 
@@ -34816,11 +34886,102 @@ function receiptStatusText(status) {
       body.innerHTML += '<br><div id="studentInternalNoteInView" class="card" style="box-shadow:none; border:1px solid #e5e7eb;"><h3>หมายเหตุภายใน Admin</h3><p>' + (student.internalNote || 'ยังไม่มีหมายเหตุ') + '</p><div class="test-actions"><button class="btn btn-dark" type="button" onclick="editStudentInternalNote(\'' + jsArg(student.id) + '\')">แก้ไขหมายเหตุ</button></div></div>';
     };
 
+    function getStudentStrictDeleteKeys(student) {
+      return [student && student.id, student && student.firebaseDocId, student && student.authUid, student && student.memberId, student && student.studentId]
+        .map(function(value) { return String(value || '').trim(); })
+        .filter(Boolean);
+    }
+
+    function recordMatchesStudentStrict(record, student) {
+      if (!record || !student) return false;
+      const keys = getStudentStrictDeleteKeys(student);
+      if (!keys.length) return false;
+      const recordKeys = [
+        record.id,
+        record.firebaseDocId,
+        record.studentId,
+        record.memberId,
+        record.studentMemberId,
+        record.authUid,
+        record.studentAuthUid,
+        record.studentUid,
+        record.uid
+      ].map(function(value) { return String(value || '').trim(); }).filter(Boolean);
+      return recordKeys.some(function(key) { return keys.includes(key); });
+    }
+
+    function studentHasProtectedHistory(student) {
+      if (!student) return true;
+      const collections = [
+        payments,
+        paymentBundles,
+        receipts,
+        adminScoreRecords,
+        scoreReports,
+        monthlyPlanSessions,
+        pickupHistory,
+        studentGamificationProfiles,
+        studentGamificationEvents,
+        gamificationRedemptions,
+        studentPersonalQuests,
+        onlineExamGradeAllResults
+      ];
+      return collections.some(function(list) {
+        return Array.isArray(list) && list.some(function(record) {
+          return recordMatchesStudentStrict(record, student);
+        });
+      });
+    }
+
+    function studentAuthUidUsedByAnotherStudent(student) {
+      if (!student) return false;
+      const uid = String(student.authUid || student.uid || '').trim();
+      if (!uid) return false;
+      const currentKeys = [student.id, student.firebaseDocId]
+        .map(function(value) { return String(value || '').trim(); })
+        .filter(Boolean);
+      return (students || []).some(function(item) {
+        if (!item) return false;
+        const itemUid = String(item.authUid || item.uid || '').trim();
+        if (itemUid !== uid) return false;
+        const itemKeys = [item.id, item.firebaseDocId]
+          .map(function(value) { return String(value || '').trim(); })
+          .filter(Boolean);
+        return !itemKeys.some(function(key) { return currentKeys.includes(key); });
+      });
+    }
+
     const originalDeleteStudentFinal = deleteStudent;
     deleteStudent = async function(id) {
       const student = (students || []).find(function(s) { return String(s.id) === String(id); });
       if (!student) return originalDeleteStudentFinal(id);
-      if (!confirm('แนะนำให้ “ปิดใช้งาน / ลาออก” แทนการลบถาวร\n\nกด OK เพื่อย้ายนักเรียนไปสถานะลาออกและเก็บประวัติไว้\nกด Cancel เพื่อยกเลิก')) return;
+      const canHardDelete = !studentHasProtectedHistory(student);
+      if (canHardDelete) {
+        if (!confirm('นักเรียนคนนี้ยังไม่พบประวัติธุรกรรม/คะแนน/ตารางเรียนที่ผูกไว้\n\nกรณีเพิ่มนักเรียนซ้ำ สามารถลบจริงออกจาก Firebase และคืนเลข Member ID ล่าสุดได้\n\nกด OK เพื่อลบจริง\nกด Cancel เพื่อยกเลิก')) return;
+        try {
+          const authUidShared = studentAuthUidUsedByAnotherStudent(student);
+          if (!authUidShared) {
+            await queueStudentAuthCleanup(student, 'hard_delete_duplicate_student', 0);
+          }
+          await hardDeleteFirebaseDocument('students', student);
+          if (!authUidShared) {
+            await deleteStudentUserProfileDocument(student);
+          }
+          await recalibrateMemberCounterAfterHardDelete(student);
+          const idx = students.findIndex(function(s) { return String(s.id) === String(id); });
+          if (idx !== -1) students.splice(idx, 1);
+          addActivityLog('ลบนักเรียนซ้ำออกจาก Firebase', (student.name || '-') + ' · ' + (student.memberId || student.studentId || '-'));
+          renderAdminStudents();
+          renderAdminDashboard();
+          updateMemberIdPreview();
+          alert('ลบนักเรียนซ้ำออกจาก Firebase แล้ว และปรับเลข Member ID ล่าสุดตามข้อมูลที่เหลือ');
+        } catch (error) {
+          console.error('hard delete duplicate student error:', error);
+          alert('ลบจริงไม่สำเร็จ: ' + (error.message || error.code || 'ไม่ทราบสาเหตุ'));
+        }
+        return;
+      }
+      if (!confirm('พบนักเรียนคนนี้มีประวัติผูกกับระบบแล้ว\n\nแนะนำให้ “ปิดใช้งาน / ลาออก” แทนการลบถาวรเพื่อเก็บประวัติไว้\n\nกด OK เพื่อย้ายนักเรียนไปสถานะลาออก\nกด Cancel เพื่อยกเลิก')) return;
       student.learningStatus = 'ลาออก';
       student.status = 'ลาออก';
       student.archived = true;
