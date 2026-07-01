@@ -20201,7 +20201,7 @@
               spinRecord.id = spinId; spinRecord.firebaseDocId = spinId;
               await db.collection('prizeWheelSpins').doc(spinId).set(Object.assign({}, spinRecord, { createdAt: firebase.firestore.FieldValue.serverTimestamp() }));
               prizeWheelSpins.push(spinRecord);
-              // Trim to 30 per-student — delete oldest beyond limit
+              // Trim to 15 per-student — permanently delete oldest beyond limit
               try {
                 const mySpins = prizeWheelSpins.filter(function(s) {
                   return !s.deleted && (
@@ -20211,12 +20211,13 @@
                 }).slice().sort(function(a, b) {
                   return String(a.createdAtText || '') > String(b.createdAtText || '') ? 1 : -1;
                 });
-                if (mySpins.length > 30) {
-                  const toDelete = mySpins.slice(0, mySpins.length - 30);
+                if (mySpins.length > 15) {
+                  const toDelete = mySpins.slice(0, mySpins.length - 15);
                   toDelete.forEach(function(old) {
                     const oldId = String(old.firebaseDocId || old.id || '');
-                    old.deleted = true;
-                    if (oldId) db.collection('prizeWheelSpins').doc(oldId).set({ deleted: true, updatedAt: firebase.firestore.FieldValue.serverTimestamp() }, { merge: true }).catch(function() {});
+                    const idx = prizeWheelSpins.indexOf(old);
+                    if (idx !== -1) prizeWheelSpins.splice(idx, 1);
+                    if (oldId) db.collection('prizeWheelSpins').doc(oldId).delete().catch(function() {});
                   });
                 }
               } catch (te) { console.warn('pw trim spins:', te); }
