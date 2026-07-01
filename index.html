@@ -20201,6 +20201,25 @@
               spinRecord.id = spinId; spinRecord.firebaseDocId = spinId;
               await db.collection('prizeWheelSpins').doc(spinId).set(Object.assign({}, spinRecord, { createdAt: firebase.firestore.FieldValue.serverTimestamp() }));
               prizeWheelSpins.push(spinRecord);
+              // Trim to 30 per-student — delete oldest beyond limit
+              try {
+                const mySpins = prizeWheelSpins.filter(function(s) {
+                  return !s.deleted && (
+                    (authUid && String(s.authUid || '') === authUid) ||
+                    String(s.studentId || '') === getStudentRecordDocId(currentStudent)
+                  );
+                }).slice().sort(function(a, b) {
+                  return String(a.createdAtText || '') > String(b.createdAtText || '') ? 1 : -1;
+                });
+                if (mySpins.length > 30) {
+                  const toDelete = mySpins.slice(0, mySpins.length - 30);
+                  toDelete.forEach(function(old) {
+                    const oldId = String(old.firebaseDocId || old.id || '');
+                    old.deleted = true;
+                    if (oldId) db.collection('prizeWheelSpins').doc(oldId).set({ deleted: true, updatedAt: firebase.firestore.FieldValue.serverTimestamp() }, { merge: true }).catch(function() {});
+                  });
+                }
+              } catch (te) { console.warn('pw trim spins:', te); }
             } catch (e) { console.warn('pw spin save:', e); }
           }
           if (winner.rewardType === 'custom' && winner.linkedRewardId && firebaseReady && db) {
