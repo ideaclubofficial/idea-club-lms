@@ -9345,6 +9345,11 @@
     const onDemandClips = [];
     let studentActiveOnDemandClipId = '';
     let studentActiveOnDemandPlayingId = '';
+    let odYtApiReady = false;
+    let odYtApiLoading = false;
+    let odYtPendingVideoId = '';
+    let odYtPendingClipId = '';
+    let odYtProgressIntervals = [];
 
     let currentStudentCourseId = null;
     let currentStudent = null;
@@ -18276,6 +18281,15 @@
       }).length;
     }
 
+    const LEVEL_UP_BONUS_COINS = 20;
+
+    function formatLevelBonusText(levelsGained, levelBonusCoins) {
+      const levels = Math.max(0, Number(levelsGained) || 0);
+      const bonus = Math.max(0, Number(levelBonusCoins) || 0);
+      if (!levels || !bonus) return '';
+      return 'Level Up! +' + bonus + ' Bonus Coins';
+    }
+
     function applyStudentGamificationReward(profile, expToAdd, coinsToAdd) {
       let nextExp = Math.max(0, Number(profile.exp || 0) + (Number(expToAdd) || 0));
       let nextLevel = Math.max(1, Number(profile.level || 1) || 1);
@@ -18287,12 +18301,17 @@
         nextMax = getStudentGamificationLevelMaxExp(nextLevel);
       }
       const levelsGained = nextLevel - prevLevel;
+      const levelBonusCoins = levelsGained * LEVEL_UP_BONUS_COINS;
       profile.exp = nextExp;
       profile.level = nextLevel;
-      profile.coins = Math.max(0, Number(profile.coins || 0) + (Number(coinsToAdd) || 0));
+      profile.coins = Math.max(0, Number(profile.coins || 0) + (Number(coinsToAdd) || 0) + levelBonusCoins);
       profile.sp = Math.max(0, Number(profile.sp || 0)) + levelsGained;
       profile.updatedAtText = new Date().toLocaleString('th-TH');
-      return profile;
+      return {
+        profile: profile,
+        levelsGained: levelsGained,
+        levelBonusCoins: levelBonusCoins
+      };
     }
 
     function getStudentGamificationEventId(sourceType, sourceId) {
@@ -18446,7 +18465,10 @@
         createdAtText: new Date().toLocaleString('th-TH')
       };
 
-      applyStudentGamificationReward(profile, boosted.exp, boosted.coins);
+      const rewardResult = applyStudentGamificationReward(profile, boosted.exp, boosted.coins);
+      event.levelsGained = rewardResult.levelsGained;
+      event.levelBonusCoins = rewardResult.levelBonusCoins;
+      event.levelBonusText = formatLevelBonusText(rewardResult.levelsGained, rewardResult.levelBonusCoins);
       if (existingProfile) Object.assign(existingProfile, profile);
       else studentGamificationProfiles.push(profile);
       studentGamificationEvents.push(event);
@@ -18458,7 +18480,7 @@
           if (type === 'onDemandClip')   setTimeout(function() { triggerDailyQuestProgress('daily_clip'); }, 0);
           if (type === 'onlineExamPass') setTimeout(function() { triggerDailyQuestProgress('daily_exam'); }, 0);
         }
-        return true;
+        return rewardResult;
       } catch (error) {
         console.error('student gamification award error:', error);
         const eventIndex = studentGamificationEvents.findIndex(function(item) {
@@ -18604,7 +18626,10 @@
         createdAtText: new Date().toLocaleString('th-TH')
       };
 
-      applyStudentGamificationReward(profile, boosted.exp, boosted.coins);
+      const rewardResult = applyStudentGamificationReward(profile, boosted.exp, boosted.coins);
+      event.levelsGained = rewardResult.levelsGained;
+      event.levelBonusCoins = rewardResult.levelBonusCoins;
+      event.levelBonusText = formatLevelBonusText(rewardResult.levelsGained, rewardResult.levelBonusCoins);
       if (existingProfile) Object.assign(existingProfile, profile);
       else studentGamificationProfiles.push(profile);
       studentGamificationEvents.push(event);
@@ -18613,7 +18638,7 @@
 
       try {
         await saveStudentGamificationAward(profile, event);
-        return true;
+        return rewardResult;
       } catch (error) {
         console.error('teacher gamification award error:', error);
         const eventIndex = studentGamificationEvents.findIndex(function(item) {
@@ -18864,9 +18889,10 @@
           }
           if (resultEl) { resultEl.textContent = 'กำลังบันทึก...'; resultEl.style.color = '#d97706'; }
           try {
+            let rewardResult = null;
             if (exp > 0 || coins > 0) {
               const sourceId = createFirebaseDocId('studentGamificationEvents');
-              await awardGamificationForStudent(student, 'teacherAward', sourceId, exp, coins, reason);
+              rewardResult = await awardGamificationForStudent(student, 'teacherAward', sourceId, exp, coins, reason);
             }
             if (tickets > 0) {
               const existingProfile = findStudentGamificationProfile(student);
@@ -18888,8 +18914,10 @@
             if (exp > 0) parts.push('+' + exp + ' EXP');
             if (coins > 0) parts.push('+' + coins + ' Coins');
             if (tickets > 0) parts.push('+' + tickets + ' 🎟');
+            const bonusText = rewardResult ? formatLevelBonusText(rewardResult.levelsGained, rewardResult.levelBonusCoins) : '';
+            if (bonusText) parts.push(bonusText);
             addActivityLog('ให้รางวัลนักเรียนโดยตรง', (student.name || '-') + ' · ' + parts.join(' · ') + ' · ' + reason);
-            if (resultEl) { resultEl.textContent = 'ให้รางวัล ' + (student.name || '-') + ' เรียบร้อย'; resultEl.style.color = '#16a34a'; }
+            if (resultEl) { resultEl.textContent = 'ให้รางวัล ' + (student.name || '-') + ' เรียบร้อย' + (bonusText ? ' · ' + bonusText : ''); resultEl.style.color = '#16a34a'; }
             window.setTimeout(function() { closeEditBubble(); }, 600);
           } catch (error) {
             if (resultEl) { resultEl.textContent = 'บันทึกไม่สำเร็จ: ' + (error.message || error.code || 'ไม่ทราบสาเหตุ'); resultEl.style.color = '#dc2626'; }
@@ -18979,8 +19007,9 @@
             String(event.sourceType || '') === 'personalQuest' &&
             String(event.sourceId || '') === questDocId;
         });
+        let rewardResult = null;
         if (!alreadyAwarded && (rewardExp > 0 || rewardCoins > 0)) {
-          await awardGamificationForStudent(student, 'personalQuest', questDocId, rewardExp, rewardCoins, quest.title || 'Quest รายบุคคล');
+          rewardResult = await awardGamificationForStudent(student, 'personalQuest', questDocId, rewardExp, rewardCoins, quest.title || 'Quest รายบุคคล');
         }
         if (rewardTickets > 0) {
           const profile = getStudentGamificationProfile(student);
@@ -19017,6 +19046,12 @@
         renderTeacherStudents();
         renderStudentGamificationPanel();
         openGiveExpBubbleForStudent(student);
+        const bonusText = rewardResult ? formatLevelBonusText(rewardResult.levelsGained, rewardResult.levelBonusCoins) : '';
+        const reopenedResultEl = getElement('editBubbleResult');
+        if (bonusText && reopenedResultEl) {
+          reopenedResultEl.textContent = 'ยืนยัน Quest สำเร็จ · ' + bonusText;
+          reopenedResultEl.style.color = '#16a34a';
+        }
       } catch (error) {
         console.error('completePersonalQuest error:', error);
         if (resultEl) { resultEl.textContent = 'ยืนยันไม่สำเร็จ: ' + (error.message || error.code || ''); resultEl.style.color = '#dc2626'; }
@@ -20169,8 +20204,9 @@
           const expGain = winner.rewardType === 'exp' ? (Number(winner.rewardValue) || 0) : 0;
           const coinsGain = winner.rewardType === 'coins' ? (Number(winner.rewardValue) || 0) : 0;
           const ticketsGain = winner.rewardType === 'wheelTickets' ? Math.max(1, Number(winner.rewardValue) || 1) : 0;
+          let rewardResult = null;
           if (expGain > 0 || coinsGain > 0) {
-            await awardStudentGamification('prizeWheel', 'spin_' + Date.now(), expGain, coinsGain, 'วงล้อสุ่มรางวัล: ' + (winner.name || '-'));
+            rewardResult = await awardStudentGamification('prizeWheel', 'spin_' + Date.now(), expGain, coinsGain, 'วงล้อสุ่มรางวัล: ' + (winner.name || '-'));
           }
           if (ticketsGain > 0 && firebaseReady && db) {
             try {
@@ -20266,10 +20302,12 @@
               customLabel = ' — บัตรแลก: ' + (winner.linkedRewardTitle || 'ของรางวัลพิเศษ');
             }
           }
+          const bonusText = rewardResult ? formatLevelBonusText(rewardResult.levelsGained, rewardResult.levelBonusCoins) : '';
           pwLastSpinResult = {
             text: '🎉 ได้รับ: ' + (winner.icon || '') + ' ' + (winner.name || '-') +
               (coinsGain ? ' (+' + coinsGain + ' Coins)' : '') + (expGain ? ' (+' + expGain + ' EXP)' : '') +
-              (ticketsGain ? ' (+' + ticketsGain + ' 🎟 ตั๋วหมุนวงล้อ)' : '') + customLabel,
+              (ticketsGain ? ' (+' + ticketsGain + ' 🎟 ตั๋วหมุนวงล้อ)' : '') +
+              (bonusText ? ' · ' + bonusText : '') + customLabel,
             color: '#16a34a'
           };
           pwLastWinner = winner; // persist winner so reel stays on it; cleared only on page reload
@@ -21165,20 +21203,98 @@
       '</p>';
     }
 
-    async function startStudentOnDemandClip(id) {
+    function loadOdYtApi() {
+      if (odYtApiReady || odYtApiLoading) return;
+      odYtApiLoading = true;
+      var tag = document.createElement('script');
+      tag.src = 'https://www.youtube.com/iframe_api';
+      document.head.appendChild(tag);
+    }
+
+    window.onYouTubeIframeAPIReady = function() {
+      odYtApiReady = true;
+      odYtApiLoading = false;
+      if (odYtPendingVideoId) {
+        var vid = odYtPendingVideoId, cid = odYtPendingClipId;
+        odYtPendingVideoId = ''; odYtPendingClipId = '';
+        doCreateOdYtPlayers(vid, cid);
+      }
+    };
+
+    function doCreateOdYtPlayers(videoId, clipId) {
+      odYtProgressIntervals.forEach(function(iv) { clearInterval(iv); });
+      odYtProgressIntervals = [];
+      var els = document.querySelectorAll('.od-yt-player');
+      els.forEach(function(el) {
+        new YT.Player(el.id, {
+          videoId: videoId,
+          width: '100%',
+          height: '100%',
+          playerVars: { rel: 0, modestbranding: 1, playsinline: 1, autoplay: 1 },
+          events: { onStateChange: function(event) { onOdYtStateChange(event, clipId); } }
+        });
+      });
+    }
+
+    function onOdYtStateChange(event, clipId) {
+      var ENDED = 0, PLAYING = 1, PAUSED = 2;
+      if (event.data === PAUSED || event.data === ENDED) {
+        odYtProgressIntervals.forEach(function(iv) { clearInterval(iv); });
+        odYtProgressIntervals = [];
+      }
+      if (event.data === ENDED) {
+        awardOnDemandClipReward(clipId);
+        return;
+      }
+      if (event.data === PLAYING) {
+        var player = event.target;
+        var iv = setInterval(function() {
+          try {
+            var cur = player.getCurrentTime();
+            var dur = player.getDuration();
+            if (dur > 0 && cur / dur >= 0.8) {
+              odYtProgressIntervals.forEach(function(j) { clearInterval(j); });
+              odYtProgressIntervals = [];
+              awardOnDemandClipReward(clipId);
+            }
+          } catch(e) {}
+        }, 1000);
+        odYtProgressIntervals.push(iv);
+      }
+    }
+
+    function awardOnDemandClipReward(clipId) {
+      var item = onDemandClips.find(function(p) { return getOnDemandClipId(p) === String(clipId || ''); });
+      awardStudentGamification('onDemandClip', clipId, 50, 5, 'ดูคลิป On-demand: ' + (item ? (item.clipTitle || item.playlistName || '-') : '-'));
+    }
+
+    function launchOnDemandYouTubePlayer(id) {
       if (!studentCanUseCourseEntitlements(currentStudent)) {
-        alert(getPausedCourseAccessMessage());
-        return;
+        alert(getPausedCourseAccessMessage()); return;
       }
-      const item = onDemandClips.find(function(p) { return getOnDemandClipId(p) === String(id || ''); });
-      if (!item || !item.link) {
-        alert('ยังไม่ได้เพิ่มลิงก์คลิปนี้');
-        return;
-      }
-      const clipId = getOnDemandClipId(item);
+      var item = onDemandClips.find(function(p) { return getOnDemandClipId(p) === String(id || ''); });
+      if (!item || !item.link) { alert('ยังไม่ได้เพิ่มลิงก์คลิปนี้'); return; }
+      var videoId = getOnDemandYouTubeId(item.link);
+      if (!videoId) { window.open(item.link, '_blank'); return; }
+      var clipId = getOnDemandClipId(item);
       studentActiveOnDemandClipId = clipId;
-      await awardStudentGamification('onDemandClip', clipId, 50, 5, 'เปิดคลิป On-demand: ' + (item.clipTitle || item.playlistName || '-'));
-      window.open(item.link, '_blank');
+      odYtProgressIntervals.forEach(function(iv) { clearInterval(iv); });
+      odYtProgressIntervals = [];
+      var screens = document.querySelectorAll('.student-ondemand-screen');
+      screens.forEach(function(screen, i) {
+        screen.innerHTML = '<div class="od-yt-player" id="odYtPlayer_' + i + '" style="position:absolute;inset:0;width:100%;height:100%;"></div>';
+      });
+      if (odYtApiReady) {
+        doCreateOdYtPlayers(videoId, clipId);
+      } else {
+        odYtPendingVideoId = videoId;
+        odYtPendingClipId = clipId;
+        loadOdYtApi();
+      }
+    }
+
+    async function startStudentOnDemandClip(id) {
+      launchOnDemandYouTubePlayer(id);
     }
 
     function renderStudentOnDemandExperience(courseList, grade, target) {
@@ -21236,7 +21352,7 @@
               '<div class="student-ondemand-screen-overlay">' +
                 playerButton +
                 '<h3>' + escapeHtml(active.clipTitle || active.playlistName || '-') + '</h3>' +
-                '<p>' + (hasLink ? 'กดเพื่อดูคลิปใน YouTube' : 'ยังไม่มีลิงก์คลิปนี้') + '</p>' +
+                '<p>' + (rewardCompleted ? '✓ รับรางวัลแล้ว' : hasLink ? 'ดูให้ถึง 80% หรือจบคลิป เพื่อรับ +50 EXP · +5 Coins' : 'ยังไม่มีลิงก์คลิปนี้') + '</p>' +
               '</div>' +
               '<div class="student-ondemand-timeline"><span style="width:' + progressPct + '%;"></span></div>' +
             '</div>' +
@@ -21367,17 +21483,7 @@
     }
 
     function openOnDemandClipClip(id) {
-      if (!studentCanUseCourseEntitlements(currentStudent)) {
-        alert(getPausedCourseAccessMessage());
-        return;
-      }
-      const item = onDemandClips.find(function(p) { return getOnDemandClipId(p) === String(id || ''); });
-      if (!item || !item.link) {
-        alert('ยังไม่ได้เพิ่มลิงก์คลิปนี้');
-        return;
-      }
-      awardStudentGamification('onDemandClip', item.id || item.firebaseDocId || id, 50, 5, 'เปิดคลิป On-demand: ' + (item.clipTitle || item.playlistName || '-'));
-      window.open(item.link, '_blank');
+      launchOnDemandYouTubePlayer(id);
     }
 
     function openOnlineClassByCourseId(id) {
