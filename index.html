@@ -9486,9 +9486,7 @@
     function getMaxMemberRunningByPrefix(prefix, excludedStudent) {
       const excludeKeys = [
         excludedStudent && excludedStudent.id,
-        excludedStudent && excludedStudent.firebaseDocId,
-        excludedStudent && excludedStudent.authUid,
-        excludedStudent && excludedStudent.uid
+        excludedStudent && excludedStudent.firebaseDocId
       ].map(function(value) { return String(value || '').trim(); }).filter(Boolean);
       const numbers = (students || [])
         .filter(function(s) {
@@ -13483,6 +13481,7 @@
         '<button class="btn btn-dark" type="button" onclick="' + actionCall('openResetStudentPassword', s.id) + '">Reset รหัสผ่าน</button>' +
         '<button class="btn btn-dark" type="button" onclick="' + actionCall('copyStudentLoginInfoById', s.id) + '">คัดลอกข้อมูลเข้าสู่ระบบ</button>' +
         '<button class="btn btn-red" type="button" onclick="' + actionCall('deleteStudent', s.id) + '">ลบ</button>' +
+        '<button class="btn btn-red" type="button" onclick="' + actionCall('deleteStudentHistoryPermanently', s.id) + '">ลบประวัติ</button>' +
       '</div>';
     }
 
@@ -34563,218 +34562,6 @@ function receiptStatusText(status) {
       }
     }
 
-    const HARD_WIPE_TARGETS = [
-      { key: 'wipeAllSystem', label: 'Wipe ทั้งหมด', collections: ['students', 'payments', 'paymentBundles', 'receipts', 'paymentMonths', 'monthlyQuestions', 'monthlyExamLinks', 'monthlyPlans', 'monthlyPlanSessions', 'holidays', 'scoreReports', 'adminScoreRecords', 'announcements', 'activityLogs', 'onDemandClips', 'studentGamificationProfiles', 'studentGamificationEvents', 'studentPersonalQuests', 'attendanceHistory', 'courses', 'teachers', 'lineGroups', 'settings'], studentUsers: true, dangerous: true },
-      { key: 'students', label: 'นักเรียน', collections: ['students'] },
-      { key: 'studentUsers', label: 'บัญชี users ของนักเรียน', studentUsers: true },
-      { key: 'finance', label: 'การเงิน / ใบเสร็จ / รอบชำระเงิน', collections: ['payments', 'paymentBundles', 'receipts', 'paymentMonths'] },
-      { key: 'scores', label: 'สอบ / คะแนน', collections: ['monthlyQuestions', 'monthlyExamLinks', 'scoreReports', 'adminScoreRecords'] },
-      { key: 'monthlyPlanner', label: 'แผนสอนรายเดือน', collections: ['monthlyPlans', 'monthlyPlanSessions', 'holidays'] },
-      { key: 'announcements', label: 'ประกาศ', collections: ['announcements'] },
-      { key: 'activityLogs', label: 'ประวัติการแก้ไข', collections: ['activityLogs'] },
-      { key: 'onDemandClips', label: 'คลิป On-demand', collections: ['onDemandClips'] },
-      { key: 'studentGamification', label: 'Progress / Coins นักเรียน', collections: ['studentGamificationProfiles', 'studentGamificationEvents', 'studentPersonalQuests'] },
-      { key: 'attendanceHistory', label: 'ประวัติเข้าเรียน', collections: ['attendanceHistory'] }
-    ];
-
-    function hardWipeTargetChoicesHtml() {
-      return '<div class="permission-grid">' + HARD_WIPE_TARGETS.map(function(target) {
-        return '<label class="feature-check" style="align-items:flex-start;">' +
-          '<input class="hard-wipe-target" type="checkbox" value="' + target.key + '"' + (target.dangerous ? '' : ' checked') + ' onchange="renderHardWipeSelectionSummary()" />' +
-          '<span><strong>' + target.label + '</strong><br><span class="mini-muted">' + (target.collections ? target.collections.join(', ') : 'users role student / student authUid') + '</span></span>' +
-        '</label>';
-      }).join('') + '</div>';
-    }
-
-    function injectHardWipePanel() {
-      const settings = getElement('admin-settings');
-      if (!settings || !canRunHardWipeData()) return;
-      ensureElement(settings, 'hardWipePanel',
-        '<div id="hardWipePanel" class="form-box" style="border:2px solid #dc2626;">' +
-          '<h3 style="color:#dc2626;">Danger Zone / Wipe Data</h3>' +
-          '<p style="color:#6b7280; margin-bottom:14px;">ลบข้อมูลถาวรตามรายการที่เลือก ต้อง Export Backup ก่อนทุกครั้ง</p>' +
-          '<div class="notice" style="border-color:#fecaca; background:#fff7f7;">' +
-            '<p><strong>Wipe ทั้งหมด:</strong> ลบทุก collection หลัก รวม courses, teachers, lineGroups และ settings</p>' +
-            '<p><strong>ไม่ลบ:</strong> users ของครู/Admin และ Firebase Auth accounts</p>' +
-          '</div>' +
-          '<h3 style="font-size:18px;">เลือกรายการที่จะลบ</h3>' +
-          '<div class="test-actions">' +
-            '<button class="btn btn-dark" type="button" onclick="setHardWipeTargetSelection(\'all\')">เลือกทั้งหมด</button>' +
-            '<button class="btn btn-dark" type="button" onclick="setHardWipeTargetSelection(\'none\')">ล้างการเลือก</button>' +
-            '<button class="btn btn-dark" type="button" onclick="setHardWipeTargetSelection(\'default\')">เลือกชุดล้างระบบตามค่าเริ่มต้น</button>' +
-          '</div>' +
-          hardWipeTargetChoicesHtml() +
-          '<div id="hardWipeSelectionSummary" class="status-display" style="margin-top:14px;"></div>' +
-          '<div class="test-actions"><button class="btn btn-blue" type="button" onclick="exportAllDataBackup()">1. Export Backup ก่อน</button><span id="hardWipeBackupStatus" class="mini-muted">ยังไม่ได้ backup ใน session นี้</span></div>' +
-          '<label>พิมพ์คำยืนยัน: WIPE IDEA CLUB DATA</label>' +
-          '<input id="hardWipeConfirmText" type="text" placeholder="WIPE IDEA CLUB DATA" />' +
-          '<button class="btn btn-red" type="button" onclick="runHardWipeData()">Hard Wipe ข้อมูล</button>' +
-          '<div id="hardWipeResult" class="status-display" style="margin-top:14px;"></div>' +
-        '</div>');
-      if (lastFullBackupExportedAt && getElement('hardWipeBackupStatus')) {
-        getElement('hardWipeBackupStatus').textContent = 'Backup ล่าสุด: ' + lastFullBackupExportedAt.toLocaleString('th-TH');
-      }
-      renderHardWipeSelectionSummary();
-    }
-
-    function setHardWipeTargetSelection(mode) {
-      const checkboxes = Array.from(document.querySelectorAll('.hard-wipe-target'));
-      checkboxes.forEach(function(input) {
-        if (mode === 'none') {
-          input.checked = false;
-        } else if (mode === 'default') {
-          const target = HARD_WIPE_TARGETS.find(function(item) { return item.key === input.value; });
-          input.checked = !(target && target.dangerous);
-        } else {
-          input.checked = true;
-        }
-      });
-      renderHardWipeSelectionSummary();
-    }
-
-    function getSelectedHardWipeTargets() {
-      const selectedKeys = Array.from(document.querySelectorAll('.hard-wipe-target:checked')).map(function(input) { return input.value; });
-      return HARD_WIPE_TARGETS.filter(function(target) { return selectedKeys.includes(target.key); });
-    }
-
-    function selectedHardWipeIncludesAll(targets) {
-      return (targets || getSelectedHardWipeTargets()).some(function(target) { return target.key === 'wipeAllSystem'; });
-    }
-
-    function getHardWipeCollectionsToDelete(targets) {
-      const selectedTargets = targets || getSelectedHardWipeTargets();
-      const collectionMap = {};
-      selectedTargets.forEach(function(target) {
-        (target.collections || []).forEach(function(collectionName) {
-          collectionMap[collectionName] = true;
-        });
-      });
-      return Object.keys(collectionMap);
-    }
-
-    function getHardWipeTargetLabels(targets) {
-      return (targets || []).map(function(target) { return target.label; });
-    }
-
-    function renderHardWipeSelectionSummary() {
-      const box = getElement('hardWipeSelectionSummary');
-      if (!box) return;
-      const targets = getSelectedHardWipeTargets();
-      if (!targets.length) {
-        box.innerHTML = '<div class="feature-warning">ยังไม่ได้เลือกรายการที่จะลบ</div>';
-        return;
-      }
-      const wipeAllWarning = selectedHardWipeIncludesAll(targets)
-        ? '<p style="color:#dc2626;"><strong>โหมด Wipe ทั้งหมดจะลบ courses, teachers, lineGroups และ settings ด้วย</strong></p>'
-        : '';
-      box.innerHTML = '<div class="feature-warning"><strong>รายการที่จะถูกลบ ' + targets.length + ' หมวด</strong><p>' + escapeHtml(getHardWipeTargetLabels(targets).join(', ')) + '</p>' + wipeAllWarning + '</div>';
-    }
-
-    function confirmHardWipeInput() {
-      const input = getElement('hardWipeConfirmText');
-      return input && input.value.trim() === 'WIPE IDEA CLUB DATA';
-    }
-
-    async function deleteRefsInBatches(refs) {
-      let deleted = 0;
-      for (let i = 0; i < refs.length; i += 450) {
-        const batch = db.batch();
-        refs.slice(i, i + 450).forEach(function(ref) { batch.delete(ref); });
-        await batch.commit();
-        deleted += Math.min(450, refs.length - i);
-      }
-      return deleted;
-    }
-
-    async function deleteCollectionInBatches(collectionName) {
-      let deleted = 0;
-      while (true) {
-        const snapshot = await db.collection(collectionName).limit(450).get();
-        if (snapshot.empty) break;
-        const refs = [];
-        snapshot.forEach(function(doc) { refs.push(doc.ref); });
-        deleted += await deleteRefsInBatches(refs);
-        if (snapshot.size < 450) break;
-      }
-      return deleted;
-    }
-
-    async function deleteStudentUserProfiles(studentAuthUids) {
-      const refsByPath = {};
-      const addRef = function(ref) { refsByPath[ref.path] = ref; };
-
-      (studentAuthUids || []).filter(Boolean).forEach(function(uid) {
-        addRef(db.collection('users').doc(String(uid)));
-      });
-
-      const roleSnapshot = await db.collection('users').where('role', '==', 'student').limit(500).get();
-      roleSnapshot.forEach(function(doc) { addRef(doc.ref); });
-
-      return deleteRefsInBatches(Object.keys(refsByPath).map(function(path) { return refsByPath[path]; }));
-    }
-
-    async function runHardWipeData() {
-      const result = getElement('hardWipeResult');
-      if (!result) return;
-      if (!canRunHardWipeData()) {
-        result.innerHTML = '<div class="feature-warning">สิทธิ์ไม่เพียงพอ ต้องเป็น Super Admin เท่านั้น</div>';
-        return;
-      }
-      if (!firebaseReady || !db) {
-        result.innerHTML = '<div class="feature-warning">Firebase ยังไม่พร้อมใช้งาน</div>';
-        return;
-      }
-      if (!lastFullBackupExportedAt) {
-        result.innerHTML = '<div class="feature-warning">กรุณา Export Backup ก่อน wipe ข้อมูล</div>';
-        return;
-      }
-      if (!confirmHardWipeInput()) {
-        result.innerHTML = '<div class="feature-warning">กรุณาพิมพ์คำยืนยันให้ตรง: WIPE IDEA CLUB DATA</div>';
-        return;
-      }
-      const selectedTargets = getSelectedHardWipeTargets();
-      if (!selectedTargets.length) {
-        result.innerHTML = '<div class="feature-warning">กรุณาเลือกรายการที่ต้องการลบ</div>';
-        return;
-      }
-      const selectedLabels = getHardWipeTargetLabels(selectedTargets);
-      const includesAll = selectedHardWipeIncludesAll(selectedTargets);
-      const allWarning = includesAll ? '\n\nโหมด Wipe ทั้งหมดจะลบ courses, teachers, lineGroups และ settings ด้วย แต่จะยังเก็บ users ของ Admin/ครูไว้' : '';
-      if (!confirm('ยืนยัน Hard Wipe รายการนี้จริงหรือไม่?\n\n' + selectedLabels.join('\n') + allWarning + '\n\nการลบนี้ย้อนกลับไม่ได้ถ้าไม่มี backup')) return;
-
-      result.innerHTML = '<div class="notice">กำลังลบข้อมูล กรุณาอย่าปิดหน้านี้...</div>';
-      const studentSnapshotForAuthCleanup = (students || []).slice();
-      const studentAuthUids = studentSnapshotForAuthCleanup.map(function(student) { return student.authUid; }).filter(Boolean);
-      const collectionsToDelete = getHardWipeCollectionsToDelete(selectedTargets);
-      const summary = [];
-
-      try {
-        if (selectedTargets.some(function(target) { return target.studentUsers || (target.collections || []).includes('students'); })) {
-          const queuedAuth = await queueStudentAuthCleanupForStudents(studentSnapshotForAuthCleanup, includesAll ? 'hard_wipe_all' : 'hard_wipe', 30);
-          summary.push({ label: 'คิวล้าง Firebase Auth', count: queuedAuth });
-        }
-        if (selectedTargets.some(function(target) { return target.studentUsers; })) {
-          const deletedUsers = await deleteStudentUserProfiles(studentAuthUids);
-          summary.push({ label: 'users นักเรียน', count: deletedUsers });
-        }
-        for (let i = 0; i < collectionsToDelete.length; i += 1) {
-          const collectionName = collectionsToDelete[i];
-          const count = await deleteCollectionInBatches(collectionName);
-          summary.push({ label: collectionName, count: count });
-        }
-        await loadCoreDataFromFirebase();
-        renderActiveAdminTab();
-        result.innerHTML = '<div class="feature-ok"><strong>Hard Wipe สำเร็จ</strong><p>' + (includesAll ? 'ล้างทุก collection หลักแล้ว และยังเก็บ users ของ Admin/ครูไว้' : 'ลบเฉพาะรายการที่เลือกแล้ว') + '</p></div>' +
-          summary.map(function(item) {
-            return '<div class="status-display-row"><span class="status-label">' + escapeHtml(item.label) + '</span><strong>' + item.count + '</strong></div>';
-          }).join('');
-        if (getElement('hardWipeConfirmText')) getElement('hardWipeConfirmText').value = '';
-      } catch (error) {
-        console.error('hard wipe error:', error);
-        result.innerHTML = '<div class="feature-warning"><strong>Hard Wipe ไม่สำเร็จ</strong><p>' + escapeHtml(error.message || error.code || String(error)) + '</p></div>';
-      }
-    }
-
     function injectStudentGuide() {
       const dashboard = getElement('studentDashboard');
       if (!dashboard) return;
@@ -34824,7 +34611,7 @@ function receiptStatusText(status) {
       if (tabId === 'admin-dashboard') { renderNewMemberNotificationBox(); renderAdminDataQualityBox(); }
       if (tabId === 'admin-courses') { injectCourseReadinessTools(); renderAllCourseReadiness(); }
       if (tabId === 'admin-payment') { injectOverdueDayFilter(); injectPaymentOwnerDiagnosticPanel(); }
-      if (tabId === 'admin-settings') { injectBackupButton(); injectAuthCleanupPanel(); injectHardWipePanel(); injectAdminRoleSettings(); }
+      if (tabId === 'admin-settings') { injectBackupButton(); injectAuthCleanupPanel(); injectAdminRoleSettings(); }
       applyAdminRoleVisibility();
     };
 
@@ -34951,6 +34738,52 @@ function receiptStatusText(status) {
       });
     }
 
+    async function hardDeleteStudentRecordAndRecalibrate(student, source, activityTitle) {
+      if (!student) throw new Error('ไม่พบนักเรียนที่ต้องการลบ');
+      const authUidShared = studentAuthUidUsedByAnotherStudent(student);
+      if (!authUidShared) {
+        await queueStudentAuthCleanup(student, source || 'hard_delete_student', 0);
+      }
+      await hardDeleteFirebaseDocument('students', student);
+      if (!authUidShared) {
+        await deleteStudentUserProfileDocument(student);
+      }
+      await recalibrateMemberCounterAfterHardDelete(student);
+      const deleteKeys = [student.id, student.firebaseDocId]
+        .map(function(value) { return String(value || '').trim(); })
+        .filter(Boolean);
+      const idx = students.findIndex(function(item) {
+        if (!item) return false;
+        return [item.id, item.firebaseDocId]
+          .map(function(value) { return String(value || '').trim(); })
+          .filter(Boolean)
+          .some(function(key) { return deleteKeys.includes(key); });
+      });
+      if (idx !== -1) students.splice(idx, 1);
+      addActivityLog(activityTitle || 'ลบนักเรียนออกจาก Firebase', (student.name || '-') + ' · ' + (student.memberId || student.studentId || '-'));
+      renderAdminStudents();
+      renderAdminDashboard();
+      updateMemberIdPreview();
+    }
+
+    async function deleteStudentHistoryPermanently(id) {
+      const student = (students || []).find(function(s) { return String(s.id) === String(id); });
+      if (!student) return;
+      const protectedHistory = studentHasProtectedHistory(student);
+      const warning = protectedHistory
+        ? 'พบนักเรียนคนนี้มีประวัติผูกกับระบบ เช่น การเงิน/คะแนน/ตารางเรียน/ระบบตัวละคร\n\nปุ่มนี้จะลบประวัตินักเรียน record นี้ออกจาก Firebase จริง และถ้า Member ID เป็นลำดับล่าสุดจะลดตัวนับให้\n\nข้อมูลรายการอื่นที่เคยผูกกับนักเรียนอาจยังอยู่ในระบบตาม collection เดิม'
+        : 'ปุ่มนี้จะลบประวัตินักเรียน record นี้ออกจาก Firebase จริง และถ้า Member ID เป็นลำดับล่าสุดจะลดตัวนับให้';
+      if (!confirm(warning + '\n\nกด OK เพื่อยืนยันลบประวัติถาวร\nกด Cancel เพื่อยกเลิก')) return;
+      if (!confirm('ยืนยันอีกครั้ง: ต้องการลบประวัติของ ' + (student.name || '-') + ' ถาวรใช่ไหม?')) return;
+      try {
+        await hardDeleteStudentRecordAndRecalibrate(student, 'hard_delete_student_history', 'ลบประวัตินักเรียนออกจาก Firebase');
+        alert('ลบประวัตินักเรียนออกจาก Firebase แล้ว และปรับเลข Member ID ล่าสุดตามข้อมูลที่เหลือ');
+      } catch (error) {
+        console.error('hard delete student history error:', error);
+        alert('ลบประวัติไม่สำเร็จ: ' + (error.message || error.code || 'ไม่ทราบสาเหตุ'));
+      }
+    }
+
     const originalDeleteStudentFinal = deleteStudent;
     deleteStudent = async function(id) {
       const student = (students || []).find(function(s) { return String(s.id) === String(id); });
@@ -34959,21 +34792,7 @@ function receiptStatusText(status) {
       if (canHardDelete) {
         if (!confirm('นักเรียนคนนี้ยังไม่พบประวัติธุรกรรม/คะแนน/ตารางเรียนที่ผูกไว้\n\nกรณีเพิ่มนักเรียนซ้ำ สามารถลบจริงออกจาก Firebase และคืนเลข Member ID ล่าสุดได้\n\nกด OK เพื่อลบจริง\nกด Cancel เพื่อยกเลิก')) return;
         try {
-          const authUidShared = studentAuthUidUsedByAnotherStudent(student);
-          if (!authUidShared) {
-            await queueStudentAuthCleanup(student, 'hard_delete_duplicate_student', 0);
-          }
-          await hardDeleteFirebaseDocument('students', student);
-          if (!authUidShared) {
-            await deleteStudentUserProfileDocument(student);
-          }
-          await recalibrateMemberCounterAfterHardDelete(student);
-          const idx = students.findIndex(function(s) { return String(s.id) === String(id); });
-          if (idx !== -1) students.splice(idx, 1);
-          addActivityLog('ลบนักเรียนซ้ำออกจาก Firebase', (student.name || '-') + ' · ' + (student.memberId || student.studentId || '-'));
-          renderAdminStudents();
-          renderAdminDashboard();
-          updateMemberIdPreview();
+          await hardDeleteStudentRecordAndRecalibrate(student, 'hard_delete_duplicate_student', 'ลบนักเรียนซ้ำออกจาก Firebase');
           alert('ลบนักเรียนซ้ำออกจาก Firebase แล้ว และปรับเลข Member ID ล่าสุดตามข้อมูลที่เหลือ');
         } catch (error) {
           console.error('hard delete duplicate student error:', error);
