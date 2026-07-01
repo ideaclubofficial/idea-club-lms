@@ -21957,6 +21957,16 @@
       const deleteSlipBtn = canDeletePaymentSlip(payment)
         ? '<button class="btn btn-red" type="button" onclick="deletePaymentSlipOnly(\'' + jsArg(String(paymentId)) + '\')">ลบสลิป</button>'
         : '';
+      const revertBtn = statusText === 'ชำระแล้ว'
+        ? '<button class="btn btn-orange" type="button" onclick="revertPaymentApproval(\'' + jsArg(String(paymentId)) + '\')">↩ ยกเลิกการอนุมัติ</button>'
+        : '';
+      const linkedReceipt = (receipts || []).find(function(r) {
+        return (payment.receiptId && String(r.id || '') === String(payment.receiptId)) ||
+               (r.paymentId && String(r.paymentId) === String(paymentId));
+      });
+      const receiptNote = linkedReceipt
+        ? '<div class="receipt-line"><strong>ใบเสร็จ</strong><span class="mini-muted">' + escapeHtml(linkedReceipt.receiptNo || '-') + (linkedReceipt.status === 'published' ? ' · แสดงแล้ว' : '') + '</span></div>'
+        : '';
       openViewBubble('ตรวจสลิปการชำระเงิน',
         '<div style="display:flex;gap:20px;flex-wrap:wrap;align-items:flex-start;">' +
         '<div style="flex:1 1 220px;">' + slipHtml + '</div>' +
@@ -21966,11 +21976,12 @@
         '<div class="receipt-line"><strong>เดือน</strong><span>' + escapeHtml(payment.month || '-') + '</span></div>' +
         '<div class="receipt-line"><strong>ยอด</strong><span style="font-weight:800;">' + escapeHtml(renderPaymentAmountText(payment)) + '</span></div>' +
         '<div class="receipt-line"><strong>สถานะ</strong><span class="' + statusClass + '">' + escapeHtml(statusText) + '</span></div>' +
-        adminNote + ocrNote +
+        receiptNote + adminNote + ocrNote +
         '</div></div>' +
         '<div class="test-actions" style="margin-top:18px;">' +
         '<button id="slipModalApproveBtn" class="btn btn-green" type="button" onclick="approvePaymentByIdFromModal(\'' + jsArg(String(paymentId)) + '\')">✓ อนุมัติ</button>' +
         '<button id="slipModalRejectBtn" class="btn btn-red" type="button" onclick="rejectPaymentByIdFromModal(\'' + jsArg(String(paymentId)) + '\')">✗ ไม่ผ่าน</button>' +
+        revertBtn +
         moveSlipBtn +
         deleteSlipBtn +
         (slipUrl ? '<a class="btn btn-blue" href="' + escapeHtml(slipUrl) + '" target="_blank" rel="noopener">เปิดสลิปเต็ม</a>' : '') +
@@ -22004,6 +22015,48 @@
       renderPaymentTable();
       updatePaymentSummary();
       safeRun(renderStudentMobilePayment, 'reject-payment-mobile');
+    }
+
+    async function revertPaymentApproval(paymentId) {
+      if (!hasPermission('admin.payments')) { alert('ไม่มีสิทธิ์'); return; }
+      const payment = findPaymentByAnyId(paymentId);
+      if (!payment) { alert('ไม่พบรายการชำระเงิน'); return; }
+      if (getPaymentDisplayStatus(payment) !== 'ชำระแล้ว') { alert('รายการนี้ยังไม่ได้อนุมัติ'); return; }
+      const linkedReceipt = (receipts || []).find(function(r) {
+        return (payment.receiptId && String(r.id || '') === String(payment.receiptId)) ||
+               (r.paymentId && String(r.paymentId) === String(payment.id || payment.firebaseDocId || ''));
+      });
+      const receiptLine = linkedReceipt ? '\n- ใบเสร็จ ' + (linkedReceipt.receiptNo || '-') + ' จะถูกลบออกด้วย' : '';
+      if (!confirm('ยืนยันยกเลิกการอนุมัติรายการนี้?\n- สถานะจะเปลี่ยนกลับเป็น "รอชำระเงิน"' + receiptLine)) return;
+      payment.status = 'รอชำระเงิน';
+      payment.paymentStatus = 'รอชำระเงิน';
+      payment.slipStatus = 'waiting_admin_review';
+      payment.adminReviewStatus = 'pending';
+      payment.receiptStatus = '';
+      payment.receiptId = '';
+      payment.receiptNo = '';
+      try {
+        await setFirebaseDocument('payments', payment);
+        if (linkedReceipt) {
+          const rIdx = receipts.findIndex(function(r) { return String(r.id || '') === String(linkedReceipt.id || ''); });
+          await deleteFirebaseDocument('receipts', linkedReceipt);
+          if (rIdx !== -1) receipts.splice(rIdx, 1);
+          addActivityLog('ยกเลิกการอนุมัติ+ลบใบเสร็จ', (linkedReceipt.receiptNo || '-') + ' · ' + (payment.student || '-') + ' · ' + (payment.month || '-'));
+        } else {
+          addActivityLog('ยกเลิกการอนุมัติ', (payment.student || '-') + ' · ' + (payment.month || '-'));
+        }
+        await syncStudentPaymentStatusFromPayment(payment, 'รอชำระเงิน');
+        closeEditBubble();
+        renderPaymentTable();
+        renderAdminReceipts();
+        renderStudentReceipts();
+        updatePaymentSummary();
+        safeRun(renderStudentMobilePayment, 'revert-payment-mobile');
+        safeRun(renderAdminDashboard, 'revert-payment-dashboard');
+      } catch (err) {
+        console.error('revertPaymentApproval error:', err);
+        alert('ยกเลิกการอนุมัติไม่สำเร็จ: ' + (err.message || err.code || 'ไม่ทราบสาเหตุ'));
+      }
     }
 
     async function approvePaymentAndIssueReceipt(paymentId) {
