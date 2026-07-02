@@ -7412,6 +7412,7 @@
                     <option value="standard">รางวัลมาตรฐาน (แลกครั้งเดียว)</option>
                     <option value="stampCard">บัตรสะสม (สะสมแสตมป์)</option>
                     <option value="wheelTickets">🎟 ตั๋วหมุนวงล้อ</option>
+                    <option value="avatarCosmetic">👗 ไอเท็มแต่ง Avatar</option>
                   </select>
                 </div>
               </div>
@@ -7434,6 +7435,15 @@
                     <label>จำนวนตั๋วหมุนวงล้อที่ได้รับ</label>
                     <input type="number" id="shopTicketsAwarded" min="1" max="50" value="1" style="width:100px;" />
                     <p style="font-size:11px;color:#5b21b6;margin:3px 0 0;">เมื่อแอดมินยืนยัน → ตั๋วหมุนวงล้อจะเพิ่มอัตโนมัติ</p>
+                  </div>
+                </div>
+              </div>
+              <div id="shopAvatarCosmeticRow" style="display:none;margin-bottom:10px;padding:10px 12px;border-radius:8px;background:#ecfeff;border:1px solid #67e8f9;">
+                <div class="form-row" style="margin-bottom:0;">
+                  <div>
+                    <label>ไอเท็มแต่ง Avatar</label>
+                    <select id="shopAvatarCosmeticId"></select>
+                    <p style="font-size:11px;color:#0e7490;margin:3px 0 0;">นักเรียนซื้อแล้วได้รับทันที และนำไปใส่ในตู้เสื้อผ้าได้</p>
                   </div>
                 </div>
               </div>
@@ -9394,6 +9404,25 @@
     const PROFESSION_CHANGE_TICKET_REWARD_ID = 'system-profession-change-ticket';
     const PROFESSION_CHANGE_TICKET_PRICE = 100;
     const PROFESSION_CHANGE_TICKET_TITLE = 'บัตรเปลี่ยนอาชีพ';
+    const AVATAR_COSMETIC_SLOTS = [
+      { id: 'head', label: 'หัว / หมวก' },
+      { id: 'outfit', label: 'ชุด' },
+      { id: 'accessory', label: 'อุปกรณ์' }
+    ];
+    const AVATAR_COSMETICS = [
+      { id: 'head-star-crown', slot: 'head', label: 'มงกุฎดาว', icon: '👑' },
+      { id: 'head-focus-phones', slot: 'head', label: 'หูฟังโฟกัส', icon: '🎧' },
+      { id: 'head-sky-cap', slot: 'head', label: 'หมวกฟ้า IDEA', icon: '🧢' },
+      { id: 'head-spark-halo', slot: 'head', label: 'ฮาโล่ประกาย', icon: '✨' },
+      { id: 'outfit-academy-cloak', slot: 'outfit', label: 'ผ้าคลุม Academy', icon: '🧥' },
+      { id: 'outfit-neon-jacket', slot: 'outfit', label: 'แจ็กเก็ต Neon', icon: '🟦' },
+      { id: 'outfit-gold-armor', slot: 'outfit', label: 'เกราะทอง', icon: '🛡' },
+      { id: 'outfit-lab-apron', slot: 'outfit', label: 'ผ้ากันเปื้อนทดลอง', icon: '🥼' },
+      { id: 'accessory-mini-wings', slot: 'accessory', label: 'ปีกเล็ก', icon: '🪽' },
+      { id: 'accessory-book-bag', slot: 'accessory', label: 'กระเป๋าหนังสือ', icon: '🎒' },
+      { id: 'accessory-star-staff', slot: 'accessory', label: 'คทาดาว', icon: '🪄' },
+      { id: 'accessory-crystal-orb', slot: 'accessory', label: 'ลูกแก้วคริสตัล', icon: '🔮' }
+    ];
 
     let currentTeacher = null;
     let currentAdmin = null;
@@ -17848,6 +17877,8 @@
       const passiveLevel = Math.min(5, Math.max(1, Number(rawSkill.passive) || 1));
       const rawDqp = (profile && profile.dailyQuestProgress) || {};
       const pendingCoinFrac = Math.max(0, Number(profile && profile.pendingCoinFrac) || 0) % 1;
+      const ownedAvatarItems = normalizeOwnedAvatarItems(profile && profile.ownedAvatarItems);
+      const equippedAvatarItems = normalizeEquippedAvatarItems(profile && profile.equippedAvatarItems, ownedAvatarItems);
       return Object.assign({}, profile || {}, {
         level: level,
         exp: exp,
@@ -17855,6 +17886,8 @@
         sp: sp,
         professionChangeTickets: professionChangeTickets,
         prizeWheelTickets: prizeWheelTickets,
+        ownedAvatarItems: ownedAvatarItems,
+        equippedAvatarItems: equippedAvatarItems,
         profession: (profile && profile.profession) || 'IDEA Explorer',
         skillLevels: { passive: passiveLevel },
         dailyQuestProgress: { date: rawDqp.date || '', quests: rawDqp.quests || {} },
@@ -17877,6 +17910,37 @@
 
     function getPrizeWheelTickets(profile) {
       return Math.max(0, Number(profile && (profile.prizeWheelTickets !== undefined ? profile.prizeWheelTickets : profile.freeSpins)) || 0);
+    }
+
+    function getAvatarCosmeticById(cosmeticId) {
+      return AVATAR_COSMETICS.find(function(item) { return item.id === cosmeticId; }) || null;
+    }
+
+    function getAvatarCosmeticsBySlot(slot) {
+      return AVATAR_COSMETICS.filter(function(item) { return item.slot === slot; });
+    }
+
+    function normalizeOwnedAvatarItems(value) {
+      const list = Array.isArray(value) ? value : [];
+      const seen = {};
+      return list.map(function(id) { return String(id || '').trim(); })
+        .filter(function(id) {
+          if (!id || seen[id] || !getAvatarCosmeticById(id)) return false;
+          seen[id] = true;
+          return true;
+        });
+    }
+
+    function normalizeEquippedAvatarItems(value, ownedItems) {
+      const owned = normalizeOwnedAvatarItems(ownedItems);
+      const raw = value || {};
+      const result = {};
+      AVATAR_COSMETIC_SLOTS.forEach(function(slot) {
+        const id = String(raw[slot.id] || '').trim();
+        const item = getAvatarCosmeticById(id);
+        if (item && item.slot === slot.id && owned.indexOf(id) !== -1) result[slot.id] = id;
+      });
+      return result;
     }
 
     function canChangeStudentProfession(profile) {
@@ -18145,7 +18209,59 @@
       '<text x="57" y="40" font-size="7"  fill="#e0e7ff" class="sga-pc">✦</text>';
     }
 
-    function renderProfessionAvatarSVG(profId, level) {
+    function renderAvatarCosmeticSvg(cosmeticId, phase) {
+      const item = getAvatarCosmeticById(cosmeticId);
+      if (!item) return '';
+      if (phase === 'back') {
+        if (item.id === 'accessory-mini-wings') {
+          return '<g opacity=".9"><ellipse cx="38" cy="82" rx="20" ry="35" fill="#bfdbfe" stroke="#60a5fa" stroke-width="2" transform="rotate(-24 38 82)"/><ellipse cx="102" cy="82" rx="20" ry="35" fill="#bfdbfe" stroke="#60a5fa" stroke-width="2" transform="rotate(24 102 82)"/><path d="M28 78 Q38 66 50 76" fill="none" stroke="#eff6ff" stroke-width="3" stroke-linecap="round"/><path d="M90 76 Q102 66 112 78" fill="none" stroke="#eff6ff" stroke-width="3" stroke-linecap="round"/></g>';
+        }
+        if (item.id === 'accessory-book-bag') {
+          return '<g><rect x="28" y="82" width="22" height="30" rx="6" fill="#7c2d12" stroke="#451a03" stroke-width="2"/><path d="M33 86 Q39 78 45 86" fill="none" stroke="#fbbf24" stroke-width="2"/><rect x="33" y="96" width="12" height="3" rx="1.5" fill="#fbbf24"/></g>';
+        }
+        return '';
+      }
+      if (item.id === 'head-star-crown') {
+        return '<g><path d="M49 49 L57 32 L66 47 L70 29 L76 47 L85 32 L91 49 Z" fill="#fbbf24" stroke="#b45309" stroke-width="2"/><circle cx="57" cy="32" r="3" fill="#fde68a"/><circle cx="70" cy="29" r="3" fill="#fde68a"/><circle cx="85" cy="32" r="3" fill="#fde68a"/></g>';
+      }
+      if (item.id === 'head-focus-phones') {
+        return '<g><path d="M48 68 Q49 42 70 42 Q91 42 92 68" fill="none" stroke="#111827" stroke-width="5" stroke-linecap="round"/><rect x="43" y="62" width="10" height="18" rx="4" fill="#2563eb"/><rect x="87" y="62" width="10" height="18" rx="4" fill="#2563eb"/><path d="M92 80 Q98 84 101 90" fill="none" stroke="#111827" stroke-width="2" stroke-linecap="round"/></g>';
+      }
+      if (item.id === 'head-sky-cap') {
+        return '<g><path d="M51 60 Q56 43 70 43 Q84 43 89 60 Q74 54 51 60Z" fill="#2563eb" stroke="#1e40af" stroke-width="2"/><path d="M86 59 Q103 60 109 66 Q96 70 86 64Z" fill="#60a5fa" stroke="#1e40af" stroke-width="1.5"/><text x="70" y="56" text-anchor="middle" font-size="8" font-weight="800" fill="#dbeafe">IDEA</text></g>';
+      }
+      if (item.id === 'head-spark-halo') {
+        return '<g><ellipse cx="70" cy="36" rx="26" ry="8" fill="none" stroke="#fbbf24" stroke-width="3" opacity=".9"/><text x="43" y="34" font-size="9" fill="#fde68a">✦</text><text x="92" y="35" font-size="8" fill="#fde68a">✦</text></g>';
+      }
+      if (item.id === 'outfit-academy-cloak') {
+        return '<g><path d="M48 86 Q70 101 92 86 L101 121 Q70 132 39 121Z" fill="#312e81" opacity=".92"/><path d="M61 88 L70 106 L79 88" fill="none" stroke="#c4b5fd" stroke-width="3" stroke-linecap="round"/><circle cx="70" cy="94" r="4" fill="#fbbf24"/></g>';
+      }
+      if (item.id === 'outfit-neon-jacket') {
+        return '<g><path d="M47 86 H93 L98 116 Q70 126 42 116Z" fill="#0f172a" opacity=".9"/><path d="M52 89 L64 112 M88 89 L76 112" stroke="#22d3ee" stroke-width="4" stroke-linecap="round"/><rect x="66" y="91" width="8" height="25" rx="3" fill="#a855f7"/></g>';
+      }
+      if (item.id === 'outfit-gold-armor') {
+        return '<g><path d="M50 84 H90 L96 112 Q70 124 44 112Z" fill="#f59e0b" stroke="#92400e" stroke-width="2" opacity=".92"/><path d="M70 88 L82 102 L70 116 L58 102Z" fill="#fde68a" stroke="#b45309" stroke-width="2"/><rect x="54" y="92" width="8" height="18" rx="3" fill="#b45309"/><rect x="78" y="92" width="8" height="18" rx="3" fill="#b45309"/></g>';
+      }
+      if (item.id === 'outfit-lab-apron') {
+        return '<g><path d="M52 85 H88 L94 117 Q70 126 46 117Z" fill="#f8fafc" stroke="#cbd5e1" stroke-width="2"/><path d="M61 89 L70 104 L79 89" fill="none" stroke="#f59e0b" stroke-width="3"/><rect x="57" y="105" width="10" height="8" rx="2" fill="#bae6fd"/><rect x="73" y="105" width="10" height="8" rx="2" fill="#bbf7d0"/></g>';
+      }
+      if (item.id === 'accessory-star-staff') {
+        return '<g><line x1="104" y1="110" x2="111" y2="50" stroke="#7c3aed" stroke-width="5" stroke-linecap="round"/><path d="M111 39 L115 49 L126 49 L117 56 L121 67 L111 60 L101 67 L105 56 L96 49 L107 49Z" fill="#fbbf24" stroke="#a16207" stroke-width="1.5"/></g>';
+      }
+      if (item.id === 'accessory-crystal-orb') {
+        return '<g><circle cx="108" cy="92" r="13" fill="#a5b4fc" opacity=".9" stroke="#4f46e5" stroke-width="2"/><circle cx="104" cy="87" r="4" fill="#eef2ff" opacity=".8"/><path d="M97 108 H119" stroke="#4f46e5" stroke-width="3" stroke-linecap="round"/></g>';
+      }
+      return '';
+    }
+
+    function renderEquippedAvatarCosmeticsSvg(equippedAvatarItems, phase) {
+      const equipped = equippedAvatarItems || {};
+      return AVATAR_COSMETIC_SLOTS.map(function(slot) {
+        return renderAvatarCosmeticSvg(equipped[slot.id], phase);
+      }).join('');
+    }
+
+    function renderProfessionAvatarSVG(profId, level, equippedAvatarItems) {
       var safeLevel = Math.max(1, Number(level || 1) || 1);
       var tier = getAvatarEvolutionTier(safeLevel);
       var prof = getGamificationProfessionAvatarConfig(profId || 'IDEA Explorer');
@@ -18181,7 +18297,7 @@
           '<animate attributeName="r" values="' + auraMin + ';' + auraMax + ';' + auraMin + '" dur="3s" repeatCount="indefinite"/>' +
           '<animate attributeName="opacity" values=".45;.9;.45" dur="3s" repeatCount="indefinite"/>' +
         '</circle>' +
-        rings + charFn() + badge +
+        rings + renderEquippedAvatarCosmeticsSvg(equippedAvatarItems, 'back') + charFn() + renderEquippedAvatarCosmeticsSvg(equippedAvatarItems, 'front') + badge +
       '</svg>';
     }
 
@@ -18189,7 +18305,7 @@
       options = options || {};
       const divId = options.mobile ? 'studentGamificationAvatarMobile' : 'studentGamificationAvatarDesktop';
       return '<div id="' + divId + '" class="student-gamification-avatar-stage" role="button" tabindex="0" onclick="openProfessionChooser()" title="เลือกหรือเปลี่ยนอาชีพ">' +
-        renderProfessionAvatarSVG(profile.profession || 'IDEA Explorer', profile.level || 1) +
+        renderProfessionAvatarSVG(profile.profession || 'IDEA Explorer', profile.level || 1, profile.equippedAvatarItems || {}) +
       '</div>';
     }
 
@@ -19362,12 +19478,27 @@
 
     // ===========================
 
+    function getAvatarCosmeticOptionsHtml(selectedId) {
+      return AVATAR_COSMETIC_SLOTS.map(function(slot) {
+        const options = getAvatarCosmeticsBySlot(slot.id).map(function(item) {
+          return '<option value="' + escapeHtml(item.id) + '"' + (item.id === selectedId ? ' selected' : '') + '>' +
+            escapeHtml((item.icon || '') + ' ' + item.label + ' · ' + slot.label) +
+          '</option>';
+        }).join('');
+        return '<optgroup label="' + escapeHtml(slot.label) + '">' + options + '</optgroup>';
+      }).join('');
+    }
+
     function onShopRewardTypeChange() {
       const t = getElement('shopRewardType') ? getElement('shopRewardType').value : 'standard';
       const stampRow = getElement('shopStampCardRow');
       const ticketsRow = getElement('shopWheelTicketsRow');
+      const avatarRow = getElement('shopAvatarCosmeticRow');
+      const avatarSelect = getElement('shopAvatarCosmeticId');
       if (stampRow) stampRow.style.display = t === 'stampCard' ? '' : 'none';
       if (ticketsRow) ticketsRow.style.display = t === 'wheelTickets' ? '' : 'none';
+      if (avatarRow) avatarRow.style.display = t === 'avatarCosmetic' ? '' : 'none';
+      if (avatarSelect && !avatarSelect.innerHTML) avatarSelect.innerHTML = getAvatarCosmeticOptionsHtml('');
     }
 
     function renderAdminGamificationShop() {
@@ -19382,7 +19513,9 @@
         let rows = active.map(function(r) {
           const isStamp = r.rewardType === 'stampCard';
           const isTickets = r.rewardType === 'wheelTickets';
-          const typeLabel = isStamp ? '🎴 บัตรสะสม (' + (r.stampsRequired || '?') + ' แสตมป์)' : isTickets ? '🎟 ตั๋วหมุนวงล้อ (' + (r.ticketsAwarded || 1) + ' ตั๋ว)' : '🎁 มาตรฐาน';
+          const isAvatar = r.rewardType === 'avatarCosmetic';
+          const cosmetic = isAvatar ? getAvatarCosmeticById(r.avatarCosmeticId) : null;
+          const typeLabel = isStamp ? '🎴 บัตรสะสม (' + (r.stampsRequired || '?') + ' แสตมป์)' : isTickets ? '🎟 ตั๋วหมุนวงล้อ (' + (r.ticketsAwarded || 1) + ' ตั๋ว)' : isAvatar ? '👗 Avatar (' + (cosmetic ? cosmetic.label : (r.avatarCosmeticId || '-')) + ')' : '🎁 มาตรฐาน';
           return '<tr>' +
             '<td>' + escapeHtml(r.title || '-') + '</td>' +
             '<td>' + escapeHtml(r.category || '-') + '</td>' +
@@ -19479,6 +19612,7 @@
       if (getElement('shopRewardDesc')) getElement('shopRewardDesc').value = '';
       if (getElement('shopStampRequired')) getElement('shopStampRequired').value = '5';
       if (getElement('shopTicketsAwarded')) getElement('shopTicketsAwarded').value = '1';
+      if (getElement('shopAvatarCosmeticId')) getElement('shopAvatarCosmeticId').innerHTML = getAvatarCosmeticOptionsHtml('');
       if (getElement('shopRewardType')) { getElement('shopRewardType').value = 'standard'; onShopRewardTypeChange(); }
       var r = getElement('shopRewardSaveResult'); if (r) r.textContent = '';
     }
@@ -19488,6 +19622,7 @@
       if (!r) return;
       const isStamp = r.rewardType === 'stampCard';
       const isTickets = r.rewardType === 'wheelTickets';
+      const isAvatar = r.rewardType === 'avatarCosmetic';
       const formHtml =
         '<div style="display:flex;flex-direction:column;gap:12px;padding:2px 0;">' +
           '<div><label style="font-size:13px;font-weight:700;display:block;margin-bottom:4px;">ชื่อรางวัล</label>' +
@@ -19496,10 +19631,11 @@
             '<div style="flex:1;min-width:130px;"><label style="font-size:13px;font-weight:700;display:block;margin-bottom:4px;">หมวดหมู่</label>' +
               '<input type="text" id="bGR_category" value="' + escapeHtml(r.category || '') + '" style="width:100%;" /></div>' +
             '<div><label style="font-size:13px;font-weight:700;display:block;margin-bottom:4px;">ประเภท</label>' +
-              '<select id="bGR_type" onchange="var s=document.getElementById(\'bGR_stampRow\'),t=document.getElementById(\'bGR_ticketsRow\');if(s)s.style.display=this.value===\'stampCard\'?\'\':\'none\';if(t)t.style.display=this.value===\'wheelTickets\'?\'\':\'none\';">' +
-                '<option value="standard"' + (!isStamp && !isTickets ? ' selected' : '') + '>รางวัลมาตรฐาน</option>' +
+              '<select id="bGR_type" onchange="var s=document.getElementById(\'bGR_stampRow\'),t=document.getElementById(\'bGR_ticketsRow\'),a=document.getElementById(\'bGR_avatarRow\');if(s)s.style.display=this.value===\'stampCard\'?\'\':\'none\';if(t)t.style.display=this.value===\'wheelTickets\'?\'\':\'none\';if(a)a.style.display=this.value===\'avatarCosmetic\'?\'\':\'none\';">' +
+                '<option value="standard"' + (!isStamp && !isTickets && !isAvatar ? ' selected' : '') + '>รางวัลมาตรฐาน</option>' +
                 '<option value="stampCard"' + (isStamp ? ' selected' : '') + '>บัตรสะสม</option>' +
                 '<option value="wheelTickets"' + (isTickets ? ' selected' : '') + '>🎟 ตั๋วหมุนวงล้อ</option>' +
+                '<option value="avatarCosmetic"' + (isAvatar ? ' selected' : '') + '>👗 ไอเท็มแต่ง Avatar</option>' +
               '</select></div>' +
           '</div>' +
           '<div style="display:flex;gap:10px;flex-wrap:wrap;">' +
@@ -19516,6 +19652,10 @@
             '<label style="font-size:13px;font-weight:700;display:block;margin-bottom:4px;">จำนวนตั๋วหมุนวงล้อที่ได้รับ</label>' +
             '<input type="number" id="bGR_ticketsAwarded" min="1" max="50" value="' + (r.ticketsAwarded || 1) + '" style="width:100px;" />' +
             '<p style="font-size:11px;color:#5b21b6;margin:2px 0 0;">เมื่อแอดมินยืนยัน → ตั๋วหมุนวงล้อจะเพิ่มอัตโนมัติ</p></div>' +
+          '<div id="bGR_avatarRow" style="display:' + (isAvatar ? '' : 'none') + ';padding:8px 12px;border-radius:8px;background:#ecfeff;border:1px solid #67e8f9;">' +
+            '<label style="font-size:13px;font-weight:700;display:block;margin-bottom:4px;">ไอเท็มแต่ง Avatar</label>' +
+            '<select id="bGR_avatarCosmeticId" style="min-width:220px;">' + getAvatarCosmeticOptionsHtml(r.avatarCosmeticId || '') + '</select>' +
+            '<p style="font-size:11px;color:#0e7490;margin:2px 0 0;">ซื้อแล้วเป็นเจ้าของทันทีและใส่ได้ในตู้เสื้อผ้า</p></div>' +
           '<div><label style="font-size:13px;font-weight:700;display:block;margin-bottom:4px;">รายละเอียด</label>' +
             '<textarea id="bGR_desc" rows="2" style="width:100%;box-sizing:border-box;">' + escapeHtml(r.description || '') + '</textarea></div>' +
           '<div style="display:flex;gap:8px;padding-top:4px;">' +
@@ -19527,21 +19667,28 @@
     }
 
     async function adminSaveGamificationRewardBubble(rewardId) {
-      const title = bubbleValue('bGR_title');
-      const category = bubbleValue('bGR_category');
+      let title = bubbleValue('bGR_title');
+      let category = bubbleValue('bGR_category');
       const rewardType = bubbleSelectValue('bGR_type') || 'standard';
       const cost = Math.max(0, parseInt(bubbleValue('bGR_cost')) || 0);
       const stock = Math.max(1, parseInt(bubbleValue('bGR_stock')) || 1);
       const stampsRequired = rewardType === 'stampCard' ? Math.min(50, Math.max(2, parseInt(bubbleValue('bGR_stampRequired')) || 5)) : 0;
       const ticketsAwarded = rewardType === 'wheelTickets' ? Math.min(50, Math.max(1, parseInt(bubbleValue('bGR_ticketsAwarded')) || 1)) : 0;
+      const avatarCosmeticId = rewardType === 'avatarCosmetic' ? bubbleSelectValue('bGR_avatarCosmeticId') : '';
+      const avatarCosmetic = avatarCosmeticId ? getAvatarCosmeticById(avatarCosmeticId) : null;
       const description = bubbleValue('bGR_desc');
+      if (rewardType === 'avatarCosmetic' && avatarCosmetic) {
+        if (!title) title = avatarCosmetic.icon + ' ' + avatarCosmetic.label;
+        if (!category) category = 'แต่ง Avatar';
+      }
       if (!title) { alert('กรุณาใส่ชื่อรางวัล'); return; }
+      if (rewardType === 'avatarCosmetic' && !avatarCosmetic) { alert('กรุณาเลือกไอเท็มแต่ง Avatar'); return; }
       if (!firebaseReady || !db) return;
       const resultEl = getElement('editBubbleResult');
       if (resultEl) { resultEl.textContent = 'กำลังบันทึก...'; resultEl.style.color = '#d97706'; }
       try {
         const now = firebase.firestore.FieldValue.serverTimestamp();
-        const updates = { title: title, category: category, rewardType: rewardType, stampsRequired: stampsRequired, ticketsAwarded: ticketsAwarded, cost: cost, stock: stock, description: description, updatedAt: now };
+        const updates = { title: title, category: category, rewardType: rewardType, stampsRequired: stampsRequired, ticketsAwarded: ticketsAwarded, avatarCosmeticId: avatarCosmeticId, avatarSlot: avatarCosmetic ? avatarCosmetic.slot : '', cost: cost, stock: stock, description: description, updatedAt: now };
         await db.collection('gamificationRewards').doc(rewardId).set(updates, { merge: true });
         const existing = gamificationRewards.find(function(x) { return String(x.firebaseDocId || x.id || '') === rewardId; });
         if (existing) Object.assign(existing, updates);
@@ -19555,26 +19702,33 @@
     }
 
     async function adminSaveGamificationReward() {
-      const title = (getElement('shopRewardTitle') ? getElement('shopRewardTitle').value.trim() : '');
-      const category = (getElement('shopRewardCategory') ? getElement('shopRewardCategory').value.trim() : '');
+      let title = (getElement('shopRewardTitle') ? getElement('shopRewardTitle').value.trim() : '');
+      let category = (getElement('shopRewardCategory') ? getElement('shopRewardCategory').value.trim() : '');
       const rewardType = (getElement('shopRewardType') ? getElement('shopRewardType').value : 'standard') || 'standard';
       const cost = Math.max(0, parseInt(getElement('shopRewardCost') ? getElement('shopRewardCost').value : '0') || 0);
       const stock = Math.max(1, parseInt(getElement('shopRewardStock') ? getElement('shopRewardStock').value : '0') || 0);
       const stampsRequired = rewardType === 'stampCard' ? Math.min(50, Math.max(2, parseInt(getElement('shopStampRequired') ? getElement('shopStampRequired').value : '5') || 5)) : 0;
       const ticketsAwarded = rewardType === 'wheelTickets' ? Math.min(50, Math.max(1, parseInt(getElement('shopTicketsAwarded') ? getElement('shopTicketsAwarded').value : '1') || 1)) : 0;
+      const avatarCosmeticId = rewardType === 'avatarCosmetic' ? (getElement('shopAvatarCosmeticId') ? getElement('shopAvatarCosmeticId').value : '') : '';
+      const avatarCosmetic = avatarCosmeticId ? getAvatarCosmeticById(avatarCosmeticId) : null;
       const description = (getElement('shopRewardDesc') ? getElement('shopRewardDesc').value.trim() : '');
       const resultEl = getElement('shopRewardSaveResult');
+      if (rewardType === 'avatarCosmetic' && avatarCosmetic) {
+        if (!title) title = avatarCosmetic.icon + ' ' + avatarCosmetic.label;
+        if (!category) category = 'แต่ง Avatar';
+      }
       if (!title) { if (resultEl) { resultEl.textContent = 'กรุณาใส่ชื่อรางวัล'; resultEl.style.color = '#dc2626'; } return; }
+      if (rewardType === 'avatarCosmetic' && !avatarCosmetic) { if (resultEl) { resultEl.textContent = 'กรุณาเลือกไอเท็มแต่ง Avatar'; resultEl.style.color = '#dc2626'; } return; }
       if (!firebaseReady || !db) return;
       if (resultEl) { resultEl.textContent = 'กำลังบันทึก...'; resultEl.style.color = '#d97706'; }
       try {
         const id = createFirebaseDocId('gamificationRewards');
         const now = firebase.firestore.FieldValue.serverTimestamp();
-        const reward = { id: id, firebaseDocId: id, title: title, category: category, rewardType: rewardType, stampsRequired: stampsRequired, ticketsAwarded: ticketsAwarded, cost: cost, stock: stock, description: description, active: true, deleted: false, createdAt: now, createdAtText: new Date().toLocaleString('th-TH') };
+        const reward = { id: id, firebaseDocId: id, title: title, category: category, rewardType: rewardType, stampsRequired: stampsRequired, ticketsAwarded: ticketsAwarded, avatarCosmeticId: avatarCosmeticId, avatarSlot: avatarCosmetic ? avatarCosmetic.slot : '', cost: cost, stock: stock, description: description, active: true, deleted: false, createdAt: now, createdAtText: new Date().toLocaleString('th-TH') };
         await db.collection('gamificationRewards').doc(id).set(reward);
         gamificationRewards.push(reward);
         if (resultEl) { resultEl.textContent = 'บันทึกรางวัลสำเร็จ!'; resultEl.style.color = '#16a34a'; }
-        addActivityLog('สร้างรางวัล', title + ' · ' + (rewardType === 'stampCard' ? 'บัตรสะสม ' + stampsRequired + ' แสตมป์' : rewardType === 'wheelTickets' ? '🎟 ' + ticketsAwarded + ' ตั๋ว · สต็อก ' + stock : cost + ' Coins · สต็อก ' + stock));
+        addActivityLog('สร้างรางวัล', title + ' · ' + (rewardType === 'stampCard' ? 'บัตรสะสม ' + stampsRequired + ' แสตมป์' : rewardType === 'wheelTickets' ? '🎟 ' + ticketsAwarded + ' ตั๋ว · สต็อก ' + stock : rewardType === 'avatarCosmetic' ? '👗 ' + (avatarCosmetic ? avatarCosmetic.label : avatarCosmeticId) + ' · ' + cost + ' Coins' : cost + ' Coins · สต็อก ' + stock));
         adminClearGamificationRewardForm();
         renderAdminGamificationShop();
       } catch (e) {
@@ -19808,6 +19962,7 @@
         renderStudentPersonalQuestsHtml() +
         renderStudentGamificationLeaderboardHtml() +
         renderStudentPrizeWheelHtml(profile) +
+        renderStudentAvatarWardrobeHtml(profile) +
         renderStudentVouchersHtml() +
         renderStudentGamificationShopHtml(profile) +
       '</div>';
@@ -20025,6 +20180,98 @@
         '<div class="student-gamification-lb-header">🏆 อันดับนักผจญภัย</div>' +
         '<div class="student-gamification-lb-list">' + rows + '</div>' +
       '</div>';
+    }
+
+    function renderStudentAvatarWardrobeHtml(profile) {
+      if (!currentStudent) return '';
+      const owned = normalizeOwnedAvatarItems(profile.ownedAvatarItems);
+      const equipped = normalizeEquippedAvatarItems(profile.equippedAvatarItems, owned);
+      const slotRows = AVATAR_COSMETIC_SLOTS.map(function(slot) {
+        const ownedInSlot = owned.map(getAvatarCosmeticById).filter(function(item) { return item && item.slot === slot.id; });
+        const currentId = equipped[slot.id] || '';
+        const itemRows = ownedInSlot.length ? ownedInSlot.map(function(item) {
+          const active = item.id === currentId;
+          return '<div class="sgshop-card" style="padding:10px 12px;">' +
+            '<div class="sgshop-info">' +
+              '<span class="sgshop-cat">' + escapeHtml(slot.label) + '</span>' +
+              '<strong class="sgshop-title">' + escapeHtml((item.icon || '') + ' ' + item.label) + '</strong>' +
+            '</div>' +
+            '<div class="sgshop-meta">' +
+              (active
+                ? '<span class="sgshop-status">กำลังใส่</span><button type="button" class="sgshop-btn" onclick="unequipAvatarCosmetic(\'' + slot.id + '\')">ถอด</button>'
+                : '<button type="button" class="sgshop-btn" onclick="equipAvatarCosmetic(\'' + item.id + '\')">ใส่</button>') +
+            '</div>' +
+          '</div>';
+        }).join('') : '<p class="mini-muted" style="margin:6px 0 12px;">ยังไม่มีไอเท็มช่องนี้ ซื้อได้จากร้านแลกรางวัล</p>';
+        return '<div style="margin-top:10px;">' +
+          '<div class="sgdq-header" style="font-size:13px;">' + escapeHtml(slot.label) + '</div>' +
+          '<div class="sgshop-list" style="margin-top:8px;">' + itemRows + '</div>' +
+        '</div>';
+      }).join('');
+      return '<div class="student-gamification-shop">' +
+        '<div class="student-gamification-shop-header">👗 ตู้เสื้อผ้า Avatar · มี <strong>' + owned.length + '</strong> ชิ้น</div>' +
+        slotRows +
+      '</div>';
+    }
+
+    async function saveAvatarCosmeticState(profile, ownedAvatarItems, equippedAvatarItems) {
+      if (!currentStudent || !firebaseReady || !db || !firebaseUser) throw new Error('Firebase ยังไม่พร้อมสำหรับบันทึกชุด Avatar');
+      const profileId = String(profile.firebaseDocId || profile.id || getStudentGamificationProfileId(currentStudent));
+      const owned = normalizeOwnedAvatarItems(ownedAvatarItems);
+      const equipped = normalizeEquippedAvatarItems(equippedAvatarItems, owned);
+      await db.collection('studentGamificationProfiles').doc(profileId).set({
+        firebaseDocId: profileId,
+        id: profileId,
+        studentId: getStudentRecordDocId(currentStudent),
+        authUid: String((currentStudent.authUid) || (firebaseUser && firebaseUser.uid) || '').trim(),
+        memberId: currentStudent.memberId || currentStudent.studentId || '',
+        studentName: currentStudent.name || '',
+        nickname: currentStudent.nickname || '',
+        ownedAvatarItems: owned,
+        equippedAvatarItems: equipped,
+        deleted: false,
+        updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+      }, { merge: true });
+    }
+
+    async function equipAvatarCosmetic(cosmeticId) {
+      if (!currentStudent) return;
+      const item = getAvatarCosmeticById(cosmeticId);
+      if (!item) return;
+      const profile = getCurrentStudentGamificationProfile();
+      const owned = normalizeOwnedAvatarItems(profile.ownedAvatarItems);
+      if (owned.indexOf(item.id) === -1) { alert('ยังไม่ได้เป็นเจ้าของไอเท็มนี้'); return; }
+      const equipped = Object.assign({}, profile.equippedAvatarItems || {});
+      equipped[item.slot] = item.id;
+      const existingProfile = findCurrentStudentGamificationProfile();
+      if (existingProfile) {
+        existingProfile.ownedAvatarItems = owned;
+        existingProfile.equippedAvatarItems = normalizeEquippedAvatarItems(equipped, owned);
+      }
+      renderStudentGamificationPanel();
+      try {
+        await saveAvatarCosmeticState(profile, owned, equipped);
+      } catch (e) {
+        alert('ใส่ไอเท็มไม่สำเร็จ: ' + (e.message || e.code || ''));
+      }
+    }
+
+    async function unequipAvatarCosmetic(slotId) {
+      if (!currentStudent) return;
+      const slot = AVATAR_COSMETIC_SLOTS.find(function(s) { return s.id === slotId; });
+      if (!slot) return;
+      const profile = getCurrentStudentGamificationProfile();
+      const owned = normalizeOwnedAvatarItems(profile.ownedAvatarItems);
+      const equipped = Object.assign({}, profile.equippedAvatarItems || {});
+      delete equipped[slot.id];
+      const existingProfile = findCurrentStudentGamificationProfile();
+      if (existingProfile) existingProfile.equippedAvatarItems = normalizeEquippedAvatarItems(equipped, owned);
+      renderStudentGamificationPanel();
+      try {
+        await saveAvatarCosmeticState(profile, owned, equipped);
+      } catch (e) {
+        alert('ถอดไอเท็มไม่สำเร็จ: ' + (e.message || e.code || ''));
+      }
     }
 
     function renderDailyQuestsHtml(profile) {
@@ -20723,6 +20970,7 @@
         .filter(function(r) {
           if (r.deleted || r.status === 'cancelled') return false;
           if (String(r.rewardType || '') === 'professionChangeTicket') return false;
+          if (String(r.rewardType || '') === 'avatarCosmetic') return false;
           return String(r.studentId || '') === studentDocId || String(r.authUid || '') === authUid;
         })
         .sort(function(a, b) {
@@ -20818,6 +21066,38 @@
             '</div>' +
             '<div class="sgshop-meta">' +
               (stampCost > 0 ? '<span class="sgshop-cost">💰 ' + stampCost + '/แสตมป์</span>' : '<span class="sgshop-cost" style="color:#7c3aed;">วงล้อ</span>') +
+              '<span class="sgshop-stock">สต็อก: ' + escapeHtml(r.stock) + '</span>' +
+              btnHtml +
+            '</div>' +
+          '</div>';
+        }
+
+        if (r.rewardType === 'avatarCosmetic') {
+          const cosmetic = getAvatarCosmeticById(r.avatarCosmeticId);
+          if (!cosmetic) return '';
+          const owned = normalizeOwnedAvatarItems(profile.ownedAvatarItems);
+          const equipped = normalizeEquippedAvatarItems(profile.equippedAvatarItems, owned);
+          const ownedAlready = owned.indexOf(cosmetic.id) !== -1;
+          const equippedAlready = equipped[cosmetic.slot] === cosmetic.id;
+          const slot = AVATAR_COSMETIC_SLOTS.find(function(s) { return s.id === cosmetic.slot; });
+          const canBuy = coins >= (r.cost || 0) && inStock && !ownedAlready;
+          let btnHtml;
+          if (ownedAlready) {
+            btnHtml = '<span class="sgshop-status">' + (equippedAlready ? 'กำลังใส่' : 'เป็นเจ้าของแล้ว') + '</span>';
+          } else if (!inStock) {
+            btnHtml = '<span class="sgshop-status sgshop-status--out">หมดสต็อก</span>';
+          } else {
+            btnHtml = '<button type="button" class="sgshop-btn' + (canBuy ? '' : ' sgshop-btn--disabled') + '" onclick="redeemGamificationReward(\'' + rid + '\')" ' + (canBuy ? '' : 'disabled') + '>' +
+              (canBuy ? 'ซื้อใส่ Avatar' : 'Coins ไม่พอ') + '</button>';
+          }
+          return '<div class="sgshop-card">' +
+            '<div class="sgshop-info">' +
+              '<span class="sgshop-cat">👗 แต่ง Avatar · ' + escapeHtml(slot ? slot.label : cosmetic.slot) + '</span>' +
+              '<strong class="sgshop-title">' + escapeHtml((cosmetic.icon || '') + ' ' + (r.title || cosmetic.label)) + '</strong>' +
+              '<p class="sgshop-desc">' + escapeHtml(r.description || ('ไอเท็มสวยงาม: ' + cosmetic.label)) + '</p>' +
+            '</div>' +
+            '<div class="sgshop-meta">' +
+              '<span class="sgshop-cost">💰 ' + escapeHtml(r.cost) + '</span>' +
               '<span class="sgshop-stock">สต็อก: ' + escapeHtml(r.stock) + '</span>' +
               btnHtml +
             '</div>' +
@@ -20973,6 +21253,74 @@
       const profile = getCurrentStudentGamificationProfile();
       if ((reward.stock || 0) <= 0) { alert('รางวัลนี้หมดสต็อกแล้ว'); return; }
       if (!firebaseReady || !db || !firebaseUser) return;
+
+      if (reward.rewardType === 'avatarCosmetic') {
+        const cosmetic = getAvatarCosmeticById(reward.avatarCosmeticId);
+        if (!cosmetic) { alert('ไม่พบไอเท็มแต่ง Avatar นี้'); return; }
+        const owned = normalizeOwnedAvatarItems(profile.ownedAvatarItems);
+        if (owned.indexOf(cosmetic.id) !== -1) { alert('คุณเป็นเจ้าของไอเท็มนี้แล้ว'); return; }
+        if ((profile.coins || 0) < (reward.cost || 0)) { alert('Coins ไม่เพียงพอ! ต้องการ ' + reward.cost + ' Coins'); return; }
+        if (!confirm('ยืนยันซื้อ "' + (reward.title || cosmetic.label) + '" ด้วย ' + reward.cost + ' Coins?\nซื้อแล้วจะใส่ให้ Avatar ทันที')) return;
+        const profileId = String(profile.firebaseDocId || profile.id || getStudentGamificationProfileId(currentStudent));
+        const redemptionId = createFirebaseDocId('gamificationRedemptions');
+        const now = firebase.firestore.FieldValue.serverTimestamp();
+        const newCoins = Math.max(0, (profile.coins || 0) - (reward.cost || 0));
+        const newStock = Math.max(0, (reward.stock || 0) - 1);
+        const nextOwned = normalizeOwnedAvatarItems(owned.concat([cosmetic.id]));
+        const nextEquipped = normalizeEquippedAvatarItems(Object.assign({}, profile.equippedAvatarItems || {}, { [cosmetic.slot]: cosmetic.id }), nextOwned);
+        const redemption = {
+          id: redemptionId,
+          firebaseDocId: redemptionId,
+          studentId: getStudentRecordDocId(currentStudent),
+          authUid: String((currentStudent.authUid) || (firebaseUser && firebaseUser.uid) || '').trim(),
+          memberId: currentStudent.memberId || currentStudent.studentId || '',
+          studentName: currentStudent.name || '',
+          rewardId: rewardId,
+          rewardTitle: reward.title || cosmetic.label,
+          rewardType: 'avatarCosmetic',
+          avatarCosmeticId: cosmetic.id,
+          avatarSlot: cosmetic.slot,
+          coinsPaid: reward.cost || 0,
+          status: 'fulfilled',
+          deleted: false,
+          createdAt: now,
+          createdAtText: new Date().toLocaleString('th-TH')
+        };
+        try {
+          const batch = db.batch();
+          batch.set(db.collection('gamificationRedemptions').doc(redemptionId), redemption);
+          batch.set(db.collection('studentGamificationProfiles').doc(profileId), {
+            firebaseDocId: profileId,
+            id: profileId,
+            studentId: getStudentRecordDocId(currentStudent),
+            authUid: String((currentStudent.authUid) || (firebaseUser && firebaseUser.uid) || '').trim(),
+            memberId: currentStudent.memberId || currentStudent.studentId || '',
+            studentName: currentStudent.name || '',
+            nickname: currentStudent.nickname || '',
+            coins: newCoins,
+            ownedAvatarItems: nextOwned,
+            equippedAvatarItems: nextEquipped,
+            deleted: false,
+            updatedAt: now
+          }, { merge: true });
+          batch.set(db.collection('gamificationRewards').doc(rewardId), { stock: newStock, updatedAt: now }, { merge: true });
+          await batch.commit();
+          const existingProfile = findCurrentStudentGamificationProfile();
+          if (existingProfile) {
+            existingProfile.coins = newCoins;
+            existingProfile.ownedAvatarItems = nextOwned;
+            existingProfile.equippedAvatarItems = nextEquipped;
+          }
+          reward.stock = newStock;
+          gamificationRedemptions.push(redemption);
+          updateLeaderboardProfileInMemory(profileId, getCurrentStudentGamificationProfile());
+          renderStudentGamificationPanel();
+          alert('✅ ซื้อและใส่ "' + (reward.title || cosmetic.label) + '" ให้ Avatar แล้ว!');
+        } catch (e) {
+          alert('ซื้อไอเท็มแต่ง Avatar ไม่สำเร็จ: ' + (e.message || e.code || ''));
+        }
+        return;
+      }
 
       // Stamp card flow
       if (reward.rewardType === 'stampCard') {
