@@ -9430,6 +9430,23 @@
       { id: 'accessory-star-staff', slot: 'accessory', label: 'คทาดาว', icon: '🪄' },
       { id: 'accessory-crystal-orb', slot: 'accessory', label: 'ลูกแก้วคริสตัล', icon: '🔮' }
     ];
+    const DEFAULT_AVATAR_COSMETICS = [
+      { id: 'default-idea-head', slot: 'head', label: 'ผม Explorer', icon: '⭐', defaultProfession: 'idea' },
+      { id: 'default-idea-outfit', slot: 'outfit', label: 'ชุด Explorer', icon: '⭐', defaultProfession: 'idea' },
+      { id: 'default-idea-accessory', slot: 'accessory', label: 'ไฟไอเดีย', icon: '💡', defaultProfession: 'idea' },
+      { id: 'default-mage-head', slot: 'head', label: 'หมวกจอมเวทย์', icon: '🔷', defaultProfession: 'mage' },
+      { id: 'default-mage-outfit', slot: 'outfit', label: 'ชุดจอมเวทย์', icon: '🔷', defaultProfession: 'mage' },
+      { id: 'default-mage-accessory', slot: 'accessory', label: 'คทาจอมเวทย์', icon: '🪄', defaultProfession: 'mage' },
+      { id: 'default-rogue-head', slot: 'head', label: 'ฮู้ดนักลอบเร้น', icon: '🍃', defaultProfession: 'rogue' },
+      { id: 'default-rogue-outfit', slot: 'outfit', label: 'ชุดนักลอบเร้น', icon: '🍃', defaultProfession: 'rogue' },
+      { id: 'default-rogue-accessory', slot: 'accessory', label: 'ธนูนักลอบเร้น', icon: '🏹', defaultProfession: 'rogue' },
+      { id: 'default-crusader-head', slot: 'head', label: 'มงกุฎครูเสดเดอร์', icon: '✚', defaultProfession: 'crusader' },
+      { id: 'default-crusader-outfit', slot: 'outfit', label: 'ชุดครูเสดเดอร์', icon: '✚', defaultProfession: 'crusader' },
+      { id: 'default-crusader-accessory', slot: 'accessory', label: 'โล่ครูเสดเดอร์', icon: '🛡', defaultProfession: 'crusader' },
+      { id: 'default-alchemist-head', slot: 'head', label: 'แว่นนักแปรธาตุ', icon: '🥽', defaultProfession: 'alchemist' },
+      { id: 'default-alchemist-outfit', slot: 'outfit', label: 'ชุดนักแปรธาตุ', icon: '🥼', defaultProfession: 'alchemist' },
+      { id: 'default-alchemist-accessory', slot: 'accessory', label: 'ขวดทดลอง', icon: '🧪', defaultProfession: 'alchemist' }
+    ];
 
     let currentTeacher = null;
     let currentAdmin = null;
@@ -17923,6 +17940,45 @@
       return AVATAR_COSMETICS.find(function(item) { return item.id === cosmeticId; }) || null;
     }
 
+    function getDefaultAvatarProfessionKey(profId) {
+      const id = String(profId || '').trim();
+      if (id === 'mage' || id === 'rogue' || id === 'crusader' || id === 'alchemist') return id;
+      return 'idea';
+    }
+
+    function getAvatarDefaultCosmeticById(cosmeticId) {
+      return DEFAULT_AVATAR_COSMETICS.find(function(item) { return item.id === cosmeticId; }) || null;
+    }
+
+    function getAvatarVisualItemById(cosmeticId) {
+      return getAvatarCosmeticById(cosmeticId) || getAvatarDefaultCosmeticById(cosmeticId);
+    }
+
+    function getDefaultAvatarCosmeticForSlot(profId, slotId) {
+      const professionKey = getDefaultAvatarProfessionKey(profId);
+      return DEFAULT_AVATAR_COSMETICS.find(function(item) {
+        return item.defaultProfession === professionKey && item.slot === slotId;
+      }) || DEFAULT_AVATAR_COSMETICS.find(function(item) {
+        return item.defaultProfession === 'idea' && item.slot === slotId;
+      }) || null;
+    }
+
+    function buildEffectiveAvatarEquipment(profId, equippedAvatarItems) {
+      const equipped = equippedAvatarItems || {};
+      const result = {};
+      AVATAR_COSMETIC_SLOTS.forEach(function(slot) {
+        const selectedId = String(equipped[slot.id] || '').trim();
+        const selected = getAvatarCosmeticById(selectedId);
+        if (selected && selected.slot === slot.id) {
+          result[slot.id] = selected.id;
+          return;
+        }
+        const defaultItem = getDefaultAvatarCosmeticForSlot(profId, slot.id);
+        if (defaultItem) result[slot.id] = defaultItem.id;
+      });
+      return result;
+    }
+
     function getAvatarCosmeticsBySlot(slot) {
       return AVATAR_COSMETICS.filter(function(item) { return item.slot === slot; });
     }
@@ -18126,11 +18182,8 @@
 
     function sgaCharMage() {
       return '<g class="sga-body">' +
-        '<line x1="119" y1="116" x2="126" y2="48" stroke="#6d28d9" stroke-width="5" stroke-linecap="round"/>' +
-        '<circle cx="127" cy="43" r="10" fill="#38bdf8" opacity=".9"/>' +
-        '<circle cx="127" cy="43" r="5" fill="#e0f2fe"><animate attributeName="r" values="5;9;5" dur="2s" repeatCount="indefinite"/><animate attributeName="fill-opacity" values="1;.45;1" dur="2s" repeatCount="indefinite"/></circle>' +
-        sgaBaseBodySvg('#2563eb', '#1e3a8a', '#bae6fd', '★') +
-        sgaHeadSvg('#1e3a8a', '#2563eb', '<polygon points="80,18 56,56 104,56" fill="#1d4ed8"/><polygon points="80,21 61,56 99,56" fill="#3b82f6"/><ellipse cx="80" cy="56" rx="28" ry="5" fill="#1e40af"/><text x="80" y="43" text-anchor="middle" font-size="11" fill="#fde68a">★</text>') +
+        sgaBaseBodySvg('#3b82f6', '#1e3a8a', '#bae6fd', '★') +
+        sgaHeadSvg('#1e3a8a', '#2563eb', '') +
       '</g>' +
       '<circle cx="45" cy="67" r="3.5" fill="#38bdf8" class="sga-pa"/>' +
       '<circle cx="111" cy="57" r="3" fill="#7dd3fc" class="sga-pb"/>' +
@@ -18139,12 +18192,8 @@
 
     function sgaCharRogue() {
       return '<g class="sga-body">' +
-        '<path d="M119,45 Q139,80 119,115" fill="none" stroke="#78350f" stroke-width="5" stroke-linecap="round"/>' +
-        '<line x1="119" y1="48" x2="119" y2="112" stroke="#fbbf24" stroke-width="1.8"/>' +
-        '<line x1="86" y1="76" x2="122" y2="76" stroke="#d97706" stroke-width="2.4"/>' +
-        '<polygon points="126,76 116,71 116,81" fill="#f59e0b"/>' +
-        sgaBaseBodySvg('#059669', '#064e3b', '#a7f3d0', '↗') +
-        sgaHeadSvg('#064e3b', '#047857', '<path d="M54,60 Q57,35 80,30 Q103,35 106,60 Q94,54 80,55 Q66,54 54,60Z" fill="#047857"/><path d="M60,61 Q66,42 80,38 Q94,42 100,61 Q89,56 80,57 Q71,56 60,61Z" fill="#10b981"/>') +
+        sgaBaseBodySvg('#10b981', '#064e3b', '#a7f3d0', '↗') +
+        sgaHeadSvg('#064e3b', '#047857', '') +
       '</g>' +
       '<text x="41" y="62" font-size="10" fill="#34d399" class="sga-pa">*</text>' +
       '<text x="109" y="57" font-size="9" fill="#6ee7b7" class="sga-pb">✦</text>' +
@@ -18153,9 +18202,8 @@
 
     function sgaCharCrusader() {
       return '<g class="sga-body-s">' +
-        '<g class="sga-shield"><path d="M34,82 L50,78 L50,110 Q42,120 34,110Z" fill="#be123c" stroke="#7f1d1d" stroke-width="2"/><path d="M37,84 L47,82 L47,106 Q42,114 37,106Z" fill="#e11d48"/><path d="M42 88 V104 M36 96 H48" stroke="#fecdd3" stroke-width="2" stroke-linecap="round"/></g>' +
-        sgaBaseBodySvg('#be123c', '#881337', '#fecdd3', '+') +
-        sgaHeadSvg('#881337', '#be123c', '<path d="M56,62 Q57,42 80,37 Q103,42 104,62Z" fill="#9f1239"/><path d="M61,62 Q64,47 80,43 Q96,47 99,62Z" fill="#e11d48"/><rect x="64" y="58" width="32" height="6" rx="3" fill="#881337"/><path d="M68 48 L80 31 L92 48" fill="none" stroke="#fbbf24" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>') +
+        sgaBaseBodySvg('#e11d48', '#881337', '#fecdd3', '+') +
+        sgaHeadSvg('#881337', '#be123c', '') +
       '</g>' +
       '<text x="111" y="60" font-size="10" fill="#fb7185" class="sga-pa">✦</text>' +
       '<text x="44" y="52" font-size="8" fill="#fda4af" class="sga-pb">★</text>' +
@@ -18164,11 +18212,8 @@
 
     function sgaCharAlchemist() {
       return '<g class="sga-body">' +
-        '<rect x="118" y="66" width="16" height="26" rx="6" fill="#f59e0b" opacity=".32"/>' +
-        '<ellipse cx="126" cy="66" rx="8" ry="4" fill="#f59e0b" opacity=".5"/>' +
-        '<text x="126" y="86" text-anchor="middle" font-size="13">+</text>' +
         sgaBaseBodySvg('#fef3c7', '#b45309', '#fde68a', '+') +
-        sgaHeadSvg('#78350f', '#92400e', '<rect x="58" y="63" width="44" height="13" rx="6" fill="#451a03" opacity=".78"/><circle cx="71" cy="68" r="8" fill="#1e3a8a" opacity=".82"/><circle cx="89" cy="68" r="8" fill="#1e3a8a" opacity=".82"/><circle cx="71" cy="68" r="5" fill="#60a5fa" opacity=".55"/><circle cx="89" cy="68" r="5" fill="#60a5fa" opacity=".55"/>') +
+        sgaHeadSvg('#78350f', '#92400e', '') +
       '</g>' +
       '<circle cx="67" cy="38" r="5" fill="none" stroke="#fcd34d" stroke-width="1.5" class="sga-b1"/>' +
       '<circle cx="80" cy="33" r="3.8" fill="none" stroke="#fbbf24" stroke-width="1.3" class="sga-b2"/>' +
@@ -18177,9 +18222,6 @@
 
     function sgaCharExplorer() {
       return '<g class="sga-body">' +
-        '<circle cx="80" cy="28" r="10" fill="#fbbf24"><animate attributeName="fill-opacity" values=".55;1;.55" dur="2s" repeatCount="indefinite"/></circle>' +
-        '<rect x="76" y="38" width="8" height="4" rx="2" fill="#f59e0b"/>' +
-        '<line x1="80" y1="42" x2="80" y2="46" stroke="#78350f" stroke-width="1.6"/>' +
         sgaBaseBodySvg('#4338ca', '#3730a3', '#c7d2fe', '★') +
         sgaHeadSvg('#78350f', '#92400e', '<path d="M55,60 Q57,41 80,38 Q103,41 105,60 Q94,53 80,55 Q66,53 55,60Z" fill="#78350f"/><path d="M55,60 Q53,52 58,47 Q63,42 70,43 Q63,52 61,61Z" fill="#78350f"/>') +
       '</g>' +
@@ -18189,7 +18231,7 @@
     }
 
     function renderAvatarCosmeticSvg(cosmeticId, phase) {
-      const item = getAvatarCosmeticById(cosmeticId);
+      const item = getAvatarVisualItemById(cosmeticId);
       if (!item) return '';
       if (phase === 'back') {
         if (item.id === 'accessory-mini-wings') {
@@ -18199,6 +18241,51 @@
           return '<g><rect x="31" y="88" width="25" height="34" rx="7" fill="#7c2d12" stroke="#451a03" stroke-width="2"/><path d="M36 93 Q43 83 51 93" fill="none" stroke="#fbbf24" stroke-width="2.4"/><rect x="37" y="104" width="13" height="4" rx="2" fill="#fbbf24"/></g>';
         }
         return '';
+      }
+      if (item.id === 'default-idea-head') {
+        return '';
+      }
+      if (item.id === 'default-mage-head') {
+        return '<g><polygon points="80,18 56,56 104,56" fill="#1d4ed8"/><polygon points="80,21 61,56 99,56" fill="#3b82f6"/><ellipse cx="80" cy="56" rx="28" ry="5" fill="#1e40af"/><text x="80" y="43" text-anchor="middle" font-size="11" fill="#fde68a">★</text></g>';
+      }
+      if (item.id === 'default-rogue-head') {
+        return '<g><path d="M54,60 Q57,35 80,30 Q103,35 106,60 Q94,54 80,55 Q66,54 54,60Z" fill="#047857"/><path d="M60,61 Q66,42 80,38 Q94,42 100,61 Q89,56 80,57 Q71,56 60,61Z" fill="#10b981"/></g>';
+      }
+      if (item.id === 'default-crusader-head') {
+        return '<g><path d="M56,62 Q57,42 80,37 Q103,42 104,62Z" fill="#9f1239"/><path d="M61,62 Q64,47 80,43 Q96,47 99,62Z" fill="#e11d48"/><rect x="64" y="58" width="32" height="6" rx="3" fill="#881337"/><path d="M68 48 L80 31 L92 48" fill="none" stroke="#fbbf24" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/></g>';
+      }
+      if (item.id === 'default-alchemist-head') {
+        return '<g><rect x="58" y="63" width="44" height="13" rx="6" fill="#451a03" opacity=".78"/><circle cx="71" cy="68" r="8" fill="#1e3a8a" opacity=".82"/><circle cx="89" cy="68" r="8" fill="#1e3a8a" opacity=".82"/><circle cx="71" cy="68" r="5" fill="#60a5fa" opacity=".55"/><circle cx="89" cy="68" r="5" fill="#60a5fa" opacity=".55"/></g>';
+      }
+      if (item.id === 'default-idea-outfit') {
+        return '<g><path d="M55 88 Q80 102 105 88 L110 120 Q80 132 50 120Z" fill="#4338ca" opacity=".95"/><circle cx="80" cy="100" r="8" fill="#6366f1"/><text x="80" y="104" text-anchor="middle" font-size="8" fill="#e0e7ff">★</text></g>';
+      }
+      if (item.id === 'default-mage-outfit') {
+        return '<g><path d="M52 88 Q80 104 108 88 L116 122 Q80 137 44 122Z" fill="#0c4a6e" opacity=".94"/><path d="M65 90 L80 113 L95 90" fill="none" stroke="#38bdf8" stroke-width="3.5" stroke-linecap="round"/><circle cx="80" cy="99" r="5" fill="#bae6fd"/></g>';
+      }
+      if (item.id === 'default-rogue-outfit') {
+        return '<g><path d="M52 88 H108 L114 119 Q80 132 46 119Z" fill="#065f46" opacity=".94"/><path d="M60 94 Q80 105 100 94" fill="none" stroke="#34d399" stroke-width="3.2" stroke-linecap="round"/><path d="M72 91 L80 112 L88 91" fill="none" stroke="#a7f3d0" stroke-width="2.4"/></g>';
+      }
+      if (item.id === 'default-crusader-outfit') {
+        return '<g><path d="M54 86 H106 L113 119 Q80 134 47 119Z" fill="#be123c" stroke="#7f1d1d" stroke-width="2.2" opacity=".94"/><path d="M80 90 V120 M65 105 H95" stroke="#fecdd3" stroke-width="4" stroke-linecap="round"/></g>';
+      }
+      if (item.id === 'default-alchemist-outfit') {
+        return '<g><path d="M58 86 H102 L110 121 Q80 134 50 121Z" fill="#fffbeb" stroke="#f59e0b" stroke-width="2.2"/><path d="M69 90 L80 108 L91 90" fill="none" stroke="#b45309" stroke-width="3.2"/><text x="80" y="119" text-anchor="middle" font-size="11">+</text></g>';
+      }
+      if (item.id === 'default-mage-accessory') {
+        return '<g><line x1="119" y1="116" x2="126" y2="48" stroke="#6d28d9" stroke-width="5" stroke-linecap="round"/><circle cx="127" cy="43" r="10" fill="#38bdf8" opacity=".9"/><circle cx="127" cy="43" r="5" fill="#e0f2fe"><animate attributeName="r" values="5;9;5" dur="2s" repeatCount="indefinite"/><animate attributeName="fill-opacity" values="1;.45;1" dur="2s" repeatCount="indefinite"/></circle></g>';
+      }
+      if (item.id === 'default-idea-accessory') {
+        return '<g><circle cx="80" cy="28" r="10" fill="#fbbf24"><animate attributeName="fill-opacity" values=".55;1;.55" dur="2s" repeatCount="indefinite"/></circle><rect x="76" y="38" width="8" height="4" rx="2" fill="#f59e0b"/><line x1="80" y1="42" x2="80" y2="46" stroke="#78350f" stroke-width="1.6"/></g>';
+      }
+      if (item.id === 'default-rogue-accessory') {
+        return '<g><path d="M119,45 Q139,80 119,115" fill="none" stroke="#78350f" stroke-width="5" stroke-linecap="round"/><line x1="119" y1="48" x2="119" y2="112" stroke="#fbbf24" stroke-width="1.8"/><line x1="86" y1="76" x2="122" y2="76" stroke="#d97706" stroke-width="2.4"/><polygon points="126,76 116,71 116,81" fill="#f59e0b"/></g>';
+      }
+      if (item.id === 'default-crusader-accessory') {
+        return '<g class="sga-shield"><path d="M34,82 L50,78 L50,110 Q42,120 34,110Z" fill="#be123c" stroke="#7f1d1d" stroke-width="2"/><path d="M37,84 L47,82 L47,106 Q42,114 37,106Z" fill="#e11d48"/><path d="M42 88 V104 M36 96 H48" stroke="#fecdd3" stroke-width="2" stroke-linecap="round"/></g>';
+      }
+      if (item.id === 'default-alchemist-accessory') {
+        return '<g><rect x="118" y="66" width="16" height="26" rx="6" fill="#f59e0b" opacity=".32"/><ellipse cx="126" cy="66" rx="8" ry="4" fill="#f59e0b" opacity=".5"/><text x="126" y="86" text-anchor="middle" font-size="13">+</text></g>';
       }
       if (item.id === 'head-star-crown') {
         return '<g><path d="M54 47 L63 27 L75 44 L80 23 L86 44 L97 27 L106 47 Z" fill="#fbbf24" stroke="#b45309" stroke-width="2.2"/><circle cx="63" cy="27" r="3.4" fill="#fde68a"/><circle cx="80" cy="23" r="3.8" fill="#fde68a"/><circle cx="97" cy="27" r="3.4" fill="#fde68a"/></g>';
@@ -18259,6 +18346,7 @@
         '</g>';
       }
       var badge = '';
+      var effectiveEquipment = buildEffectiveAvatarEquipment(profId, equippedAvatarItems);
       if (tier.key === 'master') {
         badge = '<rect x="24" y="139" width="112" height="15" rx="7" fill="#fbbf24"/><text x="80" y="150.5" text-anchor="middle" font-size="8" font-weight="800" fill="#78350f">✦ MASTER ✦</text>';
       } else if (tier.key === 'elite') {
@@ -18277,7 +18365,7 @@
           '<animate attributeName="r" values="' + auraMin + ';' + auraMax + ';' + auraMin + '" dur="3s" repeatCount="indefinite"/>' +
           '<animate attributeName="opacity" values=".45;.9;.45" dur="3s" repeatCount="indefinite"/>' +
         '</circle>' +
-        rings + renderEquippedAvatarCosmeticsSvg(equippedAvatarItems, 'back') + charFn() + renderEquippedAvatarCosmeticsSvg(equippedAvatarItems, 'front') + badge +
+        rings + renderEquippedAvatarCosmeticsSvg(effectiveEquipment, 'back') + charFn() + renderEquippedAvatarCosmeticsSvg(effectiveEquipment, 'front') + badge +
       '</svg>';
     }
 
@@ -18597,6 +18685,7 @@
           if (profileIndex !== -1) studentGamificationProfiles.splice(profileIndex, 1);
         }
         renderStudentGamificationPanel();
+        alert('ไม่สามารถบันทึกรางวัลได้ในขณะนี้ กรุณาตรวจสอบการเชื่อมต่ออินเทอร์เน็ตแล้วลองใหม่อีกครั้ง');
         return false;
       }
     }
@@ -20167,9 +20256,21 @@
       const owned = normalizeOwnedAvatarItems(profile.ownedAvatarItems);
       const equipped = normalizeEquippedAvatarItems(profile.equippedAvatarItems, owned);
       const slotRows = AVATAR_COSMETIC_SLOTS.map(function(slot) {
+        const defaultItem = getDefaultAvatarCosmeticForSlot(profile.profession || 'IDEA Explorer', slot.id);
         const ownedInSlot = owned.map(getAvatarCosmeticById).filter(function(item) { return item && item.slot === slot.id; });
         const currentId = equipped[slot.id] || '';
-        const itemRows = ownedInSlot.length ? ownedInSlot.map(function(item) {
+        const defaultRow = defaultItem ? '<div class="sgshop-card" style="padding:10px 12px;">' +
+          '<div class="sgshop-info">' +
+            '<span class="sgshop-cat">' + escapeHtml(slot.label) + ' · ของเริ่มต้นอาชีพ</span>' +
+            '<strong class="sgshop-title">' + escapeHtml((defaultItem.icon || '') + ' ' + defaultItem.label) + '</strong>' +
+          '</div>' +
+          '<div class="sgshop-meta">' +
+            (!currentId
+              ? '<span class="sgshop-status">กำลังใส่</span>'
+              : '<button type="button" class="sgshop-btn" onclick="unequipAvatarCosmetic(\'' + slot.id + '\')">ใส่ของเดิม</button>') +
+          '</div>' +
+        '</div>' : '';
+        const ownedRows = ownedInSlot.length ? ownedInSlot.map(function(item) {
           const active = item.id === currentId;
           return '<div class="sgshop-card" style="padding:10px 12px;">' +
             '<div class="sgshop-info">' +
@@ -20178,11 +20279,12 @@
             '</div>' +
             '<div class="sgshop-meta">' +
               (active
-                ? '<span class="sgshop-status">กำลังใส่</span><button type="button" class="sgshop-btn" onclick="unequipAvatarCosmetic(\'' + slot.id + '\')">ถอด</button>'
+                ? '<span class="sgshop-status">กำลังใส่</span><button type="button" class="sgshop-btn" onclick="unequipAvatarCosmetic(\'' + slot.id + '\')">กลับของเดิม</button>'
                 : '<button type="button" class="sgshop-btn" onclick="equipAvatarCosmetic(\'' + item.id + '\')">ใส่</button>') +
             '</div>' +
           '</div>';
-        }).join('') : '<p class="mini-muted" style="margin:6px 0 12px;">ยังไม่มีไอเท็มช่องนี้ ซื้อได้จากร้านแลกรางวัล</p>';
+        }).join('') : '<p class="mini-muted" style="margin:6px 0 12px;">ยังไม่มีไอเท็มซื้อในช่องนี้ ซื้อได้จากร้านแลกรางวัล</p>';
+        const itemRows = defaultRow + ownedRows;
         return '<div style="margin-top:10px;">' +
           '<div class="sgdq-header" style="font-size:13px;">' + escapeHtml(slot.label) + '</div>' +
           '<div class="sgshop-list" style="margin-top:8px;">' + itemRows + '</div>' +
@@ -21635,7 +21737,8 @@
     function getOnDemandYouTubeId(url) {
       const text = String(url || '').trim();
       if (!text) return '';
-      const match = text.match(/(?:youtube\.com\/(?:watch\?v=|embed\/|shorts\/)|youtu\.be\/)([A-Za-z0-9_-]{6,})/);
+      const match = text.match(/(?:youtube\.com\/(?:watch[^#]*[?&]v=|embed\/|shorts\/)|youtu\.be\/)([A-Za-z0-9_-]{6,})/)
+                 || text.match(/[?&]v=([A-Za-z0-9_-]{6,})/);
       return match ? match[1] : '';
     }
 
@@ -21690,6 +21793,7 @@
     }
 
     function onOdYtStateChange(event, clipId) {
+      if (String(clipId || '') !== String(studentActiveOnDemandClipId || '')) return;
       var ENDED = 0, PLAYING = 1, PAUSED = 2;
       if (event.data === PAUSED || event.data === ENDED) {
         odYtProgressIntervals.forEach(function(iv) { clearInterval(iv); });
