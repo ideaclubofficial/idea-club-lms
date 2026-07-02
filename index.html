@@ -25000,6 +25000,10 @@
       downloadHtmlAsPdf('ใบสมัคร ' + (currentStudent.memberId || currentStudent.name || 'IDEA CLUB'), applicationFormHtml(currentStudent, false), 'application-' + (currentStudent.memberId || currentStudent.name || 'student') + '.pdf');
     }
 
+    function getPaymentQrImageSrc() {
+      return String(paymentQrData || (systemSettings && systemSettings.qrUrl) || '').trim();
+    }
+
     function overdueNoticeHtml(paymentId) {
       const triggerPayment = (payments || []).find(function(p) {
         return String(p.id || p.firebaseDocId || '') === String(paymentId);
@@ -25049,6 +25053,19 @@
       const contactLines = [];
       if (phone) contactLines.push('โทรศัพท์: ' + escapeHtml(phone));
       if (lineId) contactLines.push('LINE: ' + escapeHtml(lineId));
+      const qrSrc = getPaymentQrImageSrc();
+      const qrHtml = qrSrc
+        ? '<div class="payment-qr-box">' +
+            '<div class="payment-qr-copy">' +
+              '<strong>สแกน QR Code เพื่อชำระยอดค้าง</strong>' +
+              '<span>หลังชำระเงินแล้ว กรุณาอัปโหลดสลิปผ่านระบบ</span>' +
+            '</div>' +
+            '<img src="' + escapeHtml(qrSrc) + '" alt="QR Code สำหรับชำระเงิน">' +
+          '</div>'
+        : '<div class="payment-qr-box payment-qr-box--missing">' +
+            '<strong>ยังไม่ได้ตั้งค่า QR Code รับชำระเงิน</strong>' +
+            '<span>กรุณาติดต่อเจ้าหน้าที่เพื่อรับช่องทางชำระเงิน</span>' +
+          '</div>';
 
       return '<style>' +
         '.overdue-notice *{box-sizing:border-box;font-family:\'Sarabun\',\'Noto Sans Thai\',Arial,sans-serif;}' +
@@ -25062,8 +25079,15 @@
         '.overdue-notice thead th:last-child{text-align:right;}' +
         '.overdue-notice .total-row td{background:#fff7ed;font-weight:800;font-size:15px;color:#ea580c;padding:10px 14px;border-top:2px solid #ea580c;}' +
         '.overdue-notice .total-row td:last-child{text-align:right;}' +
+        '.overdue-notice .payment-qr-box{display:flex;align-items:center;justify-content:space-between;gap:16px;background:#fff7ed;border:1px solid #fed7aa;border-radius:10px;padding:14px 16px;margin:16px 0;color:#9a3412;}' +
+        '.overdue-notice .payment-qr-copy{display:flex;flex-direction:column;gap:4px;font-size:13px;line-height:1.5;}' +
+        '.overdue-notice .payment-qr-copy strong{font-size:15px;color:#ea580c;}' +
+        '.overdue-notice .payment-qr-copy span,.overdue-notice .payment-qr-box--missing span{color:#9a3412;font-size:12px;}' +
+        '.overdue-notice .payment-qr-box img{width:160px;height:160px;object-fit:contain;background:#fff;border:1px solid #fed7aa;border-radius:8px;padding:6px;}' +
+        '.overdue-notice .payment-qr-box--missing{display:block;text-align:center;font-size:13px;}' +
         '.overdue-notice .contact-box{background:#fff7ed;border:1px solid #fed7aa;border-radius:8px;padding:12px 16px;margin-top:16px;font-size:13px;color:#9a3412;}' +
         '.overdue-notice .signature{margin-top:24px;text-align:right;font-size:13px;color:#374151;}' +
+        '@media(max-width:560px){.overdue-notice .payment-qr-box{flex-direction:column;text-align:center;}.overdue-notice .payment-qr-box img{width:150px;height:150px;}}' +
         '@media print{.overdue-notice{border-radius:0;border:2px solid #ea580c;}}' +
       '</style>' +
       '<div class="overdue-notice">' +
@@ -25087,6 +25111,7 @@
             '<tbody>' + rowsHtml + '</tbody>' +
             '<tfoot><tr class="total-row"><td colspan="2">ยอดค้างชำระรวมทั้งหมด</td><td>' + escapeHtml(formatPrice(totalAmount)) + '</td></tr></tfoot>' +
           '</table>' +
+          qrHtml +
           '<p style="margin:14px 0 6px;">กรุณาชำระยอดดังกล่าวโดยเร็วที่สุด เพื่อรักษาสิทธิ์การเรียนของบุตรหลาน ทางสถาบันฯ ต้องขออภัยในความไม่สะดวกและขอบคุณที่ให้ความร่วมมือมา ณ โอกาสนี้</p>' +
           (contactLines.length ? '<div class="contact-box"><strong>ติดต่อสอบถาม:</strong> ' + contactLines.join('  ·  ') + '</div>' : '') +
         '</div>' +
