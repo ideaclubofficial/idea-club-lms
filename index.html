@@ -19731,6 +19731,12 @@
           const isStamp = r.rewardType === 'stampCard';
           const isTickets = r.rewardType === 'wheelTickets';
           const isAvatar = r.rewardType === 'avatarCosmetic';
+          const isSaleActive = r.active !== false;
+          const saleStatus = isSaleActive
+            ? '<span style="display:inline-flex;align-items:center;gap:4px;border-radius:999px;background:#dcfce7;color:#15803d;font-size:11px;font-weight:800;padding:3px 8px;white-space:nowrap;">เปิดขาย</span>'
+            : '<span style="display:inline-flex;align-items:center;gap:4px;border-radius:999px;background:#fee2e2;color:#b91c1c;font-size:11px;font-weight:800;padding:3px 8px;white-space:nowrap;">ปิดขาย</span>';
+          const saleToggleClass = isSaleActive ? 'btn-red' : 'btn-green';
+          const saleToggleLabel = isSaleActive ? 'ปิดการขาย' : 'เปิดการขาย';
           const cosmetic = isAvatar ? getAvatarCosmeticById(r.avatarCosmeticId) : null;
           const typeLabel = isStamp ? '🎴 บัตรสะสม (' + (r.stampsRequired || '?') + ' แสตมป์)' : isTickets ? '🎟 ตั๋วหมุนวงล้อ (' + (r.ticketsAwarded || 1) + ' ตั๋ว)' : isAvatar ? '👗 Avatar (' + (cosmetic ? cosmetic.label : (r.avatarCosmeticId || '-')) + ')' : '🎁 มาตรฐาน';
           return '<tr>' +
@@ -19739,14 +19745,16 @@
             '<td style="font-size:11px;">' + typeLabel + '</td>' +
             '<td style="text-align:center;">' + (r.cost > 0 ? escapeHtml(r.cost) + ' 💰' : '—') + '</td>' +
             '<td style="text-align:center;">' + escapeHtml(r.stock) + '</td>' +
+            '<td style="text-align:center;">' + saleStatus + '</td>' +
             '<td style="font-size:12px;color:#64748b;max-width:160px;">' + escapeHtml(r.description || '') + '</td>' +
             '<td>' +
               '<button class="btn btn-sm" onclick="adminEditGamificationReward(\'' + escapeHtml(r.firebaseDocId || r.id) + '\')">แก้ไข</button> ' +
+              '<button class="btn btn-sm ' + saleToggleClass + '" onclick="adminToggleGamificationRewardSale(\'' + escapeHtml(r.firebaseDocId || r.id) + '\')">' + saleToggleLabel + '</button> ' +
               '<button class="btn btn-sm btn-danger" onclick="adminDeleteGamificationReward(\'' + escapeHtml(r.firebaseDocId || r.id) + '\')">ลบ</button>' +
             '</td>' +
           '</tr>';
         }).join('');
-        rewardsEl.innerHTML = '<table class="data-table" style="font-size:13px;"><thead><tr><th>ชื่อรางวัล</th><th>หมวด</th><th>ประเภท</th><th>ราคา</th><th>สต็อก</th><th>รายละเอียด</th><th></th></tr></thead><tbody>' + rows + '</tbody></table>';
+        rewardsEl.innerHTML = '<table class="data-table" style="font-size:13px;"><thead><tr><th>ชื่อรางวัล</th><th>หมวด</th><th>ประเภท</th><th>ราคา</th><th>สต็อก</th><th>สถานะขาย</th><th>รายละเอียด</th><th></th></tr></thead><tbody>' + rows + '</tbody></table>';
       }
 
       // Stamp card progress table
@@ -19962,6 +19970,27 @@
         if (idx !== -1) gamificationRewards[idx].deleted = true;
         renderAdminGamificationShop();
       } catch (e) { alert('ลบไม่สำเร็จ: ' + (e.message || '')); }
+    }
+
+    async function adminToggleGamificationRewardSale(rewardId) {
+      const reward = gamificationRewards.find(function(r) { return String(r.firebaseDocId || r.id || '') === String(rewardId || '') && !r.deleted; });
+      if (!reward) { alert('ไม่พบไอเท็มนี้'); return; }
+      if (!firebaseReady || !db) return;
+      const nextActive = reward.active === false;
+      const actionText = nextActive ? 'เปิดการขาย' : 'ปิดการขาย';
+      if (!confirm('ยืนยัน' + actionText + ' "' + (reward.title || '-') + '"?')) return;
+      try {
+        await db.collection('gamificationRewards').doc(rewardId).set({
+          active: nextActive,
+          updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+        }, { merge: true });
+        reward.active = nextActive;
+        renderAdminGamificationShop();
+        if (typeof renderStudentGamificationPanel === 'function') renderStudentGamificationPanel();
+        addActivityLog(actionText + 'ไอเท็มร้านค้า', reward.title || rewardId);
+      } catch (e) {
+        alert(actionText + 'ไม่สำเร็จ: ' + (e.message || e.code || ''));
+      }
     }
 
     async function adminFulfillRedemption(redemptionId) {
