@@ -5577,10 +5577,18 @@
                       <option value="ยกเว้น">ยกเว้นรอบนี้</option>
                     </select>
                   </div>
+                  <div id="paymentPreviewBatchActions" style="display:flex;flex-wrap:wrap;gap:8px;margin:10px 0 8px;align-items:center;">
+                    <button class="btn btn-dark" type="button" onclick="selectAllVisiblePaymentPreviewRows()">เลือกทั้งหมด</button>
+                    <button class="btn btn-dark" type="button" onclick="clearPaymentPreviewSelection()">ล้างที่เลือก</button>
+                    <button class="btn btn-green" type="button" onclick="saveSelectedPaymentCoursePricesAndRecords()">บันทึกยอดและสร้างรายการที่เลือก</button>
+                    <button class="btn btn-red" type="button" onclick="voidSelectedStudentMonthPayments()">ยกเลิกยอดที่เลือก</button>
+                    <span id="paymentPreviewSelectionSummary" style="color:#6b7280;font-size:13px;font-weight:700;">เลือก 0 รายการ</span>
+                  </div>
                   <div class="table-wrap" style="margin-top:14px;">
                     <table>
                       <thead>
                         <tr>
+                          <th style="min-width:64px;">เลือก</th>
                           <th style="min-width:180px;">นักเรียน</th>
                           <th style="min-width:160px;">คอร์ส</th>
                           <th style="min-width:130px;">ราคาที่ต้องจ่าย</th>
@@ -5593,10 +5601,6 @@
                       <tbody id="paymentRecordPreviewTableBody"></tbody>
                     </table>
                   </div>
-                  <div class="test-actions" style="margin-top:16px;">
-                    <button class="btn btn-green" style="font-size:15px; padding:10px 22px;" type="button" onclick="saveAllPaymentCoursePrices()">บันทึกยอดและสร้างรายการเรียกเก็บ</button>
-                  </div>
-                  <p style="color:#6b7280; margin-top:8px; font-size:13px;">เมื่อกดปุ่มนี้ ระบบจะบันทึกราคาและสร้างรายการเรียกเก็บให้นักเรียนทันที</p>
                   <p id="paymentRecordPreviewResult" style="margin-top:10px; font-weight:bold;"></p>
                   <details style="margin-top:14px;">
                     <summary style="cursor:pointer; font-weight:700; color:#9ca3af;">เครื่องมือซ่อมข้อมูล</summary>
@@ -23818,17 +23822,9 @@
       } catch(e) { console.error('saveStudentMonthPriceOverride error:', e); }
     }
 
-    async function saveAllPaymentCoursePrices() {
-      if (saveAllPaymentCoursePrices._saving) return;
-      saveAllPaymentCoursePrices._saving = true;
-      const month = getElement('paymentPriceMonthSelect') ? getElement('paymentPriceMonthSelect').value : '';
-      const result = getElement('paymentCoursePriceResult');
+    async function savePaymentCoursePricesForMonth(month) {
       const item = getPaymentMonthItem(month);
-      if (!item) {
-        if (result) { result.textContent = 'กรุณาเลือกเดือนก่อนบันทึกราคา'; result.style.color = '#dc2626'; }
-        saveAllPaymentCoursePrices._saving = false;
-        return;
-      }
+      if (!item) throw new Error('กรุณาเลือกเดือนก่อนบันทึกราคา');
       item.coursePrices = item.coursePrices || {};
       let savedCount = 0;
       courses.forEach(function(c) {
@@ -23841,10 +23837,25 @@
           delete item.coursePrices[String(c.id)];
         }
       });
+      if (item.visibleToStudents === undefined) item.visibleToStudents = false;
+      await setFirebaseDocument('paymentMonths', item);
+      addActivityLog('บันทึกราคาคอร์สทั้งเดือน', month + ' · ' + savedCount + ' คอร์ส');
+      return { item: item, savedCount: savedCount };
+    }
+
+    async function saveAllPaymentCoursePrices() {
+      if (saveAllPaymentCoursePrices._saving) return;
+      saveAllPaymentCoursePrices._saving = true;
+      const month = getElement('paymentPriceMonthSelect') ? getElement('paymentPriceMonthSelect').value : '';
+      const result = getElement('paymentCoursePriceResult');
+      const item = getPaymentMonthItem(month);
+      if (!item) {
+        if (result) { result.textContent = 'กรุณาเลือกเดือนก่อนบันทึกราคา'; result.style.color = '#dc2626'; }
+        saveAllPaymentCoursePrices._saving = false;
+        return;
+      }
       try {
-        if (item.visibleToStudents === undefined) item.visibleToStudents = false;
-        await setFirebaseDocument('paymentMonths', item);
-        addActivityLog('บันทึกราคาคอร์สทั้งเดือน', month + ' · ' + savedCount + ' คอร์ส');
+        await savePaymentCoursePricesForMonth(month);
         const paymentCounts = await createOrUpdateMonthlyPaymentRecordsForMonth(month);
         const paymentSummary = 'บันทึกยอดและสร้างรายการเรียกเก็บเรียบร้อย: สร้าง ' + paymentCounts.created + ' รายการ, อัปเดต ' + paymentCounts.updated + ' รายการ, ข้าม ' + paymentCounts.skipped + ' รายการ';
         if (result) { result.textContent = paymentSummary; result.style.color = '#16a34a'; }
@@ -24220,12 +24231,17 @@
         slipStatus === 'รอตรวจสลิป' || slipStatus === 'pending' || slipStatus === 'waiting';
     }
 
-    async function createOrUpdateMonthlyPaymentRecordsForMonth(month) {
+    async function createOrUpdateMonthlyPaymentRecordsForMonth(month, selectedStudentIds) {
       if (!month) return { created: 0, updated: 0, skipped: 0 };
-      const targetStudents = getMonthlyPaymentTargetStudentsForMonth(month);
+      const selectedSet = Array.isArray(selectedStudentIds) && selectedStudentIds.length
+        ? new Set(selectedStudentIds.map(function(id) { return String(id); }))
+        : null;
+      const targetStudents = getMonthlyPaymentTargetStudentsForMonth(month).filter(function(student) {
+        return !selectedSet || selectedSet.has(String(student.id));
+      });
       let created = 0;
       let updated = 0;
-      let skipped = 0;
+      let skipped = selectedSet ? Math.max(0, selectedSet.size - targetStudents.length) : 0;
 
       for (const student of targetStudents) {
         const existing = findPaymentForStudentMonth(student, month);
@@ -24278,6 +24294,131 @@
       return { created: created, updated: updated, skipped: skipped };
     }
 
+    function getSelectedPaymentPreviewStudentIds() {
+      const tbody = getElement('paymentRecordPreviewTableBody');
+      if (!tbody) return [];
+      return Array.from(tbody.querySelectorAll('.payment-preview-select:checked:not(:disabled)'))
+        .map(function(input) { return String(input.getAttribute('data-student-id') || '').trim(); })
+        .filter(Boolean);
+    }
+
+    function updatePaymentPreviewSelectionSummary() {
+      const summary = getElement('paymentPreviewSelectionSummary');
+      const selectedCount = getSelectedPaymentPreviewStudentIds().length;
+      if (summary) summary.textContent = 'เลือก ' + selectedCount + ' รายการ';
+    }
+
+    function selectAllVisiblePaymentPreviewRows() {
+      const tbody = getElement('paymentRecordPreviewTableBody');
+      if (!tbody) return;
+      Array.from(tbody.querySelectorAll('tr[data-student-id]')).forEach(function(row) {
+        if (row.style.display === 'none') return;
+        const checkbox = row.querySelector('.payment-preview-select:not(:disabled)');
+        if (checkbox) checkbox.checked = true;
+      });
+      updatePaymentPreviewSelectionSummary();
+    }
+
+    function clearPaymentPreviewSelection() {
+      const tbody = getElement('paymentRecordPreviewTableBody');
+      if (!tbody) return;
+      Array.from(tbody.querySelectorAll('.payment-preview-select')).forEach(function(checkbox) {
+        checkbox.checked = false;
+      });
+      updatePaymentPreviewSelectionSummary();
+    }
+
+    async function saveSelectedPaymentCoursePricesAndRecords() {
+      if (saveSelectedPaymentCoursePricesAndRecords._saving) return;
+      const selectedIds = getSelectedPaymentPreviewStudentIds();
+      const month = getSelectedPaymentRecordMonth();
+      const result = getElement('paymentRecordPreviewResult');
+      const courseResult = getElement('paymentCoursePriceResult');
+      if (!month) {
+        if (result) { result.textContent = 'กรุณาเลือกเดือนก่อนบันทึกรายการ'; result.style.color = '#dc2626'; }
+        return;
+      }
+      if (!selectedIds.length) {
+        if (result) { result.textContent = 'กรุณาเลือกรายการที่ต้องการสร้าง/อัปเดตก่อน'; result.style.color = '#dc2626'; }
+        return;
+      }
+      saveSelectedPaymentCoursePricesAndRecords._saving = true;
+      try {
+        await savePaymentCoursePricesForMonth(month);
+        const paymentCounts = await createOrUpdateMonthlyPaymentRecordsForMonth(month, selectedIds);
+        const paymentSummary = 'บันทึกยอดและสร้างรายการที่เลือกเรียบร้อย: สร้าง ' + paymentCounts.created + ' รายการ, อัปเดต ' + paymentCounts.updated + ' รายการ, ข้าม ' + paymentCounts.skipped + ' รายการ';
+        if (courseResult) { courseResult.textContent = 'บันทึกราคาคอร์สของเดือนนี้แล้ว'; courseResult.style.color = '#16a34a'; }
+        if (result) { result.textContent = paymentSummary; result.style.color = '#16a34a'; }
+        renderPaymentMonths();
+        renderPaymentTable();
+        renderAdminDashboard();
+        renderPaymentRecordPreview(paymentSummary);
+        updateStudentSelectedPaymentMonth();
+        updateStudentCourseDisplay();
+        renderDashboardPaymentSummary();
+      } catch (error) {
+        if (result) { result.textContent = 'บันทึกไม่สำเร็จ: ' + (error.message || error.code || error); result.style.color = '#dc2626'; }
+      } finally {
+        saveSelectedPaymentCoursePricesAndRecords._saving = false;
+      }
+    }
+
+    async function voidSelectedStudentMonthPayments() {
+      if (voidSelectedStudentMonthPayments._saving) return;
+      const selectedIds = getSelectedPaymentPreviewStudentIds();
+      const month = getSelectedPaymentRecordMonth();
+      const result = getElement('paymentRecordPreviewResult');
+      if (!month) {
+        if (result) { result.textContent = 'กรุณาเลือกเดือนก่อนยกเลิกรายการ'; result.style.color = '#dc2626'; }
+        return;
+      }
+      if (!selectedIds.length) {
+        if (result) { result.textContent = 'กรุณาเลือกรายการที่ต้องการยกเลิกก่อน'; result.style.color = '#dc2626'; }
+        return;
+      }
+      if (!confirm('ยืนยันยกเลิกยอดเรียกเก็บรอบ ' + month + ' จำนวน ' + selectedIds.length + ' รายการ?')) return;
+      const pmItem = getPaymentMonthItem(month);
+      if (!pmItem) return;
+      voidSelectedStudentMonthPayments._saving = true;
+      let voidedPayments = 0;
+      let skippedPayments = 0;
+      try {
+        if (!pmItem.skippedStudents) pmItem.skippedStudents = {};
+        selectedIds.forEach(function(studentId) {
+          pmItem.skippedStudents[String(studentId)] = true;
+        });
+        await setFirebaseDocument('paymentMonths', pmItem);
+
+        for (const studentId of selectedIds) {
+          const payment = payments.find(function(p) {
+            return String(p.studentId || '') === String(studentId) && p.month === month;
+          });
+          if (!payment) continue;
+          if (!isPaymentRecordUpdatable(payment)) {
+            skippedPayments++;
+            continue;
+          }
+          payment.status = 'ยกเว้น';
+          payment.paymentStatus = 'ยกเว้น';
+          payment.adminNote = (payment.adminNote ? payment.adminNote + ' | ' : '') + 'ยกเว้นรอบ ' + month;
+          await setFirebaseDocument('payments', payment);
+          voidedPayments++;
+        }
+        addActivityLog('ยกเลิกยอดเรียกเก็บเป็นชุด', month + ' · ' + selectedIds.length + ' รายการ');
+        const summary = 'ยกเลิกยอดที่เลือกแล้ว: ยกเว้น ' + selectedIds.length + ' คน, ปรับสถานะ payment ' + voidedPayments + ' รายการ' + (skippedPayments ? ', ข้าม ' + skippedPayments + ' รายการ' : '');
+        if (result) { result.textContent = summary; result.style.color = '#16a34a'; }
+        renderPaymentRecordPreview(summary);
+        renderPaymentTable();
+        updateStudentSelectedPaymentMonth();
+        updateStudentCourseDisplay();
+        renderDashboardPaymentSummary();
+      } catch (error) {
+        if (result) { result.textContent = 'ยกเลิกยอดไม่สำเร็จ: ' + (error.message || error.code || error); result.style.color = '#dc2626'; }
+      } finally {
+        voidSelectedStudentMonthPayments._saving = false;
+      }
+    }
+
     async function voidStudentMonthPayment(month, studentId) {
       const pmItem = getPaymentMonthItem(month);
       if (!pmItem) return;
@@ -24326,9 +24467,10 @@
       const month = getSelectedPaymentRecordMonth();
       if (!month) {
         summaryBox.innerHTML = '<div class="stat"><h4>เดือนที่เลือก</h4><p>-</p></div><div class="stat"><h4>นักเรียนที่ต้องเรียกเก็บ</h4><p>0 คน</p></div><div class="stat"><h4>ยอดรวม</h4><p>0 บาท</p></div>';
-        tbody.innerHTML = '<tr><td colspan="7">ยังไม่มีเดือนชำระเงิน ให้เพิ่มรอบเดือนก่อน</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="8">ยังไม่มีเดือนชำระเงิน ให้เพิ่มรอบเดือนก่อน</td></tr>';
         const excludedContainer = getElement('paymentRecordExcludedSection');
         if (excludedContainer) excludedContainer.innerHTML = '';
+        updatePaymentPreviewSelectionSummary();
         if (result) result.textContent = message || '';
         return;
       }
@@ -24387,11 +24529,14 @@
         const inputStyle = 'width:90px;border:1px solid ' + (override > 0 ? '#3b82f6;color:#1d4ed8;font-weight:700' : '#d1d5db;color:#6b7280') + ';border-radius:6px;padding:3px 6px;font-size:13px;';
         const overrideTd = '<td><input type="number" min="0" style="' + inputStyle + '" placeholder="ปกติ" value="' + (override > 0 ? override : '') + '" onblur="saveStudentMonthPriceOverride(' + jsArg(month) + ',' + jsArg(student.id) + ',this.value)" onkeydown="if(event.key===\'Enter\')this.blur()"></td>';
         const amountDiffNote = (payment && row.expectedAmount !== row.amount) ? '<br><span class="mini-muted">ราคาปกติ: ' + formatPrice(row.expectedAmount) + '</span>' : '';
+        const canSelect = !isSkipped && (!payment || isPaymentRecordUpdatable(payment));
+        const selectTitle = canSelect ? 'เลือกรายการนี้' : 'รายการนี้ไม่สามารถอัปเดตหรือยกเลิกเป็นชุดได้';
         return '<tr data-student-id="' + escapeHtml(String(student.id || '')) + '"' +
             ' data-name="' + escapeHtml((student.name || '').toLowerCase()) + '"' +
             ' data-course="' + escapeHtml(student.course || '') + '"' +
             ' data-location="' + escapeHtml(student.preferredLocation || '') + '"' +
             ' data-record-status="' + recordStatusText + '" style="' + (isSkipped ? 'opacity:0.45;' : '') + '">' +
+          '<td style="text-align:center;"><input class="payment-preview-select" type="checkbox" data-student-id="' + escapeHtml(String(student.id || '')) + '" onchange="updatePaymentPreviewSelectionSummary()" title="' + selectTitle + '"' + (canSelect ? '' : ' disabled') + '></td>' +
           '<td style="word-break:break-word;white-space:normal;"><strong>' + escapeHtml(student.name || '-') + '</strong>' + (student.nickname ? ' <span style="color:#6b7280;font-weight:400;font-size:13px;">(' + escapeHtml(student.nickname) + ')</span>' : '') + '<br><span class="mini-muted">' + escapeHtml(student.memberId || student.phone || '-') + '</span></td>' +
           '<td style="white-space:nowrap;">' + escapeHtml(student.course || '-') + '</td>' +
           '<td style="white-space:nowrap;"><strong>' + formatPrice(row.amount) + '</strong>' + amountDiffNote + '</td>' +
@@ -24403,7 +24548,7 @@
             : '<button class="btn btn-red" style="font-size:12px;padding:4px 10px;" type="button" onclick="voidStudentMonthPayment(\'' + jsArg(month) + '\',\'' + jsArg(student.id) + '\')">ยกเลิกยอด</button>'
           ) + '</td>' +
         '</tr>';
-      }).join('') : '<tr><td colspan="7">ยังไม่มีนักเรียนที่เข้าเงื่อนไขสำหรับสร้างรายการเรียกเก็บ</td></tr>';
+      }).join('') : '<tr><td colspan="8">ยังไม่มีนักเรียนที่เข้าเงื่อนไขสำหรับสร้างรายการเรียกเก็บ</td></tr>';
 
       const courseFilter = getElement('paymentPreviewFilterCourse');
       if (courseFilter) {
@@ -24463,8 +24608,14 @@
         const matchCourse = !courseVal || course === courseVal;
         const matchLocation = !locationVal || location === locationVal;
         const matchStatus = !statusVal || recordStatus === statusVal;
-        tr.style.display = (matchName && matchCourse && matchLocation && matchStatus) ? '' : 'none';
+        const isVisible = matchName && matchCourse && matchLocation && matchStatus;
+        tr.style.display = isVisible ? '' : 'none';
+        if (!isVisible) {
+          const checkbox = tr.querySelector('.payment-preview-select');
+          if (checkbox) checkbox.checked = false;
+        }
       });
+      updatePaymentPreviewSelectionSummary();
     }
 
     function formatPaymentSlipCell(payment) {
