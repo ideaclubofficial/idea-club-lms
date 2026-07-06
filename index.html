@@ -24363,6 +24363,36 @@
       }
     }
 
+    async function saveSinglePaymentCoursePriceAndRecord(month, studentId) {
+      if (saveSinglePaymentCoursePriceAndRecord._saving) return;
+      const result = getElement('paymentRecordPreviewResult');
+      const courseResult = getElement('paymentCoursePriceResult');
+      if (!month || !studentId) {
+        if (result) { result.textContent = 'ไม่พบเดือนหรือนักเรียนที่ต้องบันทึก'; result.style.color = '#dc2626'; }
+        return;
+      }
+      saveSinglePaymentCoursePriceAndRecord._saving = true;
+      try {
+        await savePaymentCoursePricesForMonth(month);
+        const paymentCounts = await createOrUpdateMonthlyPaymentRecordsForMonth(month, [studentId]);
+        const student = students.find(function(s) { return String(s.id) === String(studentId); }) || {};
+        const paymentSummary = 'บันทึกยอดรายคนแล้ว: ' + (student.name || 'นักเรียน') + ' · สร้าง ' + paymentCounts.created + ' รายการ, อัปเดต ' + paymentCounts.updated + ' รายการ, ข้าม ' + paymentCounts.skipped + ' รายการ';
+        if (courseResult) { courseResult.textContent = 'บันทึกราคาคอร์สของเดือนนี้แล้ว'; courseResult.style.color = '#16a34a'; }
+        if (result) { result.textContent = paymentSummary; result.style.color = '#16a34a'; }
+        renderPaymentMonths();
+        renderPaymentTable();
+        renderAdminDashboard();
+        renderPaymentRecordPreview(paymentSummary);
+        updateStudentSelectedPaymentMonth();
+        updateStudentCourseDisplay();
+        renderDashboardPaymentSummary();
+      } catch (error) {
+        if (result) { result.textContent = 'บันทึกไม่สำเร็จ: ' + (error.message || error.code || error); result.style.color = '#dc2626'; }
+      } finally {
+        saveSinglePaymentCoursePriceAndRecord._saving = false;
+      }
+    }
+
     async function voidSelectedStudentMonthPayments() {
       if (voidSelectedStudentMonthPayments._saving) return;
       const selectedIds = getSelectedPaymentPreviewStudentIds();
@@ -24531,6 +24561,7 @@
         const amountDiffNote = (payment && row.expectedAmount !== row.amount) ? '<br><span class="mini-muted">ราคาปกติ: ' + formatPrice(row.expectedAmount) + '</span>' : '';
         const canSelect = !isSkipped && (!payment || isPaymentRecordUpdatable(payment));
         const selectTitle = canSelect ? 'เลือกรายการนี้' : 'รายการนี้ไม่สามารถอัปเดตหรือยกเลิกเป็นชุดได้';
+        const saveRowButton = canSelect ? '<button class="btn btn-green" style="font-size:12px;padding:4px 10px;" type="button" onclick="saveSinglePaymentCoursePriceAndRecord(\'' + jsArg(month) + '\',\'' + jsArg(student.id) + '\')">บันทึกยอด</button>' : '';
         return '<tr data-student-id="' + escapeHtml(String(student.id || '')) + '"' +
             ' data-name="' + escapeHtml((student.name || '').toLowerCase()) + '"' +
             ' data-course="' + escapeHtml(student.course || '') + '"' +
@@ -24543,10 +24574,10 @@
           overrideTd +
           '<td style="white-space:nowrap;">' + recordStatus + '</td>' +
           '<td style="white-space:nowrap;">' + (payment ? '<span class="' + displayStatusClass + '">' + escapeHtml(displayStatus) + '</span>' : '-') + '</td>' +
-          '<td>' + (isSkipped
+          '<td><div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">' + (isSkipped
             ? '<button class="btn btn-dark" style="font-size:12px;padding:4px 10px;" type="button" onclick="restoreStudentMonthPayment(\'' + jsArg(month) + '\',\'' + jsArg(student.id) + '\')">คืนสิทธิ์</button>'
-            : '<button class="btn btn-red" style="font-size:12px;padding:4px 10px;" type="button" onclick="voidStudentMonthPayment(\'' + jsArg(month) + '\',\'' + jsArg(student.id) + '\')">ยกเลิกยอด</button>'
-          ) + '</td>' +
+            : saveRowButton + '<button class="btn btn-red" style="font-size:12px;padding:4px 10px;" type="button" onclick="voidStudentMonthPayment(\'' + jsArg(month) + '\',\'' + jsArg(student.id) + '\')">ยกเลิกยอด</button>'
+          ) + '</div></td>' +
         '</tr>';
       }).join('') : '<tr><td colspan="8">ยังไม่มีนักเรียนที่เข้าเงื่อนไขสำหรับสร้างรายการเรียกเก็บ</td></tr>';
 
