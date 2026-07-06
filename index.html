@@ -24224,11 +24224,13 @@
       if (!payment) return false;
       const status = String(payment.status || payment.paymentStatus || '').trim();
       const slipStatus = String(payment.slipStatus || '').trim();
+      if (paymentHasUploadedSlip(payment)) return false;
       if (status === 'ยกเว้น') return false;
       if (status === 'ชำระแล้ว' || status === 'paid') return false;
+      if (status === 'รอตรวจสลิป') return false;
       if (slipStatus === 'approved') return false;
-      return status === 'รอชำระเงิน' || status === 'ค้างชำระ' || status === 'รอตรวจสลิป' ||
-        slipStatus === 'รอตรวจสลิป' || slipStatus === 'pending' || slipStatus === 'waiting';
+      if (slipStatus === 'waiting_admin_review' || slipStatus === 'รอตรวจสลิป' || slipStatus === 'pending' || slipStatus === 'waiting') return false;
+      return status === 'รอชำระเงิน' || status === 'ค้างชำระ';
     }
 
     async function createOrUpdateMonthlyPaymentRecordsForMonth(month, selectedStudentIds) {
@@ -25051,6 +25053,7 @@
       if (payment.status === 'ชำระแล้ว' || payment.paymentStatus === 'ชำระแล้ว' || payment.slipStatus === 'approved') return 'ชำระแล้ว';
       if (payment.status === 'รอตรวจสลิป' || payment.paymentStatus === 'รอตรวจสลิป' || payment.slipStatus === 'waiting_admin_review') return 'รอตรวจสลิป';
       if (payment.slipStatus === 'rejected' || payment.status === 'rejected' || payment.status === 'ไม่ผ่าน') return 'สลิปไม่ผ่าน';
+      if (paymentHasUploadedSlip(payment)) return 'รอตรวจสลิป';
       if (payment.status === 'ค้างชำระ' || payment.paymentStatus === 'ค้างชำระ') return 'ค้างชำระ';
       return payment.status || payment.paymentStatus || 'รอชำระเงิน';
     }
