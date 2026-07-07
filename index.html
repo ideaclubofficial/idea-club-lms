@@ -11708,11 +11708,94 @@
       safeRun(renderTeacherMobileProfile, 'teacher-mobile-profile-tab');
     }
 
+    function getCourseTeachingSettingForCourse(course) {
+      if (!course) return null;
+      const courseIds = [course.id, course.firebaseDocId, course.courseId].map(function(value) {
+        return String(value || '').trim();
+      }).filter(Boolean);
+      if (!courseIds.length) return null;
+      return courseTeachingSettings.find(function(setting) {
+        return setting && courseIds.includes(String(setting.courseId || '').trim());
+      }) || null;
+    }
+
+    function pushTeacherIdentityValue(target, value) {
+      if (Array.isArray(value)) {
+        value.forEach(function(item) { pushTeacherIdentityValue(target, item); });
+        return;
+      }
+      String(value || '').split(',').map(function(item) { return item.trim(); }).filter(Boolean).forEach(function(item) {
+        if (!target.includes(item)) target.push(item);
+      });
+    }
+
+    function getCourseAssignedTeacherIdentitySet(course) {
+      const values = [];
+      if (course) {
+        [
+          course.teacherId,
+          course.teacherDocId,
+          course.teacherUid,
+          course.teacherAuthUid,
+          course.authUid,
+          course.teacherEmail,
+          course.primaryTeacherId,
+          course.primaryTeacherDocId,
+          course.primaryTeacherUid,
+          course.instructorId,
+          course.tutorId,
+          course.teacherIds,
+          course.teacherUids,
+          course.backupTeacherIds
+        ].forEach(function(value) { pushTeacherIdentityValue(values, value); });
+      }
+      const setting = getCourseTeachingSettingForCourse(course);
+      if (setting && Array.isArray(setting.subjects)) {
+        setting.subjects.forEach(function(subject) {
+          if (!subject) return;
+          pushTeacherIdentityValue(values, subject.primaryTeacherId);
+          pushTeacherIdentityValue(values, subject.primaryTeacherDocId);
+          pushTeacherIdentityValue(values, subject.primaryTeacherUid);
+          pushTeacherIdentityValue(values, subject.teacherId);
+          pushTeacherIdentityValue(values, subject.teacherUid);
+          pushTeacherIdentityValue(values, subject.backupTeacherIds);
+          pushTeacherIdentityValue(values, subject.teacherIds);
+        });
+      }
+      return values;
+    }
+
+    function isCourseAssignedToTeacher(course, teacher) {
+      if (!course || !teacher) return false;
+      const teacherKeys = getTeacherIdentitySet(teacher);
+      const courseKeys = getCourseAssignedTeacherIdentitySet(course);
+      if (teacherKeys.length && courseKeys.some(function(key) { return teacherKeys.includes(key); })) return true;
+      const setting = getCourseTeachingSettingForCourse(course);
+      const teacherNames = getTeacherNameIdentitySet(teacher);
+      const courseNames = [
+        course.teacherName,
+        course.instructorName,
+        course.tutorName,
+        course.primaryTeacherName
+      ];
+      if (setting && Array.isArray(setting.subjects)) {
+        setting.subjects.forEach(function(subject) {
+          if (!subject) return;
+          pushTeacherIdentityValue(courseNames, subject.teacherName);
+          pushTeacherIdentityValue(courseNames, subject.primaryTeacherName);
+          pushTeacherIdentityValue(courseNames, subject.instructorName);
+          pushTeacherIdentityValue(courseNames, subject.tutorName);
+        });
+      }
+      return hasTeacherNameIdentityMatch(teacherNames, courseNames);
+    }
+
     function getTeacherVisibleCourses() {
       const teacherSubject = currentTeacher && currentTeacher.subject ? String(currentTeacher.subject) : '';
       const teacherRole = currentTeacher && currentTeacher.role ? String(currentTeacher.role) : '';
       const canSeeAllCourses = hasPermission('admin.full') || hasPermission('admin.courses') || hasPermission('admin.students');
       return courses.filter(function(c) {
+        const assignedByTeacherId = isCourseAssignedToTeacher(c, currentTeacher);
         const subjectMatched = !teacherSubject ||
           canSeeAllCourses ||
           teacherRole === 'Admin' ||
@@ -11720,7 +11803,7 @@
           guessSubjectFromCourse(c.name) === teacherSubject ||
           c.subject === teacherSubject ||
           c.onlineSubject === teacherSubject;
-        return subjectMatched;
+        return assignedByTeacherId || subjectMatched;
       });
     }
 
