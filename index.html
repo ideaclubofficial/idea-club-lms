@@ -9160,11 +9160,21 @@
       }
       const role = normalizeAppRole(source.appRole || source.role || getCurrentAppRole());
       if (source.permissionMode === 'custom' && Array.isArray(source.permissions)) {
-        if (!source.permissions.length && (role === 'Teacher' || role === 'Assistant')) return getDefaultPermissionsForRole(role);
-        return source.permissions.slice();
+        return normalizePermissionsForRole(role, source.permissions);
       }
       if (Array.isArray(source.permissions) && source.permissions.length) return source.permissions.slice();
       return getDefaultPermissionsForRole(role);
+    }
+
+    function normalizePermissionsForRole(role, permissions) {
+      const normalizedRole = normalizeAppRole(role || 'Teacher');
+      const list = Array.isArray(permissions) ? permissions.filter(Boolean) : [];
+      const defaults = getDefaultPermissionsForRole(normalizedRole);
+      if (!list.length) return defaults;
+      if (['Teacher', 'Assistant', 'Manager', 'Academic'].includes(normalizedRole)) {
+        return Array.from(new Set(defaults.concat(list)));
+      }
+      return list.slice();
     }
 
     function hasPermission(permissionKey) {
@@ -9301,9 +9311,12 @@
 
     function canAccessTeacherPanel(profile) {
       if (!profile) return false;
-      const role = profile.role || profile.appRole;
+      const accountType = String(profile.accountType || '').trim().toLowerCase();
+      const role = profile.appRole || profile.role || accountType;
       if (profile.status && String(profile.status).toLowerCase() === 'inactive') return false;
-      return isTeacherRole(role) || role === 'admin' || role === 'SuperAdmin' || role === 'Admin';
+      return accountType === 'teacher' || accountType === 'staff' ||
+        isTeacherRole(role) || isAdminRole(role) ||
+        role === 'admin' || role === 'SuperAdmin' || role === 'Admin';
     }
 
     function findTeacherByAuthUid(uid) {
@@ -14727,7 +14740,8 @@
       const branch = getElement('teacherBranch').value;
       const teachingModes = normalizeTeachingModesFromValue(getElement('teacherTeachingMode') ? getElement('teacherTeachingMode').value : 'both');
       const role = getElement('teacherRole') ? getElement('teacherRole').value : 'Teacher';
-      const permissions = getCheckedPermissionValues('.teacher-permission:checked');
+      const normalizedRole = normalizeAppRole(role);
+      const permissions = normalizePermissionsForRole(normalizedRole, getCheckedPermissionValues('.teacher-permission:checked'));
       const status = getElement('teacherStatus').value;
       const result = getElement('teacherSaveResult');
 
@@ -14753,8 +14767,8 @@
             t.phone = phone || t.phone || (username && username.match(/^[0-9]+$/) ? username : '');
             t.branch = branch;
             t.teachingModes = teachingModes;
-            t.role = normalizeAppRole(role);
-            t.appRole = normalizeAppRole(role);
+            t.role = normalizedRole;
+            t.appRole = normalizedRole;
             t.permissions = permissions;
             t.permissionMode = 'custom';
             t.status = status || 'Active';
@@ -14769,7 +14783,7 @@
 
             if (PRODUCTION_MODE && !t.authUid && db) {
               try {
-                t.authUid = await createOrResolveAuthUidForAccount(t.authEmail, '000000', isAdminLikeRole(role) ? 'staff' : 'teacher');
+                t.authUid = await createOrResolveAuthUidForAccount(t.authEmail, '000000', isAdminLikeRole(normalizedRole) ? 'staff' : 'teacher');
               } catch (authError) {
                 console.error('edit teacher auth create error:', authError);
                 throw authError;
@@ -14792,7 +14806,7 @@
 
           if (PRODUCTION_MODE && db) {
             try {
-              authUid = await createOrResolveAuthUidForAccount(teacherEmail, '000000', isAdminLikeRole(role) ? 'staff' : 'teacher');
+              authUid = await createOrResolveAuthUidForAccount(teacherEmail, '000000', isAdminLikeRole(normalizedRole) ? 'staff' : 'teacher');
             } catch (authError) {
               console.error('create teacher auth error:', authError);
               throw authError;
@@ -14822,8 +14836,8 @@
             teachingModes: teachingModes,
             defaultPassword: '000000',
             branch: branch,
-            role: normalizeAppRole(role),
-            appRole: normalizeAppRole(role),
+            role: normalizedRole,
+            appRole: normalizedRole,
             permissions: permissions,
             permissionMode: 'custom',
             status: status || 'Active'
@@ -14919,6 +14933,8 @@
 
           try {
             const teacherEmail = username && username.includes('@') ? username : buildLocalEmailFromPhone(username);
+            const selectedRole = normalizeAppRole(bubbleSelectValue('bubbleTeacherRole') || 'Teacher');
+            const selectedPermissions = normalizePermissionsForRole(selectedRole, getCheckedPermissionValues('.bubble-teacher-permission:checked'));
             Object.assign(t, {
               name: name,
               subject: bubbleSelectValue('bubbleTeacherSubject'),
@@ -14926,28 +14942,16 @@
               email: teacherEmail || t.email || '',
               branch: bubbleSelectValue('bubbleTeacherBranch'),
               teachingModes: normalizeTeachingModesFromValue(bubbleSelectValue('bubbleTeacherTeachingMode')),
-              role: normalizeAppRole(bubbleSelectValue('bubbleTeacherRole') || 'Teacher'),
-              appRole: normalizeAppRole(bubbleSelectValue('bubbleTeacherRole') || 'Teacher'),
-              permissions: getCheckedPermissionValues('.bubble-teacher-permission:checked'),
+              role: selectedRole,
+              appRole: selectedRole,
+              permissions: selectedPermissions,
               permissionMode: 'custom',
               status: bubbleSelectValue('bubbleTeacherStatus')
             });
             await setFirebaseDocument('teachers', t);
 
             if (PRODUCTION_MODE && t.authUid && db) {
-              await db.collection('users').doc(t.authUid).set({
-                name: t.name,
-                email: t.email || '',
-                phone: username && !username.includes('@') ? username : '',
-                role: isAdminLikeRole(t.role || t.appRole || 'Teacher') ? 'admin' : 'teacher',
-                appRole: normalizeAppRole(t.appRole || t.role || 'Teacher'),
-                permissions: getEffectivePermissions(t),
-                permissionMode: t.permissionMode || 'custom',
-                status: t.status === 'Active' ? 'active' : 'inactive',
-                subject: t.subject,
-                teachingModes: t.teachingModes,
-                updatedAt: firebase.firestore.FieldValue.serverTimestamp()
-              }, { merge: true });
+              await syncTeacherUserProfile(t, t.authUid);
             }
 
             renderTeachers();
