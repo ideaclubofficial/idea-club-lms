@@ -28,7 +28,6 @@ service cloud.firestore {
     function hasStaffAccountType() {
       return request.auth != null
         && exists(/databases/$(database)/documents/users/$(request.auth.uid))
-        && !isStudentUser()
         && (
           get(/databases/$(database)/documents/users/$(request.auth.uid)).data.accountType in ['staff', 'teacher', 'admin']
           || get(/databases/$(database)/documents/users/$(request.auth.uid)).data.appRole in ['SuperAdmin', 'Admin', 'Manager', 'Academic', 'Finance', 'Teacher', 'Assistant', 'TeacherAdmin', 'AssistantTeacher', 'Staff']
@@ -294,7 +293,7 @@ service cloud.firestore {
     }
 
     match /students/{docId} {
-      allow read: if isAdmin() || hasAdminPermission('admin.full') || isTeacher() || ownsExistingDoc();
+      allow read: if hasStaffAccountType() || ownsExistingDoc();
       allow create: if isAdmin() || ownsIncomingDoc();
       // Teacher can update attendance fields; student can update own doc but NOT attendance fields
       allow update: if isAdmin()
@@ -305,7 +304,7 @@ service cloud.firestore {
     }
 
     match /payments/{docId} {
-      allow read: if isAdmin() || hasAdminPermission('admin.full') || isFinance() || isPaymentOwner() || isTeacher();
+      allow read: if hasStaffAccountType() || isPaymentOwner();
       // Payment records must be created by Admin/Finance or backend workflows only.
       // Students should not create payment documents directly.
       allow create: if isAdmin() || isFinance();
@@ -316,24 +315,24 @@ service cloud.firestore {
     }
 
     match /paymentBundles/{docId} {
-      allow read: if isAdmin() || hasAdminPermission('admin.full') || isFinance() || isTeacher() || isStudentPaymentBundleOwner();
+      allow read: if hasStaffAccountType() || isStudentPaymentBundleOwner();
       allow create: if isAdmin() || isFinance() || isStudentPaymentBundleCreate(docId);
       allow update: if isAdmin() || isFinance() || isStudentPaymentBundleSlipUpdate(docId);
       allow delete: if isAdmin();
     }
 
     match /receipts/{docId} {
-      allow read: if isAdmin() || hasAdminPermission('admin.full') || isTeacher() || ownsExistingDoc();
+      allow read: if hasStaffAccountType() || ownsExistingDoc();
       allow write: if isAdmin();
     }
 
     match /attendanceHistory/{docId} {
-      allow read: if isAdmin() || isTeacher();
+      allow read: if hasStaffAccountType();
       allow write: if isAdmin() || isTeacher();
     }
 
     match /teachers/{docId} {
-      allow read: if isAdmin() || hasAdminPermission('admin.full') || isTeacher();
+      allow read: if hasStaffAccountType();
       allow write: if isAdmin();
     }
 
@@ -405,19 +404,19 @@ service cloud.firestore {
     }
 
     match /monthlyPlans/{docId} {
-      allow read: if isAdmin() || hasAdminPermission('admin.full') || hasMonthlyPlannerAccess() || isTeacher();
+      allow read: if hasStaffAccountType();
       allow create, update: if hasMonthlyPlannerAccess();
       allow delete: if false;
     }
 
     match /monthlyPlanSessions/{docId} {
-      allow read: if isAdmin() || hasAdminPermission('admin.full') || hasMonthlyPlannerAccess() || isTeacher() || isStudentUser();
+      allow read: if hasStaffAccountType() || isStudentUser();
       allow create, update: if hasMonthlyPlannerAccess();
       allow delete: if false;
     }
 
     match /holidays/{docId} {
-      allow read: if isAdmin() || hasAdminPermission('admin.full') || hasMonthlyPlannerAccess() || isTeacher();
+      allow read: if hasStaffAccountType();
       allow create, update: if hasMonthlyPlannerAccess();
       allow delete: if false;
     }
@@ -428,7 +427,7 @@ service cloud.firestore {
     }
 
     match /adminScoreRecords/{docId} {
-      allow read: if isAdmin() || hasAdminPermission('admin.full') || isTeacher()
+      allow read: if hasStaffAccountType()
                    || (isStudentUser() && resource.data.status == 'published');
       allow write: if isAdmin();
     }
@@ -439,12 +438,12 @@ service cloud.firestore {
     }
 
     match /courseTeachingSettings/{docId} {
-      allow read: if isAdmin() || hasAdminPermission('admin.full') || isTeacher();
+      allow read: if hasStaffAccountType();
       allow write: if isAdmin();
     }
 
     match /teacherPreferenceRules/{docId} {
-      allow read: if isAdmin() || hasAdminPermission('admin.full') || isTeacher();
+      allow read: if hasStaffAccountType();
       allow write: if isAdmin();
     }
 
