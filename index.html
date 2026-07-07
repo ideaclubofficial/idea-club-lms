@@ -11963,6 +11963,17 @@
           if (text && !allowedIds.includes(text)) allowedIds.push(text);
         });
       });
+      const studentCourseIds = [
+        student.courseId,
+        student.courseDocId,
+        student.courseFirebaseDocId,
+        student.registeredCourseId,
+        student.enrolledCourseId,
+        student.selectedCourseId,
+        student.appliedCourseId,
+        student.course
+      ].map(function(value) { return String(value || '').trim(); }).filter(Boolean);
+      if (studentCourseIds.some(function(courseId) { return allowedIds.includes(courseId); })) return true;
       if (course) {
         const courseIds = [course.id, course.firebaseDocId, course.courseId].map(function(value) {
           return String(value || '').trim();
@@ -11985,6 +11996,78 @@
       return studentCourseNames.some(function(name) { return allowedNames.includes(name); });
     }
 
+    function getTeacherVisibleSessionCourseKeys() {
+      if (!currentTeacher || !Array.isArray(monthlyPlanSessions)) return { ids: [], names: [], studentIds: [], grades: [], centers: [] };
+      const ids = [];
+      const names = [];
+      const studentIds = [];
+      const grades = [];
+      const centers = [];
+      monthlyPlanSessions.forEach(function(session) {
+        if (!session || session.deleted === true || session.status === 'cancelled') return;
+        if (!isMonthlySessionForTeacher(session, currentTeacher)) return;
+        [session.courseId, session.courseDocId, session.courseFirebaseDocId, session.registeredCourseId, session.enrolledCourseId].forEach(function(value) {
+          const text = String(value || '').trim();
+          if (text && !ids.includes(text)) ids.push(text);
+        });
+        [session.courseName, session.course, session.title, getMonthlyPlanCourseName(session)].forEach(function(value) {
+          const text = String(value || '').trim();
+          if (text && !names.includes(text)) names.push(text);
+        });
+        [session.studentId, session.studentDocId, session.studentFirebaseDocId, session.studentMemberId, session.memberId, session.studentUid, session.studentAuthUid].forEach(function(value) {
+          const text = String(value || '').trim();
+          if (text && !studentIds.includes(text)) studentIds.push(text);
+        });
+        [session.grade, session.classLevel, session.level, getMonthlySessionGradeLabel(session)].forEach(function(value) {
+          const text = String(value || '').trim();
+          if (text && !grades.includes(text)) grades.push(text);
+        });
+        [session.center, session.location, session.branch].forEach(function(value) {
+          const text = String(value || '').trim();
+          if (text && !centers.includes(text)) centers.push(text);
+        });
+      });
+      return { ids: ids, names: names, studentIds: studentIds, grades: grades, centers: centers };
+    }
+
+    function isStudentMatchedByTeacherSessions(student, sessionKeys) {
+      if (!student || !sessionKeys) return false;
+      const studentIds = [student.id, student.firebaseDocId, student.studentId, student.memberId, student.authUid, student.uid].map(function(value) {
+        return String(value || '').trim();
+      }).filter(Boolean);
+      if ((sessionKeys.studentIds || []).some(function(id) { return studentIds.includes(id); })) return true;
+      const studentCourseIds = [
+        student.courseId,
+        student.courseDocId,
+        student.courseFirebaseDocId,
+        student.registeredCourseId,
+        student.enrolledCourseId,
+        student.selectedCourseId,
+        student.appliedCourseId
+      ].map(function(value) { return String(value || '').trim(); }).filter(Boolean);
+      if ((sessionKeys.ids || []).some(function(id) { return studentCourseIds.includes(id); })) return true;
+      const course = getCourseByStudentOrName(student, student.course);
+      if (course) {
+        const courseIds = [course.id, course.firebaseDocId, course.courseId].map(function(value) {
+          return String(value || '').trim();
+        }).filter(Boolean);
+        if ((sessionKeys.ids || []).some(function(id) { return courseIds.includes(id); })) return true;
+      }
+      const studentCourseNames = [
+        student.course,
+        student.courseName,
+        student.registeredCourseName,
+        student.enrolledCourseName,
+        course && course.name,
+        course && course.title,
+        course && course.courseName
+      ].map(function(value) { return String(value || '').trim(); }).filter(Boolean);
+      if ((sessionKeys.names || []).some(function(name) { return studentCourseNames.includes(name); })) return true;
+      const studentGrade = String(student.grade || student.classLevel || student.level || '').trim();
+      const studentCenter = getTeacherStudentCenterValue(student);
+      return !!(studentGrade && studentCenter && (sessionKeys.grades || []).includes(studentGrade) && (sessionKeys.centers || []).includes(studentCenter));
+    }
+
     function getTeacherStudentCenterValue(student) {
       const course = getCourseByStudentOrName(student, student && student.course);
       return String((student && (student.preferredLocation || student.location || student.center || student.courseLocation)) || (course && (course.location || course.center || course.courseLocation)) || '').trim();
@@ -11992,8 +12075,9 @@
 
     function getTeacherStudentBaseList(teacherCourses) {
       const visibleCourses = teacherCourses || getTeacherVisibleCourses();
+      const sessionKeys = getTeacherVisibleSessionCourseKeys();
       return students.filter(function(s) {
-        return isStudentInTeacherCourseList(s, visibleCourses);
+        return isStudentInTeacherCourseList(s, visibleCourses) || isStudentMatchedByTeacherSessions(s, sessionKeys);
       });
     }
 
