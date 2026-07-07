@@ -11727,42 +11727,96 @@
         value.forEach(function(item) { pushTeacherIdentityValue(target, item); });
         return;
       }
+      if (value && typeof value === 'object') {
+        [
+          value.id,
+          value.firebaseDocId,
+          value.teacherId,
+          value.teacherDocId,
+          value.teacherUid,
+          value.teacherAuthUid,
+          value.authUid,
+          value.uid,
+          value.username,
+          value.email,
+          value.authEmail,
+          value.name,
+          value.displayName
+        ].forEach(function(item) { pushTeacherIdentityValue(target, item); });
+        return;
+      }
       String(value || '').split(',').map(function(item) { return item.trim(); }).filter(Boolean).forEach(function(item) {
         if (!target.includes(item)) target.push(item);
       });
+    }
+
+    function normalizeTeacherIdentityForMatch(value) {
+      return String(value || '').trim().toLowerCase().replace(/\s+/g, '');
+    }
+
+    function teacherIdentitySetsMatch(leftValues, rightValues) {
+      const left = (leftValues || []).map(normalizeTeacherIdentityForMatch).filter(Boolean);
+      const right = (rightValues || []).map(normalizeTeacherIdentityForMatch).filter(Boolean);
+      return left.length && right.length && right.some(function(value) { return left.includes(value); });
     }
 
     function getCourseAssignedTeacherIdentitySet(course) {
       const values = [];
       if (course) {
         [
+          course.teacher,
           course.teacherId,
           course.teacherDocId,
           course.teacherUid,
           course.teacherAuthUid,
           course.authUid,
           course.teacherEmail,
+          course.teacherUsername,
           course.primaryTeacherId,
           course.primaryTeacherDocId,
           course.primaryTeacherUid,
           course.instructorId,
+          course.instructor,
           course.tutorId,
+          course.tutor,
+          course.assignedTeacherId,
+          course.assignedTeacherIds,
+          course.assignedTeacherUid,
+          course.assignedTeacherUids,
           course.teacherIds,
           course.teacherUids,
-          course.backupTeacherIds
+          course.backupTeacherIds,
+          course.oldTeacherId,
+          course.oldTeacherIds,
+          course.legacyTeacherId,
+          course.legacyTeacherIds,
+          course.teachers,
+          course.tutors,
+          course.instructors
         ].forEach(function(value) { pushTeacherIdentityValue(values, value); });
       }
       const setting = getCourseTeachingSettingForCourse(course);
       if (setting && Array.isArray(setting.subjects)) {
         setting.subjects.forEach(function(subject) {
           if (!subject) return;
+          pushTeacherIdentityValue(values, subject.teacher);
           pushTeacherIdentityValue(values, subject.primaryTeacherId);
           pushTeacherIdentityValue(values, subject.primaryTeacherDocId);
           pushTeacherIdentityValue(values, subject.primaryTeacherUid);
           pushTeacherIdentityValue(values, subject.teacherId);
           pushTeacherIdentityValue(values, subject.teacherUid);
+          pushTeacherIdentityValue(values, subject.teacherDocId);
+          pushTeacherIdentityValue(values, subject.teacherAuthUid);
+          pushTeacherIdentityValue(values, subject.tutorId);
+          pushTeacherIdentityValue(values, subject.instructorId);
+          pushTeacherIdentityValue(values, subject.assignedTeacherId);
+          pushTeacherIdentityValue(values, subject.assignedTeacherIds);
           pushTeacherIdentityValue(values, subject.backupTeacherIds);
           pushTeacherIdentityValue(values, subject.teacherIds);
+          pushTeacherIdentityValue(values, subject.oldTeacherId);
+          pushTeacherIdentityValue(values, subject.oldTeacherIds);
+          pushTeacherIdentityValue(values, subject.legacyTeacherId);
+          pushTeacherIdentityValue(values, subject.legacyTeacherIds);
         });
       }
       return values;
@@ -11772,13 +11826,17 @@
       if (!course || !teacher) return false;
       const teacherKeys = getTeacherIdentitySet(teacher);
       const courseKeys = getCourseAssignedTeacherIdentitySet(course);
-      if (teacherKeys.length && courseKeys.some(function(key) { return teacherKeys.includes(key); })) return true;
+      if (teacherIdentitySetsMatch(teacherKeys, courseKeys)) return true;
       const setting = getCourseTeachingSettingForCourse(course);
       const teacherNames = getTeacherNameIdentitySet(teacher);
       const courseNames = [
         course.teacherName,
+        course.teacher,
         course.instructorName,
+        course.instructor,
         course.tutorName,
+        course.tutor,
+        course.assignedTeacherName,
         course.primaryTeacherName
       ];
       if (setting && Array.isArray(setting.subjects)) {
@@ -11791,6 +11849,56 @@
         });
       }
       return hasTeacherNameIdentityMatch(teacherNames, courseNames);
+    }
+
+    function getStudentAssignedTeacherIdentitySet(student) {
+      const values = [];
+      if (!student) return values;
+      [
+        student.teacher,
+        student.teacherId,
+        student.teacherDocId,
+        student.teacherUid,
+        student.teacherAuthUid,
+        student.authTeacherId,
+        student.primaryTeacherId,
+        student.assignedTeacherId,
+        student.assignedTeacherIds,
+        student.assignedTeacherUid,
+        student.assignedTeacherUids,
+        student.teacherIds,
+        student.tutorId,
+        student.instructorId,
+        student.privateLessonTeacherId,
+        student.oldTeacherId,
+        student.oldTeacherIds,
+        student.legacyTeacherId,
+        student.legacyTeacherIds,
+        student.teachers,
+        student.tutors,
+        student.instructors
+      ].forEach(function(value) { pushTeacherIdentityValue(values, value); });
+      return values;
+    }
+
+    function isStudentAssignedToTeacher(student, teacher) {
+      if (!student || !teacher) return false;
+      const teacherKeys = getTeacherIdentitySet(teacher);
+      const studentKeys = getStudentAssignedTeacherIdentitySet(student);
+      if (teacherIdentitySetsMatch(teacherKeys, studentKeys)) return true;
+      const teacherNames = getTeacherNameIdentitySet(teacher);
+      const studentTeacherNames = [
+        student.teacherName,
+        student.teacher,
+        student.assignedTeacherName,
+        student.primaryTeacherName,
+        student.privateLessonTeacherName,
+        student.tutorName,
+        student.tutor,
+        student.instructorName,
+        student.instructor
+      ];
+      return hasTeacherNameIdentityMatch(teacherNames, studentTeacherNames);
     }
 
     function getTeacherVisibleCourses() {
@@ -11812,15 +11920,30 @@
 
     function isStudentInTeacherCourseList(student, courseList) {
       if (currentTeacher && currentTeacher.role === 'Admin') return true;
+      if (isStudentAssignedToTeacher(student, currentTeacher)) return true;
       const allowedCourses = Array.isArray(courseList) ? courseList : [];
       if (!student || !allowedCourses.length) return false;
       const course = getCourseByStudentOrName(student, student.course);
-      const allowedIds = allowedCourses.map(function(c) { return String(c.id || c.firebaseDocId || ''); }).filter(Boolean);
+      const allowedIds = [];
+      allowedCourses.forEach(function(c) {
+        [c.id, c.firebaseDocId, c.courseId].forEach(function(value) {
+          const text = String(value || '').trim();
+          if (text && !allowedIds.includes(text)) allowedIds.push(text);
+        });
+      });
       if (course) {
-        const courseId = String(course.id || course.firebaseDocId || '');
-        if (courseId && allowedIds.includes(courseId)) return true;
+        const courseIds = [course.id, course.firebaseDocId, course.courseId].map(function(value) {
+          return String(value || '').trim();
+        }).filter(Boolean);
+        if (courseIds.some(function(courseId) { return allowedIds.includes(courseId); })) return true;
       }
-      const allowedNames = allowedCourses.map(function(c) { return String(c.name || ''); }).filter(Boolean);
+      const allowedNames = [];
+      allowedCourses.forEach(function(c) {
+        [c.name, c.title, c.courseName].forEach(function(value) {
+          const text = String(value || '').trim();
+          if (text && !allowedNames.includes(text)) allowedNames.push(text);
+        });
+      });
       const studentCourseNames = [
         student.course,
         student.courseName,
