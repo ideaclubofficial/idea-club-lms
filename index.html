@@ -43375,7 +43375,7 @@ function receiptStatusText(status) {
       }
       const sharedRow = tfEl('tf-shared-class-row');
       if (sharedRow) {
-        if (fmt === 'online' || fmt === 'ondemand') sharedRow.classList.remove('hidden');
+        if (tfCanCombineConflictingClass(fmt)) sharedRow.classList.remove('hidden');
         else {
           sharedRow.classList.add('hidden');
           const cb = tfEl('tf-sched-shared');
@@ -43392,8 +43392,9 @@ function receiptStatusText(status) {
     function tfOnSharedClassChange() {
       const checked = tfEl('tf-sched-shared') && tfEl('tf-sched-shared').checked;
       const wrap = tfEl('tf-shared-center2-wrap');
+      const fmt = tfGetSelectedSchedFormat();
       if (wrap) {
-        if (checked) {
+        if (checked && (fmt === 'online' || fmt === 'ondemand')) {
           wrap.classList.remove('hidden');
           const center1 = (tfEl('tf-sched-center') || {}).value || '';
           const sel2 = tfEl('tf-sched-center2');
@@ -43468,6 +43469,41 @@ function receiptStatusText(status) {
       }) || null;
     }
 
+    function tfCanCombineConflictingClass(format) {
+      return format === 'onsite' || format === 'online' || format === 'ondemand';
+    }
+
+    function tfRequiresSecondCenterForSharedClass(format) {
+      return format === 'online' || format === 'ondemand';
+    }
+
+    function tfFormatConflictSummary(conflicts) {
+      return (conflicts || []).slice(0, 3).map(function(item) {
+        return [
+          item.date || '-',
+          item.timeText || '-',
+          item.courseName || '-',
+          item.center || '-'
+        ].join(' · ');
+      }).join(' | ');
+    }
+
+    function tfShowSharedClassChoiceForConflict(conflicts) {
+      const sharedRow = tfEl('tf-shared-class-row');
+      const sharedWrap = tfEl('tf-shared-center2-wrap');
+      if (sharedRow) sharedRow.classList.remove('hidden');
+      if (sharedWrap) {
+        if (tfRequiresSecondCenterForSharedClass(tfGetSelectedSchedFormat())) sharedWrap.classList.remove('hidden');
+        else sharedWrap.classList.add('hidden');
+      }
+      const errEl = tfEl('tf-sched-error');
+      if (errEl) {
+        errEl.textContent = 'พบตารางครูชนเวลา: ' + tfFormatConflictSummary(conflicts) + ' หากเป็นคาบรวมคลาส ให้ติ๊ก "รวมคลาส/เรียนร่วมกัน" ก่อนบันทึก';
+        errEl.classList.remove('hidden');
+      }
+      tfToast('พบตารางชน เลือกรวมคลาสได้', 'error');
+    }
+
     // --- Save schedule to Firebase ---
     async function tfSaveSchedule(event) {
       event.preventDefault();
@@ -43489,7 +43525,7 @@ function receiptStatusText(status) {
         if (errEl) { errEl.textContent = 'กรุณากรอกข้อมูลที่จำเป็นให้ครบ (ศูนย์, ระดับชั้น, รูปแบบ, วันที่, เวลา)'; errEl.classList.remove('hidden'); }
         return;
       }
-      if (isSharedClass && !center2) {
+      if (isSharedClass && tfRequiresSecondCenterForSharedClass(format) && !center2) {
         if (errEl) { errEl.textContent = 'กรุณาเลือกศูนย์ที่ 2 สำหรับคาบเรียนร่วมกัน'; errEl.classList.remove('hidden'); }
         return;
       }
@@ -43497,6 +43533,18 @@ function receiptStatusText(status) {
       const existing = monthlyPlanSessions.find(function(s) { return (s.id || s.firebaseDocId || '') === docId; }) || null;
       const sch = { id: docId, courseId, tutorId, format, center, date, start, end, location, notes, completed: false, report: '', isSharedClass: isSharedClass, center2: center2 || '' };
       const session = tfSchedToSession(sch, existing);
+      const teacherConflicts = findTeacherConflicts(session);
+      if (teacherConflicts.length) {
+        if (tfCanCombineConflictingClass(format)) {
+          if (!isSharedClass) {
+            tfShowSharedClassChoiceForConflict(teacherConflicts);
+            return;
+          }
+          if (!confirm('พบตารางครูชนเวลา แต่เลือกคาบรวมคลาสแล้ว ต้องการบันทึกเป็นคาบรวมคลาสใช่หรือไม่?')) return;
+        } else if (!confirm('พบตารางครูชนเวลา ต้องการบันทึกต่อหรือไม่?')) {
+          return;
+        }
+      }
       const duplicate = tfFindDuplicateScheduleSession(session, editingId);
       if (duplicate) {
         const dupTime = [duplicate.timeStart || duplicate.sessionTime || '', duplicate.timeEnd || ''].filter(Boolean).join(' - ');
@@ -43817,11 +43865,11 @@ function receiptStatusText(status) {
           </div>
         </div>
         <div id="tf-shared-class-row" class="hidden">
-          <label class="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">ตัวเลือกพิเศษ Online / On-demand</label>
+          <label class="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">ตัวเลือกกรณีรวมคลาส</label>
           <div class="flex items-center gap-3 flex-wrap">
             <label class="flex items-center gap-2 cursor-pointer select-none">
               <input type="checkbox" id="tf-sched-shared" onchange="tfOnSharedClassChange()" class="w-4 h-4 accent-indigo-600" />
-              <span class="text-sm font-semibold text-slate-700">เรียนร่วมกัน 2 ศูนย์</span>
+              <span class="text-sm font-semibold text-slate-700">รวมคลาส / เรียนร่วมกัน</span>
             </label>
             <div id="tf-shared-center2-wrap" class="hidden flex-1 min-w-[180px]">
               <select id="tf-sched-center2" class="w-full bg-slate-50 border border-indigo-300 text-slate-900 rounded-xl p-2 font-medium text-sm">
