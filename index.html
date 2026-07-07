@@ -11818,7 +11818,13 @@
         if (courseId && allowedIds.includes(courseId)) return true;
       }
       const allowedNames = allowedCourses.map(function(c) { return String(c.name || ''); }).filter(Boolean);
-      return !student.courseId && !!student.course && allowedNames.includes(String(student.course));
+      const studentCourseNames = [
+        student.course,
+        student.courseName,
+        student.registeredCourseName,
+        student.enrolledCourseName
+      ].map(function(value) { return String(value || '').trim(); }).filter(Boolean);
+      return studentCourseNames.some(function(name) { return allowedNames.includes(name); });
     }
 
     function getTeacherStudentCenterValue(student) {
@@ -24300,11 +24306,40 @@
     }
 
     function getCourseByStudentOrName(student, courseName) {
-      if (student && student.courseId) {
-        const byId = courses.find(function(c) { return String(c.id) === String(student.courseId); });
+      const studentCourseIds = [];
+      if (student) {
+        [
+          student.courseId,
+          student.courseDocId,
+          student.registeredCourseId,
+          student.enrolledCourseId
+        ].forEach(function(value) {
+          const text = String(value || '').trim();
+          if (text && !studentCourseIds.includes(text)) studentCourseIds.push(text);
+        });
+      }
+      if (studentCourseIds.length) {
+        const byId = courses.find(function(c) {
+          const courseIds = [c.id, c.firebaseDocId, c.courseId].map(function(value) {
+            return String(value || '').trim();
+          }).filter(Boolean);
+          return courseIds.some(function(id) { return studentCourseIds.includes(id); });
+        });
         if (byId) return byId;
       }
-      return courses.find(function(c) { return c.name === courseName; }) || null;
+      const names = [
+        courseName,
+        student && student.course,
+        student && student.courseName,
+        student && student.registeredCourseName,
+        student && student.enrolledCourseName
+      ].map(function(value) { return String(value || '').trim(); }).filter(Boolean);
+      if (!names.length) return null;
+      return courses.find(function(c) {
+        return names.includes(String(c.name || '').trim()) ||
+          names.includes(String(c.title || '').trim()) ||
+          names.includes(String(c.courseName || '').trim());
+      }) || null;
     }
 
     function filterPaymentStatusByMonth() {
