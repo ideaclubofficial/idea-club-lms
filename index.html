@@ -29593,6 +29593,7 @@ function receiptStatusText(status) {
       const draftRange = getMonthlySessionTimeRange(sessionDraft);
       const draftId = String(sessionDraft.id || sessionDraft.firebaseDocId || '');
       const draftStatus = sessionDraft ? (sessionDraft.status || 'draft') : '';
+      if (sessionDraft && sessionDraft.isSharedClass) return [];
       if (draftStatus === 'cancelled' || draftStatus === 'holiday' || !teacherKey || !date || !draftRange.start || !draftRange.end) return [];
 
       return monthlyPlanSessions.filter(function(session) {
@@ -29600,6 +29601,7 @@ function receiptStatusText(status) {
         const status = session.status || 'draft';
         const range = getMonthlySessionTimeRange(session);
         return sessionId !== draftId &&
+          !session.isSharedClass &&
           status !== 'cancelled' &&
           status !== 'holiday' &&
           !!getSessionTeacherKey(session) &&
@@ -42526,8 +42528,9 @@ function receiptStatusText(status) {
       base.status = sch.completed ? 'done' : (existing ? (existing.status || 'draft') : 'draft');
       base.teacherReport = sch.report || '';
       base.isSharedClass = !!sch.isSharedClass;
+      base.isCrossCenterClass = !!sch.isCrossCenterClass;
       base.center2 = sch.center2 || '';
-      base.centers = sch.isSharedClass && sch.center2 ? [sch.center, sch.center2] : [sch.center];
+      base.centers = sch.isCrossCenterClass && sch.center2 ? [sch.center, sch.center2] : [sch.center];
       return base;
     }
 
@@ -43331,6 +43334,7 @@ function receiptStatusText(status) {
       if (tfEl('tf-sched-notes')) tfEl('tf-sched-notes').value = '';
       // Reset shared class
       if (tfEl('tf-sched-shared')) tfEl('tf-sched-shared').checked = false;
+      if (tfEl('tf-sched-cross-center')) tfEl('tf-sched-cross-center').checked = false;
       if (tfEl('tf-sched-center2')) tfEl('tf-sched-center2').value = '';
       const sharedRow = tfEl('tf-shared-class-row');
       if (sharedRow) sharedRow.classList.add('hidden');
@@ -43396,10 +43400,12 @@ function receiptStatusText(status) {
 
       // Shared class
       const isShared = !!session.isSharedClass;
+      const isCrossCenter = !!(session.isCrossCenterClass || session.center2);
       if (tfEl('tf-sched-shared')) tfEl('tf-sched-shared').checked = isShared;
+      if (tfEl('tf-sched-cross-center')) tfEl('tf-sched-cross-center').checked = isCrossCenter;
       if (tfEl('tf-sched-center2')) tfEl('tf-sched-center2').value = session.center2 || '';
       const sharedWrap = tfEl('tf-shared-center2-wrap');
-      if (sharedWrap) { if (isShared) sharedWrap.classList.remove('hidden'); else sharedWrap.classList.add('hidden'); }
+      if (sharedWrap) { if (isCrossCenter) sharedWrap.classList.remove('hidden'); else sharedWrap.classList.add('hidden'); }
 
       // Sync summary
       const courseObj = (courses || []).find(function(c) { return (c.id || c.firebaseDocId || '') === session.courseId; });
@@ -43432,6 +43438,19 @@ function receiptStatusText(status) {
           sharedRow.classList.add('hidden');
           const cb = tfEl('tf-sched-shared');
           if (cb) cb.checked = false;
+          const crossCb = tfEl('tf-sched-cross-center');
+          if (crossCb) crossCb.checked = false;
+          const wrap = tfEl('tf-shared-center2-wrap');
+          if (wrap) wrap.classList.add('hidden');
+        }
+      }
+      const crossOption = tfEl('tf-cross-center-option');
+      if (crossOption) {
+        if (tfSupportsCrossCenterClass(fmt)) crossOption.classList.remove('hidden');
+        else {
+          crossOption.classList.add('hidden');
+          if (tfEl('tf-sched-cross-center')) tfEl('tf-sched-cross-center').checked = false;
+          if (tfEl('tf-sched-center2')) tfEl('tf-sched-center2').value = '';
           const wrap = tfEl('tf-shared-center2-wrap');
           if (wrap) wrap.classList.add('hidden');
         }
@@ -43442,11 +43461,15 @@ function receiptStatusText(status) {
     }
 
     function tfOnSharedClassChange() {
-      const checked = tfEl('tf-sched-shared') && tfEl('tf-sched-shared').checked;
+      tfOnCrossCenterClassChange();
+    }
+
+    function tfOnCrossCenterClassChange() {
+      const checked = tfEl('tf-sched-cross-center') && tfEl('tf-sched-cross-center').checked;
       const wrap = tfEl('tf-shared-center2-wrap');
       const fmt = tfGetSelectedSchedFormat();
       if (wrap) {
-        if (checked && (fmt === 'online' || fmt === 'ondemand')) {
+        if (checked && tfSupportsCrossCenterClass(fmt)) {
           wrap.classList.remove('hidden');
           const center1 = (tfEl('tf-sched-center') || {}).value || '';
           const sel2 = tfEl('tf-sched-center2');
@@ -43525,7 +43548,7 @@ function receiptStatusText(status) {
       return format === 'onsite' || format === 'online' || format === 'ondemand';
     }
 
-    function tfRequiresSecondCenterForSharedClass(format) {
+    function tfSupportsCrossCenterClass(format) {
       return format === 'online' || format === 'ondemand';
     }
 
@@ -43545,7 +43568,7 @@ function receiptStatusText(status) {
       const sharedWrap = tfEl('tf-shared-center2-wrap');
       if (sharedRow) sharedRow.classList.remove('hidden');
       if (sharedWrap) {
-        if (tfRequiresSecondCenterForSharedClass(tfGetSelectedSchedFormat())) sharedWrap.classList.remove('hidden');
+        if (tfEl('tf-sched-cross-center') && tfEl('tf-sched-cross-center').checked && tfSupportsCrossCenterClass(tfGetSelectedSchedFormat())) sharedWrap.classList.remove('hidden');
         else sharedWrap.classList.add('hidden');
       }
       const errEl = tfEl('tf-sched-error');
@@ -43572,18 +43595,19 @@ function receiptStatusText(status) {
       const location = tfEl('tf-sched-location') ? tfEl('tf-sched-location').value.trim() : '';
       const notes = tfEl('tf-sched-notes') ? tfEl('tf-sched-notes').value.trim() : '';
       const isSharedClass = !!(tfEl('tf-sched-shared') && tfEl('tf-sched-shared').checked);
-      const center2 = isSharedClass && tfEl('tf-sched-center2') ? tfEl('tf-sched-center2').value : '';
+      const isCrossCenterClass = !!(tfEl('tf-sched-cross-center') && tfEl('tf-sched-cross-center').checked);
+      const center2 = isCrossCenterClass && tfEl('tf-sched-center2') ? tfEl('tf-sched-center2').value : '';
       if (!center || !courseId || !format || !date || !start || !end) {
         if (errEl) { errEl.textContent = 'กรุณากรอกข้อมูลที่จำเป็นให้ครบ (ศูนย์, ระดับชั้น, รูปแบบ, วันที่, เวลา)'; errEl.classList.remove('hidden'); }
         return;
       }
-      if (isSharedClass && tfRequiresSecondCenterForSharedClass(format) && !center2) {
+      if (isCrossCenterClass && tfSupportsCrossCenterClass(format) && !center2) {
         if (errEl) { errEl.textContent = 'กรุณาเลือกศูนย์ที่ 2 สำหรับคาบเรียนร่วมกัน'; errEl.classList.remove('hidden'); }
         return;
       }
       const docId = editingId || createFirebaseDocId('monthlyPlanSessions');
       const existing = monthlyPlanSessions.find(function(s) { return (s.id || s.firebaseDocId || '') === docId; }) || null;
-      const sch = { id: docId, courseId, tutorId, format, center, date, start, end, location, notes, completed: false, report: '', isSharedClass: isSharedClass, center2: center2 || '' };
+      const sch = { id: docId, courseId, tutorId, format, center, date, start, end, location, notes, completed: false, report: '', isSharedClass: isSharedClass, isCrossCenterClass: isCrossCenterClass, center2: center2 || '' };
       const session = tfSchedToSession(sch, existing);
       const teacherConflicts = findTeacherConflicts(session);
       if (teacherConflicts.length) {
@@ -43921,7 +43945,11 @@ function receiptStatusText(status) {
           <div class="flex items-center gap-3 flex-wrap">
             <label class="flex items-center gap-2 cursor-pointer select-none">
               <input type="checkbox" id="tf-sched-shared" onchange="tfOnSharedClassChange()" class="w-4 h-4 accent-indigo-600" />
-              <span class="text-sm font-semibold text-slate-700">รวมคลาส / เรียนร่วมกัน</span>
+              <span class="text-sm font-semibold text-slate-700">รวมคลาส</span>
+            </label>
+            <label id="tf-cross-center-option" class="hidden flex items-center gap-2 cursor-pointer select-none">
+              <input type="checkbox" id="tf-sched-cross-center" onchange="tfOnCrossCenterClassChange()" class="w-4 h-4 accent-indigo-600" />
+              <span class="text-sm font-semibold text-slate-700">เรียนร่วมกัน 2 ศูนย์</span>
             </label>
             <div id="tf-shared-center2-wrap" class="hidden flex-1 min-w-[180px]">
               <select id="tf-sched-center2" class="w-full bg-slate-50 border border-indigo-300 text-slate-900 rounded-xl p-2 font-medium text-sm">
