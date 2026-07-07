@@ -15,6 +15,7 @@ const ADMIN_PERMISSIONS = [
   'admin.finance',
   'admin.receipts',
   'admin.exams',
+  'admin.onlineExams',
   'admin.monthlyPlanner',
   'admin.users',
   'admin.announcements',
@@ -22,6 +23,7 @@ const ADMIN_PERMISSIONS = [
   'admin.logs',
   'teacher.dashboard',
   'teacher.online',
+  'teacher.privateLessons',
   'teacher.attendance',
   'teacher.students'
 ];
@@ -38,6 +40,7 @@ const ROLE_PERMISSIONS = {
     'admin.finance',
     'admin.receipts',
     'admin.exams',
+    'admin.onlineExams',
     'admin.monthlyPlanner',
     'admin.announcements',
     'admin.logs',
@@ -53,6 +56,7 @@ const ROLE_PERMISSIONS = {
     'admin.online',
     'admin.ondemand',
     'admin.exams',
+    'admin.onlineExams',
     'admin.monthlyPlanner',
     'admin.announcements',
     'teacher.dashboard',
@@ -61,8 +65,14 @@ const ROLE_PERMISSIONS = {
   ],
   Finance: [
     'admin.dashboard',
+    'admin.students',
     'admin.finance',
-    'admin.receipts'
+    'admin.receipts',
+    'admin.logs'
+  ],
+  Viewer: [
+    'admin.dashboard',
+    'teacher.dashboard'
   ]
 };
 
@@ -242,13 +252,14 @@ function normalizeRole(role) {
   if (value.toLowerCase() === 'manager') return 'Manager';
   if (value.toLowerCase() === 'academic') return 'Academic';
   if (value.toLowerCase() === 'finance') return 'Finance';
+  if (value.toLowerCase() === 'viewer') return 'Viewer';
   return value || 'SuperAdmin';
 }
 
 function permissionsForRole(role) {
   const appRole = normalizeRole(role);
   if (!ROLE_PERMISSIONS[appRole]) {
-    throw new Error('role ไม่รองรับ: ' + appRole + ' (รองรับ SuperAdmin, Admin, Manager, Academic, Finance)');
+    throw new Error('role ไม่รองรับ: ' + appRole + ' (รองรับ SuperAdmin, Admin, Manager, Academic, Finance, Viewer)');
   }
   return ROLE_PERMISSIONS[appRole].slice();
 }

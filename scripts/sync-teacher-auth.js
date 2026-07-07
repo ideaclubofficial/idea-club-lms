@@ -6,6 +6,24 @@ const LOGIN = '0831234003';
 const AUTH_EMAIL = '0831234003@ideaclub.local';
 const AUTH_UID = 'j4CJLX9AyoXcoY2wukzz5uJ7hzE3';
 
+function normalizeRole(role) {
+  const value = String(role || 'Teacher').trim();
+  const lower = value.toLowerCase();
+  if (value === 'Super Admin' || value === 'super_admin' || lower === 'superadmin') return 'SuperAdmin';
+  if (lower === 'admin') return 'Admin';
+  if (lower === 'manager') return 'Manager';
+  if (lower === 'academic') return 'Academic';
+  if (lower === 'finance' || lower === 'financeadmin') return 'Finance';
+  if (lower === 'assistant' || lower === 'assistantteacher') return 'Assistant';
+  if (lower === 'viewer') return 'Viewer';
+  if (lower === 'teacher' || lower === 'teacheradmin') return 'Teacher';
+  return value || 'Teacher';
+}
+
+function isAdminLikeRole(role) {
+  return ['SuperAdmin', 'Admin', 'Manager', 'Academic', 'Finance', 'Viewer'].includes(normalizeRole(role));
+}
+
 async function main() {
   // Load service account
   const path = require('path');
@@ -86,6 +104,10 @@ async function main() {
 
   console.log('Selected teacher to update:', chosen.id, chosen.data.name || '(no name)');
 
+  const appRole = normalizeRole(chosen.data.appRole || chosen.data.role || 'Teacher');
+  const accountType = isAdminLikeRole(appRole) ? 'staff' : 'teacher';
+  const userRole = isAdminLikeRole(appRole) ? 'admin' : 'teacher';
+
   // Build update payload for teacher
   const teacherMerge = Object.assign({}, {
     authUid: AUTH_UID,
@@ -94,7 +116,9 @@ async function main() {
     username: LOGIN,
     phone: LOGIN,
     loginId: LOGIN,
-    role: 'Teacher',
+    role: appRole,
+    appRole: appRole,
+    permissionMode: chosen.data.permissionMode || 'custom',
     status: 'Active'
   });
 
@@ -113,8 +137,10 @@ async function main() {
   const userMerge = Object.assign({}, {
     uid: AUTH_UID,
     authUid: AUTH_UID,
-    accountType: 'teacher',
-    role: 'Teacher',
+    accountType: accountType,
+    role: userRole,
+    appRole: appRole,
+    permissionMode: chosen.data.permissionMode || 'custom',
     status: 'Active',
     username: LOGIN,
     phone: LOGIN,

@@ -33,6 +33,24 @@ function buildTeacherAuthEmail(teacher) {
   return 'teacher_' + (teacherId || Date.now()) + '@ideaclub.local';
 }
 
+function normalizeRole(role) {
+  const value = String(role || 'Teacher').trim();
+  const lower = value.toLowerCase();
+  if (value === 'Super Admin' || value === 'super_admin' || lower === 'superadmin') return 'SuperAdmin';
+  if (lower === 'admin') return 'Admin';
+  if (lower === 'manager') return 'Manager';
+  if (lower === 'academic') return 'Academic';
+  if (lower === 'finance' || lower === 'financeadmin') return 'Finance';
+  if (lower === 'assistant' || lower === 'assistantteacher') return 'Assistant';
+  if (lower === 'viewer') return 'Viewer';
+  if (lower === 'teacher' || lower === 'teacheradmin') return 'Teacher';
+  return value || 'Teacher';
+}
+
+function isAdminLikeRole(role) {
+  return ['SuperAdmin', 'Admin', 'Manager', 'Academic', 'Finance', 'Viewer'].includes(normalizeRole(role));
+}
+
 async function getServiceAccount() {
   const keyPath = path.join(__dirname, '..', 'functions', 'service-account-drive.json');
   if (!fs.existsSync(keyPath)) {
@@ -119,6 +137,11 @@ async function main() {
         createdAuth = true;
       }
 
+      const appRole = normalizeRole(data.appRole || data.role || 'Teacher');
+      const accountType = isAdminLikeRole(appRole) ? 'staff' : 'teacher';
+      const userRole = isAdminLikeRole(appRole) ? 'admin' : 'teacher';
+      const permissions = Array.isArray(data.permissions) ? data.permissions : [];
+
       const teacherPayload = {
         authUid: authUid,
         authEmail: authEmail,
@@ -127,7 +150,10 @@ async function main() {
         phone: phone || username || '',
         loginId: loginId,
         loginKeys: loginKeys,
-        role: data.role || data.appRole || 'Teacher',
+        role: appRole,
+        appRole: appRole,
+        permissionMode: data.permissionMode || 'custom',
+        permissions: permissions,
         status: data.status || 'Active'
       };
 
@@ -137,8 +163,10 @@ async function main() {
       const usersPayload = {
         uid: authUid,
         authUid: authUid,
-        accountType: 'teacher',
-        role: teacherPayload.role,
+        accountType: accountType,
+        role: userRole,
+        appRole: appRole,
+        permissionMode: data.permissionMode || 'custom',
         status: teacherPayload.status,
         teacherId: teacherId,
         username: teacherPayload.username,
@@ -149,7 +177,7 @@ async function main() {
         name: data.name || '',
         subject: data.subject || '',
         branch: data.branch || '',
-        permissions: Array.isArray(data.permissions) ? data.permissions : [],
+        permissions: permissions,
         updatedAt: admin.firestore.FieldValue.serverTimestamp()
       };
 

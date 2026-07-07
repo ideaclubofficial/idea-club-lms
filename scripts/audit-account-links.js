@@ -35,6 +35,41 @@ const adminNameArg = optionValue('name') || 'Admin IDEA CLUB';
 const adminAppRoleArg = optionValue('app-role') || 'Admin';
 let accessToken = null;
 
+const PERMISSION_DEFINITIONS = [
+  'admin.full',
+  'admin.dashboard',
+  'admin.students',
+  'admin.courses',
+  'admin.online',
+  'admin.ondemand',
+  'admin.finance',
+  'admin.receipts',
+  'admin.exams',
+  'admin.onlineExams',
+  'admin.monthlyPlanner',
+  'admin.users',
+  'admin.announcements',
+  'admin.settings',
+  'admin.logs',
+  'teacher.dashboard',
+  'teacher.online',
+  'teacher.privateLessons',
+  'teacher.attendance',
+  'teacher.students'
+];
+
+const ROLE_PERMISSIONS = {
+  SuperAdmin: PERMISSION_DEFINITIONS,
+  Admin: PERMISSION_DEFINITIONS,
+  Manager: ['admin.dashboard','admin.students','admin.courses','admin.online','admin.ondemand','admin.finance','admin.receipts','admin.exams','admin.onlineExams','admin.monthlyPlanner','admin.announcements','admin.logs','teacher.dashboard','teacher.online','teacher.attendance','teacher.students'],
+  Academic: ['admin.dashboard','admin.students','admin.courses','admin.online','admin.ondemand','admin.exams','admin.onlineExams','admin.monthlyPlanner','admin.announcements','teacher.dashboard','teacher.online','teacher.students'],
+  Finance: ['admin.dashboard','admin.students','admin.finance','admin.receipts','admin.logs'],
+  Teacher: ['teacher.dashboard','teacher.online','teacher.privateLessons','teacher.attendance','teacher.students'],
+  Assistant: ['teacher.dashboard','teacher.attendance','teacher.students'],
+  Viewer: ['admin.dashboard','teacher.dashboard'],
+  Student: []
+};
+
 function base64Url(input) {
   return Buffer.from(input).toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
 }
@@ -200,7 +235,7 @@ function studentUserProfile(student, uid) {
 
 function teacherUserProfile(teacher, uid) {
   const role = String(teacher.appRole || teacher.role || 'Teacher');
-  const staffRole = ['SuperAdmin', 'Admin', 'Manager', 'Academic', 'Finance'].includes(role);
+  const staffRole = ['SuperAdmin', 'Admin', 'Manager', 'Academic', 'Finance', 'Viewer'].includes(role);
   const email = String(teacher.authEmail || teacher.email || '').trim().toLowerCase();
   return {
     uid: uid,
@@ -281,8 +316,34 @@ function userNeedsTeacherFix(user, teacher) {
     return String(value || '').trim().toLowerCase();
   }
 
+  function normalizeRole(value) {
+    const text = String(value || '').trim();
+    const lower = text.toLowerCase();
+    if (text === 'Super Admin' || text === 'super_admin' || lower === 'superadmin') return 'SuperAdmin';
+    if (lower === 'admin') return 'Admin';
+    if (lower === 'manager') return 'Manager';
+    if (lower === 'academic') return 'Academic';
+    if (lower === 'finance' || lower === 'financeadmin') return 'Finance';
+    if (lower === 'teacher' || lower === 'teacheradmin') return 'Teacher';
+    if (lower === 'assistant' || lower === 'assistantteacher') return 'Assistant';
+    if (lower === 'viewer') return 'Viewer';
+    if (lower === 'student') return 'Student';
+    return ROLE_PERMISSIONS[text] ? text : '';
+  }
+
+  function expectedPermissionsForRole(role) {
+    const normalizedRole = normalizeRole(role);
+    return ROLE_PERMISSIONS[normalizedRole] ? ROLE_PERMISSIONS[normalizedRole].slice() : [];
+  }
+
+  function permissionSetsMatch(actual, expected) {
+    const actualList = Array.isArray(actual) ? actual.slice().sort() : [];
+    const expectedList = Array.isArray(expected) ? expected.slice().sort() : [];
+    return actualList.join('|') === expectedList.join('|');
+  }
+
   function isAdminLike(role) {
-    return ['superadmin', 'admin', 'manager', 'academic', 'finance', 'financeadmin', 'teacheradmin', 'staff'].includes(normalized(role));
+    return ['superadmin', 'admin', 'manager', 'academic', 'finance', 'financeadmin', 'viewer', 'teacheradmin', 'staff'].includes(normalized(role));
   }
 
   function isActiveStatus(value) {
@@ -302,8 +363,8 @@ function userNeedsTeacherFix(user, teacher) {
       && !isStudentUser(user)
       && (
         ['staff', 'teacher', 'admin'].includes(normalized(user.accountType))
-        || ['admin', 'teacher', 'staff', 'manager', 'academic', 'finance', 'superadmin'].includes(normalized(user.role))
-        || ['superadmin', 'admin', 'manager', 'academic', 'finance', 'teacher', 'assistantteacher'].includes(normalized(user.appRole))
+        || ['admin', 'teacher', 'staff', 'manager', 'academic', 'finance', 'superadmin', 'assistant', 'viewer'].includes(normalized(user.role))
+        || ['superadmin', 'admin', 'manager', 'academic', 'finance', 'teacher', 'assistant', 'assistantteacher', 'viewer'].includes(normalized(user.appRole))
       );
   }
 
@@ -347,10 +408,26 @@ function userNeedsTeacherFix(user, teacher) {
       : !(normalized(user.accountType) === 'teacher' || normalized(user.role) === 'teacher');
   });
 
+  const permissionMismatchIssues = users.filter(function(doc) {
+    const user = doc.data || {};
+    if (isStudentUser(user)) return hasStaffPermissions(user);
+    const role = normalizeRole(user.appRole || user.role);
+    if (!role || role === 'SuperAdmin' || role === 'Admin') return false;
+    const expected = expectedPermissionsForRole(role);
+    if (!expected.length) return false;
+    if (!permissionSetsMatch(user.permissions, expected) && user.permissionMode !== 'custom') return true;
+    if (hasStaffPermissions(user) && !isStaffOrTeacherUser(user)) return true;
+    if (expected.some(function(permission) { return String(permission).indexOf('admin.') === 0; })
+      && normalized(user.accountType) !== 'staff'
+      && normalized(user.role) !== 'admin') return true;
+    return false;
+  });
+
   console.log('student users มี staff/admin permission ค้าง:', studentPermissionLeaks.length);
   console.log('admin/SuperAdmin ไม่มี admin.full:', adminMissingFull.length);
   console.log('users role/accountType/status น่าสงสัย:', usersRoleIssues.length);
   console.log('teachers role ไม่ตรง users/{authUid}:', teacherRoleIssues.length);
+  console.log('users permission/accountType ไม่ตรง role:', permissionMismatchIssues.length);
 
   studentUserIssues.slice(0, 10).forEach(function(doc) {
     console.log('- student fix:', doc.id, doc.data.name || '-', doc.data.authUid);
@@ -374,6 +451,15 @@ function userNeedsTeacherFix(user, teacher) {
   });
   teacherRoleIssues.slice(0, 10).forEach(function(doc) {
     console.log('- teacher role mismatch:', doc.id, doc.data.name || '-', doc.data.authUid);
+  });
+  permissionMismatchIssues.slice(0, 10).forEach(function(doc) {
+    console.log('- permission/accountType mismatch:', doc.id, doc.data.name || '-', {
+      accountType: doc.data.accountType,
+      role: doc.data.role,
+      appRole: doc.data.appRole,
+      permissionMode: doc.data.permissionMode,
+      permissions: doc.data.permissions || []
+    });
   });
 
   console.log('AUDIT ONLY: ไม่มีการบันทึกใดๆ');
