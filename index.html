@@ -7432,6 +7432,10 @@
                   <label>ลิงก์วิดีโอ On-demand</label>
                   <input id="adminOnDemandLink" type="url" placeholder="https://..." />
                 </div>
+                <div>
+                  <label>วันที่คลิป</label>
+                  <input id="adminOnDemandClipDate" type="date" />
+                </div>
               </div>
 
               <label>ลิงก์เอกสาร / เว็บประกอบบทเรียน</label>
@@ -7486,6 +7490,7 @@
                     <option value="grade">ระดับชั้น</option>
                     <option value="playlistName">ชุดคลิป</option>
                     <option value="clipTitle">ชื่อคลิป</option>
+                    <option value="clipDate">วันที่คลิป</option>
                   </select>
                 </div>
                 <div>
@@ -7508,6 +7513,7 @@
                     <th class="sortable" onclick="setOnDemandSort('grade')">ระดับชั้น</th>
                     <th class="sortable" onclick="setOnDemandSort('playlistName')">ชุดคลิป</th>
                     <th class="sortable" onclick="setOnDemandSort('clipTitle')">ชื่อคลิป</th>
+                    <th class="sortable" onclick="setOnDemandSort('clipDate')">วันที่</th>
                     <th>ลิงก์วิดีโอ</th>
                     <th>ไฟล์ PDF</th>
                     <th>จัดการ</th>
@@ -16399,6 +16405,7 @@
       const playlistName = getElement('adminOnDemandClipName').value.trim();
       const clipTitle = getElement('adminOnDemandTitle').value.trim();
       const link = getElement('adminOnDemandLink').value.trim();
+      const clipDate = getElement('adminOnDemandClipDate') ? getElement('adminOnDemandClipDate').value : '';
       const pdfFiles = parsePdfFilesFromText(getElement('adminOnDemandPdfFiles') ? getElement('adminOnDemandPdfFiles').value : '');
       const editingId = getElement('editingOnDemandClipId').value;
       const nowText = new Date().toLocaleString('th-TH');
@@ -16413,13 +16420,13 @@
         if (editingId) {
           const item = onDemandClips.find(function(p) { return String(p.id) === String(editingId); });
           if (item) {
-            Object.assign(item, { courseId: '', subject: subject, grade: grade, playlistName: playlistName, clipTitle: clipTitle, link: link, pdfFiles: pdfFiles, updatedAtText: nowText });
+            Object.assign(item, { courseId: '', subject: subject, grade: grade, playlistName: playlistName, clipTitle: clipTitle, clipDate: clipDate, link: link, pdfFiles: pdfFiles, updatedAtText: nowText });
             await setFirebaseDocument('onDemandClips', item);
           }
           getElement('videoSaveResult').textContent = 'แก้ไข ชุดคลิป / คลิป On-demand เรียบร้อย';
         } else {
           const newId = createFirebaseDocId('onDemandClips');
-          const newItem = { id: newId, firebaseDocId: newId, courseId: '', subject: subject, grade: grade, playlistName: playlistName, clipTitle: clipTitle, link: link, pdfFiles: pdfFiles, createdAtText: nowText, updatedAtText: nowText };
+          const newItem = { id: newId, firebaseDocId: newId, courseId: '', subject: subject, grade: grade, playlistName: playlistName, clipTitle: clipTitle, clipDate: clipDate, link: link, pdfFiles: pdfFiles, createdAtText: nowText, updatedAtText: nowText };
           onDemandClips.push(newItem);
           await setFirebaseDocument('onDemandClips', newItem);
           getElement('videoSaveResult').textContent = 'เพิ่ม ชุดคลิป / คลิป On-demand เรียบร้อย';
@@ -16468,13 +16475,24 @@
       renderOnDemandTable();
     }
 
+    function formatOnDemandClipDate(item) {
+      const raw = String((item && (item.clipDate || item.classDate || item.publishedDate)) || '').trim();
+      if (raw) {
+        const date = new Date(raw + 'T00:00:00');
+        if (!Number.isNaN(date.getTime())) return date.toLocaleDateString('th-TH', { day: '2-digit', month: 'short', year: 'numeric' });
+        return raw;
+      }
+      const fallbackDate = parseRecordDate(item && (item.createdAtText || item.updatedAtText || item.createdAt || item.updatedAt));
+      return fallbackDate ? fallbackDate.toLocaleDateString('th-TH', { day: '2-digit', month: 'short', year: 'numeric' }) : '-';
+    }
+
     function renderOnDemandTable() {
       const tbody = getElement('adminOnDemandTableBody');
       if (!tbody) return;
       const filtered = getFilteredSortedOnDemandClips();
       tbody.innerHTML = filtered.length ? filtered.map(function(item) {
-        return '<tr><td>' + item.subject + '</td><td>' + item.grade + '</td><td>' + item.playlistName + '</td><td>' + item.clipTitle + '</td><td>' + (item.link ? 'มีลิงก์' : '-') + '</td><td>' + getPdfFileCountText(item) + '</td><td><button class="btn btn-blue" type="button" onclick="' + actionCall('editOnDemand', item.id) + '">แก้ไข</button><button class="btn btn-red" type="button" onclick="' + actionCall('deleteOnDemandClip', item.id) + '">ลบ</button></td></tr>';
-      }).join('') : '<tr><td colspan="7">ไม่พบคลิป On-demand ตามวิชาและระดับชั้นที่เลือก</td></tr>';
+        return '<tr><td>' + escapeHtml(item.subject || '-') + '</td><td>' + escapeHtml(item.grade || '-') + '</td><td>' + escapeHtml(item.playlistName || '-') + '</td><td>' + escapeHtml(item.clipTitle || '-') + '</td><td>' + escapeHtml(formatOnDemandClipDate(item)) + '</td><td>' + (item.link ? 'มีลิงก์' : '-') + '</td><td>' + getPdfFileCountText(item) + '</td><td><button class="btn btn-blue" type="button" onclick="' + actionCall('editOnDemand', item.id) + '">แก้ไข</button><button class="btn btn-red" type="button" onclick="' + actionCall('deleteOnDemandClip', item.id) + '">ลบ</button></td></tr>';
+      }).join('') : '<tr><td colspan="8">ไม่พบคลิป On-demand ตามวิชาและระดับชั้นที่เลือก</td></tr>';
     }
 
     function editOnDemand(id) {
@@ -16488,6 +16506,7 @@
         '</div>' +
         '<div class="form-row">' +
           '<div><label>ชื่อชุดคลิป</label><input id="bubbleOnDemandClipName" type="text" value="' + item.playlistName + '"></div>' +
+          '<div><label>วันที่คลิป</label><input id="bubbleOnDemandClipDate" type="date" value="' + escapeHtml(item.clipDate || '') + '"></div>' +
         '</div>' +
         '<label>ชื่อคลิป / บทเรียน</label><input id="bubbleOnDemandTitle" type="text" value="' + item.clipTitle + '">' +
         '<br><br><label>ลิงก์วิดีโอ On-demand</label><input id="bubbleOnDemandLink" type="url" value="' + item.link + '">' +
@@ -16498,6 +16517,7 @@
           const playlistName = bubbleValue('bubbleOnDemandClipName');
           const clipTitle = bubbleValue('bubbleOnDemandTitle');
           const link = bubbleValue('bubbleOnDemandLink');
+          const clipDate = bubbleValue('bubbleOnDemandClipDate');
           const pdfFiles = parsePdfFilesFromText(bubbleValue('bubbleOnDemandPdfFiles'));
           if (!playlistName || !clipTitle || !link) {
             getElement('editBubbleResult').textContent = 'กรุณากรอกชื่อชุดคลิป ชื่อคลิป และลิงก์วิดีโอให้ครบถ้วน';
@@ -16510,6 +16530,7 @@
             grade: bubbleSelectValue('bubbleOnDemandGrade'),
             playlistName: playlistName,
             clipTitle: clipTitle,
+            clipDate: clipDate,
             link: link,
             pdfFiles: pdfFiles,
             updatedAtText: new Date().toLocaleString('th-TH')
@@ -16540,6 +16561,7 @@
       getElement('editingOnDemandClipId').value = '';
       getElement('adminOnDemandTitle').value = '';
       getElement('adminOnDemandLink').value = '';
+      if (getElement('adminOnDemandClipDate')) getElement('adminOnDemandClipDate').value = '';
       if (getElement('adminOnDemandPdfFiles')) getElement('adminOnDemandPdfFiles').value = '';
       if (clearMessage !== false) getElement('videoSaveResult').textContent = '';
     }
@@ -21954,7 +21976,7 @@
     }
 
     function getOnDemandClipTimestamp(item) {
-      const date = parseRecordDate(item && (item.updatedAt || item.createdAt || item.updatedAtText || item.createdAtText));
+      const date = parseRecordDate(item && (item.clipDate || item.classDate || item.publishedDate || item.updatedAt || item.createdAt || item.updatedAtText || item.createdAtText));
       return date ? date.getTime() : 0;
     }
 
