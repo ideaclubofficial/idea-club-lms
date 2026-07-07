@@ -4477,7 +4477,7 @@
                 <div class="teacher-mobile-filter-stack">
                   <div>
                     <label>วันที่เช็คชื่อ</label>
-                    <input id="teacherMobilePickupDate" type="date" onchange="syncTeacherMobileAttendanceFilters()" />
+                    <input id="teacherMobilePickupDate" type="date" onchange="handleAttendanceDateChange('mobile')" />
                   </div>
                   <div>
                     <label>คอร์ส</label>
@@ -4545,7 +4545,7 @@
               <div class="form-row">
                 <div>
                   <label>วันที่เช็คชื่อ</label>
-                  <input id="pickupDate" type="date" onchange="pickupCurrentPage=1; renderPickupList()" />
+                  <input id="pickupDate" type="date" onchange="handleAttendanceDateChange('desktop')" />
                 </div>
                 <div>
                   <label>คอร์ส</label>
@@ -11698,7 +11698,7 @@
       if (tabId === 'teacher-dashboard') { renderTodayTeachingList(); renderTeacherDashboardSummary(); }
       if (tabId === 'teacher-online') renderTeacherOnlineClasses();
       if (tabId === 'teacher-private-lessons') renderTeacherPrivateLessons();
-      if (tabId === 'teacher-attendance') { initAttendanceDateToToday(); refreshAttendanceData(); }
+      if (tabId === 'teacher-attendance') { initAttendanceDateToToday({ resetManualOverride: true }); refreshAttendanceData(); }
       if (tabId === 'teacher-profile') renderProfileSettingsForRole('teacher');
       safeRun(renderTeacherMobileHome, 'teacher-mobile-home-tab');
       safeRun(renderTeacherMobileOnlineClasses, 'teacher-mobile-online-tab');
@@ -12436,6 +12436,10 @@
     const pickupHistory = [];
     let attendanceSaving = false; // double-submit guard
     let attendanceEditHistoryId = '';
+    let attendanceAutoDateText = '';
+    let attendanceDateManualOverride = false;
+    let attendanceDateMonitorStarted = false;
+    let attendanceLastObservedDate = '';
 
     const VALID_PICKUP_STATUSES = ['มาเรียน', 'รถรับส่ง', 'ผู้ปกครองมาส่ง', 'ไม่มา', 'ยังไม่เช็คชื่อ', 'ไม่มีเรียน'];
 
@@ -12545,11 +12549,82 @@
       });
     }
 
-    function initAttendanceDateToToday() {
-      const today = getLocalDateString();
+    function setAttendanceDateInputs(dateText) {
       ['pickupDate', 'teacherMobilePickupDate'].forEach(function(id) {
         const el = getElement(id);
-        if (el && !el.value) el.value = today;
+        if (el) el.value = dateText || '';
+      });
+    }
+
+    function isTeacherAttendanceTabActive() {
+      const tab = getElement('teacher-attendance');
+      return !!(tab && !tab.classList.contains('hidden'));
+    }
+
+    function initAttendanceDateToToday(options) {
+      options = options || {};
+      const today = getLocalDateString();
+      if (options.resetManualOverride) attendanceDateManualOverride = false;
+      const desktopDate = getElement('pickupDate');
+      const mobileDate = getElement('teacherMobilePickupDate');
+      const currentValue = (desktopDate && desktopDate.value) || (mobileDate && mobileDate.value) || '';
+      const shouldUseToday = !attendanceDateManualOverride && (!currentValue || currentValue === attendanceAutoDateText || options.resetManualOverride);
+      attendanceLastObservedDate = today;
+      if (shouldUseToday) {
+        attendanceAutoDateText = today;
+        setAttendanceDateInputs(today);
+        return;
+      }
+      if (!attendanceAutoDateText) attendanceAutoDateText = today;
+      ['pickupDate', 'teacherMobilePickupDate'].forEach(function(id) {
+        const el = getElement(id);
+        if (el && !el.value && !attendanceDateManualOverride) el.value = today;
+      });
+    }
+
+    function handleAttendanceDateChange(source) {
+      const desktopDate = getElement('pickupDate');
+      const mobileDate = getElement('teacherMobilePickupDate');
+      const selectedDate = source === 'mobile'
+        ? (mobileDate ? mobileDate.value : '')
+        : (desktopDate ? desktopDate.value : '');
+      if (selectedDate) {
+        if (desktopDate) desktopDate.value = selectedDate;
+        if (mobileDate) mobileDate.value = selectedDate;
+      }
+      attendanceDateManualOverride = true;
+      pickupCurrentPage = 1;
+      renderPickupList();
+    }
+
+    function syncAttendanceDateForRealDayChange(forceRefresh) {
+      const today = getLocalDateString();
+      if (!attendanceLastObservedDate) attendanceLastObservedDate = today;
+      if (today === attendanceLastObservedDate && !forceRefresh) return false;
+      attendanceLastObservedDate = today;
+      if (attendanceDateManualOverride) return false;
+      if (attendanceAutoDateText === today && !forceRefresh) return false;
+      attendanceAutoDateText = today;
+      setAttendanceDateInputs(today);
+      pickupCurrentPage = 1;
+      if (isTeacherAttendanceTabActive()) {
+        refreshAttendanceData();
+      }
+      return true;
+    }
+
+    function startAttendanceDateMonitor() {
+      if (attendanceDateMonitorStarted) return;
+      attendanceDateMonitorStarted = true;
+      attendanceLastObservedDate = getLocalDateString();
+      setInterval(function() {
+        syncAttendanceDateForRealDayChange(false);
+      }, 60 * 1000);
+      document.addEventListener('visibilitychange', function() {
+        if (!document.hidden) syncAttendanceDateForRealDayChange(false);
+      });
+      window.addEventListener('focus', function() {
+        syncAttendanceDateForRealDayChange(false);
       });
     }
 
@@ -42441,6 +42516,7 @@ function receiptStatusText(status) {
       safeRun(renderSystemSettingsForm, 'settings-init');
       safeRun(applySystemSettingsToPage, 'settings-apply-init');
       safeRun(updatePaymentSlipOcrAvailability, 'payment-slip-ocr-availability');
+      safeRun(startAttendanceDateMonitor, 'attendance-date-monitor-init');
     }
 
     document.addEventListener('DOMContentLoaded', initPage);
