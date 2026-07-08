@@ -9065,7 +9065,7 @@
       'teacher.online': { menus: ['ห้องเรียนครู'], collections: ['courses', 'learningMaterials'] },
       'teacher.privateLessons': { menus: ['ชั่วโมงเรียนเดี่ยว'], collections: ['students', 'attendanceHistory'] },
       'teacher.attendance': { menus: ['เช็คชื่อ'], collections: ['students(pickup fields)', 'attendanceHistory'] },
-      'teacher.students': { menus: ['รายชื่อนักเรียน'], collections: ['students', 'studentGamificationProfiles', 'studentGamificationEvents'] }
+      'teacher.students': { menus: ['รายชื่อนักเรียน', 'มอบ Quest / ให้รางวัล'], collections: ['students', 'studentGamificationProfiles', 'studentGamificationEvents', 'studentPersonalQuests', 'gamificationLeaderboard'] }
     };
 
     const TEACHER_TAB_PERMISSIONS = {
@@ -12172,6 +12172,15 @@
       });
     }
 
+    function canTeacherManageStudentReward(student) {
+      if (!student) return false;
+      if (!currentTeacher) return true;
+      if (!canOpenTeacherTab('teacher-students')) return false;
+      const visibleCourses = getTeacherVisibleCourses();
+      const sessionKeys = getTeacherVisibleSessionCourseKeys();
+      return isStudentInTeacherCourseList(student, visibleCourses) || isStudentMatchedByTeacherSessions(student, sessionKeys);
+    }
+
     function populateSelectWithValues(selectIds, values, allLabel) {
       const uniqueValues = values.filter(function(value, index, list) {
         return value && list.indexOf(value) === index;
@@ -12685,10 +12694,7 @@
     }
 
     function getTeacherRelatedStudentsForMobile(teacherCourses) {
-      const visibleCourses = teacherCourses || getTeacherVisibleCourses();
-      return students.filter(function(s) {
-        return isStudentInTeacherCourseList(s, visibleCourses);
-      });
+      return getTeacherStudentBaseList(teacherCourses);
     }
 
     function getTeacherMonthlyPlanSessionsForMobile() {
@@ -19701,7 +19707,7 @@
         return String(item.id || item.firebaseDocId || '') === String(studentId || '');
       });
       if (!student) { alert('ไม่พบนักเรียน'); return; }
-      if (!isStudentInTeacherCourseList(student, getTeacherVisibleCourses())) {
+      if (!canTeacherManageStudentReward(student)) {
         alert('บัญชีครูนี้ไม่มีสิทธิ์ให้รางวัลนักเรียนคนนี้');
         return;
       }
@@ -19713,7 +19719,7 @@
         return String(item.id || item.firebaseDocId || '') === String(studentId || '');
       });
       if (!student) { alert('ไม่พบนักเรียน'); return; }
-      if (!isStudentInTeacherCourseList(student, getTeacherVisibleCourses())) {
+      if (!canTeacherManageStudentReward(student)) {
         alert('บัญชีครูนี้ไม่มีสิทธิ์ให้รางวัลนักเรียนคนนี้');
         return;
       }
@@ -19895,7 +19901,7 @@
         return String(s.id || s.firebaseDocId || '') === String(studentId || '');
       });
       if (!student) { alert('ไม่พบนักเรียน'); return; }
-      if (currentTeacher && !isStudentInTeacherCourseList(student, getTeacherVisibleCourses())) {
+      if (currentTeacher && !canTeacherManageStudentReward(student)) {
         alert('บัญชีครูนี้ไม่มีสิทธิ์ลด EXP นักเรียนคนนี้');
         return;
       }
@@ -19992,7 +19998,7 @@
         return personalQuestMatchesStudent(quest, s);
       });
       if (!student) { alert('ไม่พบนักเรียนของ Quest นี้'); return; }
-      if (currentTeacher && !isStudentInTeacherCourseList(student, getTeacherVisibleCourses())) {
+      if (currentTeacher && !canTeacherManageStudentReward(student)) {
         alert('บัญชีครูนี้ไม่มีสิทธิ์จัดการ Quest ของนักเรียนคนนี้');
         return;
       }
@@ -20067,7 +20073,7 @@
       if (String(quest.status || 'pending') !== 'pending') { alert('Quest นี้ถูกปิดไปแล้ว'); return; }
       const student = students.find(function(s) { return personalQuestMatchesStudent(quest, s); });
       if (!student) { alert('ไม่พบนักเรียนของ Quest นี้'); return; }
-      if (currentTeacher && !isStudentInTeacherCourseList(student, getTeacherVisibleCourses())) {
+      if (currentTeacher && !canTeacherManageStudentReward(student)) {
         alert('บัญชีครูนี้ไม่มีสิทธิ์จัดการ Quest ของนักเรียนคนนี้'); return;
       }
       if (!confirm('ยืนยันว่า Quest "' + (quest.title || '-') + '" ไม่ผ่าน? (ไม่ได้รับรางวัล)')) return;
@@ -20150,7 +20156,7 @@
       if (!quest || quest.deleted === true) { alert('ไม่พบ Quest นี้'); return; }
       if (String(quest.status || 'pending') !== 'pending') { alert('Quest นี้ถูกปิดไปแล้ว'); return; }
       const student = students.find(function(s) { return personalQuestMatchesStudent(quest, s); });
-      if (student && currentTeacher && !isStudentInTeacherCourseList(student, getTeacherVisibleCourses())) {
+      if (student && currentTeacher && !canTeacherManageStudentReward(student)) {
         alert('บัญชีครูนี้ไม่มีสิทธิ์จัดการ Quest ของนักเรียนคนนี้');
         return;
       }
