@@ -3991,7 +3991,7 @@
           </div>
         </div>
 
-        <div class="student-mobile-card">
+        <div id="studentMobilePaymentStatusCard" class="student-mobile-card">
           <h3>สถานะชำระเงิน</h3>
           <div style="margin-bottom:14px;padding:12px;border-radius:12px;background:#f8fafc;border:1.5px solid #bfdbfe;box-shadow:0 6px 18px rgba(15,23,42,0.08);">
             <label style="font-size:13px;color:#0f172a;font-weight:800;display:block;margin-bottom:6px;">เลือกเดือนที่ชำระ</label>
@@ -4015,7 +4015,7 @@
           <button class="btn btn-blue" type="button" onclick="downloadPaymentQr('student')">ดาวน์โหลด QR</button>
         </div>
 
-        <div class="student-mobile-card">
+        <div id="studentMobileSlipUploadCard" class="student-mobile-card">
           <h3>อัปโหลดสลิป</h3>
           <p id="studentMobileSlipFileName" class="student-mobile-muted">ยังไม่ได้เลือกไฟล์</p>
           <div class="student-mobile-actions">
@@ -4040,7 +4040,7 @@
           <div id="studentMobileLatestReceipt" class="student-mobile-list"></div>
         </div>
 
-        <div class="student-mobile-card">
+        <div id="studentMobilePaymentStepsCard" class="student-mobile-card">
           <h3>ขั้นตอนการชำระเงิน</h3>
           <ol style="padding-left:20px; margin:8px 0 0; line-height:2.1; color:#374151;">
             <li>เลือกเดือนที่ต้องการชำระ</li>
@@ -11416,6 +11416,10 @@
     }
 
     function openStudentProfileEdit() {
+      if (isStudentWithdrawn(currentStudent)) {
+        alert(getWithdrawnAccessMessage());
+        return;
+      }
       const panel = getElement('profilePanel');
       if (panel) panel.classList.add('hidden');
       const modal = getElement('student-profile');
@@ -12168,12 +12172,18 @@
       const visibleCourses = teacherCourses || getTeacherVisibleCourses();
       const sessionKeys = getTeacherVisibleSessionCourseKeys();
       return students.filter(function(s) {
+        if (!isStudentVisibleToTeacher(s)) return false;
         return isStudentInTeacherCourseList(s, visibleCourses) || isStudentMatchedByTeacherSessions(s, sessionKeys);
       });
     }
 
+    function isStudentVisibleToTeacher(student) {
+      return !!student && !isStudentLimitedAccess(student) && student.archived !== true;
+    }
+
     function canTeacherManageStudentReward(student) {
       if (!student) return false;
+      if (!isStudentVisibleToTeacher(student)) return false;
       if (!currentTeacher) return true;
       if (!canOpenTeacherTab('teacher-students')) return false;
       const visibleCourses = getTeacherVisibleCourses();
@@ -12379,7 +12389,7 @@
 
       const pendingBox = getElement('teacherMobilePendingApprovals');
       if (pendingBox) {
-        const pending = students.filter(function(s) { return s.courseStatus === 'รออนุมัติคอร์ส'; }).sort(function(a, b) {
+        const pending = students.filter(function(s) { return isStudentVisibleToTeacher(s) && s.courseStatus === 'รออนุมัติคอร์ส'; }).sort(function(a, b) {
           var idA = String(a.memberId || a.memberID || a.id || '');
           var idB = String(b.memberId || b.memberID || b.id || '');
           return idA.localeCompare(idB, undefined, { numeric: true });
@@ -12651,11 +12661,11 @@
       const teacherCourses = getTeacherVisibleCourses();
       const teacherAttendanceCourses = getTeacherAttendanceCourses();
       const relatedStudents = students.filter(function(s) {
-        return isStudentInTeacherCourseList(s, teacherCourses);
+        return isStudentVisibleToTeacher(s) && isStudentInTeacherCourseList(s, teacherCourses);
       });
       const todayText = getLocalDateString();
       const todayClassStudents = students.filter(function(s) {
-        return isStudentInTeacherCourseList(s, teacherAttendanceCourses) && isStudentEligibleForAttendance(s, todayText);
+        return isStudentVisibleToTeacher(s) && isStudentInTeacherCourseList(s, teacherAttendanceCourses) && isStudentEligibleForAttendance(s, todayText);
       });
       const absentCount = todayClassStudents.filter(function(s) { return getStudentAttendanceDisplayStatus(s, todayText) === 'ไม่มา' || getStudentAttendanceDisplayStatus(s, todayText) === 'ยังไม่เช็คชื่อ'; }).length;
       const todayPrivateLessons = getTeacherPrivateLessonSessions().filter(function(session) {
@@ -13230,6 +13240,7 @@
       const selectedDate = getPickupDateValue();
       pickupList.length = 0;
       students.forEach(function(student, index) {
+        if (!isStudentVisibleToTeacher(student)) return;
         const course = getStudentAttendanceCourse(student);
         const hasClassToday = isStudentEligibleForAttendance(student, selectedDate);
         const isOnsite = isOnsiteCourse(course);
@@ -14380,8 +14391,10 @@
           s.courseAccess = selectedCourse ? selectedCourse.access : '-';
           s.courseStatus = selectedCourse ? (courseStatusInput || s.courseStatus || 'อนุมัติแล้ว') : 'ยังไม่ได้สมัครคอร์ส';
           s.paymentStatus = !selectedCourse ? 'ยังไม่ได้สมัครคอร์ส' : (s.paymentStatus || 'รอชำระเงิน');
+          const previousLearningStatus = getStudentLearningStatus(s);
           s.status = learningStatus;
           s.learningStatus = learningStatus;
+          applyStudentLearningStatusAuditFields(s, learningStatus, previousLearningStatus);
           s.learningType = learningType;
           s.privateLessonEnabled = isLearningTypePrivateEnabled(learningType);
           s.privateLessonDay = getElement('adminStudentPrivateLessonDay') ? getElement('adminStudentPrivateLessonDay').value : '';
@@ -14513,6 +14526,7 @@
               authEmail: studentEmail
             })
           };
+          applyStudentLearningStatusAuditFields(newStudent, learningStatus, '');
           if (PRODUCTION_MODE && db) {
             if (!authUid) throw new Error('สร้างบัญชี Auth ไม่สำเร็จ ระบบจึงยังไม่บันทึกข้อมูลนักเรียน');
             await commitNewStudentAccount(newStudent, authUid);
@@ -14702,6 +14716,8 @@
           const finalGrade = selectedCourse ? selectedCourse.grade : bubbleSelectValue('bubbleStudentGrade');
           const learningType = normalizeStudentLearningType(bubbleSelectValue('bubbleStudentLearningType'));
           const privateLessonTeacherId = bubbleSelectValue('bubbleStudentPrivateLessonTeacher');
+          const previousLearningStatus = getStudentLearningStatus(s);
+          const nextLearningStatus = bubbleSelectValue('bubbleStudentLearningStatus');
           Object.assign(s, {
             name: name,
             nickname: nickname,
@@ -14716,8 +14732,8 @@
             courseAccess: selectedCourse ? selectedCourse.access : '-',
             courseStatus: selectedCourse ? bubbleSelectValue('bubbleStudentCourseStatus') : 'ยังไม่ได้สมัครคอร์ส',
             paymentStatus: !selectedCourse ? 'ยังไม่ได้สมัครคอร์ส' : (s.paymentStatus || 'รอชำระเงิน'),
-            learningStatus: bubbleSelectValue('bubbleStudentLearningStatus'),
-            status: bubbleSelectValue('bubbleStudentLearningStatus'),
+            learningStatus: nextLearningStatus,
+            status: nextLearningStatus,
             billingStartMonth: (function() {
               syncThaiMonthYearPicker('bubbleBillingStartMonth', 'text');
               return bubbleValue('bubbleBillingStartMonth') || '';
@@ -14735,6 +14751,7 @@
             privateLessonNote: bubbleValue('bubbleStudentPrivateLessonNote'),
             role: 'student'
           });
+          applyStudentLearningStatusAuditFields(s, nextLearningStatus, previousLearningStatus);
           try {
             await setFirebaseDocument('students', s);
             if (s.authUid && db) {
@@ -16217,21 +16234,104 @@
       return getStudentLearningStatus(student) === 'พักเรียน';
     }
 
+    function isStudentWithdrawn(student) {
+      return getStudentLearningStatus(student) === 'ลาออก';
+    }
+
+    function isStudentLimitedAccess(student) {
+      return isStudentOnLearningPause(student) || isStudentWithdrawn(student);
+    }
+
     function studentCanUseCourseEntitlements(student) {
       const activeStudent = student || currentStudent;
-      return studentHasApprovedCourse(activeStudent) && !isStudentOnLearningPause(activeStudent);
+      return studentHasApprovedCourse(activeStudent) && !isStudentLimitedAccess(activeStudent);
     }
 
     function studentCanReceiveIdCard(student) {
-      return !!student && !isStudentOnLearningPause(student);
+      return !!student && !isStudentLimitedAccess(student);
     }
 
     function studentCanParticipateInExams(student) {
-      return !!student && !isStudentOnLearningPause(student);
+      return !!student && !isStudentLimitedAccess(student);
     }
 
     function getPausedCourseAccessMessage() {
-      return 'สถานะพักเรียน: ระบบปิดสิทธิ์เข้าเรียนของคอร์สชั่วคราว แต่ยังดูคะแนนและระบบตัวละครได้';
+      return 'สถานะพักเรียน: ระบบปิดสิทธิ์ใช้งานคอร์สชั่วคราว เหลือเฉพาะ Avatar, ใบเสร็จที่ชำระแล้ว และคะแนนก่อนพักเรียน';
+    }
+
+    function getWithdrawnAccessMessage() {
+      return 'สถานะลาออก: ระบบปิดการใช้งานทั้งหมด หากต้องการเรียนต่อกรุณาสมัครคอร์สใหม่';
+    }
+
+    function getStudentLimitedAccessMessage(student) {
+      return isStudentWithdrawn(student) ? getWithdrawnAccessMessage() : getPausedCourseAccessMessage();
+    }
+
+    function getStudentStatusLimitMonth(student) {
+      const activeStudent = student || currentStudent || {};
+      return String(activeStudent.learningPausedAtMonth || activeStudent.pausedAtMonth || activeStudent.statusChangedAtMonth || '').trim();
+    }
+
+    function getStudentStatusLimitTimestamp(student) {
+      const activeStudent = student || currentStudent || {};
+      const parsed = parseRecordDate(activeStudent.learningPausedAt || activeStudent.pausedAt || activeStudent.statusChangedAt || activeStudent.learningPausedAtText || activeStudent.pausedAtText || activeStudent.statusChangedAtText);
+      return parsed ? parsed.getTime() : 0;
+    }
+
+    function isMonthOnOrBeforeStudentLimit(month, student) {
+      if (!isStudentOnLearningPause(student)) return true;
+      const limitMonth = getStudentStatusLimitMonth(student);
+      if (!limitMonth) return true;
+      return compareThaiMonthYear(String(month || ''), limitMonth) <= 0;
+    }
+
+    function isRecordBeforeStudentPause(record, student) {
+      if (!isStudentOnLearningPause(student)) return !isStudentWithdrawn(student);
+      if (!record) return false;
+      if (record.month) {
+        const limitMonth = getStudentStatusLimitMonth(student);
+        if (limitMonth) {
+          const monthCompare = compareThaiMonthYear(String(record.month || ''), limitMonth);
+          if (monthCompare < 0) return true;
+          if (monthCompare > 0) return false;
+        }
+      }
+      const limitTs = getStudentStatusLimitTimestamp(student);
+      if (!limitTs) return true;
+      const recordDate = parseRecordDate(record.examDate || record.submittedAt || record.createdAt || record.updatedAt || record.createdAtText || record.updatedAtText);
+      return !recordDate || recordDate.getTime() <= limitTs;
+    }
+
+    function applyStudentLearningStatusAuditFields(student, nextStatus, previousStatus) {
+      if (!student) return;
+      const prev = String(previousStatus || student.learningStatus || student.status || '').trim();
+      const next = String(nextStatus || '').trim();
+      const nowText = new Date().toLocaleString('th-TH');
+      const nowMonth = getThaiMonthFromDate(new Date().toISOString().slice(0, 10));
+      if (next === 'พักเรียน' && prev !== 'พักเรียน') {
+        student.learningPausedAtText = nowText;
+        student.learningPausedAtMonth = nowMonth;
+      }
+      if (next !== 'พักเรียน' && prev === 'พักเรียน') {
+        student.learningPausedEndedAtText = nowText;
+      }
+      if (next === 'ลาออก' && prev !== 'ลาออก') {
+        student.withdrawnCourse = student.course || '';
+        student.withdrawnCourseId = student.courseId || '';
+        student.withdrawnCourseStatus = student.courseStatus || '';
+        student.withdrawnCourseAccess = student.courseAccess || '';
+        student.withdrawnAtText = nowText;
+        student.withdrawnAtMonth = nowMonth;
+      }
+      if (next === 'ลาออก') {
+        student.course = 'ยังไม่ได้สมัครคอร์ส';
+        student.courseId = null;
+        student.courseAccess = '-';
+        student.courseStatus = 'ยังไม่ได้สมัครคอร์ส';
+        student.paymentStatus = 'ยังไม่ได้สมัครคอร์ส';
+      }
+      student.statusChangedAtText = nowText;
+      student.statusChangedAtMonth = nowMonth;
     }
 
     function updateStudentCourseApplySectionVisibility() {
@@ -17963,6 +18063,7 @@
 
     async function createStudentPaymentBundleFromSelected() {
       if (!currentStudent || !firebaseUser) { alert('กรุณาเข้าสู่ระบบก่อนสร้างยอดรวม'); return; }
+      if (isStudentLimitedAccess(currentStudent)) { alert(getStudentLimitedAccessMessage(currentStudent)); return; }
       const selected = getSelectedStudentBundlePayments();
       if (selected.length < 2) {
         alert('กรุณาเลือกอย่างน้อย 2 รายการเพื่อรวมยอด');
@@ -18027,6 +18128,7 @@
 
     async function uploadStudentPaymentBundleSlip(bundleId) {
       if (bundleSlipUploadInProgress) return;
+      if (isStudentLimitedAccess(currentStudent)) { alert(getStudentLimitedAccessMessage(currentStudent)); return; }
       const result = getElement('studentSlipResult') || getElement('studentMobileSlipResult');
       const fileInput = getElement('studentSlipFile');
       const file = fileInput && fileInput.files ? fileInput.files[0] : null;
@@ -18137,6 +18239,7 @@
 
     function canStudentUploadSlipForMonth(month) {
       const selectedMonth = month || (getElement('studentPaymentMonth') && getElement('studentPaymentMonth').value ? getElement('studentPaymentMonth').value : '');
+      if (isStudentLimitedAccess(currentStudent)) return false;
       if (!currentStudent || !selectedMonth) return true;
       const payment = getStudentPaymentForSelectedMonth();
       if (!payment) return false;
@@ -18278,6 +18381,16 @@
     }
 
     function scrollToStudentSection(sectionId) {
+      if (isStudentWithdrawn(currentStudent) && sectionId !== 'studentDashboard') {
+        alert(getWithdrawnAccessMessage());
+        sectionId = 'studentDashboard';
+      } else if (isStudentOnLearningPause(currentStudent)) {
+        const allowedPausedSections = ['studentDashboard', 'student-services', 'student-monthly-test'];
+        if (!allowedPausedSections.includes(sectionId)) {
+          alert(getPausedCourseAccessMessage());
+          sectionId = 'studentDashboard';
+        }
+      }
       if (sectionId === 'student-online-exam') sectionId = 'student-monthly-test';
       if (sectionId === 'course-section' && studentHasApprovedCourse()) sectionId = 'studentDashboard';
       if (sectionId !== 'student-monthly-test') document.body.classList.remove('student-mobile-online-exam-open');
@@ -18325,9 +18438,9 @@
     function getLatestPublishedScoreInfo() {
       const grade = currentStudent && currentStudent.grade ? currentStudent.grade : getProfileGrade();
       const published = scoreReports.filter(function(item) {
-        return item.grade === grade && item.status === 'published';
+        return item.grade === grade && item.status === 'published' && isRecordBeforeStudentPause(item, currentStudent);
       }).slice().sort(function(a, b) {
-        return String(b.month || '').localeCompare(String(a.month || ''), 'th');
+        return compareThaiMonthYear(b.month || '', a.month || '');
       });
       return published[0] || null;
     }
@@ -18350,21 +18463,22 @@
       const isApprovedForHome = hasRegisteredCourse && isCourseStatusApproved(courseStatusForHome);
       const canUseCourseForHome = hasRegisteredCourse && studentCanUseCourseEntitlements(currentStudent);
       const isPausedForHome = isStudentOnLearningPause(currentStudent);
+      const isWithdrawnForHome = isStudentWithdrawn(currentStudent);
       if (getElement('studentDashClassToday')) {
-        getElement('studentDashClassToday').textContent = !hasRegisteredCourse ? 'ยังไม่ได้สมัครคอร์ส' : (!isApprovedForHome ? 'รออนุมัติคอร์ส' : (isPausedForHome ? 'พักเรียน' : classSummary.statusText));
+        getElement('studentDashClassToday').textContent = isWithdrawnForHome ? 'ลาออก' : (!hasRegisteredCourse ? 'ยังไม่ได้สมัครคอร์ส' : (!isApprovedForHome ? 'รออนุมัติคอร์ส' : (isPausedForHome ? 'พักเรียน' : classSummary.statusText)));
         getElement('studentDashClassToday').className = 'status-badge ' + (canUseCourseForHome && hasClassToday ? 'present' : 'parent');
       }
       if (getElement('studentDashClassDetail')) {
-        getElement('studentDashClassDetail').innerHTML = !selectedCourse ? 'สมัครคอร์สก่อนจึงจะเห็นห้องเรียน' : (!isApprovedForHome ? 'รอเจ้าหน้าที่ตรวจสอบการชำระเงิน' : (isPausedForHome ? getPausedCourseAccessMessage() : classSummary.detailHtml));
+        getElement('studentDashClassDetail').innerHTML = isWithdrawnForHome ? getWithdrawnAccessMessage() : (!selectedCourse ? 'สมัครคอร์สก่อนจึงจะเห็นห้องเรียน' : (!isApprovedForHome ? 'รอเจ้าหน้าที่ตรวจสอบการชำระเงิน' : (isPausedForHome ? getPausedCourseAccessMessage() : classSummary.detailHtml)));
       }
 
       const latestScore = isApprovedForHome ? getLatestPublishedScoreInfo() : null;
       if (getElement('studentDashScoreStatus')) {
-        getElement('studentDashScoreStatus').textContent = !hasRegisteredCourse ? 'ยังไม่ได้สมัครคอร์ส' : (!isApprovedForHome ? 'รออนุมัติคอร์ส' : (latestScore ? 'ประกาศแล้ว' : 'ยังไม่ประกาศ'));
+        getElement('studentDashScoreStatus').textContent = isWithdrawnForHome ? 'ปิดการใช้งาน' : (!hasRegisteredCourse ? 'ยังไม่ได้สมัครคอร์ส' : (!isApprovedForHome ? 'รออนุมัติคอร์ส' : (latestScore ? 'ประกาศแล้ว' : 'ยังไม่ประกาศ')));
         getElement('studentDashScoreStatus').className = 'status-badge ' + (latestScore ? 'present' : 'parent');
       }
       if (getElement('studentDashScoreMonth')) {
-        getElement('studentDashScoreMonth').textContent = !hasRegisteredCourse ? 'สมัครคอร์สก่อน ระบบจึงจะแสดงคะแนน' : (!isApprovedForHome ? 'หลังคอร์สได้รับอนุมัติแล้วจึงดูคะแนนได้' : (latestScore ? ('ล่าสุด: ' + latestScore.month) : 'คะแนนจะแสดงเมื่อสถาบันประกาศผล'));
+        getElement('studentDashScoreMonth').textContent = isWithdrawnForHome ? getWithdrawnAccessMessage() : (!hasRegisteredCourse ? 'สมัครคอร์สก่อน ระบบจึงจะแสดงคะแนน' : (!isApprovedForHome ? 'หลังคอร์สได้รับอนุมัติแล้วจึงดูคะแนนได้' : (latestScore ? ('ล่าสุด: ' + latestScore.month) : 'คะแนนจะแสดงเมื่อสถาบันประกาศผล')));
       }
     }
 
@@ -18442,6 +18556,8 @@
       const isApproved = !!(hasRegisteredCourse && isCourseStatusApproved(courseStatus));
       const canUseCourse = !!(hasRegisteredCourse && studentCanUseCourseEntitlements(student));
       const isPaused = isStudentOnLearningPause(student);
+      const isWithdrawn = isStudentWithdrawn(student);
+      const isLimitedAccess = isPaused || isWithdrawn;
       const today = getThaiDayName(new Date());
       const classSummary = getStudentTodayClassSummary(selectedCourse);
       const hasClassToday = classSummary.hasClassToday;
@@ -18469,19 +18585,21 @@
 
       setStudentMobileText('studentMobilePaymentStatus', paymentText);
       setStudentMobileText('studentMobilePaymentDetail',
+        isWithdrawn ? getWithdrawnAccessMessage() :
+        isPaused ? 'ดูได้เฉพาะใบเสร็จที่ชำระแล้ว' :
         hasRegisteredCourse
           ? ((selectedMonth || '-') + ' · ' + (paymentAmount ? formatPrice(paymentAmount) : 'รอยอดชำระ'))
           : 'สมัครคอร์สก่อนจึงจะเห็นรายละเอียดชำระเงิน'
       );
-      setStudentMobileTag('studentMobilePaymentTag', paymentText === 'ชำระแล้ว' ? 'เรียบร้อย' : 'รอตรวจ');
+      setStudentMobileTag('studentMobilePaymentTag', isLimitedAccess ? (isPaused ? 'พักเรียน' : 'ลาออก') : (paymentText === 'ชำระแล้ว' ? 'เรียบร้อย' : 'รอตรวจ'));
 
       setStudentMobileText('studentMobileScoreStatus',
-        !hasRegisteredCourse ? 'ยังไม่ได้สมัครคอร์ส' : (!isApproved ? 'รออนุมัติคอร์ส' : (latestScore ? 'ประกาศแล้ว' : 'ยังไม่ประกาศ'))
+        isWithdrawn ? 'ปิดการใช้งาน' : (!hasRegisteredCourse ? 'ยังไม่ได้สมัครคอร์ส' : (!isApproved ? 'รออนุมัติคอร์ส' : (latestScore ? 'ประกาศแล้ว' : 'ยังไม่ประกาศ')))
       );
       setStudentMobileText('studentMobileScoreDetail',
-        !hasRegisteredCourse ? 'สมัครคอร์สก่อน ระบบจึงจะแสดงคะแนน' : (!isApproved ? 'หลังคอร์สได้รับอนุมัติแล้วจึงดูคะแนนได้' : (latestScore ? ('ล่าสุด: ' + latestScore.month) : 'คะแนนจะแสดงเมื่อสถาบันประกาศผล'))
+        isWithdrawn ? getWithdrawnAccessMessage() : (!hasRegisteredCourse ? 'สมัครคอร์สก่อน ระบบจึงจะแสดงคะแนน' : (!isApproved ? 'หลังคอร์สได้รับอนุมัติแล้วจึงดูคะแนนได้' : (latestScore ? ('ล่าสุด: ' + latestScore.month) : 'คะแนนจะแสดงเมื่อสถาบันประกาศผล')))
       );
-      setStudentMobileTag('studentMobileScoreTag', latestScore ? 'ล่าสุด' : 'คะแนน');
+      setStudentMobileTag('studentMobileScoreTag', isWithdrawn ? 'ลาออก' : (latestScore ? 'ล่าสุด' : 'คะแนน'));
 
       const privateCard = getElement('studentMobilePrivateLessonCard');
       const hasPrivateLesson = !!(currentStudent && isPrivateLessonStudentEnabled(currentStudent));
@@ -18557,6 +18675,11 @@
     }
 
     function goToStudentExamBestPage() {
+      if (isStudentWithdrawn(currentStudent)) {
+        alert(getWithdrawnAccessMessage());
+        studentMobileGo('studentDashboard');
+        return;
+      }
       studentMobileGo('student-monthly-test');
       safeRun(function() {
         if (getElement('monthlyExamPage')) getElement('monthlyExamPage').classList.add('hidden');
@@ -22326,13 +22449,16 @@
       const isCourseApproved = hasRegisteredCourse && isCourseStatusApproved(courseStatus);
       const canUseCourseEntitlements = hasRegisteredCourse && selectedCourse && studentCanUseCourseEntitlements(currentStudent);
       const selectedFeatures = selectedCourse ? normalizeCourseFeatures(selectedCourse) : {};
-      const canUsePayment = hasRegisteredCourse && selectedFeatures.payment !== false;
-      const canUseReceipts = hasRegisteredCourse && selectedFeatures.receipts !== false;
+      const isPaused = isStudentOnLearningPause(currentStudent);
+      const isWithdrawn = isStudentWithdrawn(currentStudent);
+      const isLimitedAccess = isStudentLimitedAccess(currentStudent);
+      const canUsePayment = hasRegisteredCourse && selectedFeatures.payment !== false && !isLimitedAccess;
+      const canUseReceipts = hasRegisteredCourse && !isWithdrawn && (isPaused || selectedFeatures.receipts !== false);
       const canUseExamArea = !!currentStudent;
       const canUseOnlineExamArea = !!canUseCourseEntitlements && selectedFeatures.exams !== false;
-      const canUseScoreArea = isCourseApproved && selectedFeatures.scores !== false;
+      const canUseScoreArea = isCourseApproved && selectedFeatures.scores !== false && !isWithdrawn;
       const canUsePickupStatus = !!canUseCourseEntitlements && selectedFeatures.attendance !== false;
-      const canUseAnnouncements = (!selectedCourse || selectedFeatures.announcements !== false) && !isStudentOnLearningPause(currentStudent);
+      const canUseAnnouncements = (!selectedCourse || selectedFeatures.announcements !== false) && !isLimitedAccess;
 
       if (selectedCourse) currentStudentCourseId = selectedCourse.id;
       updateStudentCourseApplySectionVisibility();
@@ -22354,6 +22480,8 @@
         getElement('studentPaymentLocked').classList.toggle('hidden', canUsePayment);
         if (!hasRegisteredCourse) {
           getElement('studentPaymentLocked').innerHTML = '<h3>ชำระเงิน</h3><p style="color:#6b7280;">สมัครคอร์สก่อน จึงจะเห็นรายละเอียดการชำระเงิน</p>';
+        } else if (isLimitedAccess) {
+          getElement('studentPaymentLocked').innerHTML = '<h3>ชำระเงิน</h3><p style="color:#6b7280;">' + escapeHtml(getStudentLimitedAccessMessage(currentStudent)) + '</p>';
         } else if (!canUsePayment) {
           getElement('studentPaymentLocked').innerHTML = '<h3>ชำระเงิน</h3><p style="color:#6b7280;">คอร์สนี้ยังปิดเมนูชำระเงินไว้ หากต้องการชำระเงิน กรุณาติดต่อเจ้าหน้าที่</p>';
         }
@@ -22447,6 +22575,94 @@
       if (getElement('student-announcements')) getElement('student-announcements').classList.toggle('hidden', !canUseAnnouncements);
       if (getElement('studentMobileAnnouncementCard')) getElement('studentMobileAnnouncementCard').classList.toggle('hidden', !canUseAnnouncements);
       if (canUseAnnouncements) renderStudentAnnouncements();
+      safeRun(applyStudentStatusAccessVisibility, 'student-status-access-visibility');
+    }
+
+    function toggleStudentStatusElement(id, show) {
+      const el = getElement(id);
+      if (el) el.classList.toggle('hidden', !show);
+    }
+
+    function setStudentRestrictedCard(id, title, message) {
+      const el = getElement(id);
+      if (!el) return;
+      el.innerHTML = '<div class="notice"><strong>' + escapeHtml(title) + '</strong><p>' + escapeHtml(message) + '</p></div>';
+    }
+
+    function applyStudentStatusAccessVisibility() {
+      if (!currentStudent) return;
+      const paused = isStudentOnLearningPause(currentStudent);
+      const withdrawn = isStudentWithdrawn(currentStudent);
+      const limited = paused || withdrawn;
+      const msg = getStudentLimitedAccessMessage(currentStudent);
+
+      if (!limited) {
+        ['student-learning', 'student-services', 'student-monthly-test', 'studentMonthlyPlanPanel', 'studentMobileScheduleCard', 'studentMobileGamificationCard', 'studentGamificationPanel', 'onlineExamStudentContent', 'onlineExamStudentLocked'].forEach(function(id) {
+          toggleStudentStatusElement(id, true);
+        });
+        ['studentMobilePaymentStatusCard', 'studentMobileQrCard', 'studentMobileSlipUploadCard', 'studentMobileBundlePaymentCard', 'studentMobilePaymentStepsCard'].forEach(function(id) {
+          const el = getElement(id);
+          if (el) el.style.display = '';
+        });
+        document.querySelectorAll('button[onclick="studentMobileChooseSlipFile()"], button[onclick="studentMobileUploadSlip()"], button[onclick="uploadStudentSlipToDrive()"]').forEach(function(btn) {
+          btn.disabled = false;
+        });
+        document.querySelectorAll('button[onclick="openStudentProfileEdit()"], button[onclick="studentMobileOpenProfile()"]').forEach(function(btn) {
+          btn.disabled = false;
+        });
+        const slipFileNormal = getElement('studentSlipFile');
+        if (slipFileNormal) slipFileNormal.disabled = false;
+        return;
+      }
+
+      toggleStudentStatusElement('course-section', !limited);
+      toggleStudentStatusElement('student-learning', !limited);
+      toggleStudentStatusElement('studentMonthlyPlanPanel', !limited);
+      toggleStudentStatusElement('studentMobileScheduleCard', !limited);
+      toggleStudentStatusElement('studentPickupStatusCard', !limited);
+      toggleStudentStatusElement('studentMobilePickupStatusCard', !limited);
+      toggleStudentStatusElement('studentMobilePrivateLessonCard', !limited);
+      toggleStudentStatusElement('student-announcements', !limited);
+      toggleStudentStatusElement('studentMobileAnnouncementCard', !limited);
+      toggleStudentStatusElement('studentPaymentContent', !limited);
+      toggleStudentStatusElement('studentReceiptContent', paused);
+      toggleStudentStatusElement('studentMobileGamificationCard', !withdrawn);
+      toggleStudentStatusElement('studentGamificationPanel', !withdrawn);
+      toggleStudentStatusElement('scoreHistoryPage', paused);
+      toggleStudentStatusElement('studentExamContent', paused);
+      toggleStudentStatusElement('onlineExamStudentContent', false);
+      toggleStudentStatusElement('onlineExamStudentLocked', !withdrawn);
+
+      const paymentLocked = getElement('studentPaymentLocked');
+      if (paymentLocked && limited) {
+        paymentLocked.classList.toggle('hidden', withdrawn);
+        paymentLocked.innerHTML = '<h3>ชำระเงิน</h3><p style="color:#6b7280;">' + escapeHtml(msg) + '</p>';
+      }
+
+      ['studentMobilePaymentStatusCard', 'studentMobileQrCard', 'studentMobileSlipUploadCard', 'studentMobileBundlePaymentCard', 'studentMobilePaymentStepsCard'].forEach(function(id) {
+        const el = getElement(id);
+        if (el) el.style.display = limited ? 'none' : '';
+      });
+      document.querySelectorAll('button[onclick="studentMobileChooseSlipFile()"], button[onclick="studentMobileUploadSlip()"], button[onclick="uploadStudentSlipToDrive()"]').forEach(function(btn) {
+        btn.disabled = limited;
+      });
+      document.querySelectorAll('button[onclick="openStudentProfileEdit()"], button[onclick="studentMobileOpenProfile()"]').forEach(function(btn) {
+        btn.disabled = withdrawn;
+      });
+      const slipFile = getElement('studentSlipFile');
+      if (slipFile) slipFile.disabled = limited;
+
+      if (withdrawn) {
+        ['student-services', 'student-monthly-test'].forEach(function(id) { toggleStudentStatusElement(id, false); });
+        if (getElement('studentCourseSummaryCard')) getElement('studentCourseSummaryCard').classList.add('hidden');
+        setStudentRestrictedCard('studentGamificationPanel', 'สถานะลาออก', msg);
+        setStudentRestrictedCard('studentMobileGamificationPanel', 'สถานะลาออก', msg);
+      } else if (paused) {
+        toggleStudentStatusElement('student-services', true);
+        toggleStudentStatusElement('student-monthly-test', true);
+        renderStudentReceipts();
+        renderScoreHistoryByMonth();
+      }
     }
 
     function renderStudentOnlineClasses(courseList, grade) {
@@ -27346,6 +27562,7 @@ function receiptStatusText(status) {
 
     async function uploadStudentSlipToDrive() {
       if (slipUploadInProgress) return;
+      if (isStudentLimitedAccess(currentStudent)) { alert(getStudentLimitedAccessMessage(currentStudent)); return; }
       const result = getElement('studentSlipResult') || getElement('studentSlipOcrResult');
       const monthSelect = getElement('studentPaymentMonth');
       const fileInput = getElement('studentSlipFile');
@@ -27709,6 +27926,10 @@ function receiptStatusText(status) {
 
     function openScoreHistory() {
       const c = getCurrentStudentCourse ? getCurrentStudentCourse() : null;
+      if (isStudentWithdrawn(currentStudent)) {
+        alert(getWithdrawnAccessMessage());
+        return;
+      }
       if (!(currentStudent && currentStudent.courseId)) {
         alert('กรุณาสมัครคอร์สก่อนดูคะแนนย้อนหลัง');
         return;
@@ -28370,7 +28591,7 @@ function receiptStatusText(status) {
         const studentGrade = currentStudent ? currentStudent.grade : getProfileGrade();
         const publishedMonths = Array.from(new Set(
           adminScoreRecords
-            .filter(function(r) { return r.status === 'published' && r.grade === studentGrade; })
+            .filter(function(r) { return r.status === 'published' && r.grade === studentGrade && isRecordBeforeStudentPause(r, currentStudent); })
             .map(function(r) { return r.month; })
             .filter(Boolean)
         )).sort(function(a, b) { return compareThaiMonthYear(b, a); });
@@ -28474,7 +28695,7 @@ function receiptStatusText(status) {
       }
       const selectedGrade = currentStudent && currentStudent.grade ? currentStudent.grade : (gradeFilter ? gradeFilter.value : getProfileGrade());
       const gradeRecords = adminScoreRecords.filter(function(record) {
-        return record.month === selectedMonth && record.grade === selectedGrade && record.status === 'published';
+        return record.month === selectedMonth && record.grade === selectedGrade && record.status === 'published' && isRecordBeforeStudentPause(record, currentStudent);
       });
 
       const studentRecord = gradeRecords.find(function(record) {
@@ -28482,7 +28703,7 @@ function receiptStatusText(status) {
       });
 
       const report = scoreReports.find(function(item) {
-        return item.month === selectedMonth && item.grade === selectedGrade && item.status === 'published';
+        return item.month === selectedMonth && item.grade === selectedGrade && item.status === 'published' && isRecordBeforeStudentPause(item, currentStudent);
       });
 
       const hasPublishedScore = !!studentRecord;
@@ -28562,7 +28783,7 @@ function receiptStatusText(status) {
         const sameMonth = !month || record.month === month;
         const sameGrade = !grade || record.grade === grade;
         const sameStatus = record.status === 'published';
-        return sameMonth && sameGrade && sameStatus && isCurrentStudentScoreRecord(record);
+        return sameMonth && sameGrade && sameStatus && isCurrentStudentScoreRecord(record) && isRecordBeforeStudentPause(record, currentStudent);
       }) || null;
     }
 
@@ -28570,9 +28791,10 @@ function receiptStatusText(status) {
       if (!currentStudent) return [];
       return adminScoreRecords.filter(function(record) {
         if (record.status !== 'published') return false;
+        if (!isRecordBeforeStudentPause(record, currentStudent)) return false;
         return isCurrentStudentScoreRecord(record);
       }).slice().sort(function(a, b) {
-        return String(b.month || '').localeCompare(String(a.month || ''), 'th');
+        return compareThaiMonthYear(b.month || '', a.month || '');
       });
     }
 
@@ -28632,6 +28854,10 @@ function receiptStatusText(status) {
     }
 
     function studentMobileOpenScoreHistory() {
+      if (isStudentWithdrawn(currentStudent)) {
+        alert(getWithdrawnAccessMessage());
+        return;
+      }
       openScoreHistory();
       safeRun(renderStudentMobileExam, 'student-mobile-exam-open-history');
       scrollToStudentSection('student-monthly-test');
@@ -34598,7 +34824,9 @@ function receiptStatusText(status) {
       }
 
       if (scoreMonthSelect) {
-        const scoreMonths = getAdminScoreMonths();
+        const scoreMonths = getAdminScoreMonths().filter(function(month) {
+          return !currentStudent || isMonthOnOrBeforeStudentLimit(month, currentStudent);
+        });
         scoreMonths.sort(function(a, b) { return compareThaiMonthYear(b, a); });
         const currentScoreMonth = scoreMonthSelect.value;
         scoreMonthSelect.innerHTML = scoreMonths.length ? scoreMonths.map(function(month) { return '<option value="' + month + '">' + month + '</option>'; }).join('') : '<option value="">ยังไม่มีเดือนคะแนน</option>';
@@ -34607,7 +34835,7 @@ function receiptStatusText(status) {
         } else {
           const grade = getProfileGrade();
           const latestPublished = scoreReports
-            .filter(function(r) { return r.grade === grade && r.status === 'published'; })
+            .filter(function(r) { return r.grade === grade && r.status === 'published' && isRecordBeforeStudentPause(r, currentStudent); })
             .sort(function(a, b) { return compareThaiMonthYear(b.month || '', a.month || ''); })[0];
           const defaultMonth = (latestPublished && scoreMonths.includes(latestPublished.month))
             ? latestPublished.month
@@ -36661,8 +36889,10 @@ function receiptStatusText(status) {
         return;
       }
       if (!confirm('พบนักเรียนคนนี้มีประวัติผูกกับระบบแล้ว\n\nแนะนำให้ “ปิดใช้งาน / ลาออก” แทนการลบถาวรเพื่อเก็บประวัติไว้\n\nกด OK เพื่อย้ายนักเรียนไปสถานะลาออก\nกด Cancel เพื่อยกเลิก')) return;
+      const previousLearningStatus = getStudentLearningStatus(student);
       student.learningStatus = 'ลาออก';
       student.status = 'ลาออก';
+      applyStudentLearningStatusAuditFields(student, 'ลาออก', previousLearningStatus);
       student.archived = true;
       student.archivedAtText = new Date().toLocaleString('th-TH');
       await setFirebaseDocument('students', student);
