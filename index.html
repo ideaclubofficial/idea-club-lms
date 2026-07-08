@@ -44765,5 +44765,49 @@ function receiptStatusText(status) {
     <span id="tf-toast-message" class="text-xs font-bold">—</span>
   </div>
   <!-- ===== End TutorFlow Modals ===== -->
+  <script>
+    (function setupAutoPatchReload() {
+      const VERSION_URL = 'app-version.json';
+      const POLL_INTERVAL_MS = 60 * 1000;
+      let loadedVersion = null;
+      let reloadStarted = false;
+
+      async function fetchAppVersion() {
+        const url = new URL(VERSION_URL, window.location.href);
+        url.searchParams.set('ts', String(Date.now()));
+        const response = await fetch(url.toString(), { cache: 'no-store' });
+        if (!response.ok) return null;
+        const data = await response.json();
+        return data && typeof data.version === 'string' ? data.version.trim() : null;
+      }
+
+      function reloadWithVersion(version) {
+        if (reloadStarted) return;
+        reloadStarted = true;
+        const nextUrl = new URL(window.location.href);
+        nextUrl.searchParams.set('appVersion', version);
+        window.location.replace(nextUrl.toString());
+      }
+
+      async function checkForPatchUpdate() {
+        try {
+          const latestVersion = await fetchAppVersion();
+          if (!latestVersion) return;
+          if (!loadedVersion) {
+            loadedVersion = latestVersion;
+            return;
+          }
+          if (latestVersion !== loadedVersion) {
+            reloadWithVersion(latestVersion);
+          }
+        } catch (error) {
+          console.warn('Unable to check app version for auto reload.', error);
+        }
+      }
+
+      checkForPatchUpdate();
+      window.setInterval(checkForPatchUpdate, POLL_INTERVAL_MS);
+    })();
+  </script>
 </body>
 </html>
