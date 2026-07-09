@@ -248,6 +248,17 @@ service cloud.firestore {
         );
     }
 
+    function isStudentRewardStockDecrement() {
+      return signedIn()
+        && isStudentUser()
+        && resource.data.deleted != true
+        && resource.data.active != false
+        && resource.data.stock is number
+        && resource.data.stock > 0
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['stock', 'updatedAt'])
+        && request.resource.data.stock == resource.data.stock - 1;
+    }
+
     function isPaymentOwner() {
       return signedIn()
         && (
@@ -453,7 +464,8 @@ service cloud.firestore {
 
     match /gamificationRewards/{docId} {
       allow read: if signedIn();
-      allow create, update: if hasAdminPermission('admin.settings');
+      allow create: if hasAdminPermission('admin.settings');
+      allow update: if hasAdminPermission('admin.settings') || isStudentRewardStockDecrement();
       allow delete: if isAdmin();
     }
 
