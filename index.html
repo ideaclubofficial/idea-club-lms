@@ -7143,6 +7143,11 @@
                 <div>
                   <label>อัปโหลด QR Code</label>
                   <input id="adminQrUpload" type="file" accept="image/*" onchange="previewAdminQr()" />
+                  <label style="margin-top:14px;">ลิงก์รูป QR Code จาก Google Drive</label>
+                  <input id="adminQrUrl" type="url" placeholder="วางลิงก์ไฟล์รูปจาก Google Drive หรือ URL รูปภาพ"
+                    onblur="previewPaymentQrFromUrl(false)"
+                    onpaste="setTimeout(function(){ previewPaymentQrFromUrl(false); }, 80)" />
+                  <button class="btn btn-blue" type="button" style="margin-top:10px;" onclick="previewPaymentQrFromUrl(true)">ดูตัวอย่างจากลิงก์</button>
                 </div>
                 <div>
                   <label>Preview QR Code</label>
@@ -27761,8 +27766,8 @@ function receiptStatusText(status) {
     }
 
     function setPaymentQrImage(src) {
-      paymentQrData = src;
-      const rawSrc = String(src || '');
+      paymentQrData = parseDriveImageUrl(src || '');
+      const rawSrc = String(paymentQrData || '');
       const displaySrc = rawSrc.startsWith('data:') || rawSrc.includes('?') ? rawSrc : rawSrc + '?v=' + Date.now();
       const safeSrc = displaySrc.replace(/"/g, '&quot;');
       const imgHtml = '<img src="' + safeSrc + '" alt="QR Code สำหรับชำระเงิน" onerror="renderQrPlaceholder()">';
@@ -27770,6 +27775,7 @@ function receiptStatusText(status) {
       const adminQrPreview = getElement('adminQrPreview');
       if (studentQrBox) studentQrBox.innerHTML = imgHtml;
       if (adminQrPreview) adminQrPreview.innerHTML = imgHtml;
+      if (getElement('adminQrUrl') && !rawSrc.startsWith('data:')) getElement('adminQrUrl').value = rawSrc;
       safeRun(syncStudentMobileQrBox, 'student-mobile-qr-image');
     }
 
@@ -27813,6 +27819,26 @@ function receiptStatusText(status) {
 
     function previewAdminQr() {
       previewImageFile('adminQrUpload', 'adminQrPreview', 'ยังไม่ได้อัปโหลด QR');
+    }
+
+    function previewPaymentQrFromUrl(showResult) {
+      const input = getElement('adminQrUrl');
+      const result = getElement('qrSaveResult');
+      const qrUrl = parseDriveImageUrl(input ? input.value.trim() : '');
+      if (input && qrUrl) input.value = qrUrl;
+      if (!qrUrl) {
+        if (showResult && result) {
+          result.textContent = 'กรุณาวางลิงก์รูป QR Code ก่อนดูตัวอย่าง';
+          result.style.color = '#dc2626';
+        }
+        return '';
+      }
+      setPaymentQrImage(qrUrl);
+      if (showResult && result) {
+        result.textContent = 'โหลดตัวอย่าง QR Code จากลิงก์แล้ว';
+        result.style.color = '#0f4cbd';
+      }
+      return qrUrl;
     }
 
     function previewSiteAsset(inputId, previewId) {
@@ -27868,8 +27894,9 @@ function receiptStatusText(status) {
     async function savePaymentQr() {
       const result = getElement('qrSaveResult');
       const hasFile = !!(getElement('adminQrUpload') && getElement('adminQrUpload').files && getElement('adminQrUpload').files[0]);
-      if (!paymentQrData && !hasFile && !(systemSettings && systemSettings.qrUrl)) {
-        result.textContent = 'กรุณาอัปโหลด QR Code ก่อนบันทึก';
+      const manualQrUrl = parseDriveImageUrl((getElement('adminQrUrl') && getElement('adminQrUrl').value.trim()) || '');
+      if (!paymentQrData && !hasFile && !manualQrUrl && !(systemSettings && systemSettings.qrUrl)) {
+        result.textContent = 'กรุณาอัปโหลด QR Code หรือวางลิงก์รูปจาก Google Drive ก่อนบันทึก';
         result.style.color = '#dc2626';
         return;
       }
@@ -27877,18 +27904,20 @@ function receiptStatusText(status) {
         result.textContent = 'กำลังบันทึก QR Code...';
         result.style.color = '#0f4cbd';
         uploadSiteAssetToDrive.lastWarnings = [];
-        let qrUrl = hasFile ? await uploadSiteAssetToDrive('payment_qr', 'adminQrUpload', result) : (systemSettings.qrUrl || paymentQrData);
+        let qrUrl = hasFile ? await uploadSiteAssetToDrive('payment_qr', 'adminQrUpload', result) : (manualQrUrl || systemSettings.qrUrl || paymentQrData);
+        qrUrl = parseDriveImageUrl(qrUrl);
         const qrSetting = { id: 'main-payment-qr', firebaseDocId: 'main-payment-qr', type: 'paymentQr', qrUrl: qrUrl, updatedAtText: new Date().toLocaleString('th-TH') };
         await setFirebaseDocument('settings', qrSetting);
         systemSettings = Object.assign(systemSettings, { id: 'main', firebaseDocId: 'main', qrUrl: qrUrl });
         await setFirebaseDocument('settings', systemSettings);
         setPaymentQrImage(qrUrl);
         if (getElement('settingQrUrl')) getElement('settingQrUrl').value = qrUrl;
+        if (getElement('adminQrUrl')) getElement('adminQrUrl').value = qrUrl;
         if (uploadSiteAssetToDrive.lastWarnings && uploadSiteAssetToDrive.lastWarnings.length) {
           result.textContent = 'บันทึก QR Code เรียบร้อย แต่ Google Drive ยังตั้งสิทธิ์ public ไม่สำเร็จ กรุณาตรวจสิทธิ์ไฟล์ใน Drive';
           result.style.color = '#d97706';
         } else {
-          result.textContent = 'บันทึก QR Code ใน Google Drive เรียบร้อย';
+          result.textContent = hasFile ? 'บันทึก QR Code ใน Google Drive เรียบร้อย' : 'บันทึกลิงก์ QR Code เรียบร้อย';
           result.style.color = '#16a34a';
         }
       } catch (error) {
@@ -35502,6 +35531,7 @@ function receiptStatusText(status) {
       if (getElement('settingLoginLogoUrl')) getElement('settingLoginLogoUrl').value = systemSettings.loginLogoUrl || '';
       if (getElement('settingFaviconUrl')) getElement('settingFaviconUrl').value = systemSettings.faviconUrl || '';
       getElement('settingQrUrl').value = systemSettings.qrUrl || '';
+      if (getElement('adminQrUrl')) getElement('adminQrUrl').value = systemSettings.qrUrl || '';
       getElement('settingReceiptFooter').value = systemSettings.receiptFooter || '';
       getElement('settingAcademicYear').value = systemSettings.academicYear || '';
       getElement('settingDefaultPassword').value = systemSettings.defaultPassword || '000000';
@@ -35532,7 +35562,7 @@ function receiptStatusText(status) {
             getElement('settingLoginLogoUrl') ? getElement('settingLoginLogoUrl').value.trim() : ''
           ),
           faviconUrl: parseDriveImageUrl(uploadedFaviconUrl || (getElement('settingFaviconUrl') ? getElement('settingFaviconUrl').value.trim() : '')),
-          qrUrl: getElement('settingQrUrl').value.trim(),
+          qrUrl: parseDriveImageUrl(getElement('settingQrUrl').value.trim()),
           receiptFooter: getElement('settingReceiptFooter').value.trim(),
           academicYear: getElement('settingAcademicYear').value.trim(),
           defaultPassword: getElement('settingDefaultPassword').value.trim() || '000000',
@@ -35544,6 +35574,8 @@ function receiptStatusText(status) {
         if (getElement('settingLogoUrl')) getElement('settingLogoUrl').value = systemSettings.logoUrl || '';
         if (getElement('settingLoginLogoUrl')) getElement('settingLoginLogoUrl').value = systemSettings.loginLogoUrl || '';
         if (getElement('settingFaviconUrl')) getElement('settingFaviconUrl').value = systemSettings.faviconUrl || '';
+        if (getElement('settingQrUrl')) getElement('settingQrUrl').value = systemSettings.qrUrl || '';
+        if (getElement('adminQrUrl')) getElement('adminQrUrl').value = systemSettings.qrUrl || '';
         if (uploadSiteAssetToDrive.lastWarnings && uploadSiteAssetToDrive.lastWarnings.length) {
           result.textContent = 'บันทึกตั้งค่าระบบเรียบร้อย แต่ Google Drive ยังตั้งสิทธิ์ public ของบางไฟล์ไม่สำเร็จ กรุณาตรวจสิทธิ์ไฟล์ใน Drive';
           result.style.color = '#d97706';
@@ -35588,9 +35620,7 @@ function receiptStatusText(status) {
         if (getElement('dynamicAppleTouchIcon')) getElement('dynamicAppleTouchIcon').href = systemSettings.faviconUrl;
       }
       if (systemSettings.qrUrl) {
-        paymentQrData = systemSettings.qrUrl;
-        if (getElement('studentQrBox')) getElement('studentQrBox').innerHTML = '<img src="' + systemSettings.qrUrl + '" alt="QR Code สำหรับชำระเงิน">';
-        if (getElement('adminQrPreview')) getElement('adminQrPreview').innerHTML = '<img src="' + systemSettings.qrUrl + '" alt="QR Code">';
+        setPaymentQrImage(systemSettings.qrUrl);
       }
     }
 
