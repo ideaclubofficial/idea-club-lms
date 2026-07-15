@@ -1642,6 +1642,19 @@
       min-width: 220px;
     }
 
+    .monthly-plan-grid-table td.monthly-plan-grid-td-holiday {
+      background: #fee2e2;
+      border-color: #fca5a5;
+    }
+
+    .monthly-plan-grid-cell.monthly-plan-grid-cell-holiday {
+      background: #fee2e2;
+      border: 1px solid #f87171;
+      border-radius: 10px;
+      min-height: 100%;
+      padding: 8px;
+    }
+
     .monthly-plan-grid-card {
       padding: 10px;
       border-radius: 10px;
@@ -1688,6 +1701,20 @@
       background: #e5e7eb;
       border-color: #d1d5db;
       color: #4b5563;
+    }
+
+    .monthly-plan-grid-holiday-label {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: max-content;
+      max-width: 100%;
+      padding: 4px 8px;
+      border-radius: 999px;
+      background: #dc2626;
+      color: #ffffff;
+      font-size: 12px;
+      font-weight: 800;
     }
 
     .monthly-plan-grid-card .grid-card-row {
@@ -1860,6 +1887,31 @@
       color: #fff;
     }
 
+    .teacher-mini-cal-day.teacher-mini-cal-holiday {
+      background: #fee2e2;
+      border: 1px solid #f87171;
+      color: #b91c1c;
+    }
+
+    .teacher-mini-cal-day.teacher-mini-cal-holiday:hover {
+      background: #fecaca;
+    }
+
+    .teacher-mini-cal-day.teacher-mini-cal-holiday.today,
+    .teacher-mini-cal-day.teacher-mini-cal-holiday.selected,
+    .teacher-mini-cal-day.teacher-mini-cal-holiday.today.selected {
+      background: #dc2626;
+      border-color: #b91c1c;
+      color: #ffffff;
+    }
+
+    .teacher-mini-cal-holiday-label {
+      font-size: 8px;
+      font-weight: 800;
+      line-height: 1;
+      color: inherit;
+    }
+
     .teacher-mini-cal-dots {
       display: flex;
       gap: 2px;
@@ -1877,6 +1929,8 @@
 
     .teacher-mini-cal-empty { color: #d1d5db; cursor: default; }
     .teacher-mini-cal-empty:hover { background: transparent; }
+    .teacher-mini-cal-empty.teacher-mini-cal-holiday { cursor: pointer; color: #b91c1c; }
+    .teacher-mini-cal-empty.teacher-mini-cal-holiday:hover { background: #fecaca; }
 
     .teacher-cal-agenda-header {
       font-size: 14px;
@@ -31620,6 +31674,12 @@ function receiptStatusText(status) {
         const dayLabel = padNumber(date.getDate(), 2) + ' ' + getMonthlyPlanDayText(dayKey);
         const dateKey = date.toISOString().slice(0, 10);
         const rowCells = courseList.map(function(course) {
+          const holiday = getActiveHolidayForCalendarDate(dateKey, {
+            center: currentCenter,
+            courseId: course.id,
+            matchAnyCenter: !currentCenter,
+            matchAnyCourse: false
+          });
           const cellSessions = sessions.filter(function(session) {
             return String(getMonthlySessionDate(session) || '') === dateKey && String(session.courseId || '') === course.id;
           });
@@ -31636,7 +31696,8 @@ function receiptStatusText(status) {
             '</div>';
           }).join('');
           const addButton = '<button class="monthly-plan-grid-add-btn" type="button" onclick="openMonthlyPlanGridAddSession(\'' + jsArg(dateKey) + '\', \'' + jsArg(course.id) + '\', \'' + jsArg(currentCenter) + '\')">+ เพิ่มคาบรอ</button>';
-          return '<td><div class="monthly-plan-grid-cell">' + addButton + cards + '</div></td>';
+          const holidayLabel = holiday ? '<div class="monthly-plan-grid-holiday-label">วันหยุด</div>' : '';
+          return '<td class="' + (holiday ? 'monthly-plan-grid-td-holiday' : '') + '"><div class="monthly-plan-grid-cell ' + (holiday ? 'monthly-plan-grid-cell-holiday' : '') + '">' + holidayLabel + addButton + cards + '</div></td>';
         }).join('');
         return '<tr><td><strong>' + escapeHtml(dayLabel) + '</strong></td>' + rowCells + '</tr>';
       }).join('');
@@ -32203,6 +32264,56 @@ function receiptStatusText(status) {
     function getActiveHolidayForSession(session) {
       return (holidays || []).find(function(holiday) {
         return isHolidayForSession(session, holiday);
+      }) || null;
+    }
+
+    function normalizeHolidayMatchText(value) {
+      return String(value || '')
+        .toLowerCase()
+        .replace(/idea\s*club/g, '')
+        .replace(/ศูนย์/g, '')
+        .replace(/[🏬🏫📍]/g, '')
+        .replace(/\s+/g, '')
+        .trim();
+    }
+
+    function getActiveHolidayForCalendarDate(dateText, options) {
+      const dateKey = String(dateText || '').slice(0, 10);
+      if (!dateKey) return null;
+      options = options || {};
+      const contextCenters = []
+        .concat(options.center || [])
+        .concat(options.centers || [])
+        .map(function(value) { return String(value || '').trim(); })
+        .filter(Boolean);
+      const contextCourseIds = []
+        .concat(options.courseId || [])
+        .concat(options.courseIds || [])
+        .map(function(value) { return String(value || '').trim(); })
+        .filter(Boolean);
+      const matchAnyCenter = options.matchAnyCenter === true;
+      const matchAnyCourse = options.matchAnyCourse === true;
+
+      return (holidays || []).find(function(holiday) {
+        if (!holiday || holiday.status === 'cancelled') return false;
+        if (String(holiday.date || '').slice(0, 10) !== dateKey) return false;
+
+        const holidayCenter = String(holiday.center || '').trim();
+        const holidayAllCenters = !holidayCenter || holidayCenter === 'ทั้งหมด' || normalizeHolidayMatchText(holidayCenter) === 'all';
+        const centerMatched = holidayAllCenters || matchAnyCenter || contextCenters.some(function(center) {
+          const holidayText = normalizeHolidayMatchText(holidayCenter);
+          const centerText = normalizeHolidayMatchText(center);
+          return !!holidayText && !!centerText && (holidayText === centerText || holidayText.includes(centerText) || centerText.includes(holidayText));
+        });
+        if (!centerMatched) return false;
+
+        const holidayCourseIds = Array.isArray(holiday.courseIds)
+          ? holiday.courseIds.map(function(value) { return String(value || '').trim(); }).filter(Boolean)
+          : [];
+        const holidayAllCourses = !holiday.appliesTo || holiday.appliesTo === 'all' || !holidayCourseIds.length;
+        return holidayAllCourses || matchAnyCourse || contextCourseIds.some(function(courseId) {
+          return holidayCourseIds.includes(String(courseId || '').trim());
+        });
       }) || null;
     }
 
@@ -32776,6 +32887,15 @@ function receiptStatusText(status) {
       });
     }
 
+    function getStudentHolidayCalendarContext(selectedCourse) {
+      return {
+        center: getCurrentStudentScheduleCenter(selectedCourse),
+        courseId: getCurrentStudentScheduleCourseId(selectedCourse),
+        matchAnyCenter: false,
+        matchAnyCourse: false
+      };
+    }
+
     function getStudentScheduleMonthOptions(sessions) {
       return Array.from(new Set((sessions || []).map(function(session) {
         return getMonthlySessionMonthKey(session);
@@ -32825,30 +32945,36 @@ function receiptStatusText(status) {
         }).sort(function(a, b) { return (a.timeStart || '').localeCompare(b.timeStart || ''); });
         const date = new Date(dateKey + 'T00:00:00');
         const dayLabel = getMonthlyPlanDayText(getMonthlyPlanDayKey(date)) + ' ' + date.getDate() + ' ' + getThaiMonthLabel(dateKey.slice(0, 7), true);
+        const holiday = getActiveHolidayForCalendarDate(dateKey, getStudentHolidayCalendarContext(selectedCourse));
         agendaEl.innerHTML = '<div class="teacher-cal-agenda-header">' + escapeHtml(dayLabel) + '</div>' +
+          (holiday ? '<div class="student-schedule-card student-schedule-card-holiday"><strong>วันหยุด</strong><div class="mini-muted">' + escapeHtml(holiday.name || 'งดเรียน') + '</div></div>' : '') +
           (sessions.length
             ? sessions.map(renderStudentScheduleCard).join('')
-            : '<div class="teacher-cal-agenda-empty">ไม่มีคาบในวันนี้</div>');
+            : (holiday ? '' : '<div class="teacher-cal-agenda-empty">ไม่มีคาบในวันนี้</div>'));
       });
     }
 
     function renderStudentScheduleCalendar(monthKey, sessions) {
+      const selectedCourse = getCurrentStudentCourse();
       const today = getLocalDateString();
       const sessionDates = sessions.map(function(s) { return getMonthlySessionDate(s); }).filter(Boolean).sort();
       const initDate = sessionDates.includes(today) ? today : (sessionDates[0] || today);
       if (!studentCalSelectedDate || !sessionDates.includes(studentCalSelectedDate)) {
         studentCalSelectedDate = initDate;
       }
-      const miniCal = renderTeacherMiniCalendar(monthKey, sessions, studentCalSelectedDate, 'selectStudentCalendarDay');
+      const studentHolidayContext = getStudentHolidayCalendarContext(selectedCourse);
+      const miniCal = renderTeacherMiniCalendar(monthKey, sessions, studentCalSelectedDate, 'selectStudentCalendarDay', studentHolidayContext);
       const agendaSessions = sessions.filter(function(s) {
         return getMonthlySessionDate(s) === studentCalSelectedDate;
       }).sort(function(a, b) { return (a.timeStart || '').localeCompare(b.timeStart || ''); });
       const selDate = new Date(studentCalSelectedDate + 'T00:00:00');
       const dayLabel = getMonthlyPlanDayText(getMonthlyPlanDayKey(selDate)) + ' ' + selDate.getDate() + ' ' + getThaiMonthLabel(studentCalSelectedDate.slice(0, 7), true);
+      const holiday = getActiveHolidayForCalendarDate(studentCalSelectedDate, studentHolidayContext);
       const agendaHtml = '<div class="teacher-cal-agenda-header">' + escapeHtml(dayLabel) + '</div>' +
+        (holiday ? '<div class="student-schedule-card student-schedule-card-holiday"><strong>วันหยุด</strong><div class="mini-muted">' + escapeHtml(holiday.name || 'งดเรียน') + '</div></div>' : '') +
         (agendaSessions.length
           ? agendaSessions.map(renderStudentScheduleCard).join('')
-          : '<div class="teacher-cal-agenda-empty">ไม่มีคาบในวันนี้</div>');
+          : (holiday ? '' : '<div class="teacher-cal-agenda-empty">ไม่มีคาบในวันนี้</div>'));
       return miniCal + '<div id="studentCalAgenda">' + agendaHtml + '</div>';
     }
 
@@ -32966,13 +33092,25 @@ function receiptStatusText(status) {
       }).sort(function(a, b) { return (a.timeStart || '').localeCompare(b.timeStart || ''); });
       const date = new Date(dateKey + 'T00:00:00');
       const dayLabel = getMonthlyPlanDayText(getMonthlyPlanDayKey(date)) + ' ' + date.getDate() + ' ' + getThaiMonthLabel(dateKey.slice(0, 7), true);
+      const holiday = getActiveHolidayForCalendarDate(dateKey, getTeacherHolidayCalendarContext());
       agendaEl.innerHTML = '<div class="teacher-cal-agenda-header">' + escapeHtml(dayLabel) + '</div>' +
+        (holiday ? '<div class="student-schedule-card student-schedule-card-holiday"><strong>วันหยุด</strong><div class="mini-muted">' + escapeHtml(holiday.name || 'งดสอน') + '</div></div>' : '') +
         (sessions.length
           ? sessions.map(renderTeacherScheduleCard).join('')
-          : '<div class="teacher-cal-agenda-empty">ไม่มีคาบในวันนี้</div>');
+          : (holiday ? '' : '<div class="teacher-cal-agenda-empty">ไม่มีคาบในวันนี้</div>'));
     }
 
-    function renderTeacherMiniCalendar(monthKey, sessions, selectedDate, onclickFn) {
+    function getTeacherHolidayCalendarContext() {
+      const keys = getTeacherVisibleSessionCourseKeys();
+      return {
+        centers: keys.centers || [],
+        courseIds: keys.ids || [],
+        matchAnyCenter: !(keys.centers && keys.centers.length),
+        matchAnyCourse: !(keys.ids && keys.ids.length)
+      };
+    }
+
+    function renderTeacherMiniCalendar(monthKey, sessions, selectedDate, onclickFn, holidayContext) {
       if (!onclickFn) onclickFn = 'selectTeacherCalendarDay';
       const days = getMonthlyPlanGridDays(monthKey);
       if (!days.length) return '';
@@ -33006,19 +33144,22 @@ function receiptStatusText(status) {
           if (!date) { html += '<td></td>'; return; }
           const dk = date.getFullYear() + '-' + padNumber(date.getMonth() + 1, 2) + '-' + padNumber(date.getDate(), 2);
           const dots = dayMap[dk] || [];
+          const holiday = getActiveHolidayForCalendarDate(dk, holidayContext || { matchAnyCenter: true, matchAnyCourse: true });
           const isToday = dk === today;
           const isSel = dk === selectedDate;
           let cls = 'teacher-mini-cal-day';
           if (isToday) cls += ' today';
           if (isSel) cls += ' selected';
+          if (holiday) cls += ' teacher-mini-cal-holiday';
           if (!dots.length) cls += ' teacher-mini-cal-empty';
           const dotHtml = dots.length
             ? '<div class="teacher-mini-cal-dots">' + dots.slice(0, 3).map(function(c) {
                 return '<span class="teacher-mini-cal-dot" style="background:' + c + ';"></span>';
               }).join('') + '</div>'
             : '';
-          html += '<td><div class="' + cls + '" data-date="' + dk + '" onclick="' + (dots.length ? onclickFn + '(\'' + dk + '\')' : '') + '">' +
-            date.getDate() + dotHtml + '</div></td>';
+          const holidayHtml = holiday ? '<div class="teacher-mini-cal-holiday-label">วันหยุด</div>' : '';
+          html += '<td><div class="' + cls + '" data-date="' + dk + '" onclick="' + ((dots.length || holiday) ? onclickFn + '(\'' + dk + '\')' : '') + '">' +
+            date.getDate() + holidayHtml + dotHtml + '</div></td>';
         });
         html += '</tr>';
       });
@@ -33048,17 +33189,20 @@ function receiptStatusText(status) {
       if (!teacherCalSelectedDate || !sessionDates.includes(teacherCalSelectedDate)) {
         teacherCalSelectedDate = initDate;
       }
-      const miniCal = renderTeacherMiniCalendar(monthKey, sessions, teacherCalSelectedDate);
+      const teacherHolidayContext = getTeacherHolidayCalendarContext();
+      const miniCal = renderTeacherMiniCalendar(monthKey, sessions, teacherCalSelectedDate, 'selectTeacherCalendarDay', teacherHolidayContext);
       // agenda for selected date
       const agendaSessions = sessions.filter(function(s) {
         return getMonthlySessionDate(s) === teacherCalSelectedDate;
       }).sort(function(a, b) { return (a.timeStart || '').localeCompare(b.timeStart || ''); });
       const selDate = new Date(teacherCalSelectedDate + 'T00:00:00');
       const dayLabel = getMonthlyPlanDayText(getMonthlyPlanDayKey(selDate)) + ' ' + selDate.getDate() + ' ' + getThaiMonthLabel(teacherCalSelectedDate.slice(0, 7), true);
+      const holiday = getActiveHolidayForCalendarDate(teacherCalSelectedDate, teacherHolidayContext);
       const agendaHtml = '<div class="teacher-cal-agenda-header">' + escapeHtml(dayLabel) + '</div>' +
+        (holiday ? '<div class="student-schedule-card student-schedule-card-holiday"><strong>วันหยุด</strong><div class="mini-muted">' + escapeHtml(holiday.name || 'งดสอน') + '</div></div>' : '') +
         (agendaSessions.length
           ? agendaSessions.map(renderTeacherScheduleCard).join('')
-          : '<div class="teacher-cal-agenda-empty">ไม่มีคาบในวันนี้</div>');
+          : (holiday ? '' : '<div class="teacher-cal-agenda-empty">ไม่มีคาบในวันนี้</div>'));
       return miniCal + '<div id="teacherCalAgenda">' + agendaHtml + '</div>';
     }
 
@@ -45348,9 +45492,21 @@ function receiptStatusText(status) {
         const isToday = dateStr === todayStr;
         const isSun = new Date(year, month, d).getDay() === 0;
         const isSat = new Date(year, month, d).getDay() === 6;
-        const dayClass = isToday ? 'border-indigo-400 bg-indigo-50' : 'border-slate-200 bg-white hover:bg-slate-50';
+        const selectedCourseId = tfEl('tf-filter-course') ? tfEl('tf-filter-course').value : 'all';
+        const activeHoliday = getActiveHolidayForCalendarDate(dateStr, {
+          center: tfCenterFilter && tfCenterFilter !== 'all' ? tfCenterFilter : '',
+          courseId: selectedCourseId && selectedCourseId !== 'all' ? selectedCourseId : '',
+          matchAnyCenter: !tfCenterFilter || tfCenterFilter === 'all',
+          matchAnyCourse: !selectedCourseId || selectedCourseId === 'all'
+        });
+        const dayClass = activeHoliday
+          ? 'border-rose-400 bg-rose-100 hover:bg-rose-200 text-rose-900'
+          : (isToday ? 'border-indigo-400 bg-indigo-50' : 'border-slate-200 bg-white hover:bg-slate-50');
         html += '<div onclick="tfShowDayDetail(\'' + dateStr + '\')" class="min-h-28 p-1.5 rounded-lg border ' + dayClass + ' cursor-pointer transition-colors flex flex-col overflow-hidden">' +
-          '<span class="text-xs font-bold block text-right p-0.5 ' + (isToday ? 'text-indigo-600 bg-indigo-100 rounded-full w-5 h-5 flex items-center justify-center ml-auto' : isSun ? 'text-rose-500' : isSat ? 'text-indigo-600' : 'text-slate-600') + '">' + d + '</span>' +
+          '<div class="flex items-start justify-between gap-1">' +
+          (activeHoliday ? '<span class="text-[10px] font-extrabold bg-rose-600 text-white px-1.5 py-0.5 rounded-md truncate">วันหยุด</span>' : '<span></span>') +
+          '<span class="text-xs font-bold p-0.5 ' + (activeHoliday ? 'text-rose-700 bg-white/70 rounded-full w-5 h-5 flex items-center justify-center' : (isToday ? 'text-indigo-600 bg-indigo-100 rounded-full w-5 h-5 flex items-center justify-center' : isSun ? 'text-rose-500' : isSat ? 'text-indigo-600' : 'text-slate-600')) + '">' + d + '</span>' +
+          '</div>' +
           '<div class="space-y-0.5 mt-0.5 flex-1 overflow-y-auto pr-0.5">';
         dayScheds.sort(function(a, b) { return tfGetSessionStartText(a).localeCompare(tfGetSessionStartText(b)); }).forEach(function(s) {
           html += tfScheduleCalendarCardHtml(s, false);
@@ -45410,10 +45566,20 @@ function receiptStatusText(status) {
       if (label) label.textContent = 'วัน' + dayNames[d.getDay()] + ' ที่ ' + d.getDate() + ' ' + TF_MONTH_NAMES[d.getMonth()] + ' ' + (d.getFullYear() + 543);
 
       const all = tfGetMonthSchedules().filter(function(s) { return tfGetSessionDateText(s) === dateStr; });
+      const selectedCourseId = tfEl('tf-filter-course') ? tfEl('tf-filter-course').value : 'all';
+      const activeHoliday = getActiveHolidayForCalendarDate(dateStr, {
+        center: tfCenterFilter && tfCenterFilter !== 'all' ? tfCenterFilter : '',
+        courseId: selectedCourseId && selectedCourseId !== 'all' ? selectedCourseId : '',
+        matchAnyCenter: !tfCenterFilter || tfCenterFilter === 'all',
+        matchAnyCourse: !selectedCourseId || selectedCourseId === 'all'
+      });
+      const holidayBanner = activeHoliday
+        ? '<div class="rounded-xl border border-rose-500 bg-rose-950/60 text-rose-100 p-3 text-sm"><strong>วันหยุด</strong><div class="text-xs text-rose-200 mt-1">' + escapeHtml(activeHoliday.name || 'งดเรียน') + '</div></div>'
+        : '';
       if (!all.length) {
-        content.innerHTML = '<p class="text-xs text-slate-400 text-center py-4">ไม่มีคาบเรียนวันนี้ <button onclick="tfOpenScheduleModal(\'' + dateStr + '\')" class="text-indigo-300 hover:text-indigo-200 font-bold underline bg-transparent border-0 cursor-pointer ml-1">+ เพิ่มคาบรอ</button> · <button onclick="tfOpenHolidayModal(\'' + dateStr + '\')" class="text-rose-400 hover:text-rose-300 font-bold underline bg-transparent border-0 cursor-pointer">🗓 วันหยุด</button></p>';
+        content.innerHTML = holidayBanner + '<p class="text-xs text-slate-400 text-center py-4">ไม่มีคาบเรียนวันนี้ <button onclick="tfOpenScheduleModal(\'' + dateStr + '\')" class="text-indigo-300 hover:text-indigo-200 font-bold underline bg-transparent border-0 cursor-pointer ml-1">+ เพิ่มคาบรอ</button> · <button onclick="tfOpenHolidayModal(\'' + dateStr + '\')" class="text-rose-400 hover:text-rose-300 font-bold underline bg-transparent border-0 cursor-pointer">🗓 วันหยุด</button></p>';
       } else {
-        content.innerHTML = all.sort(function(a, b) { return tfGetSessionStartText(a).localeCompare(tfGetSessionStartText(b)); }).map(function(s) {
+        content.innerHTML = holidayBanner + all.sort(function(a, b) { return tfGetSessionStartText(a).localeCompare(tfGetSessionStartText(b)); }).map(function(s) {
           const colorCls = TF_FORMAT_COLORS[s.format] || 'bg-slate-600';
           const sessionId = s.id;
           return '<div class="bg-slate-800 rounded-xl p-3 space-y-1.5">' +
