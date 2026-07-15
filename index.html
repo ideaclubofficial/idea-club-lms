@@ -45956,6 +45956,8 @@ function receiptStatusText(status) {
       } else {
         tfSyncScheduleFormFromCourse();
       }
+      if (tfEl('tf-sched-cross-center') && tfEl('tf-sched-cross-center').checked) tfSelectDefaultSecondCenter();
+      if (tfEl('tf-sched-shared') && tfEl('tf-sched-shared').checked) tfRenderCombinedGradeOptions();
     }
 
     // --- Open schedule modal ---
@@ -46106,27 +46108,58 @@ function receiptStatusText(status) {
       }
       tfPopulateSchedTutors(fmt);
       tfPopulateSchedCourses();
+      if (tfEl('tf-sched-shared') && tfEl('tf-sched-shared').checked) tfOnSharedClassChange();
       if (!options.skipSync) tfSyncScheduleFormFromCourse({ keepFormat: true });
     }
 
-    function tfOnSharedClassChange() {
-      tfRenderCombinedGradeOptions();
-      tfOnCrossCenterClassChange();
+    function tfSelectDefaultSecondCenter() {
+      const center1 = (tfEl('tf-sched-center') || {}).value || '';
+      const sel2 = tfEl('tf-sched-center2');
+      if (!sel2) return;
+      if (sel2.value && sel2.value !== center1) return;
+      const other = Array.from(sel2.options).find(function(o) { return o.value && o.value !== center1; });
+      if (other) sel2.value = other.value;
     }
 
-    function tfOnCrossCenterClassChange() {
-      const checked = tfEl('tf-sched-cross-center') && tfEl('tf-sched-cross-center').checked;
+    function tfOnSharedClassChange() {
+      const shared = tfEl('tf-sched-shared');
+      const cross = tfEl('tf-sched-cross-center');
+      const fmt = tfGetSelectedSchedFormat();
+      const sharedChecked = !!(shared && shared.checked);
+      if (cross) {
+        if (sharedChecked && tfSupportsCrossCenterClass(fmt)) {
+          cross.checked = true;
+        } else if (!sharedChecked) {
+          cross.checked = false;
+        }
+      }
+      tfOnCrossCenterClassChange({ skipSharedAutoCheck: true });
+      tfRenderCombinedGradeOptions();
+    }
+
+    function tfOnCrossCenterClassChange(options) {
+      options = options || {};
+      const cross = tfEl('tf-sched-cross-center');
+      const checked = cross && cross.checked;
       const wrap = tfEl('tf-shared-center2-wrap');
       const fmt = tfGetSelectedSchedFormat();
+      if (checked && !tfSupportsCrossCenterClass(fmt)) {
+        if (cross) cross.checked = false;
+        if (tfEl('tf-sched-center2')) tfEl('tf-sched-center2').value = '';
+        if (wrap) wrap.classList.add('hidden');
+        return;
+      }
+      if (checked && !options.skipSharedAutoCheck) {
+        const shared = tfEl('tf-sched-shared');
+        if (shared && !shared.checked) {
+          shared.checked = true;
+          tfRenderCombinedGradeOptions();
+        }
+      }
       if (wrap) {
         if (checked && tfSupportsCrossCenterClass(fmt)) {
           wrap.classList.remove('hidden');
-          const center1 = (tfEl('tf-sched-center') || {}).value || '';
-          const sel2 = tfEl('tf-sched-center2');
-          if (sel2 && (!sel2.value || sel2.value === center1)) {
-            const other = Array.from(sel2.options).find(function(o) { return o.value && o.value !== center1; });
-            if (other) sel2.value = other.value;
-          }
+          tfSelectDefaultSecondCenter();
         } else {
           wrap.classList.add('hidden');
           if (tfEl('tf-sched-center2')) tfEl('tf-sched-center2').value = '';
@@ -46403,8 +46436,8 @@ function receiptStatusText(status) {
       const center = tfEl('tf-sched-center') ? tfEl('tf-sched-center').value : '';
       const location = tfEl('tf-sched-location') ? tfEl('tf-sched-location').value.trim() : '';
       const notes = tfEl('tf-sched-notes') ? tfEl('tf-sched-notes').value.trim() : '';
-      const isSharedClass = !!(tfEl('tf-sched-shared') && tfEl('tf-sched-shared').checked);
       const isCrossCenterClass = !!(tfEl('tf-sched-cross-center') && tfEl('tf-sched-cross-center').checked);
+      const isSharedClass = !!(tfEl('tf-sched-shared') && tfEl('tf-sched-shared').checked) || isCrossCenterClass;
       const center2 = isCrossCenterClass && tfEl('tf-sched-center2') ? tfEl('tf-sched-center2').value : '';
       let combinedCourseIds = isSharedClass ? tfGetSelectedCombinedGradeCourseIds() : [];
       let combinedGrades = isSharedClass ? tfGetSelectedCombinedGrades() : [];
@@ -46416,7 +46449,7 @@ function receiptStatusText(status) {
         if (errEl) { errEl.textContent = 'กรุณากรอกข้อมูลที่จำเป็นให้ครบ (ศูนย์, ระดับชั้น, รูปแบบ, วันที่, เวลา)'; errEl.classList.remove('hidden'); }
         return;
       }
-      if (isSharedClass && combinedGrades.length < 2) {
+      if (isSharedClass && !isCrossCenterClass && combinedGrades.length < 2) {
         if (errEl) { errEl.textContent = 'กรุณาเลือกระดับชั้นอย่างน้อย 2 ระดับสำหรับรวมคลาส'; errEl.classList.remove('hidden'); }
         tfRenderCombinedGradeOptions(combinedCourseIds);
         return;
