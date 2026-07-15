@@ -11924,10 +11924,10 @@
       getElement('publicInterface').classList.remove('hidden');
       showAuthSections();
       hideStudentAreas();
-      getElement('loginPassword').value = '';
-      getElement('studentLoginResult').textContent = '';
-      getElement('registerResult').textContent = '';
-      if (!getElement('rememberLogin').checked) getElement('loginUsername').value = '';
+      if (getElement('loginPassword')) getElement('loginPassword').value = '';
+      if (getElement('studentLoginResult')) getElement('studentLoginResult').textContent = '';
+      if (getElement('registerResult')) getElement('registerResult').textContent = '';
+      if (getElement('rememberLogin') && !getElement('rememberLogin').checked && getElement('loginUsername')) getElement('loginUsername').value = '';
       restoreRememberedLogin();
       window.scrollTo({ top: 0, behavior: 'smooth' });
     }
@@ -12507,6 +12507,12 @@
       return left.length && right.length && right.some(function(value) { return left.includes(value); });
     }
 
+    function rosterTextValuesMatch(leftValues, rightValues) {
+      const left = (leftValues || []).map(normalizeTeacherIdentityForMatch).filter(Boolean);
+      const right = (rightValues || []).map(normalizeTeacherIdentityForMatch).filter(Boolean);
+      return left.length && right.length && right.some(function(value) { return left.includes(value); });
+    }
+
     function getCourseAssignedTeacherIdentitySet(course) {
       const values = [];
       if (course) {
@@ -12719,7 +12725,7 @@
       const grades = [];
       const centers = [];
       monthlyPlanSessions.forEach(function(session) {
-        if (!isMonthlySessionPublishedForLearners(session)) return;
+        if (!isMonthlySessionVisibleForTeacherRoster(session)) return;
         if (!isMonthlySessionForTeacher(session, currentTeacher)) return;
         [session.courseId, session.courseDocId, session.courseFirebaseDocId, session.registeredCourseId, session.enrolledCourseId].forEach(function(value) {
           const text = String(value || '').trim();
@@ -12743,6 +12749,13 @@
         });
       });
       return { ids: ids, names: names, studentIds: studentIds, grades: grades, centers: centers };
+    }
+
+    function isMonthlySessionVisibleForTeacherRoster(session) {
+      if (!session || session.deleted === true) return false;
+      const status = String(session.status || '').trim().toLowerCase();
+      if (['cancelled', 'canceled', 'holiday', 'void', 'hidden'].includes(status)) return false;
+      return !isMonthlySessionAwaitingTeacher(session);
     }
 
     function isStudentMatchedByTeacherSessions(student, sessionKeys) {
@@ -12777,7 +12790,7 @@
         course && course.title,
         course && course.courseName
       ].map(function(value) { return String(value || '').trim(); }).filter(Boolean);
-      if ((sessionKeys.names || []).some(function(name) { return studentCourseNames.includes(name); })) return true;
+      if (rosterTextValuesMatch(sessionKeys.names || [], studentCourseNames)) return true;
       const studentGrade = String(student.grade || student.classLevel || student.level || '').trim();
       const studentCenter = getTeacherStudentCenterValue(student);
       return !!(studentGrade && studentCenter && (sessionKeys.grades || []).includes(studentGrade) && (sessionKeys.centers || []).includes(studentCenter));
@@ -12793,7 +12806,7 @@
       const teacherSubject = String(currentTeacher.subject || '').trim();
       const teacherBranch = String(currentTeacher.branch || currentTeacher.preferredLocation || currentTeacher.center || currentTeacher.location || '').trim();
       const teacherCanSeeAll = hasPermission('admin.full') || hasPermission('admin.students') || hasPermission('admin.courses');
-      return students.filter(function(student) {
+      const fallback = students.filter(function(student) {
         if (!isStudentVisibleToTeacher(student)) return false;
         if (isStudentAssignedToTeacher(student, currentTeacher)) return true;
         if (teacherCanSeeAll) return true;
@@ -12808,6 +12821,20 @@
         const studentCenter = getTeacherStudentCenterValue(student);
         return !!(teacherBranch && studentCenter && teacherBranch === studentCenter);
       });
+      if (fallback.length) return fallback;
+      if (hasPermission('teacher.students') && !teacherCanSeeAll && !teacherSubject && !teacherBranch) {
+        const allVisibleStudents = students.filter(isStudentVisibleToTeacher);
+        if (allVisibleStudents.length) {
+          console.warn('teacher-student-roster-last-resort', {
+            teacherId: currentTeacher.teacherId || currentTeacher.id || '',
+            teacherName: currentTeacher.name || '',
+            reason: 'teacher profile has no subject/branch and no direct course/session matches',
+            fallbackCount: allVisibleStudents.length
+          });
+        }
+        return allVisibleStudents;
+      }
+      return fallback;
     }
 
     function getTeacherStudentBaseList(teacherCourses) {
@@ -12842,7 +12869,12 @@
       if (!canOpenTeacherTab('teacher-students')) return false;
       const visibleCourses = getTeacherVisibleCourses();
       const sessionKeys = getTeacherVisibleSessionCourseKeys();
-      return isStudentInTeacherCourseList(student, visibleCourses) || isStudentMatchedByTeacherSessions(student, sessionKeys);
+      if (isStudentInTeacherCourseList(student, visibleCourses) || isStudentMatchedByTeacherSessions(student, sessionKeys)) return true;
+      const visibleStudentIds = getTeacherStudentBaseList(visibleCourses).map(function(item) {
+        return String(item.id || item.firebaseDocId || item.memberId || item.studentId || '').trim();
+      }).filter(Boolean);
+      const targetId = String(student.id || student.firebaseDocId || student.memberId || student.studentId || '').trim();
+      return !!(targetId && visibleStudentIds.includes(targetId));
     }
 
     function populateSelectWithValues(selectIds, values, allLabel) {
@@ -13314,9 +13346,7 @@
     function renderTeacherDashboardSummary() {
       const teacherCourses = getTeacherVisibleCourses();
       const teacherAttendanceCourses = getTeacherAttendanceCourses();
-      const relatedStudents = students.filter(function(s) {
-        return isStudentVisibleToTeacher(s) && isStudentInTeacherCourseList(s, teacherCourses);
-      });
+      const relatedStudents = getTeacherStudentBaseList(teacherCourses);
       const todayText = getLocalDateString();
       const todayClassStudents = students.filter(function(s) {
         return isStudentVisibleToTeacher(s) && isStudentInTeacherCourseList(s, teacherAttendanceCourses) && isStudentEligibleForAttendance(s, todayText);
@@ -13435,7 +13465,7 @@
       const relatedStudents = getTeacherRelatedStudentsForMobile(teacherCourses);
       const todayText = getLocalDateString();
       const todayClassStudents = students.filter(function(s) {
-        return isStudentInTeacherCourseList(s, teacherAttendanceCourses) && isStudentEligibleForAttendance(s, todayText);
+        return isStudentVisibleToTeacher(s) && isStudentInTeacherCourseList(s, teacherAttendanceCourses) && isStudentEligibleForAttendance(s, todayText);
       });
       const absentCount = todayClassStudents.filter(function(s) {
         const status = getStudentAttendanceDisplayStatus(s, todayText);
