@@ -7316,7 +7316,7 @@
                       <i data-lucide="sliders" class="w-5 h-5 text-indigo-600"></i> แผงควบคุม
                     </h2>
                     <button onclick="tfOpenScheduleModal()" class="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold rounded-xl transition-all shadow-md text-sm border-0 cursor-pointer">
-                      <i data-lucide="plus-circle" class="w-4 h-4"></i> เพิ่มคาบ
+                      <i data-lucide="plus-circle" class="w-4 h-4"></i> เพิ่มคาบรอ
                     </button>
                     <button onclick="tfOpenHolidayModal()" class="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-rose-500 hover:bg-rose-600 text-white font-semibold rounded-xl transition-all shadow-md text-sm border-0 cursor-pointer">
                       <i data-lucide="calendar-x" class="w-4 h-4"></i> สร้างวันหยุด
@@ -31080,6 +31080,19 @@ function receiptStatusText(status) {
       }
     }
 
+    function getMonthlyPlanDefaultSlotForDate(courseId, dateText) {
+      const course = courses.find(function(item) {
+        return String(item.id || item.firebaseDocId || '') === String(courseId || '');
+      });
+      if (!course || !dateText) return null;
+      const date = new Date(String(dateText) + 'T00:00:00');
+      if (Number.isNaN(date.getTime())) return null;
+      const dayKey = getMonthlyPlanDayKey(date);
+      return normalizeMonthlyPlanSlotsFromCourseSchedule(course).find(function(slot) {
+        return slot.day === dayKey;
+      }) || null;
+    }
+
     function applyCourseScheduleDefaultsToMonthlyPlanDraft(showMessage) {
       const result = getElement('monthlyPlanGeneratorResult');
       const courseId = getElement('monthlyPlanGeneratorCourse') ? getElement('monthlyPlanGeneratorCourse').value : '';
@@ -31183,19 +31196,40 @@ function receiptStatusText(status) {
 
     function openMonthlyPlanGridAddSession(date, courseId, center) {
       clearMonthlyPlanForm();
+      const course = courses.find(function(item) {
+        return String(item.id || item.firebaseDocId || '') === String(courseId || '');
+      });
+      const slot = getMonthlyPlanDefaultSlotForDate(courseId, date);
       if (getElement('editingMonthlyPlanSessionId')) getElement('editingMonthlyPlanSessionId').value = '';
       if (getElement('monthlyPlanManualAdded')) getElement('monthlyPlanManualAdded').value = 'true';
       setThaiMonthYearPickerValue('monthlyPlanMonth', formatMonthTextFromKey(String(date || '').slice(0, 7)) || '', 'text');
       if (getElement('monthlyPlanDate')) getElement('monthlyPlanDate').value = date || '';
-      if (getElement('monthlyPlanCenter')) getElement('monthlyPlanCenter').value = center || '';
+      if (getElement('monthlyPlanCenter')) getElement('monthlyPlanCenter').value = center || (course ? (course.location || '') : '');
       if (getElement('monthlyPlanCourse')) getElement('monthlyPlanCourse').value = courseId || '';
-      updateMonthlyPlanTeacherOptions();
-      if (getElement('monthlyPlanStatus')) getElement('monthlyPlanStatus').value = 'planned';
-      if (getElement('monthlyPlanType')) getElement('monthlyPlanType').value = 'onsite';
+      if (getElement('monthlyPlanType')) getElement('monthlyPlanType').value = slot ? slot.type : 'onsite';
       updateMonthlyPlanTypeFields();
-      if (getElement('monthlyPlanSaveResult')) getElement('monthlyPlanSaveResult').textContent = '';
+      if (slot && slot.type === 'ondemand') {
+        if (getElement('monthlyPlanTimeStart')) getElement('monthlyPlanTimeStart').value = '';
+        if (getElement('monthlyPlanTimeEnd')) getElement('monthlyPlanTimeEnd').value = '';
+        if (getElement('monthlyPlanPublishTime')) getElement('monthlyPlanPublishTime').value = slot.publishTime || '';
+      } else if (slot) {
+        if (getElement('monthlyPlanTimeStart')) getElement('monthlyPlanTimeStart').value = slot.startTime || '';
+        if (getElement('monthlyPlanTimeEnd')) getElement('monthlyPlanTimeEnd').value = slot.endTime || '';
+        if (getElement('monthlyPlanPublishTime')) getElement('monthlyPlanPublishTime').value = '';
+      }
+      if (getElement('monthlyPlanSubject')) getElement('monthlyPlanSubject').value = getMonthlyCourseSubjectSnapshot(course, course ? (course.name || course.title || '') : '');
+      if (getElement('monthlyPlanTopic')) getElement('monthlyPlanTopic').value = getMonthlyCourseTopicSnapshot(course, course ? (course.name || course.title || '') : '');
+      updateMonthlyPlanTeacherOptions();
+      if (getElement('monthlyPlanTeacher')) getElement('monthlyPlanTeacher').value = '';
+      if (getElement('monthlyPlanStatus')) getElement('monthlyPlanStatus').value = 'draft';
+      syncMonthlyPlanCourseSlotOptions();
+      if (getElement('monthlyPlanSaveResult')) {
+        getElement('monthlyPlanSaveResult').textContent = 'เพิ่มคาบรอจากปฏิทินแล้ว: บันทึกไว้ก่อนได้ หรือเลือกครูเพื่อยืนยันทันที';
+        getElement('monthlyPlanSaveResult').style.color = '#0f4cbd';
+      }
       const form = getElement('admin-monthly-planner');
       if (form) form.scrollIntoView({ behavior: 'smooth' });
+      if (getElement('monthlyPlanTeacher')) setTimeout(function() { getElement('monthlyPlanTeacher').focus(); }, 120);
     }
 
     function renderMonthlyPlanGrid(sessions) {
@@ -31251,7 +31285,7 @@ function receiptStatusText(status) {
               '<div class="grid-card-badges">' + getMonthlyPlanExtraBadges(session) + '</div>' +
             '</div>';
           }).join('');
-          const addButton = '<button class="monthly-plan-grid-add-btn" type="button" onclick="openMonthlyPlanGridAddSession(\'' + jsArg(dateKey) + '\', \'' + jsArg(course.id) + '\', \'' + jsArg(currentCenter) + '\')">+ เพิ่มคาบ</button>';
+          const addButton = '<button class="monthly-plan-grid-add-btn" type="button" onclick="openMonthlyPlanGridAddSession(\'' + jsArg(dateKey) + '\', \'' + jsArg(course.id) + '\', \'' + jsArg(currentCenter) + '\')">+ เพิ่มคาบรอ</button>';
           return '<td><div class="monthly-plan-grid-cell">' + addButton + cards + '</div></td>';
         }).join('');
         return '<tr><td><strong>' + escapeHtml(dayLabel) + '</strong></td>' + rowCells + '</tr>';
@@ -45000,7 +45034,7 @@ function receiptStatusText(status) {
 
       const all = tfGetMonthSchedules().filter(function(s) { return tfGetSessionDateText(s) === dateStr; });
       if (!all.length) {
-        content.innerHTML = '<p class="text-xs text-slate-400 text-center py-4">ไม่มีคาบเรียนวันนี้ <button onclick="tfOpenScheduleModal(\'' + dateStr + '\')" class="text-indigo-300 hover:text-indigo-200 font-bold underline bg-transparent border-0 cursor-pointer ml-1">+ เพิ่มคาบ</button> · <button onclick="tfOpenHolidayModal(\'' + dateStr + '\')" class="text-rose-400 hover:text-rose-300 font-bold underline bg-transparent border-0 cursor-pointer">🗓 วันหยุด</button></p>';
+        content.innerHTML = '<p class="text-xs text-slate-400 text-center py-4">ไม่มีคาบเรียนวันนี้ <button onclick="tfOpenScheduleModal(\'' + dateStr + '\')" class="text-indigo-300 hover:text-indigo-200 font-bold underline bg-transparent border-0 cursor-pointer ml-1">+ เพิ่มคาบรอ</button> · <button onclick="tfOpenHolidayModal(\'' + dateStr + '\')" class="text-rose-400 hover:text-rose-300 font-bold underline bg-transparent border-0 cursor-pointer">🗓 วันหยุด</button></p>';
       } else {
         content.innerHTML = all.sort(function(a, b) { return tfGetSessionStartText(a).localeCompare(tfGetSessionStartText(b)); }).map(function(s) {
           const colorCls = TF_FORMAT_COLORS[s.format] || 'bg-slate-600';
@@ -45021,7 +45055,7 @@ function receiptStatusText(status) {
             (s.completed ? '<span class="text-xs font-bold text-emerald-400">✓ สอนแล้ว</span>' : '<button onclick="tfMarkDone(\'' + sessionId + '\')" class="text-xs text-emerald-400 hover:text-emerald-300 font-bold cursor-pointer bg-transparent border-0">✓ มาร์กว่าสอนแล้ว</button>') +
             '</div></div>';
         }).join('') + '<div class="flex gap-2 mt-2">' +
-          '<button onclick="tfOpenScheduleModal(\'' + dateStr + '\')" class="flex-1 text-xs text-indigo-300 hover:text-indigo-200 font-bold py-2 border border-dashed border-slate-700 rounded-xl cursor-pointer bg-transparent">+ เพิ่มคาบ</button>' +
+          '<button onclick="tfOpenScheduleModal(\'' + dateStr + '\')" class="flex-1 text-xs text-indigo-300 hover:text-indigo-200 font-bold py-2 border border-dashed border-slate-700 rounded-xl cursor-pointer bg-transparent">+ เพิ่มคาบรอ</button>' +
           '<button onclick="tfOpenHolidayModal(\'' + dateStr + '\')" class="flex-1 text-xs text-rose-400 hover:text-rose-300 font-bold py-2 border border-dashed border-rose-800 rounded-xl cursor-pointer bg-transparent">🗓 วันหยุด</button>' +
         '</div>';
       }
@@ -45361,7 +45395,7 @@ function receiptStatusText(status) {
       if (errEl) errEl.classList.add('hidden');
       // Reset modal title
       const titleEl = modal.querySelector('h3');
-      if (titleEl) titleEl.innerHTML = '<i data-lucide="calendar-plus" class="w-5 h-5"></i> บันทึกตารางสอน';
+      if (titleEl) titleEl.innerHTML = '<i data-lucide="calendar-plus" class="w-5 h-5"></i> เพิ่มคาบรอครู';
       tfRenderCourseSyncSummary(null, null);
       modal.classList.remove('hidden');
       if (typeof lucide !== 'undefined') lucide.createIcons();
@@ -45978,7 +46012,7 @@ function receiptStatusText(status) {
     <div class="bg-white rounded-2xl shadow-xl max-w-lg w-full mx-auto my-auto overflow-hidden border border-slate-200" style="margin-top:max(16px,5vh); margin-bottom:max(16px,5vh);">
       <div class="bg-indigo-600 text-white px-6 py-4 flex justify-between items-center">
         <h3 class="font-bold text-lg flex items-center gap-2">
-          <i data-lucide="calendar-plus" class="w-5 h-5"></i> บันทึกตารางสอน
+          <i data-lucide="calendar-plus" class="w-5 h-5"></i> เพิ่มคาบรอครู
         </h3>
         <button onclick="tfCloseScheduleModal()" class="text-white/80 hover:text-white bg-transparent border-0 cursor-pointer">
           <i data-lucide="x" class="w-6 h-6"></i>
