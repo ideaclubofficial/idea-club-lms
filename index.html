@@ -11055,6 +11055,86 @@
       return candidates;
     }
 
+    function isTeacherAuthMatchForUser(teacher, user, fallbackEmail) {
+      if (!teacher || !user) return false;
+      const uid = String(user.uid || '').trim();
+      const email = normalizeLoginCompare(fallbackEmail || (user.email || ''));
+      const teacherUid = String(teacher.authUid || teacher.uid || '').trim();
+      const teacherEmail = normalizeLoginCompare(teacher.authEmail || teacher.email || '');
+      return !!(
+        (uid && teacherUid && uid === teacherUid) ||
+        (email && teacherEmail && email === teacherEmail)
+      );
+    }
+
+    function buildTeacherSessionFromProfile(teacherProfile, fallbackProfile, fallbackEmail, displayLoginId) {
+      const source = teacherProfile || {};
+      const fallback = fallbackProfile || {};
+      const normalizedRole = normalizeAppRole(fallback.appRole || source.appRole || source.role || 'Teacher');
+      return Object.assign({}, source, {
+        linkedTeacherId: fallback.linkedTeacherId || source.linkedTeacherId || source.firebaseDocId || source.id || '',
+        teacherDocId: fallback.teacherDocId || source.teacherDocId || source.firebaseDocId || source.id || fallback.linkedTeacherId || '',
+        linkedTeacherIds: fallback.linkedTeacherIds || source.linkedTeacherIds || source.teacherIds || [],
+        teacherId: fallback.teacherId || source.teacherId || '',
+        oldTeacherId: fallback.oldTeacherId || source.oldTeacherId || '',
+        oldTeacherIds: fallback.oldTeacherIds || source.oldTeacherIds || [],
+        legacyTeacherId: fallback.legacyTeacherId || source.legacyTeacherId || '',
+        legacyTeacherIds: fallback.legacyTeacherIds || source.legacyTeacherIds || [],
+        permissions: Array.isArray(fallback.permissions) && fallback.permissions.length ? fallback.permissions : source.permissions,
+        permissionMode: fallback.permissionMode || source.permissionMode || 'custom',
+        appRole: normalizedRole,
+        role: fallback.role || source.role || (isAdminLikeRole(normalizedRole) ? 'admin' : 'teacher'),
+        status: fallback.status || source.status || 'Active',
+        authUid: firebaseUser ? firebaseUser.uid : (source.authUid || fallback.authUid || ''),
+        teacherUid: source.teacherUid || (firebaseUser ? firebaseUser.uid : ''),
+        email: fallback.email || source.email || fallbackEmail,
+        authEmail: fallback.authEmail || source.authEmail || fallbackEmail,
+        username: fallback.username || source.username || displayLoginId,
+        loginId: fallback.loginId || source.loginId || displayLoginId,
+        phone: fallback.phone || source.phone || displayLoginId,
+        name: fallback.name || source.name || source.displayName || fallbackEmail || 'Teacher'
+      });
+    }
+
+    async function findTeacherProfileForAuthenticatedUser(user, fallbackEmail, preMatchedTeacher) {
+      if (!user) return null;
+      const uid = String(user.uid || '').trim();
+      const email = normalizeLoginCompare(fallbackEmail || (user.email || ''));
+      const localMatch = (Array.isArray(teachers) ? teachers : []).find(function(t) {
+        return isTeacherAuthMatchForUser(t, user, fallbackEmail);
+      });
+      if (localMatch) return localMatch;
+      if (isTeacherAuthMatchForUser(preMatchedTeacher, user, fallbackEmail)) return preMatchedTeacher;
+      if (!firebaseReady || !db || !uid) return null;
+
+      try {
+        const directDoc = await db.collection('teachers').doc(uid).get();
+        if (directDoc.exists) {
+          return Object.assign({ id: directDoc.id, firebaseDocId: directDoc.id }, directDoc.data());
+        }
+      } catch (error) {
+        console.warn('teacher-auth-direct-lookup-skipped', { uid: uid, error: error && (error.code || error.message) });
+      }
+
+      try {
+        const authUidSnapshot = await db.collection('teachers').where('authUid', '==', uid).limit(1).get();
+        if (!authUidSnapshot.empty) {
+          const doc = authUidSnapshot.docs[0];
+          return Object.assign({ id: doc.id, firebaseDocId: doc.id }, doc.data());
+        }
+      } catch (error) {
+        console.warn('teacher-authuid-query-skipped', { uid: uid, error: error && (error.code || error.message) });
+      }
+
+      if (email && Array.isArray(teachers)) {
+        return teachers.find(function(t) {
+          const teacherEmail = normalizeLoginCompare(t.authEmail || t.email || '');
+          return teacherEmail && teacherEmail === email;
+        }) || null;
+      }
+      return null;
+    }
+
     function toggleLoginPassword() {
       const input = getElement('loginPassword');
       if (!input) return;
@@ -11253,15 +11333,32 @@
 
           const firebaseEmail = firebaseUser.email || username;
           const profileDoc = await db.collection('users').doc(firebaseUser.uid).get();
-          if (!profileDoc.exists) {
+          let rawUserProfile = null;
+          if (profileDoc.exists) {
+            rawUserProfile = Object.assign({ uid: firebaseUser.uid, authUid: firebaseUser.uid }, profileDoc.data());
+          } else {
+            const missingUserTeacherProfile = await findTeacherProfileForAuthenticatedUser(firebaseUser, firebaseEmail, preMatchedTeacher);
+            if (missingUserTeacherProfile) {
+              rawUserProfile = buildTeacherUserProfile(missingUserTeacherProfile, firebaseUser.uid);
+              console.warn('login-users-profile-missing-teacher-fallback', {
+                uid: firebaseUser.uid,
+                teacherId: missingUserTeacherProfile.teacherId || '',
+                teacherDocId: missingUserTeacherProfile.firebaseDocId || missingUserTeacherProfile.id || '',
+                loginId: displayLoginId
+              });
+            }
+          }
+          if (!rawUserProfile) {
+            console.warn('login-users-profile-missing-no-teacher-fallback', {
+              uid: firebaseUser.uid,
+              loginId: displayLoginId
+            });
             result.textContent = 'ไม่พบข้อมูลบัญชีผู้ใช้ กรุณาติดต่อเจ้าหน้าที่';
             result.style.color = '#dc2626';
             alert('ไม่พบข้อมูลบัญชีผู้ใช้ กรุณาติดต่อเจ้าหน้าที่');
             await auth.signOut();
             return;
           }
-
-          const rawUserProfile = Object.assign({ uid: firebaseUser.uid, authUid: firebaseUser.uid }, profileDoc.data());
           firebaseUserProfile = normalizeUserAccessProfile(rawUserProfile);
 
           const profileStatus = String(firebaseUserProfile.status || 'active').toLowerCase();
@@ -11270,6 +11367,31 @@
             result.style.color = '#dc2626';
             await auth.signOut();
             return;
+          }
+
+          const fallbackTeacherBeforeCoreLoad = await findTeacherProfileForAuthenticatedUser(firebaseUser, firebaseEmail, preMatchedTeacher);
+          const primaryRoleBeforeCoreLoad = getPrimaryAppRole(firebaseUserProfile);
+          const shouldUseTeacherLoginFallback = fallbackTeacherBeforeCoreLoad
+            && !isStudentAccount(firebaseUserProfile)
+            && !isAdminRole(primaryRoleBeforeCoreLoad)
+            && !isTeacherRole(primaryRoleBeforeCoreLoad);
+          if (shouldUseTeacherLoginFallback) {
+            const teacher = buildTeacherSessionFromProfile(fallbackTeacherBeforeCoreLoad, firebaseUserProfile, firebaseEmail, displayLoginId);
+            const fallbackUserProfile = buildTeacherUserProfile(teacher, firebaseUser.uid);
+            firebaseUserProfile = normalizeUserAccessProfile(Object.assign({}, fallbackUserProfile, {
+              permissions: Array.isArray(firebaseUserProfile.permissions) && firebaseUserProfile.permissions.length
+                ? firebaseUserProfile.permissions
+                : fallbackUserProfile.permissions,
+              permissionMode: firebaseUserProfile.permissionMode || fallbackUserProfile.permissionMode
+            }));
+            console.warn('teacher-login-profile-fallback-before-core-load', {
+              uid: firebaseUser.uid,
+              teacherDocId: teacher.firebaseDocId || teacher.id || '',
+              teacherId: teacher.teacherId || '',
+              originalRole: rawUserProfile && rawUserProfile.role,
+              originalAppRole: rawUserProfile && rawUserProfile.appRole,
+              originalAccountType: rawUserProfile && rawUserProfile.accountType
+            });
           }
 
           const userRole = firebaseUserProfile.role || '';
@@ -11428,6 +11550,32 @@
               teacherId: teacher.teacherId || teacher.id,
               role: teacher.role,
               appRole: teacher.appRole
+            });
+            return;
+          }
+
+          const fallbackTeacherProfile = fallbackTeacherBeforeCoreLoad
+            || await findTeacherProfileForAuthenticatedUser(firebaseUser, firebaseEmail, preMatchedTeacher);
+          if (fallbackTeacherProfile) {
+            const teacher = buildTeacherSessionFromProfile(fallbackTeacherProfile, firebaseUserProfile, firebaseEmail, displayLoginId);
+            const fallbackUserProfile = buildTeacherUserProfile(teacher, firebaseUser.uid);
+            firebaseUserProfile = normalizeUserAccessProfile(Object.assign({}, fallbackUserProfile, {
+              permissions: Array.isArray(firebaseUserProfile.permissions) && firebaseUserProfile.permissions.length
+                ? firebaseUserProfile.permissions
+                : fallbackUserProfile.permissions,
+              permissionMode: firebaseUserProfile.permissionMode || fallbackUserProfile.permissionMode
+            }));
+            currentStudent = null;
+            currentAdmin = null;
+            currentTeacher = teacher;
+            setSessionExpiry();
+            showTeacherPanel(teacher);
+            console.warn('teacher-route-fallback-from-teachers-record', {
+              uid: firebaseUser.uid,
+              teacherId: teacher.teacherId || teacher.id || '',
+              originalRole: userRole,
+              originalAppRole: activeAppRole,
+              originalAccountType: accountType
             });
             return;
           }

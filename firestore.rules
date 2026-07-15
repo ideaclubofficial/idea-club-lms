@@ -15,6 +15,19 @@ service cloud.firestore {
       return get(/databases/$(database)/documents/users/$(uid)).data;
     }
 
+    function teacherProfileExists() {
+      return request.auth != null
+        && exists(/databases/$(database)/documents/teachers/$(request.auth.uid));
+    }
+
+    function ownsTeacherRecord(docId) {
+      return signedIn()
+        && (
+          docId == request.auth.uid
+          || resource.data.authUid == request.auth.uid
+        );
+    }
+
     function isStudentUser() {
       return request.auth != null
         && exists(/databases/$(database)/documents/users/$(request.auth.uid))
@@ -32,11 +45,13 @@ service cloud.firestore {
           get(/databases/$(database)/documents/users/$(request.auth.uid)).data.accountType in ['staff', 'teacher', 'admin']
           || get(/databases/$(database)/documents/users/$(request.auth.uid)).data.appRole in ['SuperAdmin', 'Admin', 'Manager', 'Academic', 'Finance', 'Viewer', 'Teacher', 'Assistant', 'TeacherAdmin', 'AssistantTeacher', 'Staff']
           || get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['admin', 'Admin', 'SuperAdmin', 'teacher', 'Teacher', 'assistant', 'Assistant', 'manager', 'Manager', 'academic', 'Academic']
-        );
+        )
+        || teacherProfileExists();
     }
 
     function isAdmin() {
       return hasStaffAccountType()
+        && userProfileExists()
         && (
           get(/databases/$(database)/documents/users/$(request.auth.uid)).data.appRole in ['SuperAdmin', 'Admin']
           || get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['Admin', 'SuperAdmin']
@@ -53,26 +68,32 @@ service cloud.firestore {
 
     function isTeacher() {
       return signedIn()
-        && userProfileExists()
         && hasStaffAccountType()
         && (
-          userProfile(request.auth.uid).accountType == 'teacher'
-          || userProfile(request.auth.uid).role == 'teacher'
-          || userProfile(request.auth.uid).role == 'Teacher'
-          || userProfile(request.auth.uid).role == 'assistant'
-          || userProfile(request.auth.uid).role == 'Assistant'
-          || userProfile(request.auth.uid).role == 'manager'
-          || userProfile(request.auth.uid).role == 'Manager'
-          || userProfile(request.auth.uid).role == 'academic'
-          || userProfile(request.auth.uid).role == 'Academic'
-          || userProfile(request.auth.uid).role == 'Admin'
-          || userProfile(request.auth.uid).appRole in ['SuperAdmin', 'Admin', 'Manager', 'Academic', 'TeacherAdmin', 'Staff', 'Teacher', 'Assistant', 'AssistantTeacher']
-          || hasAdminPermission('teacher.attendance')
+          teacherProfileExists()
+          || (
+            userProfileExists()
+            && (
+              userProfile(request.auth.uid).accountType == 'teacher'
+              || userProfile(request.auth.uid).role == 'teacher'
+              || userProfile(request.auth.uid).role == 'Teacher'
+              || userProfile(request.auth.uid).role == 'assistant'
+              || userProfile(request.auth.uid).role == 'Assistant'
+              || userProfile(request.auth.uid).role == 'manager'
+              || userProfile(request.auth.uid).role == 'Manager'
+              || userProfile(request.auth.uid).role == 'academic'
+              || userProfile(request.auth.uid).role == 'Academic'
+              || userProfile(request.auth.uid).role == 'Admin'
+              || userProfile(request.auth.uid).appRole in ['SuperAdmin', 'Admin', 'Manager', 'Academic', 'TeacherAdmin', 'Staff', 'Teacher', 'Assistant', 'AssistantTeacher']
+              || hasAdminPermission('teacher.attendance')
+            )
+          )
         );
     }
 
     function hasAdminPermission(permissionKey) {
       return hasStaffAccountType()
+        && userProfileExists()
         && (
           isAdmin()
           || (
@@ -87,6 +108,7 @@ service cloud.firestore {
 
     function hasAnyAdminPermission(permissionKeys) {
       return hasStaffAccountType()
+        && userProfileExists()
         && (
           isAdmin()
           || (
@@ -412,7 +434,7 @@ service cloud.firestore {
     }
 
     match /teachers/{docId} {
-      allow read: if hasStaffAccountType();
+      allow read: if hasStaffAccountType() || ownsTeacherRecord(docId);
       allow create, update: if isAdmin() || canManageTeacherRecord(docId);
       allow delete: if isAdmin();
     }
