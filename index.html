@@ -17240,6 +17240,11 @@
       return map[type] || type || '-';
     }
 
+    function getCourseScheduleTypeOrder(type) {
+      const order = { onsite: 1, online: 2, ondemand: 3 };
+      return order[type] || 99;
+    }
+
     function getCourseScheduleDayKey(value) {
       const raw = String(value || '').trim();
       if (!raw) return '';
@@ -17342,11 +17347,31 @@
       tbody.innerHTML = rows.map(function(slot) { return courseScheduleSlotRowHtml(slot, context); }).join('');
     }
 
+    function sortCourseScheduleRows(tbodyOrContext) {
+      const tbody = typeof tbodyOrContext === 'string' || !tbodyOrContext
+        ? getElement(getCourseScheduleContextId(tbodyOrContext))
+        : tbodyOrContext;
+      if (!tbody) return;
+      Array.from(tbody.querySelectorAll('tr.course-schedule-row')).map(function(row, index) {
+        const typeSelect = row.querySelector('.course-schedule-type');
+        return {
+          row: row,
+          index: index,
+          order: getCourseScheduleTypeOrder(typeSelect ? typeSelect.value : 'onsite')
+        };
+      }).sort(function(a, b) {
+        return a.order - b.order || a.index - b.index;
+      }).forEach(function(item) {
+        tbody.appendChild(item.row);
+      });
+    }
+
     function addCourseScheduleSlot(type, context) {
       const tbody = getElement(getCourseScheduleContextId(context));
       if (!tbody) return;
       const slot = getMonthlyPlanTypeDefaultSlot(type || 'onsite');
       tbody.insertAdjacentHTML('beforeend', courseScheduleSlotRowHtml(slot, context));
+      sortCourseScheduleRows(tbody);
     }
 
     function removeCourseScheduleSlot(button) {
@@ -17368,6 +17393,8 @@
       if (end) {
         end.value = end.value || defaults.endTime || defaults.publishTime || '';
       }
+      const tbody = row.closest ? row.closest('tbody') : null;
+      sortCourseScheduleRows(tbody);
     }
 
     function readCourseScheduleRows(context) {
