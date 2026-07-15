@@ -31724,7 +31724,7 @@ function receiptStatusText(status) {
           });
           const cellSessions = sessions.filter(function(session) {
             return String(getMonthlySessionDate(session) || '') === dateKey && String(session.courseId || '') === course.id;
-          });
+          }).sort(compareMonthlySessionsForDisplay);
           const cards = cellSessions.map(function(session) {
             const id = session.id || session.firebaseDocId || '';
             const sessionType = getMonthlyPlanSessionTypeKey(session);
@@ -31909,8 +31909,8 @@ function receiptStatusText(status) {
     }
 
     function getMonthlySessionTimeRange(session) {
-      const start = session ? (session.timeStart || session.sessionTime || session.publishTime || '') : '';
-      let end = session ? (session.timeEnd || '') : '';
+      const start = session ? (session.timeStart || session.start || session.sessionTime || session.publishTime || '') : '';
+      let end = session ? (session.timeEnd || session.end || '') : '';
       if (!end && session && session.type === 'ondemand' && session.publishTime) {
         const startMinutes = parseTimeToMinutes(session.publishTime);
         end = startMinutes === null ? '' : minutesToTimeText(startMinutes + 60);
@@ -31920,6 +31920,21 @@ function receiptStatusText(status) {
 
     function isMonthlySessionOnDemand(session) {
       return String((session && (session.type || session.format)) || '').trim().toLowerCase() === 'ondemand';
+    }
+
+    function getMonthlySessionDisplayTypeOrder(session) {
+      const typeKey = String((session && (session.type || session.format)) || '').trim();
+      if (typeKey === 'onsite' || typeKey === 'online' || typeKey === 'ondemand') return getCourseScheduleTypeOrder(typeKey);
+      const extraOrder = { oneOnOne: 4, makeup: 5, holiday: 6, cancelled: 7 };
+      return extraOrder[getMonthlyPlanSessionTypeKey(session)] || 99;
+    }
+
+    function compareMonthlySessionsForDisplay(a, b) {
+      return String(getMonthlySessionDate(a) || '').localeCompare(String(getMonthlySessionDate(b) || '')) ||
+        String(getMonthlySessionTimeRange(a).start || '').localeCompare(String(getMonthlySessionTimeRange(b).start || '')) ||
+        getMonthlySessionDisplayTypeOrder(a) - getMonthlySessionDisplayTypeOrder(b) ||
+        String(getMonthlyPlanCourseName(a) || '').localeCompare(String(getMonthlyPlanCourseName(b) || ''), 'th') ||
+        String(getMonthlyPlanTeacherName(a) || '').localeCompare(String(getMonthlyPlanTeacherName(b) || ''), 'th');
     }
 
     function formatMonthlySessionTimeRange(session) {
@@ -32069,9 +32084,7 @@ function receiptStatusText(status) {
         return {
           date: dateKey,
           label: getMonthlyPlannerMobileDateLabel(dateKey),
-          sessions: groups[dateKey].slice().sort(function(a, b) {
-            return String(getMonthlySessionTimeRange(a).start || '').localeCompare(String(getMonthlySessionTimeRange(b).start || ''));
-          })
+          sessions: groups[dateKey].slice().sort(compareMonthlySessionsForDisplay)
         };
       });
     }
@@ -32929,10 +32942,7 @@ function receiptStatusText(status) {
     function getStudentMonthlyPlanSessionsForCalendar(selectedCourse) {
       return (monthlyPlanSessions || []).filter(function(session) {
         return isStudentMonthlyPlanSessionVisible(session, selectedCourse);
-      }).sort(function(a, b) {
-        return String(getMonthlySessionDate(a) || '').localeCompare(String(getMonthlySessionDate(b) || '')) ||
-          String(formatMonthlySessionTimeRange(a) || '').localeCompare(String(formatMonthlySessionTimeRange(b) || ''));
-      });
+      }).sort(compareMonthlySessionsForDisplay);
     }
 
     function getStudentHolidayCalendarContext(selectedCourse) {
@@ -32990,7 +33000,7 @@ function receiptStatusText(status) {
         const selectedCourse = getCurrentStudentCourse();
         const sessions = getStudentMonthlyPlanSessionsForCalendar(selectedCourse).filter(function(s) {
           return getMonthlySessionDate(s) === dateKey;
-        }).sort(function(a, b) { return (a.timeStart || '').localeCompare(b.timeStart || ''); });
+        }).sort(compareMonthlySessionsForDisplay);
         const date = new Date(dateKey + 'T00:00:00');
         const dayLabel = getMonthlyPlanDayText(getMonthlyPlanDayKey(date)) + ' ' + date.getDate() + ' ' + getThaiMonthLabel(dateKey.slice(0, 7), true);
         const holiday = getActiveHolidayForCalendarDate(dateKey, getStudentHolidayCalendarContext(selectedCourse));
@@ -33014,7 +33024,7 @@ function receiptStatusText(status) {
       const miniCal = renderTeacherMiniCalendar(monthKey, sessions, studentCalSelectedDate, 'selectStudentCalendarDay', studentHolidayContext);
       const agendaSessions = sessions.filter(function(s) {
         return getMonthlySessionDate(s) === studentCalSelectedDate;
-      }).sort(function(a, b) { return (a.timeStart || '').localeCompare(b.timeStart || ''); });
+      }).sort(compareMonthlySessionsForDisplay);
       const selDate = new Date(studentCalSelectedDate + 'T00:00:00');
       const dayLabel = getMonthlyPlanDayText(getMonthlyPlanDayKey(selDate)) + ' ' + selDate.getDate() + ' ' + getThaiMonthLabel(studentCalSelectedDate.slice(0, 7), true);
       const holiday = getActiveHolidayForCalendarDate(studentCalSelectedDate, studentHolidayContext);
@@ -33137,7 +33147,7 @@ function receiptStatusText(status) {
         return isMonthlySessionForTeacher(s, currentTeacher) &&
           isMonthlySessionPublishedForLearners(s) &&
           getMonthlySessionDate(s) === dateKey;
-      }).sort(function(a, b) { return (a.timeStart || '').localeCompare(b.timeStart || ''); });
+      }).sort(compareMonthlySessionsForDisplay);
       const date = new Date(dateKey + 'T00:00:00');
       const dayLabel = getMonthlyPlanDayText(getMonthlyPlanDayKey(date)) + ' ' + date.getDate() + ' ' + getThaiMonthLabel(dateKey.slice(0, 7), true);
       const holiday = getActiveHolidayForCalendarDate(dateKey, getTeacherHolidayCalendarContext());
@@ -33242,7 +33252,7 @@ function receiptStatusText(status) {
       // agenda for selected date
       const agendaSessions = sessions.filter(function(s) {
         return getMonthlySessionDate(s) === teacherCalSelectedDate;
-      }).sort(function(a, b) { return (a.timeStart || '').localeCompare(b.timeStart || ''); });
+      }).sort(compareMonthlySessionsForDisplay);
       const selDate = new Date(teacherCalSelectedDate + 'T00:00:00');
       const dayLabel = getMonthlyPlanDayText(getMonthlyPlanDayKey(selDate)) + ' ' + selDate.getDate() + ' ' + getThaiMonthLabel(teacherCalSelectedDate.slice(0, 7), true);
       const holiday = getActiveHolidayForCalendarDate(teacherCalSelectedDate, teacherHolidayContext);
@@ -33596,8 +33606,7 @@ function receiptStatusText(status) {
         const typeMatched = typeFilter === 'ทั้งหมด' || typeKey === typeFilter;
         return status !== 'cancelled' && monthMatched && locationMatched && teacherMatched && courseMatched && typeMatched;
       }).sort(function(a, b) {
-        return String(getMonthlySessionDate(a) || '').localeCompare(String(getMonthlySessionDate(b) || '')) ||
-          String(getMonthlySessionTimeRange(a).start || '').localeCompare(String(getMonthlySessionTimeRange(b).start || ''));
+        return compareMonthlySessionsForDisplay(a, b);
       });
     }
 
@@ -35853,7 +35862,7 @@ function receiptStatusText(status) {
         return monthMatched && courseMatched && statusMatched && centerMatched && teacherMatched && typeMatched;
       });
       const filtered = getMonthlyPlannerIssueFilteredSessions(baseFiltered).sort(function(a, b) {
-        return String(a.date || a.sessionDate || '').localeCompare(String(b.date || b.sessionDate || '')) || String(a.timeStart || a.sessionTime || '').localeCompare(String(b.timeStart || b.sessionTime || ''));
+        return compareMonthlySessionsForDisplay(a, b);
       });
       renderMonthlyPlannerIssueFilterBanner();
 
@@ -45556,7 +45565,7 @@ function receiptStatusText(status) {
           '<span class="text-xs font-bold p-0.5 ' + (activeHoliday ? 'text-rose-700 bg-white/70 rounded-full w-5 h-5 flex items-center justify-center' : (isToday ? 'text-indigo-600 bg-indigo-100 rounded-full w-5 h-5 flex items-center justify-center' : isSun ? 'text-rose-500' : isSat ? 'text-indigo-600' : 'text-slate-600')) + '">' + d + '</span>' +
           '</div>' +
           '<div class="space-y-0.5 mt-0.5 flex-1 overflow-y-auto pr-0.5">';
-        dayScheds.sort(function(a, b) { return tfGetSessionStartText(a).localeCompare(tfGetSessionStartText(b)); }).forEach(function(s) {
+        dayScheds.sort(compareMonthlySessionsForDisplay).forEach(function(s) {
           html += tfScheduleCalendarCardHtml(s, false);
         });
         html += '</div></div>';
@@ -45572,7 +45581,7 @@ function receiptStatusText(status) {
     function tfRenderList() {
       const container = tfEl('tf-list-view');
       if (!container) return;
-      const scheds = tfGetFiltered().sort(function(a, b) { return tfGetSessionDateText(a).localeCompare(tfGetSessionDateText(b)) || tfGetSessionStartText(a).localeCompare(tfGetSessionStartText(b)); });
+      const scheds = tfGetFiltered().sort(compareMonthlySessionsForDisplay);
       if (!scheds.length) {
         container.innerHTML = '<div class="text-center py-12 text-slate-400"><i data-lucide="calendar-x" class="w-12 h-12 mx-auto mb-3 opacity-30"></i><p class="text-sm font-medium">ไม่มีตารางสอนในช่วงที่เลือก</p></div>';
         if (typeof lucide !== 'undefined') lucide.createIcons();
@@ -45627,7 +45636,7 @@ function receiptStatusText(status) {
       if (!all.length) {
         content.innerHTML = holidayBanner + '<p class="text-xs text-slate-400 text-center py-4">ไม่มีคาบเรียนวันนี้ <button onclick="tfOpenScheduleModal(\'' + dateStr + '\')" class="text-indigo-300 hover:text-indigo-200 font-bold underline bg-transparent border-0 cursor-pointer ml-1">+ เพิ่มคาบรอ</button> · <button onclick="tfOpenHolidayModal(\'' + dateStr + '\')" class="text-rose-400 hover:text-rose-300 font-bold underline bg-transparent border-0 cursor-pointer">🗓 วันหยุด</button></p>';
       } else {
-        content.innerHTML = holidayBanner + all.sort(function(a, b) { return tfGetSessionStartText(a).localeCompare(tfGetSessionStartText(b)); }).map(function(s) {
+        content.innerHTML = holidayBanner + all.sort(compareMonthlySessionsForDisplay).map(function(s) {
           const colorCls = TF_FORMAT_COLORS[s.format] || 'bg-slate-600';
           const sessionId = s.id;
           return '<div class="bg-slate-800 rounded-xl p-3 space-y-1.5">' +
@@ -46662,7 +46671,7 @@ function receiptStatusText(status) {
         const isToday = dateStr === todayStr;
         html += '<div onclick="tfPortalSelectDay(\'' + dateStr + '\')" class="min-h-24 p-1.5 rounded-lg border ' + (isToday ? 'border-indigo-400 bg-indigo-50' : 'border-slate-200 bg-white hover:bg-slate-50') + ' cursor-pointer transition-colors flex flex-col overflow-hidden">' +
           '<span class="text-xs font-bold block text-right mb-0.5 ' + (isToday ? 'text-indigo-600' : 'text-slate-600') + '">' + d + '</span><div class="space-y-0.5 flex-1 overflow-y-auto pr-0.5">';
-        daySch.sort(function(a, b) { return tfGetSessionStartText(a).localeCompare(tfGetSessionStartText(b)); }).forEach(function(s) {
+        daySch.sort(compareMonthlySessionsForDisplay).forEach(function(s) {
           html += tfScheduleCalendarCardHtml(tfSessionToSched(s), true);
         });
         html += '</div></div>';
@@ -46682,7 +46691,7 @@ function receiptStatusText(status) {
       const daySch = (monthlyPlanSessions || []).filter(function(s) {
         return activeTutor && isMonthlySessionForTeacher(s, activeTutor) && isMonthlySessionPublishedForLearners(s) &&
           tfGetSessionDateText(s) === dateStr;
-      }).sort(function(a, b) { return tfGetSessionStartText(a).localeCompare(tfGetSessionStartText(b)); });
+      }).sort(compareMonthlySessionsForDisplay);
       if (!daySch.length) {
         info.innerHTML = '<div class="p-4 bg-slate-50 rounded-xl border border-slate-200 text-center py-6 text-slate-400"><p class="text-xs">ไม่มีคาบเรียนในวันที่เลือก</p></div>';
         return;
