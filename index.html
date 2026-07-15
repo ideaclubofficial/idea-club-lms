@@ -12640,13 +12640,47 @@
       return String((student && (student.preferredLocation || student.location || student.center || student.courseLocation)) || (course && (course.location || course.center || course.courseLocation)) || '').trim();
     }
 
+    function getTeacherFallbackStudentList() {
+      if (!currentTeacher) return [];
+      const teacherSubject = String(currentTeacher.subject || '').trim();
+      const teacherBranch = String(currentTeacher.branch || currentTeacher.preferredLocation || currentTeacher.center || currentTeacher.location || '').trim();
+      const teacherCanSeeAll = hasPermission('admin.full') || hasPermission('admin.students') || hasPermission('admin.courses');
+      return students.filter(function(student) {
+        if (!isStudentVisibleToTeacher(student)) return false;
+        if (isStudentAssignedToTeacher(student, currentTeacher)) return true;
+        if (teacherCanSeeAll) return true;
+        const course = getCourseByStudentOrName(student, student.course);
+        const courseSubject = String((course && (course.subject || course.onlineSubject)) || guessSubjectFromCourse((course && (course.name || course.title || course.courseName)) || student.course || '') || '').trim();
+        const subjectMatched = teacherSubject && (
+          teacherSubject === '-' ||
+          courseSubject === teacherSubject ||
+          guessSubjectFromCourse(student.course || '') === teacherSubject
+        );
+        if (subjectMatched) return true;
+        const studentCenter = getTeacherStudentCenterValue(student);
+        return !!(teacherBranch && studentCenter && teacherBranch === studentCenter);
+      });
+    }
+
     function getTeacherStudentBaseList(teacherCourses) {
       const visibleCourses = teacherCourses || getTeacherVisibleCourses();
       const sessionKeys = getTeacherVisibleSessionCourseKeys();
-      return students.filter(function(s) {
+      const matched = students.filter(function(s) {
         if (!isStudentVisibleToTeacher(s)) return false;
         return isStudentInTeacherCourseList(s, visibleCourses) || isStudentMatchedByTeacherSessions(s, sessionKeys);
       });
+      if (matched.length || !currentTeacher) return matched;
+      const fallback = getTeacherFallbackStudentList();
+      if (fallback.length) {
+        console.warn('teacher-student-roster-fallback', {
+          teacherId: currentTeacher.teacherId || currentTeacher.id || '',
+          teacherName: currentTeacher.name || '',
+          subject: currentTeacher.subject || '',
+          branch: currentTeacher.branch || '',
+          fallbackCount: fallback.length
+        });
+      }
+      return fallback;
     }
 
     function isStudentVisibleToTeacher(student) {
