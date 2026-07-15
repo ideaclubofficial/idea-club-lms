@@ -32143,6 +32143,12 @@ function receiptStatusText(status) {
       return !!holidayDate && holidayDate === sessionDate && centerMatched && appliesMatched;
     }
 
+    function getActiveHolidayForSession(session) {
+      return (holidays || []).find(function(holiday) {
+        return isHolidayForSession(session, holiday);
+      }) || null;
+    }
+
     async function applyHolidayToSessions(holiday) {
       if (!holiday) return 0;
       const matched = monthlyPlanSessions.filter(function(session) {
@@ -32150,10 +32156,12 @@ function receiptStatusText(status) {
       });
       const nowText = new Date().toLocaleString('th-TH');
       for (const session of matched) {
-        session.status = 'holiday';
+        session.status = 'cancelled';
         session.isHoliday = true;
         session.holidayName = holiday.name || '';
         session.holidayId = holiday.id || holiday.firebaseDocId || '';
+        session.cancelReason = 'วันหยุด: ' + (holiday.name || '');
+        session.cancelledByHoliday = true;
         session.updatedAtText = nowText;
         await setFirebaseDocument('monthlyPlanSessions', session);
       }
@@ -32207,16 +32215,14 @@ function receiptStatusText(status) {
           result.style.color = '#16a34a';
         }
         addActivityLog('บันทึกวันหยุด', name + ' · ' + date);
-        if (confirm('ต้องการนำวันหยุดนี้ไปใช้กับตารางเรียนที่ตรงกันเลยหรือไม่?')) {
-          try {
-            const count = await applyHolidayToSessions(holiday);
-            if (result) result.textContent = 'บันทึกวันหยุดและ Apply แล้ว ' + count + ' session';
-          } catch (applyError) {
-            console.error('apply holiday error:', applyError);
-            if (result) {
-              result.textContent = 'บันทึกวันหยุดแล้ว แต่ Apply ไม่สำเร็จ: ' + (applyError.message || applyError.code || applyError);
-              result.style.color = '#dc2626';
-            }
+        try {
+          const count = await applyHolidayToSessions(holiday);
+          if (result) result.textContent = 'บันทึกวันหยุดและยกเลิกตารางที่ตรงกันแล้ว ' + count + ' คาบ';
+        } catch (applyError) {
+          console.error('apply holiday error:', applyError);
+          if (result) {
+            result.textContent = 'บันทึกวันหยุดแล้ว แต่ยกเลิกตารางไม่สำเร็จ: ' + (applyError.message || applyError.code || applyError);
+            result.style.color = '#dc2626';
           }
         }
         return holiday;
@@ -32236,13 +32242,13 @@ function receiptStatusText(status) {
       try {
         const count = await applyHolidayToSessions(holiday);
         if (getElement('holidaySaveResult')) {
-          getElement('holidaySaveResult').textContent = 'Apply วันหยุดแล้ว ' + count + ' session';
+          getElement('holidaySaveResult').textContent = 'ยกเลิกตารางตามวันหยุดแล้ว ' + count + ' คาบ';
           getElement('holidaySaveResult').style.color = '#16a34a';
         }
       } catch (error) {
         console.error('apply holiday error:', error);
         if (getElement('holidaySaveResult')) {
-          getElement('holidaySaveResult').textContent = 'Apply วันหยุดไม่สำเร็จ: ' + (error.message || error.code || error);
+          getElement('holidaySaveResult').textContent = 'ยกเลิกตารางตามวันหยุดไม่สำเร็จ: ' + (error.message || error.code || error);
           getElement('holidaySaveResult').style.color = '#dc2626';
         }
       }
@@ -46028,6 +46034,10 @@ function receiptStatusText(status) {
             const candidate = tfBuildPendingMonthlySessionFromCourse(course, slot, dateText, center);
             candidate.createdAtText = nowText;
             candidate.updatedAtText = nowText;
+            if (getActiveHolidayForSession(candidate)) {
+              result.skipped += 1;
+              return;
+            }
             const signature = tfPendingMonthlySessionSignature(candidate);
             if (tfIsDuplicatePendingMonthlySession(candidate) || pendingSignatures[signature]) {
               result.skipped += 1;
@@ -46225,17 +46235,15 @@ function receiptStatusText(status) {
         safeRun(renderTeacherMonthlyPlanSummary, 'tf-holiday-teacher-refresh');
         safeRun(updateStudentCourseDisplay, 'tf-holiday-student-display');
         addActivityLog('บันทึกวันหยุด (จากปฏิทิน)', name + ' · ' + date);
-        if (confirm('ต้องการ Apply วันหยุดนี้ไปยังตารางเรียนที่ตรงกันด้วยหรือไม่?')) {
-          try {
-            const count = await applyHolidayToSessions(holiday);
-            tfToast('Apply วันหยุดแล้ว ' + count + ' session', 'success');
-            tfRenderSchedule();
-            safeRun(renderStudentMonthlyPlanSummary, 'tf-holiday-student-after-apply');
-            safeRun(renderTeacherMonthlyPlanSummary, 'tf-holiday-teacher-after-apply');
-            safeRun(updateStudentCourseDisplay, 'tf-holiday-student-display2');
-          } catch (applyErr) {
-            tfToast('Apply ไม่สำเร็จ: ' + (applyErr.message || applyErr), 'error');
-          }
+        try {
+          const count = await applyHolidayToSessions(holiday);
+          tfToast('บันทึกวันหยุดและยกเลิกตารางแล้ว ' + count + ' คาบ', 'success');
+          tfRenderSchedule();
+          safeRun(renderStudentMonthlyPlanSummary, 'tf-holiday-student-after-apply');
+          safeRun(renderTeacherMonthlyPlanSummary, 'tf-holiday-teacher-after-apply');
+          safeRun(updateStudentCourseDisplay, 'tf-holiday-student-display2');
+        } catch (applyErr) {
+          tfToast('บันทึกวันหยุดแล้ว แต่ยกเลิกตารางไม่สำเร็จ: ' + (applyErr.message || applyErr), 'error');
         }
       } catch (err) {
         console.error('tfSaveHolidayFromPlanner error:', err);
