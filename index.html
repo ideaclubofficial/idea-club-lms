@@ -11120,6 +11120,33 @@
       });
     }
 
+    function buildTeacherSessionFromUserProfile(userProfile, teacherProfile, fallbackEmail, displayLoginId) {
+      const source = teacherProfile || {
+        id: firebaseUser ? firebaseUser.uid : '',
+        authUid: firebaseUser ? firebaseUser.uid : '',
+        name: userProfile && (userProfile.name || userProfile.displayName) || fallbackEmail || 'Teacher',
+        subject: userProfile && userProfile.subject || '-',
+        username: userProfile && (userProfile.username || userProfile.phone) || fallbackEmail || displayLoginId,
+        email: fallbackEmail,
+        status: userProfile && userProfile.status || 'Active',
+        role: userProfile && (userProfile.role || userProfile.appRole) || 'teacher'
+      };
+      return buildTeacherSessionFromProfile(source, userProfile || {}, fallbackEmail, displayLoginId);
+    }
+
+    function refreshTeacherPanelAfterCoreLoad(teacherProfile, userProfile, fallbackEmail, displayLoginId) {
+      if (!teacherProfile || isCurrentStudentSession()) return;
+      currentTeacher = buildTeacherSessionFromProfile(teacherProfile, userProfile || firebaseUserProfile || {}, fallbackEmail, displayLoginId);
+      renderTeacherCourseOptions();
+      applyRoleAccessToUI();
+      safeRun(renderTeacherStudents, 'teacher-students-after-core-load');
+      safeRun(renderTeacherDashboardSummary, 'teacher-dashboard-after-core-load');
+      safeRun(renderTeacherOnlineClasses, 'teacher-online-after-core-load');
+      safeRun(renderTeacherPrivateLessons, 'teacher-private-lessons-after-core-load');
+      safeRun(renderTeacherMobileHome, 'teacher-mobile-home-after-core-load');
+      safeRun(renderTeacherMobileStudents, 'teacher-mobile-students-after-core-load');
+    }
+
     async function findTeacherProfileForAuthenticatedUser(user, fallbackEmail, preMatchedTeacher) {
       if (!user) return null;
       const uid = String(user.uid || '').trim();
@@ -11484,6 +11511,32 @@
             setSessionExpiry();
             studentLogin(student.memberId || student.studentId || displayLoginId);
             firebaseUserProfile = sanitizedStudentUserProfile;
+            return;
+          }
+
+          const primaryRoleBeforeCoreData = getPrimaryAppRole(firebaseUserProfile);
+          if (isPrimaryTeacherOnlyRole(firebaseUserProfile) || (isTeacherRole(primaryRoleBeforeCoreData) && !isAdminRole(primaryRoleBeforeCoreData))) {
+            const teacher = buildTeacherSessionFromUserProfile(firebaseUserProfile, fallbackTeacherBeforeCoreLoad, firebaseEmail, displayLoginId);
+            currentStudent = null;
+            currentAdmin = null;
+            currentTeacher = teacher;
+            setSessionExpiry();
+            showTeacherPanel(teacher);
+            console.log('teacher-route-direct-before-core-load', {
+              uid: firebaseUser.uid,
+              role: userRole,
+              appRole: activeAppRole,
+              accountType: accountType,
+              teacherId: teacher.teacherId || teacher.id || '',
+              hasTeacherProfile: !!fallbackTeacherBeforeCoreLoad
+            });
+            ensureCoreDataLoaded({ force: true }).then(function() {
+              return findTeacherProfileForAuthenticatedUser(firebaseUser, firebaseEmail, preMatchedTeacher);
+            }).then(function(refreshedTeacherProfile) {
+              refreshTeacherPanelAfterCoreLoad(refreshedTeacherProfile || teacher, firebaseUserProfile, firebaseEmail, displayLoginId);
+            }).catch(function(error) {
+              console.warn('teacher-core-data-load-after-login-skipped', error);
+            });
             return;
           }
 
