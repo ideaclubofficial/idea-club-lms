@@ -9606,6 +9606,15 @@
       return (ROLE_DEFINITIONS[normalized] && ROLE_DEFINITIONS[normalized].permissions ? ROLE_DEFINITIONS[normalized].permissions : []).slice();
     }
 
+    function getTeacherBaselinePermissions(record) {
+      if (!record || isStudentAccount(record)) return [];
+      const accountType = String(record.accountType || '').trim().toLowerCase();
+      const role = normalizeAppRole(record.appRole || record.role || '');
+      if (accountType === 'teacher' || role === 'Teacher') return getDefaultPermissionsForRole('Teacher');
+      if (role === 'Assistant') return getDefaultPermissionsForRole('Assistant');
+      return [];
+    }
+
     function isAdminLikeRole(role) {
       const permissions = getDefaultPermissionsForRole(role);
       return permissions.some(function(key) { return key.indexOf('admin.') === 0; });
@@ -9715,11 +9724,14 @@
         return [];
       }
       const role = normalizeAppRole(source.appRole || source.role || getCurrentAppRole());
+      const teacherBaseline = getTeacherBaselinePermissions(source);
       if (source.permissionMode === 'custom' && Array.isArray(source.permissions)) {
-        return normalizePermissionsForRole(role, source.permissions);
+        return Array.from(new Set(normalizePermissionsForRole(role, source.permissions).concat(teacherBaseline)));
       }
-      if (Array.isArray(source.permissions) && source.permissions.length) return source.permissions.slice();
-      return getDefaultPermissionsForRole(role);
+      if (Array.isArray(source.permissions) && source.permissions.length) {
+        return Array.from(new Set(source.permissions.concat(teacherBaseline)));
+      }
+      return Array.from(new Set(getDefaultPermissionsForRole(role).concat(teacherBaseline)));
     }
 
     function normalizePermissionsForRole(role, permissions) {
@@ -9812,6 +9824,13 @@
       return isTeacherRole(role) || isAdminRole(role);
     }
 
+    function isTeacherSessionRecord(record) {
+      if (!record || typeof record !== 'object' || isStudentAccount(record)) return false;
+      const accountType = String(record.accountType || '').trim().toLowerCase();
+      const role = getPrimaryAppRole(record);
+      return accountType === 'teacher' || isTeacherRole(role);
+    }
+
     function isKnownAccessRole(role) {
       const value = String(role || '').trim();
       if (!value) return false;
@@ -9895,7 +9914,12 @@
 
     function canOpenTeacherTab(tabId) {
       const permission = TEACHER_TAB_PERMISSIONS[tabId];
-      if (tabId === 'teacher-students' && isTeacherRole(getPrimaryAppRole(getActiveAccessRecord()))) return true;
+      const activeRecord = getActiveAccessRecord();
+      const primaryRole = getPrimaryAppRole(activeRecord);
+      const accountType = String(activeRecord.accountType || '').trim().toLowerCase();
+      if (accountType === 'teacher' || isTeacherRole(primaryRole)) {
+        if (['teacher-profile', 'teacher-dashboard', 'teacher-students'].includes(tabId)) return true;
+      }
       return !permission || hasPermission(permission);
     }
 
@@ -10530,7 +10554,7 @@
       const studentLink = getElement('superAdminStudentLink');
       if (studentLink) studentLink.classList.add('hidden');
       if (teacherLink) {
-        teacherLink.classList.toggle('hidden', isStudent || !hasPermission('teacher.dashboard'));
+        teacherLink.classList.toggle('hidden', isStudent || (!isTeacherSessionRecord(activeRecord) && !hasPermission('teacher.dashboard')));
       }
       if (adminLink) {
         const canOpenAnyAdminTab = Object.keys(ADMIN_TAB_PERMISSIONS).some(canOpenAdminTab);
@@ -12405,11 +12429,12 @@
       getElement('profilePanel').classList.add('hidden');
       renderTeacherCourseOptions();
       applyRoleAccessToUI();
-      showTeacherTab(findFirstAllowedTeacherTab());
+      showTeacherTab(findFirstAllowedTeacherTab(), { silent: true });
       window.scrollTo({ top: 0, behavior: 'smooth' });
     }
 
-    function showTeacherTab(tabId) {
+    function showTeacherTab(tabId, options) {
+      options = options || {};
       if (!canOpenTeacherTab(tabId)) {
         const fallback = findFirstAllowedTeacherTab();
         const permissions = getEffectivePermissions();
@@ -12425,8 +12450,8 @@
           authUid: firebaseUser && firebaseUser.uid
         });
         if (fallback && fallback !== tabId) {
-          alert('บัญชีนี้ไม่มีสิทธิ์เข้าเมนูนี้');
-          showTeacherTab(fallback);
+          if (!options.silent) alert('บัญชีนี้ไม่มีสิทธิ์เข้าเมนูนี้');
+          showTeacherTab(fallback, { silent: true });
         }
         return;
       }
