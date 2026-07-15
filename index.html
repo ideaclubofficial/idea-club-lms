@@ -20528,7 +20528,7 @@
       const profile = getCurrentStudentGamificationProfile();
       const reward = getAvatarBattleRewardForResult(state, profile, won);
       state.rewardSaving = true;
-      renderStudentGamificationPanel();
+      renderAvatarBattlePanelAndKeepView();
       try {
         await saveAvatarBattleDailyReward(profile, reward);
         if (reward.exp > 0 || reward.coins > 0) {
@@ -20545,7 +20545,7 @@
         state.rewardSaving = false;
         state.rewardText = 'บันทึกรางวัลไม่สำเร็จ กรุณาลองเล่นใหม่เมื่ออินเทอร์เน็ตพร้อม';
       }
-      renderStudentGamificationPanel();
+      renderAvatarBattlePanelAndKeepView();
     }
 
     function resolveAvatarBattleAction(action) {
@@ -20572,11 +20572,11 @@
         state.log += ' · ชนะแล้ว!';
         advanceAvatarBattleMonsterStage(state);
         finishAvatarBattleRound(true);
-        renderStudentGamificationPanel();
+        renderAvatarBattlePanelAndKeepView();
         return;
       }
       avatarBattleApplyMonsterCounter(state, stats, state.log, action !== 'skill');
-      renderStudentGamificationPanel();
+      renderAvatarBattlePanelAndKeepView();
     }
 
     function avatarBattlePlayerAction(action) {
@@ -20591,7 +20591,7 @@
       state.questionFeedback = action === 'skill' ? 'ตอบถูกเพื่อใช้สกิลแรงขึ้น' : 'ตอบถูกเพื่อโจมตี';
       state.questionFeedbackType = '';
       state.log = 'ตอบโจทย์ก่อนจึงจะ' + (action === 'skill' ? 'ใช้สกิล' : 'โจมตี') + 'ได้';
-      renderStudentGamificationPanel();
+      renderAvatarBattlePanelAndKeepView();
     }
 
     function submitAvatarBattleAnswer(triggerEl) {
@@ -20608,7 +20608,7 @@
       if (!raw || !Number.isFinite(answer)) {
         state.questionFeedback = 'กรอกคำตอบเป็นตัวเลขก่อนนะ';
         state.questionFeedbackType = 'bad';
-        renderStudentGamificationPanel();
+        renderAvatarBattlePanelAndKeepView();
         return;
       }
       const correct = Number(state.pendingQuestion.answer);
@@ -20624,7 +20624,7 @@
       state.questionFeedbackType = 'bad';
       const stats = getAvatarBattlePlayerStats(profile);
       avatarBattleApplyMonsterCounter(state, stats, 'ตอบผิด โจมตีไม่ออก', true);
-      renderStudentGamificationPanel();
+      renderAvatarBattlePanelAndKeepView();
     }
 
     function avatarBattleAnswerKeydown(event, inputEl) {
@@ -20636,7 +20636,21 @@
 
     function startAvatarBattleGame() {
       resetAvatarBattleState();
+      renderAvatarBattlePanelAndKeepView();
+    }
+
+    function renderAvatarBattlePanelAndKeepView() {
+      const shouldKeepBattleInView = typeof window !== 'undefined' && window.innerWidth <= 768;
       renderStudentGamificationPanel();
+      if (!shouldKeepBattleInView) return;
+      window.setTimeout(function() {
+        const mobilePanel = getElement('studentMobileGamificationPanel');
+        const target = (mobilePanel && mobilePanel.querySelector('.student-avatar-battle')) ||
+          (getElement('studentGamificationPanel') && getElement('studentGamificationPanel').querySelector('.student-avatar-battle'));
+        if (target && target.scrollIntoView) {
+          target.scrollIntoView({ behavior: 'auto', block: 'start' });
+        }
+      }, 0);
     }
 
     function renderAvatarBattleHp(current, max) {
