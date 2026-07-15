@@ -20400,33 +20400,50 @@
       return Math.floor(Math.random() * (hi - lo + 1)) + lo;
     }
 
-    function avatarBattleGenerateQuestion(profile, action) {
+    function avatarBattleGenerateQuestion(profile, action, state) {
       const level = Math.max(1, Number(profile && profile.level) || 1);
+      const stageIndex = getAvatarBattleMonsterStageIndex(state && state.monster ? state.monster.stageIndex : (state && state.monsterStageIndex));
+      const stageLevel = stageIndex + 1;
       const hard = action === 'skill';
-      const maxAdd = Math.min(hard ? 60 : 35, (hard ? 16 : 10) + level * (hard ? 4 : 3));
-      const maxMult = Math.min(hard ? 12 : 9, (hard ? 5 : 4) + Math.floor(level / 3));
-      const ops = hard ? ['+', '-', 'x'] : (level >= 3 ? ['+', '-', 'x'] : ['+', '-']);
+      const maxAdd = Math.min(hard ? 95 : 70, 8 + level * (hard ? 4 : 3) + stageLevel * (hard ? 16 : 11));
+      const maxMult = Math.min(hard ? 14 : 12, 3 + Math.floor(level / 3) + stageLevel * 2 + (hard ? 2 : 0));
+      const ops = stageLevel === 1
+        ? (hard ? ['+', '-', 'x'] : ['+', '-'])
+        : stageLevel === 2
+          ? (hard ? ['+', '-', 'x', 'x'] : ['+', '-', 'x'])
+          : (hard ? ['+', '-', 'x', 'mix', 'mix'] : ['+', '-', 'x', 'mix']);
       const op = ops[avatarBattleRandomInt(0, ops.length - 1)];
       let a = 0;
       let b = 0;
+      let c = 0;
       let answer = 0;
+      let prompt = '';
       if (op === '+') {
         a = avatarBattleRandomInt(2, maxAdd);
         b = avatarBattleRandomInt(2, maxAdd);
         answer = a + b;
+        prompt = a + ' + ' + b + ' = ?';
       } else if (op === '-') {
-        a = avatarBattleRandomInt(8, maxAdd + (hard ? 20 : 10));
+        a = avatarBattleRandomInt(8 + stageLevel * 4, maxAdd + (hard ? 24 : 12));
         b = avatarBattleRandomInt(1, Math.max(1, a - 1));
         answer = a - b;
+        prompt = a + ' - ' + b + ' = ?';
+      } else if (op === 'mix') {
+        a = avatarBattleRandomInt(2 + stageIndex, maxMult);
+        b = avatarBattleRandomInt(2 + stageIndex, maxMult);
+        c = avatarBattleRandomInt(3, Math.min(maxAdd, hard ? 34 : 24));
+        answer = a * b + c;
+        prompt = a + ' x ' + b + ' + ' + c + ' = ?';
       } else {
-        a = avatarBattleRandomInt(2, maxMult);
+        a = avatarBattleRandomInt(2 + Math.floor(stageIndex / 2), maxMult);
         b = avatarBattleRandomInt(2, hard ? Math.min(12, maxMult + 2) : maxMult);
         answer = a * b;
+        prompt = a + ' x ' + b + ' = ?';
       }
       return {
-        prompt: a + ' ' + op + ' ' + b + ' = ?',
+        prompt: prompt,
         answer: answer,
-        difficulty: hard ? 'สกิล: โจทย์ยากขึ้น' : 'โจมตี: โจทย์ง่าย'
+        difficulty: 'Stage ' + stageLevel + (stageLevel === 3 ? ' Boss' : '') + ' · ' + (hard ? 'สกิลยากขึ้น' : 'โจมตี')
       };
     }
 
@@ -20568,7 +20585,7 @@
       const state = getAvatarBattleState(profile);
       if (!state || state.status !== 'active' || state.rewardSaving) return;
       if (action === 'skill' && state.skillCooldown > 0) return;
-      state.pendingQuestion = avatarBattleGenerateQuestion(profile, action);
+      state.pendingQuestion = avatarBattleGenerateQuestion(profile, action, state);
       state.pendingAction = action;
       state.battleSceneEffect = 'idle';
       state.questionFeedback = action === 'skill' ? 'ตอบถูกเพื่อใช้สกิลแรงขึ้น' : 'ตอบถูกเพื่อโจมตี';
