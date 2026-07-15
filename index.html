@@ -43220,7 +43220,7 @@ function receiptStatusText(status) {
             actionHtml = '<button class="btn btn-green" onclick="startOnlineExam(\'' + c.firebaseDocId + '\')" style="width:100%;font-size:13px;">' + btnLabel + '</button>';
           }
 
-          return '<div style="background:#fff;border:1.5px solid #e2e8f0;border-radius:14px;padding:16px;">' +
+          return '<div id="' + onlineExamCourseCardId(c.firebaseDocId) + '" style="background:#fff;border:1.5px solid #e2e8f0;border-radius:14px;padding:16px;scroll-margin-top:110px;transition:border-color .2s,box-shadow .2s;">' +
             '<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:6px;">' +
               '<p style="font-size:11px;font-weight:700;color:#4f46e5;text-transform:uppercase;letter-spacing:.05em;margin:0;">คอร์สสอบ</p>' +
               (statusHtml ? statusHtml : '') +
@@ -43268,6 +43268,10 @@ function receiptStatusText(status) {
     }
 
     function viewStudentExamResult() { /* ไม่แสดงคะแนนให้นักเรียน */ }
+
+    function onlineExamCourseCardId(courseId) {
+      return 'onlineExamCourseCard_' + String(courseId || '').replace(/[^A-Za-z0-9_-]/g, '_');
+    }
 
     async function startOnlineExam(courseId) {
       if (!studentCanUseCourseEntitlements(currentStudent)) {
@@ -43654,20 +43658,15 @@ function receiptStatusText(status) {
       onlineExamStopAutosave();
       onlineExamDeleteDraft(onlineExamActiveCourseId);
 
-      // Show Phase 3
-      const examView = getElement('onlineExamActiveExam');
-      const resultView = getElement('onlineExamResultView');
-      if (examView) examView.style.display = 'none';
-      if (resultView) resultView.style.display = '';
-
       window.dispatchEvent(new CustomEvent('onlineExamSubmitted', { detail: payload }));
+      await showOnlineExamSubmittedCourse(onlineExamActiveCourseId);
     }
 
-    function backToOnlineExamCourseGrid() {
+    async function showOnlineExamSubmittedCourse(courseId) {
       onlineExamSubmitting = false;
       if (onlineExamTimerHandle) { clearInterval(onlineExamTimerHandle); onlineExamTimerHandle = null; }
       onlineExamStopAutosave();
-      if (onlineExamActiveCourseId) onlineExamDeleteDraft(onlineExamActiveCourseId);
+      if (courseId) onlineExamDeleteDraft(courseId);
       onlineExamStudentAnswers = {};
       onlineExamQuestionOrder = [];
       onlineExamChoiceOrder = {};
@@ -43682,8 +43681,30 @@ function receiptStatusText(status) {
       const stickyBar = getElement('onlineExamStickySubmit');
       if (stickyBar) stickyBar.style.display = 'none';
       // Reload grid to reflect updated result status
-      safeRun(renderOnlineExamCourseGrid, 'online-exam-grid-refresh');
+      try {
+        await renderOnlineExamCourseGrid();
+      } catch (e) {
+        console.error('online exam grid refresh after submit failed', e);
+      }
       if (result) result.style.display = 'none';
+
+      setTimeout(function() {
+        const card = getElement(onlineExamCourseCardId(courseId));
+        const target = card || grid;
+        if (target) target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        if (card) {
+          card.style.borderColor = '#10b981';
+          card.style.boxShadow = '0 0 0 3px rgba(16,185,129,.16)';
+          setTimeout(function() {
+            card.style.borderColor = '#e2e8f0';
+            card.style.boxShadow = '';
+          }, 1600);
+        }
+      }, 80);
+    }
+
+    function backToOnlineExamCourseGrid() {
+      safeRun(function() { return showOnlineExamSubmittedCourse(onlineExamActiveCourseId); }, 'online-exam-grid-return');
     }
 
     // helper shim in case setValue doesn't cover simple textContent setters
