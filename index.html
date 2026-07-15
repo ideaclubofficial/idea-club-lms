@@ -8605,6 +8605,7 @@
       const gamificationProfileQueries = buildStudentOwnedQueries('studentGamificationProfiles');
       const gamificationEventQueries = buildStudentOwnedQueries('studentGamificationEvents');
       const personalQuestQueries = buildStudentOwnedQueries('studentPersonalQuests');
+      const prizeWheelSpinQueries = buildStudentOwnedQueries('prizeWheelSpins');
 
       const paymentUnsubs = paymentsQueries.map(function(q) {
         return q.onSnapshot(function(snapshot) {
@@ -8654,6 +8655,14 @@
         }, function(err) { console.warn('studentPersonalQuests listener error:', err); });
       });
 
+      const prizeWheelSpinUnsubs = prizeWheelSpinQueries.map(function(q) {
+        return q.onSnapshot(function(snapshot) {
+          if (snapshot.metadata && snapshot.metadata.hasPendingWrites) return;
+          const changes = snapshot.docChanges();
+          if (applyDocChanges(prizeWheelSpins, changes)) refreshStudentUI();
+        }, function(err) { console.warn('prizeWheelSpins listener error:', err); });
+      });
+
       // Real-time listener for gamificationRedemptions — authUid only (studentId query blocked by Firestore rules for students)
       const redemptionQuery = (authUid && firebaseReady && db)
         ? db.collection('gamificationRedemptions').where('authUid', '==', String(authUid))
@@ -8668,7 +8677,7 @@
       studentReceiptsUnsubscribe = function() { receiptUnsubs.forEach(function(u) { try { u(); } catch(e) {} }); };
       studentPaymentBundlesUnsubscribe = function() { bundleUnsubs.forEach(function(u) { try { u(); } catch(e) {} }); };
       studentGamificationUnsubscribe = function() {
-        gamificationProfileUnsubs.concat(gamificationEventUnsubs, personalQuestUnsubs).forEach(function(u) { try { u(); } catch(e) {} });
+        gamificationProfileUnsubs.concat(gamificationEventUnsubs, personalQuestUnsubs, prizeWheelSpinUnsubs).forEach(function(u) { try { u(); } catch(e) {} });
         try { redemptionUnsub(); } catch(e) {}
       };
     }
@@ -22769,8 +22778,8 @@
       const wheelTickets = getPrizeWheelTickets(profile);
       const canSpin = (wheelTickets > 0 || coins >= cost) && !prizeWheelSpinning;
       const recentSpins = prizeWheelSpins
-        .filter(function(s) { return !s.deleted; })
-        .slice().sort(function(a, b) { return String(b.createdAtText || '') > String(a.createdAtText || '') ? 1 : -1; })
+        .filter(function(s) { return prizeWheelSpinMatchesCurrentStudent(s); })
+        .slice().sort(sortPrizeWheelSpinsNewestFirst)
         .slice(0, 3);
 
       const historyHtml = recentSpins.length
@@ -22795,6 +22804,23 @@
           historyHtml +
         '</div>' +
       '</div>';
+    }
+
+    function prizeWheelSpinMatchesCurrentStudent(spin) {
+      if (!spin || spin.deleted === true || !currentStudent) return false;
+      const authUid = String((firebaseUser && firebaseUser.uid) || (currentStudent && currentStudent.authUid) || '').trim();
+      const studentDocId = getStudentRecordDocId(currentStudent);
+      return (authUid && String(spin.authUid || '') === authUid) ||
+        (studentDocId && String(spin.studentId || '') === studentDocId);
+    }
+
+    function getPrizeWheelSpinTimeValue(spin) {
+      const date = parseRecordDate(spin && (spin.createdAt || spin.createdAtText));
+      return date ? date.getTime() : 0;
+    }
+
+    function sortPrizeWheelSpinsNewestFirst(a, b) {
+      return getPrizeWheelSpinTimeValue(b) - getPrizeWheelSpinTimeValue(a);
     }
 
     async function spinPrizeWheel() {
@@ -22936,7 +22962,7 @@
               await db.collection('studentGamificationProfiles').doc(pIdT).set({ prizeWheelTickets: newTickets, updatedAt: firebase.firestore.FieldValue.serverTimestamp() }, { merge: true });
             } catch (e) { console.warn('pw ticket award:', e); }
           }
-          const authUid = String((currentStudent && currentStudent.authUid) || (firebaseUser && firebaseUser.uid) || '').trim();
+          const authUid = String((firebaseUser && firebaseUser.uid) || (currentStudent && currentStudent.authUid) || '').trim();
           const spinRecord = {
             id: '', firebaseDocId: '',
             studentId: getStudentRecordDocId(currentStudent), authUid: authUid,
@@ -22963,7 +22989,7 @@
                     String(s.studentId || '') === getStudentRecordDocId(currentStudent)
                   );
                 }).slice().sort(function(a, b) {
-                  return String(a.createdAtText || '') > String(b.createdAtText || '') ? 1 : -1;
+                  return getPrizeWheelSpinTimeValue(a) - getPrizeWheelSpinTimeValue(b);
                 });
                 if (mySpins.length > 15) {
                   const toDelete = mySpins.slice(0, mySpins.length - 15);
@@ -23095,7 +23121,7 @@
       const spinsEl = getElement('adminPrizeWheelSpinsTable');
       if (spinsEl) {
         const allSpins = prizeWheelSpins.filter(function(s) { return !s.deleted; })
-          .slice().sort(function(a, b) { return String(b.createdAtText || '') > String(a.createdAtText || '') ? 1 : -1; })
+          .slice().sort(sortPrizeWheelSpinsNewestFirst)
           .slice(0, 30);
         if (!allSpins.length) {
           spinsEl.innerHTML = '<p style="color:#94a3b8;font-size:13px;">ยังไม่มีการหมุน</p>';
