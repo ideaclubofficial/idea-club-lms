@@ -3855,6 +3855,14 @@
             <div id="onlineExamCourseGrid">
               <div class="form-box">
                 <h3>📝 การทดสอบรายเดือน</h3>
+                <div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;margin-bottom:12px;">
+                  <div style="min-width:180px;flex:1 1 220px;">
+                    <label style="font-size:12px;color:#64748b;font-weight:700;display:block;margin-bottom:5px;">เลือกเดือน</label>
+                    <select id="onlineExamStudentMonthFilter" onchange="renderOnlineExamCourseGrid()" style="width:100%;padding:8px 10px;border:1.5px solid #cbd5e1;border-radius:8px;background:#fff;font-size:13px;font-weight:700;color:#0f172a;">
+                      <option value="">ยังไม่มีเดือนสอบ</option>
+                    </select>
+                  </div>
+                </div>
                 <div id="onlineExamSubjectFilter" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px;"></div>
                 <div id="onlineExamCourseCards" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:12px;"></div>
               </div>
@@ -41681,13 +41689,32 @@ function receiptStatusText(status) {
         return true;
       });
       const allVisible = filterOnlineExamCoursesForStudentLocation(gradeVisible, studentLocation);
+      const monthSelect = getElement('onlineExamStudentMonthFilter');
+      const months = Array.from(new Set(allVisible.map(function(c) { return c.examMonth || ''; }).filter(Boolean)));
+      months.sort(function(a, b) { return compareThaiMonthYear(b, a); });
+      var activeMonth = '';
+      if (monthSelect) {
+        const currentMonth = monthSelect.value;
+        monthSelect.innerHTML = months.length
+          ? months.map(function(month) { return '<option value="' + escapeHtml(month) + '">' + escapeHtml(month) + '</option>'; }).join('')
+          : '<option value="">ยังไม่มีเดือนสอบ</option>';
+        activeMonth = months.includes(currentMonth) ? currentMonth : (months[0] || '');
+        monthSelect.value = activeMonth;
+      } else {
+        activeMonth = months[0] || '';
+      }
+      const monthVisible = activeMonth
+        ? allVisible.filter(function(c) { return (c.examMonth || '') === activeMonth; })
+        : allVisible;
 
       // Build subject filter bar
       const subjectBar = getElement('onlineExamSubjectFilter');
-      const subjects = sortOnlineExamSubjects(Array.from(new Set(allVisible.map(function(c) { return c.subject || ''; }).filter(Boolean))));
+      const subjects = sortOnlineExamSubjects(Array.from(new Set(monthVisible.map(function(c) { return c.subject || ''; }).filter(Boolean))));
       var activeSubject = (subjectBar && subjectBar.dataset.active) || '';
       if (subjectBar) {
         if (subjects.length > 1) {
+          if (activeSubject && !subjects.includes(activeSubject)) activeSubject = '';
+          subjectBar.dataset.active = activeSubject;
           const all = [{ v: '', label: 'ทั้งหมด' }].concat(subjects.map(function(s) { return { v: s, label: s }; }));
           subjectBar.innerHTML = all.map(function(item) {
             const isActive = item.v === activeSubject;
@@ -41701,8 +41728,8 @@ function receiptStatusText(status) {
       }
 
       const filtered = activeSubject
-        ? allVisible.filter(function(c) { return (c.subject || '') === activeSubject; })
-        : allVisible;
+        ? monthVisible.filter(function(c) { return (c.subject || '') === activeSubject; })
+        : monthVisible;
       const sortedVisible = filtered.slice().sort(function(a, b) {
         const subjectCompare = compareOnlineExamSubjects(a.subject || '', b.subject || '');
         if (subjectCompare) return subjectCompare;
@@ -41727,7 +41754,7 @@ function receiptStatusText(status) {
       }
 
       if (!filtered.length) {
-        container.innerHTML = '<p style="color:#9ca3af;font-size:13px;text-align:center;padding:24px;">ยังไม่มีข้อสอบสำหรับชั้นเรียนของคุณ</p>';
+        container.innerHTML = '<p style="color:#9ca3af;font-size:13px;text-align:center;padding:24px;">ยังไม่มีข้อสอบสำหรับชั้นเรียนของคุณ' + (activeMonth ? ' ในเดือน ' + escapeHtml(activeMonth) : '') + '</p>';
       } else {
         container.innerHTML = sortedVisible.map(function(c) {
           const qCount = (c.questions || []).length;
