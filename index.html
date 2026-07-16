@@ -8201,10 +8201,6 @@
                     <label>Coins สูงสุดต่อวัน</label>
                     <input type="number" id="abDailyCoinCap" min="0" step="1" style="width:110px;" />
                   </div>
-                  <div>
-                    <label>รอบรับรางวัลสูงสุดต่อวัน</label>
-                    <input type="number" id="abDailyPlayCap" min="0" step="1" style="width:110px;" />
-                  </div>
                 </div>
                 <div class="form-row">
                   <div>
@@ -10265,7 +10261,6 @@
     const AVATAR_BATTLE_DEFAULT_SETTINGS = {
       dailyExpCap: 70,
       dailyCoinCap: 14,
-      dailyRewardedPlayCap: 12,
       stageRewards: [
         { id: 'slime', stage: 1, rewardExp: 8, rewardCoins: 1 },
         { id: 'shadow', stage: 2, rewardExp: 10, rewardCoins: 2 },
@@ -20388,7 +20383,6 @@
       const settings = {
         dailyExpCap: Math.max(0, Number(raw.dailyExpCap !== undefined ? raw.dailyExpCap : defaults.dailyExpCap) || 0),
         dailyCoinCap: Math.max(0, Number(raw.dailyCoinCap !== undefined ? raw.dailyCoinCap : defaults.dailyCoinCap) || 0),
-        dailyRewardedPlayCap: Math.max(0, Number(raw.dailyRewardedPlayCap !== undefined ? raw.dailyRewardedPlayCap : defaults.dailyRewardedPlayCap) || 0),
         stageRewards: []
       };
       defaults.stageRewards.forEach(function(def, index) {
@@ -20646,9 +20640,6 @@
     function getAvatarBattleRewardForResult(state, profile, won) {
       const daily = normalizeAvatarBattleDailyReward(profile);
       const settings = getAvatarBattleSettings();
-      if (daily.plays >= settings.dailyRewardedPlayCap) {
-        return { exp: 0, coins: 0, daily: daily, capped: true, reason: 'ครบจำนวนรอบรับรางวัลวันนี้แล้ว' };
-      }
       const monster = state.monster || {};
       let exp = won ? (Number(monster.rewardExp) || 8) : 3;
       let coins = won ? (Number(monster.rewardCoins) || 1) : 0;
@@ -20674,7 +20665,7 @@
       const settings = getAvatarBattleSettings();
       const nextDaily = {
         date: daily.date || avatarBattleTodayKey(),
-        plays: Math.min(settings.dailyRewardedPlayCap, Math.max(0, Number(daily.plays) || 0) + 1),
+        plays: Math.max(0, Number(daily.plays) || 0) + 1,
         exp: Math.min(settings.dailyExpCap, Math.max(0, Number(daily.exp) || 0) + Math.max(0, Number(reward.exp) || 0)),
         coins: Math.min(settings.dailyCoinCap, Math.max(0, Number(daily.coins) || 0) + Math.max(0, Number(reward.coins) || 0))
       };
@@ -20927,12 +20918,11 @@
       }).join(' · ');
       const remainingText = 'เหลือวันนี้ ' +
         Math.max(0, battleSettings.dailyExpCap - daily.exp) + ' EXP · ' +
-        Math.max(0, battleSettings.dailyCoinCap - daily.coins) + ' Coins · ' +
-        Math.max(0, battleSettings.dailyRewardedPlayCap - daily.plays) + ' รอบ';
+        Math.max(0, battleSettings.dailyCoinCap - daily.coins) + ' Coins';
       const actionDisabled = state.status !== 'active' || state.rewardSaving || !!state.pendingQuestion;
       const skillDisabled = actionDisabled || state.skillCooldown > 0;
       const statusText = state.status === 'won' ? 'ชนะรอบนี้' : state.status === 'lost' ? 'พร้อมเริ่มใหม่' : state.pendingQuestion ? 'รอตอบโจทย์' : 'Turn ' + state.turn;
-      const capText = 'วันนี้รับแล้ว ' + daily.exp + '/' + battleSettings.dailyExpCap + ' EXP · ' + daily.coins + '/' + battleSettings.dailyCoinCap + ' Coins · ' + daily.plays + '/' + battleSettings.dailyRewardedPlayCap + ' รอบ';
+      const capText = 'วันนี้รับแล้ว ' + daily.exp + '/' + battleSettings.dailyExpCap + ' EXP · ' + daily.coins + '/' + battleSettings.dailyCoinCap + ' Coins · เล่นแล้ว ' + daily.plays + ' รอบ';
       return '<div class="student-avatar-battle">' +
         '<div class="student-avatar-battle-header">' +
           '<strong>⚔️ Mini Game: Avatar Battle</strong>' +
@@ -23250,8 +23240,7 @@
       const settings = getAvatarBattleSettings();
       const fields = [
         ['abDailyExpCap', settings.dailyExpCap],
-        ['abDailyCoinCap', settings.dailyCoinCap],
-        ['abDailyPlayCap', settings.dailyRewardedPlayCap]
+        ['abDailyCoinCap', settings.dailyCoinCap]
       ];
       settings.stageRewards.forEach(function(stage, index) {
         fields.push(['abStage' + (index + 1) + 'Exp', stage.rewardExp]);
@@ -23367,7 +23356,6 @@
       const settings = {
         dailyExpCap: fieldNumber('abDailyExpCap', AVATAR_BATTLE_DEFAULT_SETTINGS.dailyExpCap),
         dailyCoinCap: fieldNumber('abDailyCoinCap', AVATAR_BATTLE_DEFAULT_SETTINGS.dailyCoinCap),
-        dailyRewardedPlayCap: fieldNumber('abDailyPlayCap', AVATAR_BATTLE_DEFAULT_SETTINGS.dailyRewardedPlayCap),
         stageRewards: AVATAR_BATTLE_DEFAULT_SETTINGS.stageRewards.map(function(def, index) {
           const stageNo = index + 1;
           return {
