@@ -8189,6 +8189,54 @@
               <button class="btn btn-blue" type="button" onclick="adminSavePrizeWheelSettings()" style="margin-bottom:20px;">บันทึกค่าหมุน</button>
               <span id="pwSettingsSaveResult" style="font-size:13px;margin-left:8px;"></span>
 
+              <div style="margin:0 0 22px;padding:14px 16px;border-radius:12px;border:1.5px solid #c7d2fe;background:#f8fafc;">
+                <h4 style="margin:0 0 10px;font-size:15px;color:#1e1b4b;">⚔️ ตั้งค่า Avatar Battle</h4>
+                <p style="margin:0 0 12px;color:#64748b;font-size:13px;">กำหนดเพดานรางวัลต่อวัน และรางวัลพื้นฐานเมื่อชนะในแต่ละ Stage</p>
+                <div class="form-row">
+                  <div>
+                    <label>EXP สูงสุดต่อวัน</label>
+                    <input type="number" id="abDailyExpCap" min="0" step="1" style="width:110px;" />
+                  </div>
+                  <div>
+                    <label>Coins สูงสุดต่อวัน</label>
+                    <input type="number" id="abDailyCoinCap" min="0" step="1" style="width:110px;" />
+                  </div>
+                  <div>
+                    <label>รอบรับรางวัลสูงสุดต่อวัน</label>
+                    <input type="number" id="abDailyPlayCap" min="0" step="1" style="width:110px;" />
+                  </div>
+                </div>
+                <div class="form-row">
+                  <div>
+                    <label>Stage 1 EXP</label>
+                    <input type="number" id="abStage1Exp" min="0" step="1" style="width:90px;" />
+                  </div>
+                  <div>
+                    <label>Stage 1 Coins</label>
+                    <input type="number" id="abStage1Coins" min="0" step="1" style="width:90px;" />
+                  </div>
+                  <div>
+                    <label>Stage 2 EXP</label>
+                    <input type="number" id="abStage2Exp" min="0" step="1" style="width:90px;" />
+                  </div>
+                  <div>
+                    <label>Stage 2 Coins</label>
+                    <input type="number" id="abStage2Coins" min="0" step="1" style="width:90px;" />
+                  </div>
+                  <div>
+                    <label>Stage 3 EXP</label>
+                    <input type="number" id="abStage3Exp" min="0" step="1" style="width:90px;" />
+                  </div>
+                  <div>
+                    <label>Stage 3 Coins</label>
+                    <input type="number" id="abStage3Coins" min="0" step="1" style="width:90px;" />
+                  </div>
+                </div>
+                <button class="btn btn-green" type="button" onclick="adminSaveAvatarBattleSettings()">บันทึกค่า Avatar Battle</button>
+                <button class="btn btn-dark" type="button" onclick="renderAdminAvatarBattleSettings()" style="margin-left:6px;">รีโหลดค่า</button>
+                <span id="abSettingsSaveResult" style="font-size:13px;margin-left:8px;"></span>
+              </div>
+
               <h4 style="margin:0 0 10px;font-size:15px;color:#1e1b4b;">🎁 เพิ่ม / แก้ไขรางวัล</h4>
               <input type="hidden" id="editingPrizeWheelItemId" value="" />
               <div class="form-row">
@@ -10214,9 +10262,16 @@
 
     const DAILY_QUESTS_ENABLED = false; // เปิดเป็น true เมื่อพร้อม launch
 
-    const AVATAR_BATTLE_DAILY_EXP_CAP = 70;
-    const AVATAR_BATTLE_DAILY_COIN_CAP = 14;
-    const AVATAR_BATTLE_DAILY_REWARDED_PLAY_CAP = 12;
+    const AVATAR_BATTLE_DEFAULT_SETTINGS = {
+      dailyExpCap: 70,
+      dailyCoinCap: 14,
+      dailyRewardedPlayCap: 12,
+      stageRewards: [
+        { id: 'slime', stage: 1, rewardExp: 8, rewardCoins: 1 },
+        { id: 'shadow', stage: 2, rewardExp: 10, rewardCoins: 2 },
+        { id: 'focusBoss', stage: 3, rewardExp: 13, rewardCoins: 3 }
+      ]
+    };
 
     const DAILY_QUESTS = [
       { id: 'daily_login', icon: '🌅', title: 'เข้าสู่ระบบประจำวัน',  desc: 'เข้าสู่ระบบ 1 ครั้ง',                      target: 1, expReward: 10,  coinReward: 2  },
@@ -20327,6 +20382,33 @@
       };
     }
 
+    function getAvatarBattleSettings() {
+      const raw = (prizeWheelSettings && prizeWheelSettings.avatarBattle) || {};
+      const defaults = AVATAR_BATTLE_DEFAULT_SETTINGS;
+      const settings = {
+        dailyExpCap: Math.max(0, Number(raw.dailyExpCap !== undefined ? raw.dailyExpCap : defaults.dailyExpCap) || 0),
+        dailyCoinCap: Math.max(0, Number(raw.dailyCoinCap !== undefined ? raw.dailyCoinCap : defaults.dailyCoinCap) || 0),
+        dailyRewardedPlayCap: Math.max(0, Number(raw.dailyRewardedPlayCap !== undefined ? raw.dailyRewardedPlayCap : defaults.dailyRewardedPlayCap) || 0),
+        stageRewards: []
+      };
+      defaults.stageRewards.forEach(function(def, index) {
+        const src = raw.stageRewards && raw.stageRewards[index] ? raw.stageRewards[index] : {};
+        settings.stageRewards.push({
+          id: def.id,
+          stage: def.stage,
+          rewardExp: Math.max(0, Number(src.rewardExp !== undefined ? src.rewardExp : def.rewardExp) || 0),
+          rewardCoins: Math.max(0, Number(src.rewardCoins !== undefined ? src.rewardCoins : def.rewardCoins) || 0)
+        });
+      });
+      return settings;
+    }
+
+    function getAvatarBattleStageReward(stageIndex) {
+      const settings = getAvatarBattleSettings();
+      const safeIndex = getAvatarBattleMonsterStageIndex(stageIndex);
+      return settings.stageRewards[safeIndex] || AVATAR_BATTLE_DEFAULT_SETTINGS.stageRewards[safeIndex] || { rewardExp: 8, rewardCoins: 1 };
+    }
+
     function getAvatarBattleProfession(profile) {
       return getGamificationProfessionAvatarConfig((profile && profile.profession) || 'IDEA Explorer');
     }
@@ -20366,10 +20448,11 @@
     }
 
     function getAvatarBattleMonsterStages() {
+      const settings = getAvatarBattleSettings();
       return [
-        { id: 'slime', stage: 1, name: 'Slime โจทย์ไว', icon: '🟢', hp: 82, attack: 11, defense: 3, rewardExp: 8, rewardCoins: 1, color: '#22c55e', sceneLabel: 'สนามหญ้าโจทย์เร็ว' },
-        { id: 'shadow', stage: 2, name: 'Shadow Quiz', icon: '👾', hp: 96, attack: 13, defense: 5, rewardExp: 10, rewardCoins: 2, color: '#7c3aed', sceneLabel: 'ห้องเงาแห่งคำถาม' },
-        { id: 'focusBoss', stage: 3, name: 'Boss สมาธิ', icon: '🔥', hp: 116, attack: 15, defense: 7, rewardExp: 13, rewardCoins: 3, color: '#f97316', sceneLabel: 'ลานประลองสมาธิ' }
+        { id: 'slime', stage: 1, name: 'Slime โจทย์ไว', icon: '🟢', hp: 82, attack: 11, defense: 3, rewardExp: settings.stageRewards[0].rewardExp, rewardCoins: settings.stageRewards[0].rewardCoins, color: '#22c55e', sceneLabel: 'สนามหญ้าโจทย์เร็ว' },
+        { id: 'shadow', stage: 2, name: 'Shadow Quiz', icon: '👾', hp: 96, attack: 13, defense: 5, rewardExp: settings.stageRewards[1].rewardExp, rewardCoins: settings.stageRewards[1].rewardCoins, color: '#7c3aed', sceneLabel: 'ห้องเงาแห่งคำถาม' },
+        { id: 'focusBoss', stage: 3, name: 'Boss สมาธิ', icon: '🔥', hp: 116, attack: 15, defense: 7, rewardExp: settings.stageRewards[2].rewardExp, rewardCoins: settings.stageRewards[2].rewardCoins, color: '#f97316', sceneLabel: 'ลานประลองสมาธิ' }
       ];
     }
 
@@ -20562,7 +20645,8 @@
 
     function getAvatarBattleRewardForResult(state, profile, won) {
       const daily = normalizeAvatarBattleDailyReward(profile);
-      if (daily.plays >= AVATAR_BATTLE_DAILY_REWARDED_PLAY_CAP) {
+      const settings = getAvatarBattleSettings();
+      if (daily.plays >= settings.dailyRewardedPlayCap) {
         return { exp: 0, coins: 0, daily: daily, capped: true, reason: 'ครบจำนวนรอบรับรางวัลวันนี้แล้ว' };
       }
       const monster = state.monster || {};
@@ -20571,8 +20655,8 @@
       if (won && state.turn <= 4) exp += 3;
       if (won && state.turn <= 3) coins += 1;
       if (won && ((profile && profile.profession) === 'alchemist')) coins += 1;
-      const expRemaining = Math.max(0, AVATAR_BATTLE_DAILY_EXP_CAP - daily.exp);
-      const coinRemaining = Math.max(0, AVATAR_BATTLE_DAILY_COIN_CAP - daily.coins);
+      const expRemaining = Math.max(0, settings.dailyExpCap - daily.exp);
+      const coinRemaining = Math.max(0, settings.dailyCoinCap - daily.coins);
       exp = Math.min(exp, expRemaining);
       coins = Math.min(coins, coinRemaining);
       return {
@@ -20587,11 +20671,12 @@
     async function saveAvatarBattleDailyReward(profile, reward) {
       if (!currentStudent || !reward) return;
       const daily = reward.daily || normalizeAvatarBattleDailyReward(profile);
+      const settings = getAvatarBattleSettings();
       const nextDaily = {
         date: daily.date || avatarBattleTodayKey(),
-        plays: Math.min(AVATAR_BATTLE_DAILY_REWARDED_PLAY_CAP, Math.max(0, Number(daily.plays) || 0) + 1),
-        exp: Math.min(AVATAR_BATTLE_DAILY_EXP_CAP, Math.max(0, Number(daily.exp) || 0) + Math.max(0, Number(reward.exp) || 0)),
-        coins: Math.min(AVATAR_BATTLE_DAILY_COIN_CAP, Math.max(0, Number(daily.coins) || 0) + Math.max(0, Number(reward.coins) || 0))
+        plays: Math.min(settings.dailyRewardedPlayCap, Math.max(0, Number(daily.plays) || 0) + 1),
+        exp: Math.min(settings.dailyExpCap, Math.max(0, Number(daily.exp) || 0) + Math.max(0, Number(reward.exp) || 0)),
+        coins: Math.min(settings.dailyCoinCap, Math.max(0, Number(daily.coins) || 0) + Math.max(0, Number(reward.coins) || 0))
       };
       const existingProfile = findCurrentStudentGamificationProfile();
       if (existingProfile) existingProfile.miniGameDailyReward = nextDaily;
@@ -20836,10 +20921,18 @@
       const state = getAvatarBattleState(profile);
       const stats = getAvatarBattlePlayerStats(profile);
       const daily = normalizeAvatarBattleDailyReward(profile);
+      const battleSettings = getAvatarBattleSettings();
+      const stageRewards = getAvatarBattleMonsterStages().map(function(monster, index) {
+        return '<span>Stage ' + (index + 1) + ': +' + escapeHtml(monster.rewardExp) + ' EXP · +' + escapeHtml(monster.rewardCoins) + ' Coins</span>';
+      }).join(' · ');
+      const remainingText = 'เหลือวันนี้ ' +
+        Math.max(0, battleSettings.dailyExpCap - daily.exp) + ' EXP · ' +
+        Math.max(0, battleSettings.dailyCoinCap - daily.coins) + ' Coins · ' +
+        Math.max(0, battleSettings.dailyRewardedPlayCap - daily.plays) + ' รอบ';
       const actionDisabled = state.status !== 'active' || state.rewardSaving || !!state.pendingQuestion;
       const skillDisabled = actionDisabled || state.skillCooldown > 0;
       const statusText = state.status === 'won' ? 'ชนะรอบนี้' : state.status === 'lost' ? 'พร้อมเริ่มใหม่' : state.pendingQuestion ? 'รอตอบโจทย์' : 'Turn ' + state.turn;
-      const capText = 'วันนี้รับแล้ว ' + daily.exp + '/' + AVATAR_BATTLE_DAILY_EXP_CAP + ' EXP · ' + daily.coins + '/' + AVATAR_BATTLE_DAILY_COIN_CAP + ' Coins · ' + daily.plays + '/' + AVATAR_BATTLE_DAILY_REWARDED_PLAY_CAP + ' รอบ';
+      const capText = 'วันนี้รับแล้ว ' + daily.exp + '/' + battleSettings.dailyExpCap + ' EXP · ' + daily.coins + '/' + battleSettings.dailyCoinCap + ' Coins · ' + daily.plays + '/' + battleSettings.dailyRewardedPlayCap + ' รอบ';
       return '<div class="student-avatar-battle">' +
         '<div class="student-avatar-battle-header">' +
           '<strong>⚔️ Mini Game: Avatar Battle</strong>' +
@@ -20856,7 +20949,8 @@
           '<div class="sab-log">' + escapeHtml(state.rewardSaving ? 'กำลังบันทึกรางวัล...' : (state.log || 'เริ่มต่อสู้ได้เลย')) + '</div>' +
           (state.lastClearMessage ? '<div class="sab-reward">' + escapeHtml(state.lastClearMessage) + '</div>' : '') +
           (state.rewardText ? '<div class="sab-reward">' + escapeHtml(state.rewardText) + '</div>' : '') +
-          '<div class="sab-cap">' + escapeHtml(capText) + '</div>' +
+          '<div class="sab-cap"><strong>รางวัลที่รับได้:</strong> ' + stageRewards + ' · โบนัสเร็ว: +3 EXP เมื่อชนะภายใน 4 เทิร์น, +1 Coin เมื่อชนะภายใน 3 เทิร์น</div>' +
+          '<div class="sab-cap"><strong>เพดานต่อวัน:</strong> ' + escapeHtml(capText) + ' · ' + escapeHtml(remainingText) + '</div>' +
         '</div>' +
       '</div>';
     }
@@ -23152,11 +23246,29 @@
       }
     }
 
+    function renderAdminAvatarBattleSettings() {
+      const settings = getAvatarBattleSettings();
+      const fields = [
+        ['abDailyExpCap', settings.dailyExpCap],
+        ['abDailyCoinCap', settings.dailyCoinCap],
+        ['abDailyPlayCap', settings.dailyRewardedPlayCap]
+      ];
+      settings.stageRewards.forEach(function(stage, index) {
+        fields.push(['abStage' + (index + 1) + 'Exp', stage.rewardExp]);
+        fields.push(['abStage' + (index + 1) + 'Coins', stage.rewardCoins]);
+      });
+      fields.forEach(function(pair) {
+        const el = getElement(pair[0]);
+        if (el) el.value = pair[1];
+      });
+    }
+
     function renderAdminPrizeWheel() {
       // Populate settings form
       const costEl = getElement('pwSpinCost');
       if (costEl) costEl.value = prizeWheelSettings.spinCost !== undefined ? prizeWheelSettings.spinCost : 30;
       renderAdminPrizeWheelToggle();
+      renderAdminAvatarBattleSettings();
 
       // Prize items table
       const tableEl = getElement('adminPrizeWheelTable');
@@ -23243,6 +23355,45 @@
         if (resultEl) { resultEl.textContent = 'บันทึกสำเร็จ!'; resultEl.style.color = '#16a34a'; }
       } catch (e) {
         if (resultEl) { resultEl.textContent = 'บันทึกไม่สำเร็จ: ' + (e.message || ''); resultEl.style.color = '#dc2626'; }
+      }
+    }
+
+    async function adminSaveAvatarBattleSettings() {
+      const resultEl = getElement('abSettingsSaveResult');
+      function fieldNumber(id, fallback) {
+        const el = getElement(id);
+        return Math.max(0, Math.round(Number(el ? el.value : fallback) || 0));
+      }
+      const settings = {
+        dailyExpCap: fieldNumber('abDailyExpCap', AVATAR_BATTLE_DEFAULT_SETTINGS.dailyExpCap),
+        dailyCoinCap: fieldNumber('abDailyCoinCap', AVATAR_BATTLE_DEFAULT_SETTINGS.dailyCoinCap),
+        dailyRewardedPlayCap: fieldNumber('abDailyPlayCap', AVATAR_BATTLE_DEFAULT_SETTINGS.dailyRewardedPlayCap),
+        stageRewards: AVATAR_BATTLE_DEFAULT_SETTINGS.stageRewards.map(function(def, index) {
+          const stageNo = index + 1;
+          return {
+            id: def.id,
+            stage: def.stage,
+            rewardExp: fieldNumber('abStage' + stageNo + 'Exp', def.rewardExp),
+            rewardCoins: fieldNumber('abStage' + stageNo + 'Coins', def.rewardCoins)
+          };
+        })
+      };
+      if (!firebaseReady || !db) return;
+      if (resultEl) { resultEl.textContent = 'กำลังบันทึก...'; resultEl.style.color = '#d97706'; }
+      try {
+        await db.collection('prizeWheelSettings').doc('main').set({
+          id: 'main',
+          firebaseDocId: 'main',
+          avatarBattle: settings,
+          deleted: false,
+          updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+        }, { merge: true });
+        prizeWheelSettings = Object.assign({}, prizeWheelSettings, { avatarBattle: settings });
+        renderAdminAvatarBattleSettings();
+        if (typeof renderStudentGamificationPanel === 'function') renderStudentGamificationPanel();
+        if (resultEl) { resultEl.textContent = 'บันทึกค่า Avatar Battle สำเร็จ'; resultEl.style.color = '#16a34a'; }
+      } catch (e) {
+        if (resultEl) { resultEl.textContent = 'บันทึกไม่สำเร็จ: ' + (e.message || e.code || ''); resultEl.style.color = '#dc2626'; }
       }
     }
 
