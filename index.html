@@ -24772,13 +24772,14 @@
       const deleteSlipBtn = p && canDeletePaymentSlip(p) ? '<button class="btn btn-red" type="button" onclick="' + actionCall('deletePaymentSlipOnly', paymentId) + '">ลบสลิป</button>' : '';
       const isOverdue = displayStatus === 'ค้างชำระ';
       const overdueNoticeBtn = isOverdue && paymentId ? '<button class="btn btn-orange" type="button" onclick="' + actionCall('printOverdueNotice', paymentId) + '">ใบแจ้งหนี้</button>' : '';
+      const adjustAmountBtn = p && canAdjustPaymentAmount(p) ? '<button class="btn btn-blue" type="button" onclick="editPaymentAmountDiscount(this)">แก้ยอด</button>' : '';
       if (isPaid) {
         return '<div class="payment-actions-wrap">' +
           '<button class="btn btn-blue" type="button" onclick="' + rowIdScript + '">ตรวจสลิป</button>' +
           '<button class="btn btn-green" type="button" onclick="createReceiptFromPaymentRow(this)">ใบเสร็จ</button>' +
           '<button class="btn btn-blue" type="button" onclick="showPaymentDetail(this)">ดูข้อมูล</button>' +
           ocrBtn +
-          '<button class="btn btn-blue" type="button" onclick="editPaymentAmountDiscount(this)">แก้ยอด</button>' +
+          adjustAmountBtn +
           '<button class="btn btn-dark" type="button" onclick="editPaymentAdminNote(this)">หมายเหตุ</button>' +
           '<button class="btn btn-red" type="button" onclick="deletePaymentRecord(this)">ลบ</button>' +
         '</div>';
@@ -24795,7 +24796,7 @@
         '<button class="btn ' + (isPaid ? 'btn-green' : 'btn-dark') + '" type="button" onclick="createReceiptFromPaymentRow(this)">ใบเสร็จ</button>' +
         '<button class="btn btn-blue" type="button" onclick="showPaymentDetail(this)">ดูข้อมูล</button>' +
         ocrBtn +
-        '<button class="btn btn-blue" type="button" onclick="editPaymentAmountDiscount(this)">แก้ยอด</button>' +
+        adjustAmountBtn +
         '<button class="btn btn-dark" type="button" onclick="editPaymentAdminNote(this)">หมายเหตุ</button>' +
         '<button class="btn btn-red" type="button" onclick="deletePaymentRecord(this)">ลบ</button>' +
         '</div>';
@@ -26150,6 +26151,12 @@
     async function saveStudentMonthPriceOverride(monthStr, studentId, amount) {
       const item = getPaymentMonthItem(monthStr);
       if (!item) return;
+      const student = students.find(function(s) { return String(s.id) === String(studentId); }) || null;
+      const payment = student ? findPaymentForStudentMonth(student, monthStr) : null;
+      if (payment && !canAdjustPaymentAmount(payment)) {
+        renderPaymentRecordPreview('รายการนี้มีสลิป/ชำระแล้ว/อยู่ในยอดรวม จึงแก้ยอดเรียกเก็บไม่ได้', true);
+        return;
+      }
       if (!item.studentPrices) item.studentPrices = {};
       const numAmt = Number(amount) || 0;
       if (numAmt > 0) {
@@ -26159,8 +26166,78 @@
       }
       try {
         await setFirebaseDocument('paymentMonths', item);
-        renderPaymentRecordPreview(numAmt > 0 ? 'บันทึกยอดพิเศษแล้ว' : 'ล้างยอดพิเศษแล้ว ใช้ราคาปกติ');
+        const syncResult = await syncStudentMonthPriceOverrideToPayment(monthStr, studentId);
+        let message = numAmt > 0 ? 'บันทึกยอดพิเศษแล้ว' : 'ล้างยอดพิเศษแล้ว ใช้ราคาปกติ';
+        let isError = false;
+        if (syncResult.status === 'updated') {
+          message = numAmt > 0 ? 'บันทึกและอัปเดตรายการเรียกเก็บแล้ว' : 'ล้างยอดพิเศษและอัปเดตรายการเรียกเก็บแล้ว';
+          renderPaymentTable();
+          renderAdminDashboard();
+          updateStudentSelectedPaymentMonth();
+          updateStudentCourseDisplay();
+          renderDashboardPaymentSummary();
+          safeRun(renderStudentMobilePayment, 'student-price-override-mobile');
+        } else if (syncResult.status === 'locked') {
+          message = 'บันทึกยอดพิเศษไว้แล้ว แต่รายการนี้มีสลิป/ชำระแล้ว/อยู่ในยอดรวม จึงแก้ยอดเรียกเก็บไม่ได้';
+          isError = true;
+        }
+        renderPaymentRecordPreview(message, isError);
       } catch(e) { console.error('saveStudentMonthPriceOverride error:', e); }
+    }
+
+    function canAdjustPaymentAmount(payment) {
+      if (!payment) return false;
+      if (!isPaymentRecordUpdatable(payment)) return false;
+      if (payment.receiptId || payment.receiptNo || payment.receiptStatus) return false;
+      if (isPaymentInActiveBundle(payment)) return false;
+      return true;
+    }
+
+    function applyDirectPaymentAmount(payment, amount, noteText) {
+      const finalAmount = Number(amount || 0) || 0;
+      const nowText = new Date().toLocaleDateString('th-TH');
+      payment.originalAmount = finalAmount;
+      payment.baseAmount = finalAmount;
+      payment.expectedAmount = finalAmount;
+      payment.discount = 0;
+      payment.finalAmount = finalAmount;
+      payment.amount = finalAmount;
+      payment.totalAmount = finalAmount;
+      payment.discountType = 'none';
+      payment.discountReason = '';
+      payment.adjustedBy = (adminUser && adminUser.name) || (firebaseUser && firebaseUser.email) || 'Admin';
+      payment.adjustedAtText = nowText;
+      payment.updatedAtText = nowText;
+      payment.slipNote = noteText;
+      appendPaymentAdminNote(payment, noteText);
+    }
+
+    async function syncStudentMonthPriceOverrideToPayment(monthStr, studentId) {
+      const student = students.find(function(s) { return String(s.id) === String(studentId); }) || null;
+      if (!student) return { status: 'no-student' };
+      const payment = findPaymentForStudentMonth(student, monthStr);
+      if (!payment) return { status: 'no-payment' };
+      if (!canAdjustPaymentAmount(payment)) return { status: 'locked' };
+      const finalAmount = getExpectedPaymentAmountForStudent(student, monthStr);
+      const noteText = 'Admin ปรับยอดค่าเรียนรายบุคคล ' + (student.name || payment.student || '-') + ' · ' + monthStr + ' · ' + formatPrice(finalAmount);
+      applyDirectPaymentAmount(payment, finalAmount, noteText);
+      await setFirebaseDocument('payments', payment);
+      addActivityLog('ปรับยอดค่าเรียนรายบุคคล', (student.name || payment.student || '-') + ' · ' + monthStr + ' · ' + formatPrice(finalAmount));
+      return { status: 'updated', payment: payment };
+    }
+
+    async function syncPaymentAmountToStudentMonthPrice(payment, amount) {
+      const month = payment ? String(payment.month || payment.paymentMonth || '').trim() : '';
+      const studentId = payment ? String(payment.studentId || '').trim() : '';
+      if (!month || !studentId) return false;
+      const item = getPaymentMonthItem(month);
+      if (!item) return false;
+      if (!item.studentPrices) item.studentPrices = {};
+      const numAmt = Number(amount || 0) || 0;
+      if (numAmt > 0) item.studentPrices[String(studentId)] = numAmt;
+      else delete item.studentPrices[String(studentId)];
+      await setFirebaseDocument('paymentMonths', item);
+      return true;
     }
 
     async function savePaymentCoursePricesForMonth(month) {
@@ -26595,6 +26672,8 @@
       const status = String(payment.status || payment.paymentStatus || '').trim();
       const slipStatus = String(payment.slipStatus || '').trim();
       if (paymentHasUploadedSlip(payment)) return false;
+      if (payment.receiptId || payment.receiptNo || payment.receiptStatus) return false;
+      if (isPaymentInActiveBundle(payment)) return false;
       if (status === 'ยกเว้น') return false;
       if (status === 'ชำระแล้ว' || status === 'paid') return false;
       if (status === 'รอตรวจสลิป') return false;
@@ -26928,10 +27007,12 @@
         const recordStatusText = isSkipped ? 'ยกเว้น' : (payment ? 'สร้างแล้ว' : 'ยังไม่ได้สร้าง');
         const displayStatusClass = displayStatus === 'ชำระแล้ว' ? 'status-paid' : (displayStatus === 'ค้างชำระ' || displayStatus === 'สลิปไม่ผ่าน' || displayStatus === 'ยกเว้น' ? 'status-absent' : 'status-waiting');
         const override = getStudentMonthPriceOverride(month, student.id);
-        const inputStyle = 'width:90px;border:1px solid ' + (override > 0 ? '#3b82f6;color:#1d4ed8;font-weight:700' : '#d1d5db;color:#6b7280') + ';border-radius:6px;padding:3px 6px;font-size:13px;';
-        const overrideTd = '<td><input type="number" min="0" style="' + inputStyle + '" placeholder="ปกติ" value="' + (override > 0 ? override : '') + '" onblur="saveStudentMonthPriceOverride(' + jsArg(month) + ',' + jsArg(student.id) + ',this.value)" onkeydown="if(event.key===\'Enter\')this.blur()"></td>';
+        const canEditOverride = !isSkipped && (!payment || canAdjustPaymentAmount(payment));
+        const inputStyle = 'width:90px;border:1px solid ' + (override > 0 ? '#3b82f6;color:#1d4ed8;font-weight:700' : '#d1d5db;color:#6b7280') + ';border-radius:6px;padding:3px 6px;font-size:13px;' + (canEditOverride ? '' : 'background:#f3f4f6;cursor:not-allowed;');
+        const overrideTitle = canEditOverride ? 'ปรับยอดพิเศษรายคน' : 'รายการนี้มีสลิป/ชำระแล้ว/อยู่ในยอดรวม จึงแก้ยอดไม่ได้';
+        const overrideTd = '<td><input type="number" min="0" style="' + inputStyle + '" placeholder="ปกติ" value="' + (override > 0 ? override : '') + '" title="' + overrideTitle + '"' + (canEditOverride ? ' onblur="saveStudentMonthPriceOverride(' + jsArg(month) + ',' + jsArg(student.id) + ',this.value)" onkeydown="if(event.key===\'Enter\')this.blur()"' : ' disabled') + '></td>';
         const amountDiffNote = (payment && row.expectedAmount !== row.amount) ? '<br><span class="mini-muted">ราคาปกติ: ' + formatPrice(row.expectedAmount) + '</span>' : '';
-        const canSelect = !isSkipped && (!payment || isPaymentRecordUpdatable(payment));
+        const canSelect = !isSkipped && (!payment || canAdjustPaymentAmount(payment));
         const selectTitle = canSelect ? 'เลือกรายการนี้' : 'รายการนี้ไม่สามารถอัปเดตหรือยกเลิกเป็นชุดได้';
         const saveRowButton = canSelect ? '<button class="btn btn-green" style="font-size:12px;padding:4px 10px;" type="button" onclick="saveSinglePaymentCoursePriceAndRecord(\'' + jsArg(month) + '\',\'' + jsArg(student.id) + '\')">บันทึกยอด</button>' : '';
         return '<tr data-student-id="' + escapeHtml(String(student.id || '')) + '"' +
@@ -37107,8 +37188,14 @@ function receiptStatusText(status) {
       const row = button.closest('tr');
       if (!row) return;
       const paymentId = row.getAttribute('data-payment-id');
-      const payment = payments.find(function(p) { return String(p.id) === String(paymentId); });
+      const payment = findPaymentByAnyId(paymentId);
       if (!payment) return;
+      if (!canAdjustPaymentAmount(payment)) {
+        alert('รายการนี้มีสลิป/ชำระแล้ว/อยู่ในยอดรวม หรือออกใบเสร็จแล้ว จึงแก้ยอดไม่ได้');
+        renderPaymentTable();
+        renderPaymentRecordPreview();
+        return;
+      }
       const originalAmount = Number(payment.originalAmount || payment.baseAmount || getPaymentFinalAmount(payment));
       const currentFinal = getPaymentFinalAmount(payment);
       const currentDiscountType = payment.discountType || 'none';
@@ -37162,11 +37249,17 @@ function receiptStatusText(status) {
           payment.adminNote = bubbleValue('bubblePaymentAmountNote');
           try {
             await setFirebaseDocument('payments', payment);
+            const monthPriceAmount = discountType === 'manualHalf' ? origAmt : newFinal;
+            await syncPaymentAmountToStudentMonthPrice(payment, monthPriceAmount);
             addActivityLog('ปรับยอดชำระ/ส่วนลด', (payment.student || '-') + ' · ' + (payment.month || '-') + ' · ' + discountType + ' · ' + formatPrice(newFinal));
           } catch (error) { console.error(error); }
           renderPaymentTable();
           renderAdminDashboard();
           renderPaymentRecordPreview();
+          updateStudentSelectedPaymentMonth();
+          updateStudentCourseDisplay();
+          renderDashboardPaymentSummary();
+          safeRun(renderStudentMobilePayment, 'edit-payment-amount-mobile');
           closeEditBubble();
         }
       );
