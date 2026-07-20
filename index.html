@@ -8731,7 +8731,9 @@
         safeRun(updateStudentSelectedPaymentMonth, 'listener-update-month');
         safeRun(renderStudentReceipts, 'listener-receipts');
         safeRun(renderStudentMobilePayment, 'listener-mobile-payment');
-        safeRun(renderStudentGamificationPanel, 'listener-gamification-panel');
+        if (!prizeWheelSpinning) {
+          safeRun(renderStudentGamificationPanel, 'listener-gamification-panel');
+        }
         safeRun(updateStudentCourseDisplay, 'listener-course-display');
       }
 
@@ -8818,7 +8820,9 @@
       const redemptionUnsub = redemptionQuery ? redemptionQuery.onSnapshot(function(snapshot) {
         if (snapshot.metadata && snapshot.metadata.hasPendingWrites) return;
         const changes = snapshot.docChanges();
-        if (applyDocChanges(gamificationRedemptions, changes)) renderStudentGamificationPanel();
+        if (applyDocChanges(gamificationRedemptions, changes)) {
+          if (!prizeWheelSpinning) renderStudentGamificationPanel();
+        }
       }, function(err) { console.warn('gamificationRedemptions listener error:', err); }) : function() {};
 
       studentPaymentsUnsubscribe = function() { paymentUnsubs.forEach(function(u) { try { u(); } catch(e) {} }); };
@@ -10301,6 +10305,8 @@
     let pwHCurrentX = 0;
     let pwLastSpinResult = null;
     let pwLastWinner = null; // persists until page reload — keeps reel centered on last prize
+    let pwSpinRunId = 0;
+    let pwResultClearTimer = null;
     let studentGamificationAvatarAnimations = {};
     let avatarBattleState = null;
     let dailyLoginQuestTriggeredThisSession = false;
@@ -21343,6 +21349,54 @@
       }
     }
 
+    function findStudentForOnlineExamResult(result) {
+      if (!result) return null;
+      const uid = String(result.studentUid || result.authUid || '').trim();
+      const memberId = String(result.memberId || result.studentMemberId || result.studentId || '').trim();
+      const name = String(result.studentName || result.student || '').trim();
+      return students.find(function(student) {
+        if (!student) return false;
+        if (uid && String(student.authUid || student.studentAuthUid || '') === uid) return true;
+        if (memberId && String(student.memberId || student.studentId || student.id || student.firebaseDocId || '') === memberId) return true;
+        if (name && String(student.name || '') === name) return true;
+        return false;
+      }) || null;
+    }
+
+    function isOnlineExamResultPassed(result) {
+      if (!result || (result.resultStatus || 'submitted') !== 'published') return false;
+      if (String(result.status || '') === 'passed') return true;
+      const scorePercent = Number(result.scorePercent);
+      if (isFinite(scorePercent)) return scorePercent >= 60;
+      const correct = Number(result.correctCount);
+      const total = Number(result.totalQ || result.scoreTotal);
+      return isFinite(correct) && isFinite(total) && total > 0 && Math.round(correct / total * 100) >= 60;
+    }
+
+    async function awardGamificationForPublishedOnlineExamResult(result) {
+      if (!isOnlineExamResultPassed(result)) return false;
+      const sourceId = String(result._docId || result.firebaseDocId || result.id || '').trim();
+      if (!sourceId) return false;
+      const student = findStudentForOnlineExamResult(result);
+      if (!student) {
+        console.warn('online exam gamification award skipped: student not found', sourceId);
+        return false;
+      }
+      const eventId = getStudentGamificationEventIdForStudent(student, 'onlineExamPass', sourceId);
+      const alreadyAwarded = studentGamificationEvents.some(function(event) {
+        return event && event.deleted !== true && String(event.firebaseDocId || event.id || '') === eventId;
+      });
+      if (alreadyAwarded) return false;
+      const title = result.courseTitle || result.examTitle || result.title || '-';
+      try {
+        await awardGamificationForStudent(student, 'onlineExamPass', sourceId, 150, 30, 'สอบออนไลน์ผ่าน: ' + title);
+        return true;
+      } catch (error) {
+        console.warn('online exam gamification award failed:', sourceId, error);
+        return false;
+      }
+    }
+
     async function backfillExamScoreGamification() {
       const result = getElement('scoreAdjustResult');
       if (!confirm('แจก EXP ย้อนหลังให้นักเรียนทุกคนจากคะแนนสอบที่ประกาศแล้วทั้งหมด?\n(ระบบจะข้ามรายการที่เคยแจกไปแล้วอัตโนมัติ)')) return;
@@ -23039,6 +23093,12 @@
       const usingWheelTicket = wheelTicketsAvail > 0;
       if (!usingWheelTicket && Number(profile.coins) < cost) { alert('Coins ไม่พอสำหรับการหมุน'); return; }
 
+      const spinRunId = ++pwSpinRunId;
+      if (pwResultClearTimer) {
+        window.clearTimeout(pwResultClearTimer);
+        pwResultClearTimer = null;
+      }
+      pwLastSpinResult = null;
       const winner = weightedRandomPrize(items);
       prizeWheelSpinning = true;
 
@@ -23090,6 +23150,7 @@
       function easeOutCubic(t) { return 1 - Math.pow(1 - t, 3); }
 
       function pwHSpinTick(ts) {
+        if (spinRunId !== pwSpinRunId) return;
         if (!spinStart) spinStart = ts;
         var elapsed = ts - spinStart;
         var progress = Math.min(elapsed / SPIN_DURATION, 1);
@@ -23113,7 +23174,7 @@
         if (progress < 1) { requestAnimationFrame(pwHSpinTick); return; }
 
         // Animation done — winner glow
-        prizeWheelSpinning = false;
+        pwLastWinner = winner; // lock the visual result before async reward writes can trigger listeners
         var wc = winner.color || '#94a3b8';
         if (sectionEl) {
           sectionEl.style.background = 'linear-gradient(135deg,' + pwHexToRgba(wc,0.35) + ' 0%,' + pwHexToRgba(wc,0.18) + ' 100%)';
@@ -23122,6 +23183,8 @@
         allHWraps.forEach(function(w) { w.style.borderColor = pwHexToRgba(wc,0.9); w.style.boxShadow = '0 2px 20px ' + pwHexToRgba(wc,0.38); });
         // Run reward logic
         window.setTimeout(async function() {
+          if (spinRunId !== pwSpinRunId) return;
+          try {
           const profileId = String(profile.firebaseDocId || profile.id || '');
           // Mutate the actual array entry so re-renders read the updated value
           const actualProfile = findCurrentStudentGamificationProfile();
@@ -23259,11 +23322,23 @@
               (bonusText ? ' · ' + bonusText : '') + customLabel,
             color: '#16a34a'
           };
-          pwLastWinner = winner; // persist winner so reel stays on it; cleared only on page reload
+          prizeWheelSpinning = false;
           // Re-render immediately with updated counts; result persists via pwLastSpinResult
           renderStudentGamificationPanel();
           // Clear result text after 6 seconds but keep pwLastWinner so reel stays on the prize
-          window.setTimeout(function() { pwLastSpinResult = null; renderStudentGamificationPanel(); }, 6000);
+          pwResultClearTimer = window.setTimeout(function() {
+            if (spinRunId !== pwSpinRunId) return;
+            pwLastSpinResult = null;
+            renderStudentGamificationPanel();
+          }, 6000);
+          } catch (e) {
+            console.warn('pw spin reward settle:', e);
+          } finally {
+            if (spinRunId === pwSpinRunId && prizeWheelSpinning) {
+              prizeWheelSpinning = false;
+              renderStudentGamificationPanel();
+            }
+          }
         }, 50);
       }
       requestAnimationFrame(pwHSpinTick);
@@ -42107,6 +42182,7 @@ function receiptStatusText(status) {
           );
           pending[i].resultStatus = 'published';
           await syncOnlineExamScoreToRecords(pending[i]);
+          await awardGamificationForPublishedOnlineExamResult(pending[i]);
           count++;
         } catch (e) {
           console.warn('publish grouped result error', pending[i]._docId, e);
@@ -42586,6 +42662,7 @@ function receiptStatusText(status) {
         if (r) {
           r.resultStatus = 'published';
           await syncOnlineExamScoreToRecords(r);
+          await awardGamificationForPublishedOnlineExamResult(r);
         }
         onlineExamGradeGroupedRows = buildOnlineExamGroupedRows(onlineExamGradeAllResults);
         renderOnlineExamGradingPage(onlineExamGradePage);
@@ -44257,9 +44334,6 @@ function receiptStatusText(status) {
       try {
         await db.collection('onlineExamResults').doc(resultId).set(payload);
         addActivityLog('ส่งข้อสอบ Interactive', (course.title || '') + ' — ' + (currentStudent ? currentStudent.name : '') + ' คะแนน ' + onlineExamFormatScore50(correctCount, questions.length));
-        if (passStatus === 'passed') {
-          await awardStudentGamification('onlineExamPass', resultId, 150, 30, 'สอบออนไลน์ผ่าน: ' + (course.title || '-'));
-        }
       } catch (e) {
         console.error('submitOnlineExamResult write error', e);
         onlineExamSubmitting = false;
