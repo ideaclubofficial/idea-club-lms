@@ -22565,7 +22565,8 @@
       }).join('');
       const rewardOptions = activeRewards.map(function(r) {
         const id = escapeHtml(String(r.firebaseDocId || r.id || ''));
-        return '<option value="' + id + '">' + escapeHtml(r.title || '-') + '</option>';
+        const tag = r.rewardType === 'stampCard' ? ' [เพิ่มแสตมป์]' : '';
+        return '<option value="' + id + '">' + escapeHtml((r.title || '-') + tag) + '</option>';
       }).join('');
 
       openEditBubble('🎟 แจกบัตรแลกของ',
@@ -22594,6 +22595,36 @@
 
       const resultEl = getElement('editBubbleResult');
       if (resultEl) resultEl.textContent = 'กำลังบันทึก…';
+
+      if (reward.rewardType === 'stampCard') {
+        try {
+          const result = await addStampMarkForStudent(student, rewardId, reward, {
+            sourceType: 'adminVoucher',
+            note: note
+          });
+          if (resultEl) {
+            if (result && result.alreadyCompleted) {
+              resultEl.textContent = '✅ นักเรียนสะสมบัตรนี้ครบแล้ว';
+            } else if (result && result.nowCompleted) {
+              resultEl.textContent = '✅ เพิ่มแสตมป์สำเร็จ และสะสมครบแล้ว';
+            } else if (result) {
+              resultEl.textContent = '✅ เพิ่มแสตมป์สำเร็จ (' + result.newStamps + '/' + result.stampsRequired + ')';
+            } else {
+              resultEl.textContent = '✅ เพิ่มแสตมป์สำเร็จ';
+            }
+          }
+          addActivityLog('Admin เพิ่มแสตมป์สะสม', (student.name || '-') + ' · ' + (reward.title || '-') + (note ? ' · ' + note : ''));
+          window.setTimeout(function() {
+            getElement('editBubbleOverlay').classList.add('hidden');
+            editBubbleSaveHandler = null;
+            renderAdminGamificationShop();
+            renderTeacherStudents();
+          }, 900);
+        } catch (e) {
+          if (resultEl) resultEl.textContent = '❌ เพิ่มแสตมป์ไม่สำเร็จ: ' + (e.message || e.code || '');
+        }
+        return;
+      }
 
       const redemptionId = createFirebaseDocId('gamificationRedemptions');
       const studentAuthUid = String(student.authUid || '').trim();
@@ -24332,11 +24363,12 @@
       }
     }
 
-    async function addStudentStampMark(rewardId, rewardDoc, fromPrizeWheel, prizeWheelSpinId) {
-      if (!currentStudent || !firebaseReady || !db || !firebaseUser) return null;
-      const profile = getCurrentStudentGamificationProfile();
-      const actualProfile = findCurrentStudentGamificationProfile();
-      const profileId = String((actualProfile && (actualProfile.firebaseDocId || actualProfile.id)) || profile.firebaseDocId || profile.id || getStudentGamificationProfileId(currentStudent));
+    async function addStampMarkForStudent(student, rewardId, rewardDoc, options) {
+      options = options || {};
+      if (!student || !firebaseReady || !db || !firebaseUser) return null;
+      const profile = getStudentGamificationProfile(student);
+      const actualProfile = findStudentGamificationProfile(student);
+      const profileId = String((actualProfile && (actualProfile.firebaseDocId || actualProfile.id)) || profile.firebaseDocId || profile.id || getStudentGamificationProfileId(student));
       if (!profileId) return null;
       const stampProgress = Object.assign({}, (profile.stampProgress) || {});
       const cardProgress = Object.assign({ stamps: 0, completed: false }, stampProgress[rewardId] || {});
@@ -24352,11 +24384,11 @@
       const profilePayload = {
         firebaseDocId: profileId,
         id: profileId,
-        studentId: getStudentRecordDocId(currentStudent),
-        authUid: String((currentStudent.authUid) || (firebaseUser && firebaseUser.uid) || '').trim(),
-        memberId: currentStudent.memberId || currentStudent.studentId || '',
-        studentName: currentStudent.name || '',
-        nickname: currentStudent.nickname || '',
+        studentId: getStudentRecordDocId(student),
+        authUid: String((student.authUid || student.studentAuthUid) || (isStudentAccount(firebaseUserProfile) && firebaseUser ? firebaseUser.uid : '') || '').trim(),
+        memberId: student.memberId || student.studentId || '',
+        studentName: student.name || student.studentName || '',
+        nickname: student.nickname || '',
         level: profile.level || 1,
         exp: profile.exp || 0,
         coins: profile.coins || 0,
@@ -24372,6 +24404,13 @@
       }
       updateLeaderboardProfileInMemory(profileId, actualProfile || profilePayload);
       return { newStamps: newStamps, stampsRequired: stampsRequired, nowCompleted: nowCompleted };
+    }
+
+    async function addStudentStampMark(rewardId, rewardDoc, fromPrizeWheel, prizeWheelSpinId) {
+      return addStampMarkForStudent(currentStudent, rewardId, rewardDoc, {
+        fromPrizeWheel: fromPrizeWheel,
+        prizeWheelSpinId: prizeWheelSpinId
+      });
     }
 
     async function claimStampCardReward(rewardId) {
