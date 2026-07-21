@@ -10329,8 +10329,9 @@
       { id: 'daily_exam',  icon: '📝',  title: 'สอบออนไลน์วันนี้',       desc: 'ผ่านเกณฑ์ 60% ขึ้นไป 1 ครั้ง',            target: 1, expReward: 30,  coinReward: 10 }
     ];
 
+    const DEFAULT_GAMIFICATION_PROFESSION_ID = 'IDEA Explorer';
     const GAMIFICATION_PROFESSIONS = [
-      { id: 'IDEA Explorer', icon: '🌟', label: 'IDEA Explorer',        thaiLabel: 'นักสำรวจ',          passiveName: '-',             passiveDesc: 'อาชีพเริ่มต้น · +5% EXP · +5% Coins ทุกกิจกรรม',                                              color: '#6366f1', bonusSources: [],                                baseBonus: 0,    bonusType: 'exp'   },
+      { id: DEFAULT_GAMIFICATION_PROFESSION_ID, icon: '🌟', label: 'IDEA Explorer',        thaiLabel: 'นักสำรวจ',          passiveName: '-',             passiveDesc: 'อาชีพเริ่มต้น · +5% EXP · +5% Coins ทุกกิจกรรม',                                              color: '#6366f1', bonusSources: [],                                baseBonus: 0,    bonusType: 'exp'   },
       { id: 'mage',          icon: '🔮', label: 'Archmage of Wisdom',   thaiLabel: 'จอมเวทแห่งปัญญา', passiveName: 'สมาธิเวท',       passiveDesc: 'รับ EXP จากการสอบ +15% (Lv.1) ถึง +75% (Lv.5) · รับ Coins จากการสอบ +10% (Lv.1) ถึง +50% (Lv.5) · Coins ทุกกิจกรรม +5% ถึง +15%',  color: '#0ea5e9', bonusSources: ['monthlyExam','onlineExamPass'],  baseBonus: 0.15, baseCoinBonus: 0.10, bonusType: 'exp'   },
       { id: 'rogue',         icon: '🏹', label: 'Windrunner Rogue',     thaiLabel: 'นักล่าสายลม',      passiveName: 'ก้าวพริบตา',     passiveDesc: 'รับ EXP จากวิดีโอ On-demand +15% (Lv.1) ถึง +75% (Lv.5) · รับ Coins จากวิดีโอ On-demand +10% (Lv.1) ถึง +50% (Lv.5) · Coins ทุกกิจกรรม +5% ถึง +15%', color: '#10b981', bonusSources: ['onDemandClip'],                  baseBonus: 0.15, baseCoinBonus: 0.10, bonusType: 'exp'   },
       { id: 'crusader',      icon: '🛡️', label: 'Grand Crusader',       thaiLabel: 'อัศวินผู้พิทักษ์', passiveName: 'เกราะแห่งวินัย', passiveDesc: 'รับ EXP จากทุกกิจกรรมเพิ่มขึ้น +12% (Lv.1) ถึง +60% (Lv.5) · +5% Coins (Lv.1) ถึง +15% Coins (Lv.5)',   color: '#f43f5e', bonusSources: ['all'],                           baseBonus: 0.12, bonusType: 'exp'   },
@@ -19694,7 +19695,7 @@
         prizeWheelTickets: prizeWheelTickets,
         ownedAvatarItems: ownedAvatarItems,
         equippedAvatarItems: equippedAvatarItems,
-        profession: (profile && profile.profession) || 'IDEA Explorer',
+        profession: (profile && profile.profession) || DEFAULT_GAMIFICATION_PROFESSION_ID,
         skillLevels: { passive: passiveLevel },
         dailyQuestProgress: { date: rawDqp.date || '', quests: rawDqp.quests || {} },
         pendingCoinFrac: pendingCoinFrac
@@ -19702,12 +19703,12 @@
     }
 
     function getSelectableGamificationProfessions() {
-      return GAMIFICATION_PROFESSIONS.filter(function(p) { return p.id !== 'IDEA Explorer'; });
+      return GAMIFICATION_PROFESSIONS.filter(function(p) { return p.id !== DEFAULT_GAMIFICATION_PROFESSION_ID; });
     }
 
     function hasStudentChosenProfession(profile) {
-      const professionId = String(profile && profile.profession || 'IDEA Explorer');
-      return !!(profile && profile.professionSelected === true) || professionId !== 'IDEA Explorer';
+      const professionId = String(profile && profile.profession || DEFAULT_GAMIFICATION_PROFESSION_ID);
+      return professionId !== DEFAULT_GAMIFICATION_PROFESSION_ID;
     }
 
     function getProfessionChangeTickets(profile) {
@@ -22502,7 +22503,7 @@
     function openProfessionChooser() {
       if (!currentStudent) return;
       const profile = getCurrentStudentGamificationProfile();
-      const current = profile.profession || 'IDEA Explorer';
+      const current = profile.profession || DEFAULT_GAMIFICATION_PROFESSION_ID;
       const chosenProfession = hasStudentChosenProfession(profile);
       const ticketCount = getProfessionChangeTickets(profile);
       if (chosenProfession && ticketCount <= 0) {
@@ -22527,7 +22528,7 @@
       const title = chosenProfession ? 'เปลี่ยนอาชีพนักผจญภัย' : 'เลือกอาชีพครั้งแรก';
       const note = chosenProfession
         ? 'คุณมี <strong>' + ticketCount + '</strong> บัตรเปลี่ยนอาชีพ · เปลี่ยนสำเร็จแล้วจะใช้บัตร 1 ใบ'
-        : 'เลือกอาชีพครั้งแรกได้ฟรี 1 ครั้ง · หากเปลี่ยนภายหลังต้องใช้บัตรเปลี่ยนอาชีพ';
+        : 'นักสำรวจเป็นอาชีพเริ่มต้นอัตโนมัติ และไม่อยู่ในตัวเลือก · เลือกอาชีพหลักครั้งแรกได้ฟรี 1 ครั้ง';
       openViewBubble(title,
         '<div class="profession-chooser-grid">' + cards + '</div>' +
         '<p class="profession-chooser-note">' + note + '</p>'
@@ -22537,10 +22538,13 @@
     async function saveStudentProfession(professionId) {
       if (!currentStudent || !firebaseReady || !db) return;
       const prof = GAMIFICATION_PROFESSIONS.find(function(p) { return p.id === professionId; });
-      if (!prof || prof.id === 'IDEA Explorer') return;
+      if (!prof || prof.id === DEFAULT_GAMIFICATION_PROFESSION_ID) {
+        alert('นักสำรวจเป็นอาชีพเริ่มต้นอัตโนมัติ ไม่สามารถเลือกเป็นอาชีพหลักได้');
+        return;
+      }
       const profile = getCurrentStudentGamificationProfile();
       const profileId = String(profile.firebaseDocId || profile.id || getStudentGamificationProfileId(currentStudent));
-      const currentProfession = profile.profession || 'IDEA Explorer';
+      const currentProfession = profile.profession || DEFAULT_GAMIFICATION_PROFESSION_ID;
       const chosenProfession = hasStudentChosenProfession(profile);
       const currentTickets = getProfessionChangeTickets(profile);
       const isSameProfession = String(currentProfession) === String(professionId);
