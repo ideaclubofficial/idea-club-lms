@@ -46436,7 +46436,6 @@ function receiptStatusText(status) {
       } else {
         tfSyncScheduleFormFromCourse();
       }
-      if (tfEl('tf-sched-cross-center') && tfEl('tf-sched-cross-center').checked) tfSelectDefaultSecondCenter();
       if (tfEl('tf-sched-shared') && tfEl('tf-sched-shared').checked) tfRenderCombinedGradeOptions();
     }
 
@@ -46588,7 +46587,7 @@ function receiptStatusText(status) {
       }
       tfPopulateSchedTutors(fmt);
       tfPopulateSchedCourses();
-      if (tfEl('tf-sched-shared') && tfEl('tf-sched-shared').checked) tfOnSharedClassChange();
+      if (tfEl('tf-sched-shared') && tfEl('tf-sched-shared').checked) tfRenderCombinedGradeOptions();
       if (!options.skipSync) tfSyncScheduleFormFromCourse({ keepFormat: true });
     }
 
@@ -46602,23 +46601,10 @@ function receiptStatusText(status) {
     }
 
     function tfOnSharedClassChange() {
-      const shared = tfEl('tf-sched-shared');
-      const cross = tfEl('tf-sched-cross-center');
-      const fmt = tfGetSelectedSchedFormat();
-      const sharedChecked = !!(shared && shared.checked);
-      if (cross) {
-        if (sharedChecked && tfSupportsCrossCenterClass(fmt)) {
-          cross.checked = true;
-        } else if (!sharedChecked) {
-          cross.checked = false;
-        }
-      }
-      tfOnCrossCenterClassChange({ skipSharedAutoCheck: true });
       tfRenderCombinedGradeOptions();
     }
 
-    function tfOnCrossCenterClassChange(options) {
-      options = options || {};
+    function tfOnCrossCenterClassChange() {
       const cross = tfEl('tf-sched-cross-center');
       const checked = cross && cross.checked;
       const wrap = tfEl('tf-shared-center2-wrap');
@@ -46628,13 +46614,6 @@ function receiptStatusText(status) {
         if (tfEl('tf-sched-center2')) tfEl('tf-sched-center2').value = '';
         if (wrap) wrap.classList.add('hidden');
         return;
-      }
-      if (checked && !options.skipSharedAutoCheck) {
-        const shared = tfEl('tf-sched-shared');
-        if (shared && !shared.checked) {
-          shared.checked = true;
-          tfRenderCombinedGradeOptions();
-        }
       }
       if (wrap) {
         if (checked && tfSupportsCrossCenterClass(fmt)) {
@@ -46733,6 +46712,47 @@ function receiptStatusText(status) {
         return candidateCourseIds.some(function(id) { return sessionCourseIds.includes(id); }) ||
           candidateGrades.some(function(grade) { return sessionGrades.includes(grade); });
       }) || null;
+    }
+
+    function tfFindExistingSharedClassGroupSessions(groupId) {
+      const key = String(groupId || '').trim();
+      if (!key) return [];
+      return (monthlyPlanSessions || []).filter(function(session) {
+        const sessionId = String(session.id || session.firebaseDocId || '').trim();
+        const sessionGroupId = String(session.sharedClassGroupId || session.sharedGroupId || '').trim();
+        return sessionId === key || sessionGroupId === key;
+      });
+    }
+
+    function tfBuildSharedClassSessions(baseSchedule, existing, targetCourseIds, combinedGrades) {
+      const groupId = String((existing && (existing.sharedClassGroupId || existing.sharedGroupId || existing.id || existing.firebaseDocId)) || baseSchedule.id || createFirebaseDocId('monthlyPlanSessions')).trim();
+      const existingGroup = tfFindExistingSharedClassGroupSessions(groupId);
+      const targetIds = Array.from(new Set((targetCourseIds || []).map(function(id) {
+        return String(id || '').trim();
+      }).filter(Boolean)));
+      return targetIds.map(function(targetCourseId, index) {
+        const existingForCourse = existingGroup.find(function(session) {
+          return String(session.courseId || '').trim() === targetCourseId;
+        }) || (String(existing && existing.courseId || '') === targetCourseId ? existing : null);
+        const docId = existingForCourse
+          ? String(existingForCourse.id || existingForCourse.firebaseDocId || '').trim()
+          : (index === 0 && baseSchedule.id ? String(baseSchedule.id) : createFirebaseDocId('monthlyPlanSessions'));
+        const schedule = Object.assign({}, baseSchedule, {
+          id: docId,
+          courseId: targetCourseId,
+          isSharedClass: true,
+          sharedClassGroupId: groupId,
+          combinedCourseIds: targetIds,
+          combinedGrades: combinedGrades
+        });
+        const session = tfSchedToSession(schedule, existingForCourse || null);
+        session.sharedClassGroupId = groupId;
+        session.sharedGroupId = groupId;
+        session.isSharedClass = true;
+        session.combinedCourseIds = targetIds;
+        session.combinedGrades = combinedGrades;
+        return { session: session, existing: existingForCourse || null };
+      });
     }
 
     function tfCanCombineConflictingClass(format) {
@@ -46917,7 +46937,7 @@ function receiptStatusText(status) {
       const location = tfEl('tf-sched-location') ? tfEl('tf-sched-location').value.trim() : '';
       const notes = tfEl('tf-sched-notes') ? tfEl('tf-sched-notes').value.trim() : '';
       const isCrossCenterClass = !!(tfEl('tf-sched-cross-center') && tfEl('tf-sched-cross-center').checked);
-      const isSharedClass = !!(tfEl('tf-sched-shared') && tfEl('tf-sched-shared').checked) || isCrossCenterClass;
+      const isSharedClass = !!(tfEl('tf-sched-shared') && tfEl('tf-sched-shared').checked);
       const center2 = isCrossCenterClass && tfEl('tf-sched-center2') ? tfEl('tf-sched-center2').value : '';
       let combinedCourseIds = isSharedClass ? tfGetSelectedCombinedGradeCourseIds() : [];
       let combinedGrades = isSharedClass ? tfGetSelectedCombinedGrades() : [];
@@ -46929,7 +46949,7 @@ function receiptStatusText(status) {
         if (errEl) { errEl.textContent = 'กรุณากรอกข้อมูลที่จำเป็นให้ครบ (ศูนย์, ระดับชั้น, รูปแบบ, วันที่, เวลา)'; errEl.classList.remove('hidden'); }
         return;
       }
-      if (isSharedClass && !isCrossCenterClass && combinedGrades.length < 2) {
+      if (isSharedClass && combinedGrades.length < 2) {
         if (errEl) { errEl.textContent = 'กรุณาเลือกระดับชั้นอย่างน้อย 2 ระดับสำหรับรวมคลาส'; errEl.classList.remove('hidden'); }
         tfRenderCombinedGradeOptions(combinedCourseIds);
         return;
@@ -46942,7 +46962,10 @@ function receiptStatusText(status) {
       const existing = monthlyPlanSessions.find(function(s) { return (s.id || s.firebaseDocId || '') === docId; }) || null;
       const scheduleStatus = tutorId ? 'confirmed' : 'draft';
       const sch = { id: docId, courseId, tutorId, format, center, date, start, end, location, notes, completed: false, report: '', status: scheduleStatus, needsTeacherAssignment: !tutorId, isSharedClass: isSharedClass, isCrossCenterClass: isCrossCenterClass, center2: center2 || '', combinedCourseIds: combinedCourseIds, combinedGrades: combinedGrades };
-      const session = tfSchedToSession(sch, existing);
+      const sessionTargets = isSharedClass
+        ? tfBuildSharedClassSessions(sch, existing, combinedCourseIds, combinedGrades)
+        : [{ session: tfSchedToSession(sch, existing), existing: existing }];
+      const session = sessionTargets[0].session;
       const teacherConflicts = findTeacherConflicts(session);
       if (teacherConflicts.length) {
         if (tfCanCombineConflictingClass(format)) {
@@ -46955,39 +46978,50 @@ function receiptStatusText(status) {
           return;
         }
       }
-      const duplicate = tfFindDuplicateScheduleSession(session, editingId);
-      if (duplicate) {
-        const dupTime = [duplicate.timeStart || duplicate.sessionTime || '', duplicate.timeEnd || ''].filter(Boolean).join(' - ');
-        if (errEl) {
-          errEl.textContent = 'พบตารางซ้ำแล้ว: ' + tfGetCourseName(duplicate.courseId) + ' วันที่ ' + (duplicate.date || duplicate.sessionDate || '-') + (dupTime ? ' เวลา ' + dupTime : '') + ' กรุณาเลือกวัน/เวลาอื่น';
-          errEl.classList.remove('hidden');
+      for (let i = 0; i < sessionTargets.length; i++) {
+        const target = sessionTargets[i];
+        const targetId = target.session.id || target.session.firebaseDocId || editingId;
+        const duplicate = tfFindDuplicateScheduleSession(target.session, targetId);
+        const targetGroupId = String(target.session.sharedClassGroupId || target.session.sharedGroupId || '');
+        const duplicateGroupId = duplicate ? String(duplicate.sharedClassGroupId || duplicate.sharedGroupId || '') : '';
+        if (duplicate && (!targetGroupId || duplicateGroupId !== targetGroupId)) {
+          const dupTime = [duplicate.timeStart || duplicate.sessionTime || '', duplicate.timeEnd || ''].filter(Boolean).join(' - ');
+          if (errEl) {
+            errEl.textContent = 'พบตารางซ้ำแล้ว: ' + tfGetCourseName(duplicate.courseId) + ' วันที่ ' + (duplicate.date || duplicate.sessionDate || '-') + (dupTime ? ' เวลา ' + dupTime : '') + ' กรุณาเลือกวัน/เวลาอื่น';
+            errEl.classList.remove('hidden');
+          }
+          tfToast('พบตารางซ้ำ ยังไม่ได้บันทึก', 'error');
+          return;
         }
-        tfToast('พบตารางซ้ำ ยังไม่ได้บันทึก', 'error');
-        return;
       }
-      const combinedDuplicate = tfFindCombinedGradeDuplicateSession(session, editingId);
-      if (combinedDuplicate) {
-        const dupTime = [combinedDuplicate.timeStart || combinedDuplicate.sessionTime || '', combinedDuplicate.timeEnd || ''].filter(Boolean).join(' - ');
-        if (errEl) {
-          errEl.textContent = 'ระดับชั้นนี้มีตารางในคาบรวม/คาบเดิมแล้ว: ' + getMonthlySessionGradeLabel(combinedDuplicate) + ' วันที่ ' + (combinedDuplicate.date || combinedDuplicate.sessionDate || '-') + (dupTime ? ' เวลา ' + dupTime : '') + ' ไม่ต้องบันทึกซ้ำ';
-          errEl.classList.remove('hidden');
+      if (!isSharedClass) {
+        const combinedDuplicate = tfFindCombinedGradeDuplicateSession(session, editingId);
+        if (combinedDuplicate) {
+          const dupTime = [combinedDuplicate.timeStart || combinedDuplicate.sessionTime || '', combinedDuplicate.timeEnd || ''].filter(Boolean).join(' - ');
+          if (errEl) {
+            errEl.textContent = 'ระดับชั้นนี้มีตารางในคาบรวม/คาบเดิมแล้ว: ' + getMonthlySessionGradeLabel(combinedDuplicate) + ' วันที่ ' + (combinedDuplicate.date || combinedDuplicate.sessionDate || '-') + (dupTime ? ' เวลา ' + dupTime : '') + ' ไม่ต้องบันทึกซ้ำ';
+            errEl.classList.remove('hidden');
+          }
+          tfToast('ไม่ต้องบันทึกระดับชั้นซ้ำ', 'error');
+          return;
         }
-        tfToast('ไม่ต้องบันทึกระดับชั้นซ้ำ', 'error');
-        return;
       }
       try {
-        await setFirebaseDocument('monthlyPlanSessions', session);
-        if (existing) {
-          Object.assign(existing, session);
-        } else {
-          monthlyPlanSessions.push(session);
+        for (let i = 0; i < sessionTargets.length; i++) {
+          const target = sessionTargets[i];
+          await setFirebaseDocument('monthlyPlanSessions', target.session);
+          if (target.existing) {
+            Object.assign(target.existing, target.session);
+          } else {
+            monthlyPlanSessions.push(target.session);
+          }
         }
         tfCloseScheduleModal();
-        if (!tfScheduleMatchesCurrentFilters(tfSessionToSched(session))) {
+        if (!sessionTargets.some(function(target) { return tfScheduleMatchesCurrentFilters(tfSessionToSched(target.session)); })) {
           tfClearScheduleFiltersWithoutRender();
         }
         tfRenderSchedule();
-        tfToast('บันทึกตารางสอนสำเร็จ', 'success');
+        tfToast(isSharedClass ? 'บันทึกคาบรวมคลาส ' + sessionTargets.length + ' คลาสสำเร็จ' : 'บันทึกตารางสอนสำเร็จ', 'success');
         safeRun(renderStudentMonthlyPlanSummary, 'student-plan-summary-refresh');
         safeRun(renderTeacherMonthlyPlanSummary, 'teacher-plan-summary-refresh');
         safeRun(renderTodayTeachingList, 'tf-sync-today');
