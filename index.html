@@ -10318,6 +10318,8 @@
     let gamificationRedemptionsCleanupRunning = false;
     const prizeWheelItems = [];
     const prizeWheelSpins = [];
+    const PRIZE_WHEEL_SPIN_HISTORY_LIMIT = 20;
+    let prizeWheelSpinsCleanupRunning = false;
     let prizeWheelSettings = { spinCost: 30, enabled: true };
     let prizeWheelSpinning = false;
     let pwHCurrentX = 0;
@@ -23421,6 +23423,42 @@
       return getPrizeWheelSpinTimeValue(b) - getPrizeWheelSpinTimeValue(a);
     }
 
+    async function cleanupOldPrizeWheelSpins() {
+      if (prizeWheelSpinsCleanupRunning || !firebaseReady || !db) return;
+      const activeSpins = prizeWheelSpins
+        .filter(function(spin) { return spin && !spin.deleted; })
+        .slice()
+        .sort(sortPrizeWheelSpinsNewestFirst);
+      if (activeSpins.length <= PRIZE_WHEEL_SPIN_HISTORY_LIMIT) return;
+      prizeWheelSpinsCleanupRunning = true;
+      const staleSpins = activeSpins.slice(PRIZE_WHEEL_SPIN_HISTORY_LIMIT);
+      try {
+        const batchSize = 400;
+        for (let i = 0; i < staleSpins.length; i += batchSize) {
+          const chunk = staleSpins.slice(i, i + batchSize).filter(function(spin) {
+            return String((spin && (spin.firebaseDocId || spin.id)) || '').trim();
+          });
+          if (!chunk.length) continue;
+          const batch = db.batch();
+          chunk.forEach(function(spin) {
+            const spinId = String(spin.firebaseDocId || spin.id || '').trim();
+            batch.delete(db.collection('prizeWheelSpins').doc(spinId));
+          });
+          await batch.commit();
+        }
+        staleSpins.forEach(function(spin) {
+          const idx = prizeWheelSpins.indexOf(spin);
+          if (idx !== -1) prizeWheelSpins.splice(idx, 1);
+        });
+        if (typeof renderAdminPrizeWheel === 'function') renderAdminPrizeWheel();
+        if (typeof renderStudentGamificationPanel === 'function') renderStudentGamificationPanel();
+      } catch (e) {
+        console.warn('cleanup prizeWheelSpins failed:', e);
+      } finally {
+        prizeWheelSpinsCleanupRunning = false;
+      }
+    }
+
     async function spinPrizeWheel() {
       if (prizeWheelSpinning) return;
       if (!currentStudent) return;
@@ -23588,7 +23626,7 @@
               spinRecord.id = spinId; spinRecord.firebaseDocId = spinId;
               await db.collection('prizeWheelSpins').doc(spinId).set(Object.assign({}, spinRecord, { createdAt: firebase.firestore.FieldValue.serverTimestamp() }));
               prizeWheelSpins.push(spinRecord);
-              // Trim to 15 per-student — permanently delete oldest beyond limit
+              // Trim per-student history so the student-owned listener does not grow forever.
               try {
                 const mySpins = prizeWheelSpins.filter(function(s) {
                   return !s.deleted && (
@@ -23598,8 +23636,8 @@
                 }).slice().sort(function(a, b) {
                   return getPrizeWheelSpinTimeValue(a) - getPrizeWheelSpinTimeValue(b);
                 });
-                if (mySpins.length > 15) {
-                  const toDelete = mySpins.slice(0, mySpins.length - 15);
+                if (mySpins.length > PRIZE_WHEEL_SPIN_HISTORY_LIMIT) {
+                  const toDelete = mySpins.slice(0, mySpins.length - PRIZE_WHEEL_SPIN_HISTORY_LIMIT);
                   toDelete.forEach(function(old) {
                     const oldId = String(old.firebaseDocId || old.id || '');
                     const idx = prizeWheelSpins.indexOf(old);
@@ -23717,6 +23755,7 @@
       if (costEl) costEl.value = prizeWheelSettings.spinCost !== undefined ? prizeWheelSettings.spinCost : 30;
       renderAdminPrizeWheelToggle();
       renderAdminAvatarBattleSettings();
+      safeRun(cleanupOldPrizeWheelSpins, 'cleanup-old-prize-wheel-spins');
 
       // Prize items table
       const tableEl = getElement('adminPrizeWheelTable');
@@ -23754,7 +23793,7 @@
       if (spinsEl) {
         const allSpins = prizeWheelSpins.filter(function(s) { return !s.deleted; })
           .slice().sort(sortPrizeWheelSpinsNewestFirst)
-          .slice(0, 30);
+          .slice(0, PRIZE_WHEEL_SPIN_HISTORY_LIMIT);
         if (!allSpins.length) {
           spinsEl.innerHTML = '<p style="color:#94a3b8;font-size:13px;">ยังไม่มีการหมุน</p>';
         } else {
@@ -23767,7 +23806,8 @@
               '<td style="font-size:11px;color:#64748b;">' + escapeHtml(s.createdAtText || '-') + '</td>' +
             '</tr>';
           }).join('');
-          spinsEl.innerHTML = '<table class="data-table" style="font-size:13px;"><thead><tr><th>นักเรียน</th><th>รางวัลที่ได้</th><th>มูลค่า</th><th>จ่าย</th><th>เวลา</th></tr></thead><tbody>' + rows + '</tbody></table>';
+          spinsEl.innerHTML = '<p style="color:#64748b;font-size:12px;margin:0 0 8px;">แสดงล่าสุดไม่เกิน ' + PRIZE_WHEEL_SPIN_HISTORY_LIMIT + ' รายการ รายการเก่ากว่านี้จะถูกลบจากระบบอัตโนมัติ</p>' +
+            '<table class="data-table" style="font-size:13px;"><thead><tr><th>นักเรียน</th><th>รางวัลที่ได้</th><th>มูลค่า</th><th>จ่าย</th><th>เวลา</th></tr></thead><tbody>' + rows + '</tbody></table>';
         }
       }
     }
