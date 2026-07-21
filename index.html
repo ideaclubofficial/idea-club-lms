@@ -10314,6 +10314,8 @@
     const leaderboardProfiles = [];
     const gamificationRewards = [];
     const gamificationRedemptions = [];
+    const GAMIFICATION_REDEMPTION_HISTORY_LIMIT = 20;
+    let gamificationRedemptionsCleanupRunning = false;
     const prizeWheelItems = [];
     const prizeWheelSpins = [];
     let prizeWheelSettings = { spinCost: 30, enabled: true };
@@ -22057,10 +22059,53 @@
       });
     }
 
+    function getGamificationRedemptionTimeValue(redemption) {
+      const parsed = parseRecordDate(redemption && (redemption.createdAt || redemption.createdAtText || redemption.updatedAt || redemption.updatedAtText));
+      return parsed ? parsed.getTime() : 0;
+    }
+
+    function sortGamificationRedemptionsNewestFirst(a, b) {
+      const diff = getGamificationRedemptionTimeValue(b) - getGamificationRedemptionTimeValue(a);
+      if (diff) return diff;
+      return String(b && (b.firebaseDocId || b.id || '')).localeCompare(String(a && (a.firebaseDocId || a.id || '')));
+    }
+
+    async function cleanupOldGamificationRedemptions() {
+      if (gamificationRedemptionsCleanupRunning || !firebaseReady || !db) return;
+      const activeRedemptions = gamificationRedemptions.filter(function(redemption) {
+        return redemption && !redemption.deleted;
+      }).slice().sort(sortGamificationRedemptionsNewestFirst);
+      if (activeRedemptions.length <= GAMIFICATION_REDEMPTION_HISTORY_LIMIT) return;
+      gamificationRedemptionsCleanupRunning = true;
+      const stale = activeRedemptions.slice(GAMIFICATION_REDEMPTION_HISTORY_LIMIT);
+      try {
+        const batchSize = 400;
+        for (var i = 0; i < stale.length; i += batchSize) {
+          const batch = db.batch();
+          stale.slice(i, i + batchSize).forEach(function(redemption) {
+            const redemptionId = String(redemption.firebaseDocId || redemption.id || '').trim();
+            if (redemptionId) batch.delete(db.collection('gamificationRedemptions').doc(redemptionId));
+          });
+          await batch.commit();
+        }
+        stale.forEach(function(redemption) {
+          const idx = gamificationRedemptions.indexOf(redemption);
+          if (idx !== -1) gamificationRedemptions.splice(idx, 1);
+        });
+        if (typeof renderAdminGamificationShop === 'function') renderAdminGamificationShop();
+        if (typeof renderStudentGamificationPanel === 'function') renderStudentGamificationPanel();
+      } catch (e) {
+        console.warn('cleanup gamificationRedemptions failed:', e);
+      } finally {
+        gamificationRedemptionsCleanupRunning = false;
+      }
+    }
+
     function renderAdminGamificationShop() {
       const rewardsEl = getElement('adminRewardsTable');
       const redemptionsEl = getElement('adminRedemptionsTable');
       if (!rewardsEl || !redemptionsEl) return;
+      safeRun(cleanupOldGamificationRedemptions, 'cleanup-old-gamification-redemptions');
 
       const active = gamificationRewards.filter(function(r) { return !r.deleted; });
       if (!active.length) {
@@ -22202,7 +22247,8 @@
       }
 
       const allRedemptions = gamificationRedemptions.filter(function(r) { return !r.deleted; })
-        .slice().sort(function(a, b) { return String(b.createdAtText || '') > String(a.createdAtText || '') ? 1 : -1; });
+        .slice().sort(sortGamificationRedemptionsNewestFirst)
+        .slice(0, GAMIFICATION_REDEMPTION_HISTORY_LIMIT);
       if (!allRedemptions.length) {
         redemptionsEl.innerHTML = '<p style="color:#94a3b8;font-size:13px;">ยังไม่มีการแลกรางวัล</p>';
       } else {
@@ -22226,7 +22272,8 @@
             '<td>' + statusCell + '</td>' +
           '</tr>';
         }).join('');
-        redemptionsEl.innerHTML = '<table class="data-table" style="font-size:13px;"><thead><tr><th>นักเรียน</th><th>รางวัล</th><th>ราคา</th><th>วันที่</th><th>สถานะ</th></tr></thead><tbody>' + rows + '</tbody></table>';
+        redemptionsEl.innerHTML = '<p style="margin:0 0 8px;font-size:12px;color:#64748b;">แสดงล่าสุดไม่เกิน ' + GAMIFICATION_REDEMPTION_HISTORY_LIMIT + ' รายการ รายการเก่ากว่านี้จะถูกลบจากระบบอัตโนมัติ</p>' +
+          '<table class="data-table" style="font-size:13px;"><thead><tr><th>นักเรียน</th><th>รางวัล</th><th>ราคา</th><th>วันที่</th><th>สถานะ</th></tr></thead><tbody>' + rows + '</tbody></table>';
       }
     }
 
@@ -22555,7 +22602,12 @@
       const activeRewards = gamificationRewards.filter(function(r) { return !r.deleted; });
       if (!activeRewards.length) { alert('ยังไม่มีรางวัลในระบบ กรุณาสร้างรางวัลก่อน'); return; }
       const activeStudents = students.filter(function(s) { return s && !s.deleted; })
-        .slice().sort(function(a, b) { return String(a.name || '').localeCompare(String(b.name || ''), 'th'); });
+        .slice().sort(function(a, b) {
+          const idA = String(a.memberId || a.studentId || a.id || a.firebaseDocId || '');
+          const idB = String(b.memberId || b.studentId || b.id || b.firebaseDocId || '');
+          const byId = idA.localeCompare(idB, undefined, { numeric: true, sensitivity: 'base' });
+          return byId || String(a.name || '').localeCompare(String(b.name || ''), 'th');
+        });
       if (!activeStudents.length) { alert('ไม่พบข้อมูลนักเรียน'); return; }
 
       const studentOptions = activeStudents.map(function(s) {
