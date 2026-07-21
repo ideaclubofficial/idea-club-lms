@@ -32116,6 +32116,7 @@ function receiptStatusText(status) {
       const type = getElement('monthlyPlanType') ? getElement('monthlyPlanType').value : 'onsite';
       const publishRow = getElement('monthlyPlanPublishTimeRow');
       if (publishRow) publishRow.classList.toggle('hidden', type !== 'ondemand');
+      if (type === 'ondemand' && getElement('monthlyPlanTimeEnd')) getElement('monthlyPlanTimeEnd').value = '';
       const studentRow = getElement('monthlyPlanStudentRow');
       if (studentRow) studentRow.classList.toggle('hidden', type !== 'oneOnOne');
       renderMonthlyPlanStudentOptions();
@@ -32407,7 +32408,7 @@ function receiptStatusText(status) {
       const slot = slots[Number(select.value)];
       if (!slot) return;
       if (type === 'ondemand') {
-        if (getElement('monthlyPlanTimeStart')) getElement('monthlyPlanTimeStart').value = '';
+        if (getElement('monthlyPlanTimeStart')) getElement('monthlyPlanTimeStart').value = slot.publishTime || '';
         if (getElement('monthlyPlanTimeEnd')) getElement('monthlyPlanTimeEnd').value = '';
         if (getElement('monthlyPlanPublishTime')) getElement('monthlyPlanPublishTime').value = slot.publishTime || '';
       } else {
@@ -32549,7 +32550,7 @@ function receiptStatusText(status) {
       if (getElement('monthlyPlanType')) getElement('monthlyPlanType').value = slot ? slot.type : 'onsite';
       updateMonthlyPlanTypeFields();
       if (slot && slot.type === 'ondemand') {
-        if (getElement('monthlyPlanTimeStart')) getElement('monthlyPlanTimeStart').value = '';
+        if (getElement('monthlyPlanTimeStart')) getElement('monthlyPlanTimeStart').value = slot.publishTime || '';
         if (getElement('monthlyPlanTimeEnd')) getElement('monthlyPlanTimeEnd').value = '';
         if (getElement('monthlyPlanPublishTime')) getElement('monthlyPlanPublishTime').value = slot.publishTime || '';
       } else if (slot) {
@@ -32805,10 +32806,6 @@ function receiptStatusText(status) {
     function getMonthlySessionTimeRange(session) {
       const start = session ? (session.timeStart || session.start || session.sessionTime || session.publishTime || '') : '';
       let end = session ? (session.timeEnd || session.end || '') : '';
-      if (!end && session && session.type === 'ondemand' && session.publishTime) {
-        const startMinutes = parseTimeToMinutes(session.publishTime);
-        end = startMinutes === null ? '' : minutesToTimeText(startMinutes + 60);
-      }
       return { start: start, end: end };
     }
 
@@ -33132,6 +33129,7 @@ function receiptStatusText(status) {
       const timeStart = getElement('monthlyPlanTimeStart') ? getElement('monthlyPlanTimeStart').value : '';
       const timeEnd = getElement('monthlyPlanTimeEnd') ? getElement('monthlyPlanTimeEnd').value : '';
       const publishTime = getElement('monthlyPlanPublishTime') ? getElement('monthlyPlanPublishTime').value : '';
+      const ondemandTime = publishTime || timeStart || (existing ? existing.publishTime || existing.sessionTime || existing.timeStart || '' : '');
       const draft = Object.assign({}, existing || {});
       draft.id = existing ? (existing.id || existing.firebaseDocId || editingId) : editingId;
       draft.firebaseDocId = existing ? (existing.firebaseDocId || existing.id || editingId) : editingId;
@@ -33140,10 +33138,10 @@ function receiptStatusText(status) {
       draft.date = getElement('monthlyPlanDate') ? getElement('monthlyPlanDate').value : '';
       draft.sessionDate = draft.date;
       draft.type = type || existing.type || 'onsite';
-      draft.timeStart = (type === 'ondemand' ? (existing ? existing.timeStart || '' : '') : timeStart || (existing ? existing.timeStart || '' : ''));
-      draft.timeEnd = (type === 'ondemand' ? (existing ? existing.timeEnd || '' : '') : timeEnd || (existing ? existing.timeEnd || '' : ''));
-      draft.publishTime = type === 'ondemand' ? (publishTime || existing && existing.publishTime || '') : (existing ? existing.publishTime || '' : '');
-      draft.sessionTime = type === 'ondemand' ? draft.publishTime : timeStart || (existing ? existing.sessionTime || '' : '');
+      draft.timeStart = (type === 'ondemand' ? ondemandTime : timeStart || (existing ? existing.timeStart || '' : ''));
+      draft.timeEnd = (type === 'ondemand' ? '' : timeEnd || (existing ? existing.timeEnd || '' : ''));
+      draft.publishTime = type === 'ondemand' ? ondemandTime : (existing ? existing.publishTime || '' : '');
+      draft.sessionTime = type === 'ondemand' ? ondemandTime : timeStart || (existing ? existing.sessionTime || '' : '');
       draft.courseId = getElement('monthlyPlanCourse') ? getElement('monthlyPlanCourse').value : '';
       draft.courseName = selectedCourse ? (selectedCourse.name || selectedCourse.title || '') : (existing ? existing.courseName : '');
       draft.teacherId = teacherId;
@@ -34273,6 +34271,12 @@ function receiptStatusText(status) {
       const type = getElement('simpleScheduleType') ? getElement('simpleScheduleType').value : 'onsite';
       const row = getElement('simpleScheduleStudentRow');
       if (row) row.classList.toggle('hidden', type !== 'oneOnOne');
+      const endInput = getElement('simpleScheduleTimeEnd');
+      if (endInput) {
+        endInput.required = type !== 'ondemand';
+        endInput.disabled = type === 'ondemand';
+        if (type === 'ondemand') endInput.value = '';
+      }
     }
 
     function clearSimpleScheduleForm(clearMessage) {
@@ -34312,7 +34316,7 @@ function receiptStatusText(status) {
       draft.sessionDate = date;
       draft.type = type;
       draft.timeStart = getElement('simpleScheduleTimeStart') ? getElement('simpleScheduleTimeStart').value : '';
-      draft.timeEnd = getElement('simpleScheduleTimeEnd') ? getElement('simpleScheduleTimeEnd').value : '';
+      draft.timeEnd = type === 'ondemand' ? '' : (getElement('simpleScheduleTimeEnd') ? getElement('simpleScheduleTimeEnd').value : '');
       draft.sessionTime = draft.timeStart;
       draft.publishTime = type === 'ondemand' ? draft.timeStart : (existing ? existing.publishTime || '' : '');
       draft.courseId = courseId;
@@ -34350,16 +34354,16 @@ function receiptStatusText(status) {
       const built = buildSimpleScheduleDraftFromForm();
       const draft = built.draft;
       const editingId = draft.id || '';
-      if (!draft.month || !draft.date || !draft.timeStart || !draft.timeEnd || !draft.type || !draft.subject || !draft.teacherId) {
+      if (!draft.month || !draft.date || !draft.timeStart || (draft.type !== 'ondemand' && !draft.timeEnd) || !draft.type || !draft.subject || !draft.teacherId) {
         if (result) {
           result.textContent = 'กรุณากรอกเดือน วันที่ เวลา ประเภทคาบ วิชา และครูให้ครบ';
           result.style.color = '#dc2626';
         }
         return;
       }
-      if (parseTimeToMinutes(draft.timeStart) === null || parseTimeToMinutes(draft.timeEnd) === null || parseTimeToMinutes(draft.timeStart) >= parseTimeToMinutes(draft.timeEnd)) {
+      if (parseTimeToMinutes(draft.timeStart) === null || (draft.type !== 'ondemand' && (parseTimeToMinutes(draft.timeEnd) === null || parseTimeToMinutes(draft.timeStart) >= parseTimeToMinutes(draft.timeEnd)))) {
         if (result) {
-          result.textContent = 'กรุณาระบุเวลาเริ่มและเวลาจบให้ถูกต้อง';
+          result.textContent = draft.type === 'ondemand' ? 'กรุณาระบุเวลาเริ่มของ On-demand ให้ถูกต้อง' : 'กรุณาระบุเวลาเริ่มและเวลาจบให้ถูกต้อง';
           result.style.color = '#dc2626';
         }
         return;
@@ -36946,6 +36950,13 @@ function receiptStatusText(status) {
           return;
         }
       }
+      if (type === 'ondemand' && (!publishTime || parseTimeToMinutes(publishTime) === null)) {
+        if (result) {
+          result.textContent = 'กรุณาระบุเวลาเริ่มของ On-demand ให้ถูกต้อง';
+          result.style.color = '#dc2626';
+        }
+        return;
+      }
 
       if (type === 'oneOnOne' && !sessionDraft.studentId) {
         if (result) {
@@ -36998,8 +37009,8 @@ function receiptStatusText(status) {
             date: sessionDate,
             sessionDate: sessionDate,
             sessionTime: type === 'ondemand' ? publishTime : timeStart,
-            timeStart: type === 'ondemand' ? (item.timeStart || '') : timeStart || item.timeStart || '',
-            timeEnd: type === 'ondemand' ? (item.timeEnd || '') : timeEnd || item.timeEnd || '',
+            timeStart: type === 'ondemand' ? (publishTime || timeStart || item.timeStart || '') : timeStart || item.timeStart || '',
+            timeEnd: type === 'ondemand' ? '' : timeEnd || item.timeEnd || '',
             publishTime: type === 'ondemand' ? (publishTime || item.publishTime || '') : (item.publishTime || ''),
             type: type,
             courseId: courseId,
@@ -37058,8 +37069,10 @@ function receiptStatusText(status) {
             status: status
           });
           if (newItem.type === 'ondemand') {
-            newItem.timeStart = newItem.timeStart || '';
-            newItem.timeEnd = newItem.timeEnd || '';
+            newItem.timeStart = newItem.publishTime || newItem.sessionTime || newItem.timeStart || '';
+            newItem.timeEnd = '';
+            newItem.publishTime = newItem.publishTime || newItem.timeStart || '';
+            newItem.sessionTime = newItem.sessionTime || newItem.timeStart || '';
           }
           applyPrivateLessonStudentSessionReference(newItem, type === 'oneOnOne' ? selectedStudent : null);
           applyPrivateLessonBillingSnapshot(newItem, type === 'oneOnOne' ? selectedStudent : null);
@@ -46081,11 +46094,15 @@ function receiptStatusText(status) {
     }
 
     function tfGetSessionStartText(session) {
-      return String((session && (session.timeStart || session.start || session.sessionTime)) || '').trim();
+      return String((session && (session.timeStart || session.start || session.sessionTime || session.publishTime)) || '').trim();
     }
 
     function tfGetSessionEndText(session) {
       return String((session && (session.timeEnd || session.end)) || '').trim();
+    }
+
+    function tfFormatSessionTimeRange(session, separator) {
+      return [tfGetSessionStartText(session), tfGetSessionEndText(session)].filter(Boolean).join(separator || ' - ');
     }
 
     // --- Data bridge: map TF schedule back to Firebase session ---
@@ -46115,8 +46132,9 @@ function receiptStatusText(status) {
       base.month = sch.date ? sch.date.slice(0, 7) : '';
       base.monthKey = base.month;
       base.timeStart = sch.start;
-      base.timeEnd = sch.end;
+      base.timeEnd = sch.format === 'ondemand' ? '' : sch.end;
       base.sessionTime = sch.start;
+      base.publishTime = sch.format === 'ondemand' ? sch.start : (existing ? existing.publishTime || '' : '');
       base.location = sch.location;
       base.notes = sch.notes;
       base.status = sch.completed ? 'done' : (sch.status || (existing ? (existing.status || 'draft') : 'draft'));
@@ -46653,7 +46671,7 @@ function receiptStatusText(status) {
             '<span class="' + colorCls + ' text-xs font-bold px-2 py-1 rounded-lg flex-shrink-0 mt-0.5">' + escapeHtml(TF_FORMAT_LABELS[s.format] || s.format) + '</span>' +
             '<div class="min-w-0">' +
             '<p class="font-semibold text-sm text-slate-900">' + escapeHtml(tfGetCourseName(s.courseId)) + '</p>' +
-            '<p class="text-xs text-slate-500">' + escapeHtml((tfGetSessionStartText(s) || '') + ' – ' + (tfGetSessionEndText(s) || '') + ' · ' + tfGetTutorName(s.tutorId)) + '</p>' +
+            '<p class="text-xs text-slate-500">' + escapeHtml((tfFormatSessionTimeRange(s, ' – ') || '-') + ' · ' + tfGetTutorName(s.tutorId)) + '</p>' +
             (s.center ? '<p class="text-xs text-slate-400">' + escapeHtml(s.center) + '</p>' : '') + '</div>' +
             '<div class="ml-auto flex-shrink-0">' + (s.completed ? '<span class="text-xs font-bold text-emerald-600 bg-emerald-50 px-2 py-1 rounded-lg">✓ สอนแล้ว</span>' : '<span class="text-xs text-slate-400">รอสอน</span>') + '</div></div>';
         }).join('');
@@ -46697,7 +46715,7 @@ function receiptStatusText(status) {
             '<button onclick="tfDeleteSession(\'' + sessionId + '\')" class="text-slate-400 hover:text-rose-400 text-xs cursor-pointer bg-transparent border-0">ลบ</button>' +
             '</div></div>' +
             '<p class="font-bold text-sm">' + escapeHtml(tfGetCourseName(s.courseId)) + '</p>' +
-            '<p class="text-xs text-slate-400">' + escapeHtml((tfGetSessionStartText(s) || '') + ' – ' + (tfGetSessionEndText(s) || '')) + ' · ' + escapeHtml(tfGetTutorName(s.tutorId)) + '</p>' +
+            '<p class="text-xs text-slate-400">' + escapeHtml(tfFormatSessionTimeRange(s, ' – ') || '-') + ' · ' + escapeHtml(tfGetTutorName(s.tutorId)) + '</p>' +
             (s.center ? '<p class="text-xs text-slate-400">📍 ' + escapeHtml(s.center) + '</p>' : '') +
             (s.location ? '<p class="text-xs text-slate-400">🚪 ' + escapeHtml(s.location) + '</p>' : '') +
             (s.notes ? '<p class="text-xs text-slate-500 italic">' + escapeHtml(s.notes) + '</p>' : '') +
@@ -46771,7 +46789,7 @@ function receiptStatusText(status) {
 
     function tfScheduleCalendarCardHtml(s, compact) {
       const colorCls = TF_FORMAT_COLORS[s.format || s.type] || 'bg-slate-100 text-slate-700';
-      const timeText = [tfGetSessionStartText(s), tfGetSessionEndText(s)].filter(Boolean).join('-');
+      const timeText = tfFormatSessionTimeRange(s, '-');
       const courseText = tfGetCourseGradeSubjectLabel(s.courseId, s.tutorId || s.teacherId);
       const metaParts = [tfGetTutorShortName(s.tutorId || s.teacherId), tfGetCenterShortLabel(s.center || s.courseLocation)].filter(Boolean);
       return '<div class="' + colorCls + ' rounded px-1 py-0.5 font-medium leading-tight whitespace-normal break-words ' + (compact ? 'text-[10px]' : 'text-[11px]') + '">' +
@@ -46804,7 +46822,7 @@ function receiptStatusText(status) {
         .concat(schedule.onsiteSlots.map(function(slot) { return Object.assign({ format: 'onsite' }, slot); }))
         .concat(schedule.onlineSlots.map(function(slot) { return Object.assign({ format: 'online' }, slot); }))
         .concat(schedule.ondemandSlots.map(function(slot) {
-          return { format: 'ondemand', day: slot.day, startTime: slot.publishTime, endTime: minutesToTimeText((parseTimeToMinutes(slot.publishTime) || 0) + 60), publishTime: slot.publishTime };
+          return { format: 'ondemand', day: slot.day, startTime: slot.publishTime, endTime: '', publishTime: slot.publishTime };
         }));
     }
 
@@ -46868,7 +46886,7 @@ function receiptStatusText(status) {
       if (tfEl('tf-sched-center') && course.location && !shouldKeepNongchangSharedClass) tfEl('tf-sched-center').value = course.location;
       if (slot) {
         if (tfEl('tf-sched-start')) tfEl('tf-sched-start').value = slot.startTime || slot.publishTime || '';
-        if (tfEl('tf-sched-end')) tfEl('tf-sched-end').value = slot.endTime || '';
+        if (tfEl('tf-sched-end')) tfEl('tf-sched-end').value = finalFormat === 'ondemand' ? '' : (slot.endTime || '');
       }
       if (tfEl('tf-sched-location')) tfEl('tf-sched-location').value = tfGetCourseLocationForFormat(course, finalFormat);
       if (tfEl('tf-sched-notes') && !tfEl('tf-sched-notes').value.trim()) {
@@ -47017,6 +47035,7 @@ function receiptStatusText(status) {
       if (centerSelect) centerSelect.value = '';
       tfPopulateSchedFormats();
       if (tfEl('tf-sched-format')) tfEl('tf-sched-format').value = '';
+      tfUpdateScheduleTimeFields('');
       tfPopulateSchedCourses('');
       // Populate tutor select
       tfPopulateSchedTutors();
@@ -47126,6 +47145,7 @@ function receiptStatusText(status) {
     function tfOnFormatChange(options) {
       options = options || {};
       const fmt = tfGetSelectedSchedFormat();
+      tfUpdateScheduleTimeFields(fmt);
       const locLabel = tfEl('tf-sched-location-label');
       if (locLabel) {
         if (fmt === 'online' || fmt === 'ondemand') locLabel.textContent = 'ลิงก์เข้าเรียน / รหัสห้อง';
@@ -47159,6 +47179,18 @@ function receiptStatusText(status) {
       tfPopulateSchedCourses();
       if (tfEl('tf-sched-shared') && tfEl('tf-sched-shared').checked) tfRenderCombinedGradeOptions();
       if (!options.skipSync) tfSyncScheduleFormFromCourse({ keepFormat: true });
+    }
+
+    function tfUpdateScheduleTimeFields(format) {
+      const fmt = format || tfGetSelectedSchedFormat();
+      const endInput = tfEl('tf-sched-end');
+      const endWrap = endInput && endInput.closest ? endInput.closest('div') : null;
+      if (endInput) {
+        endInput.required = fmt !== 'ondemand';
+        endInput.disabled = fmt === 'ondemand';
+        if (fmt === 'ondemand') endInput.value = '';
+      }
+      if (endWrap) endWrap.classList.toggle('hidden', fmt === 'ondemand');
     }
 
     function tfSelectDefaultSecondCenter() {
@@ -47501,8 +47533,8 @@ function receiptStatusText(status) {
       const tutorId = tfEl('tf-sched-tutor') ? tfEl('tf-sched-tutor').value : '';
       const date = tfEl('tf-sched-date') ? tfEl('tf-sched-date').value : '';
       const start = tfEl('tf-sched-start') ? tfEl('tf-sched-start').value : '';
-      const end = tfEl('tf-sched-end') ? tfEl('tf-sched-end').value : '';
       const format = tfGetSelectedSchedFormat();
+      const end = format === 'ondemand' ? '' : (tfEl('tf-sched-end') ? tfEl('tf-sched-end').value : '');
       const center = tfEl('tf-sched-center') ? tfEl('tf-sched-center').value : '';
       const location = tfEl('tf-sched-location') ? tfEl('tf-sched-location').value.trim() : '';
       const notes = tfEl('tf-sched-notes') ? tfEl('tf-sched-notes').value.trim() : '';
@@ -47515,7 +47547,7 @@ function receiptStatusText(status) {
       const primaryGrade = primaryCourse ? tfGetCourseGradeForSort(primaryCourse) : '';
       if (isSharedClass && courseId && !combinedCourseIds.includes(String(courseId))) combinedCourseIds.unshift(String(courseId));
       if (isSharedClass && primaryGrade && !combinedGrades.includes(primaryGrade)) combinedGrades.unshift(primaryGrade);
-      if (!center || !courseId || !format || !date || !start || !end) {
+      if (!center || !courseId || !format || !date || !start || (format !== 'ondemand' && !end)) {
         if (errEl) { errEl.textContent = 'กรุณากรอกข้อมูลที่จำเป็นให้ครบ (ศูนย์, ระดับชั้น, รูปแบบ, วันที่, เวลา)'; errEl.classList.remove('hidden'); }
         return;
       }
@@ -47826,7 +47858,7 @@ function receiptStatusText(status) {
             (sched.completed ? '<span class="text-xs font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-md">✓ สอนแล้ว</span>' : '<button onclick="tfMarkDone(\'' + sessionId + '\')" class="text-xs text-emerald-600 hover:text-emerald-700 font-bold cursor-pointer bg-transparent border-0">✓ มาร์กสอนแล้ว</button>') +
             '</div>' +
             '<p class="font-bold text-sm">' + escapeHtml(tfGetCourseName(s.courseId)) + '</p>' +
-            '<p class="text-xs text-slate-500">' + escapeHtml((tfGetSessionStartText(s) || '') + ' – ' + (tfGetSessionEndText(s) || '')) + '</p>' +
+            '<p class="text-xs text-slate-500">' + escapeHtml(tfFormatSessionTimeRange(s, ' – ') || '-') + '</p>' +
             (s.location || s.roomName ? '<p class="text-xs text-slate-400">📍 ' + escapeHtml(s.location || s.roomName || '') + '</p>' : '') +
             (s.notes ? '<p class="text-xs text-slate-400 italic">' + escapeHtml(s.notes) + '</p>' : '') +
             (sched.completed && sched.report ? '<div class="bg-emerald-50 p-2 rounded-lg"><p class="text-xs font-bold text-emerald-700 mb-1">บันทึกผลการสอน:</p><p class="text-xs text-emerald-600">' + escapeHtml(sched.report) + '</p></div>' : '') +
