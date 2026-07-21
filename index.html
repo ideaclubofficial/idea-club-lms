@@ -1112,11 +1112,11 @@
     .sgshop-btn:hover { opacity: 0.88; }
     .sgshop-btn--disabled { background: #e2e8f0; color: #94a3b8; cursor: default; }
     /* Prize Wheel (vertical slot reel) */
-    .prize-wheel-section { margin-top: 14px; border-radius: 12px; border: 1.5px solid #c7d2fe; background: linear-gradient(135deg, #eef2ff 0%, #f0fdf4 100%); overflow: hidden; transition: background 0.12s, border-color 0.12s; }
+    .prize-wheel-section { margin-top: 14px; border-radius: 12px; border: 1.5px solid #c7d2fe; background: linear-gradient(135deg, #eef2ff 0%, #f0fdf4 100%); overflow: hidden; overflow-anchor: none; transition: background 0.12s, border-color 0.12s; }
     .prize-wheel-header { padding: 9px 14px; font-size: 13px; font-weight: 700; color: #3730a3; background: rgba(199,210,254,0.35); border-bottom: 1px solid #c7d2fe; }
     .prize-wheel-body { padding: 14px; display: flex; flex-direction: column; align-items: stretch; gap: 12px; }
-    .pw-hreel-wrap { position: relative; width: 100%; border-radius: 12px; border: 2px solid #a5b4fc; background: #fff; overflow: hidden; box-shadow: 0 2px 12px rgba(99,102,241,0.10); transition: border-color 0.18s, box-shadow 0.18s; }
-    .pw-hreel-track { display: flex; flex-direction: row; will-change: transform; }
+    .pw-hreel-wrap { position: relative; width: 100%; min-height: 112px; border-radius: 12px; border: 2px solid #a5b4fc; background: #fff; overflow: hidden; box-shadow: 0 2px 12px rgba(99,102,241,0.10); transition: border-color 0.18s, box-shadow 0.18s; }
+    .pw-hreel-track { display: flex; flex-direction: row; min-height: 112px; will-change: transform; }
     .pw-hreel-item { width: 96px; flex-shrink: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 112px; padding: 8px 4px; box-sizing: border-box; border-right: 1px solid rgba(226,232,240,0.55); gap: 5px; transition: background 0.12s; }
     .pw-hreel-item-icon { font-size: 30px; line-height: 1; }
     .pw-hreel-item-name { font-size: 9px; font-weight: 700; color: #1e293b; text-align: center; line-height: 1.25; max-width: 84px; word-break: break-word; }
@@ -24308,7 +24308,8 @@
     async function addStudentStampMark(rewardId, rewardDoc, fromPrizeWheel, prizeWheelSpinId) {
       if (!currentStudent || !firebaseReady || !db || !firebaseUser) return null;
       const profile = getCurrentStudentGamificationProfile();
-      const profileId = String(profile.firebaseDocId || profile.id || '');
+      const actualProfile = findCurrentStudentGamificationProfile();
+      const profileId = String((actualProfile && (actualProfile.firebaseDocId || actualProfile.id)) || profile.firebaseDocId || profile.id || getStudentGamificationProfileId(currentStudent));
       if (!profileId) return null;
       const stampProgress = Object.assign({}, (profile.stampProgress) || {});
       const cardProgress = Object.assign({ stamps: 0, completed: false }, stampProgress[rewardId] || {});
@@ -24318,14 +24319,37 @@
       const nowCompleted = newStamps >= stampsRequired;
       stampProgress[rewardId] = { stamps: newStamps, completed: nowCompleted };
       profile.stampProgress = stampProgress;
+      if (actualProfile) actualProfile.stampProgress = stampProgress;
       const now = firebase.firestore.FieldValue.serverTimestamp();
       const batch = db.batch();
-      batch.set(db.collection('studentGamificationProfiles').doc(profileId), { stampProgress: stampProgress, updatedAt: now }, { merge: true });
-      const newStock = Math.max(0, (rewardDoc.stock || 0) - 1);
-      batch.set(db.collection('gamificationRewards').doc(rewardId), { stock: newStock, updatedAt: now }, { merge: true });
-      rewardDoc.stock = newStock;
+      const profilePayload = {
+        firebaseDocId: profileId,
+        id: profileId,
+        studentId: getStudentRecordDocId(currentStudent),
+        authUid: String((currentStudent.authUid) || (firebaseUser && firebaseUser.uid) || '').trim(),
+        memberId: currentStudent.memberId || currentStudent.studentId || '',
+        studentName: currentStudent.name || '',
+        nickname: currentStudent.nickname || '',
+        level: profile.level || 1,
+        exp: profile.exp || 0,
+        coins: profile.coins || 0,
+        profession: profile.profession || DEFAULT_GAMIFICATION_PROFESSION_ID,
+        stampProgress: stampProgress,
+        deleted: false,
+        updatedAt: now
+      };
+      batch.set(db.collection('studentGamificationProfiles').doc(profileId), profilePayload, { merge: true });
+      const currentStock = Number(rewardDoc.stock) || 0;
+      if (currentStock > 0) {
+        const newStock = Math.max(0, currentStock - 1);
+        batch.set(db.collection('gamificationRewards').doc(rewardId), { stock: newStock, updatedAt: now }, { merge: true });
+        rewardDoc.stock = newStock;
+      }
       await batch.commit();
-      updateLeaderboardProfileInMemory(profileId, getCurrentStudentGamificationProfile());
+      if (!actualProfile) {
+        studentGamificationProfiles.push(Object.assign({}, profilePayload, { updatedAt: undefined }));
+      }
+      updateLeaderboardProfileInMemory(profileId, actualProfile || profilePayload);
       return { newStamps: newStamps, stampsRequired: stampsRequired, nowCompleted: nowCompleted };
     }
 
