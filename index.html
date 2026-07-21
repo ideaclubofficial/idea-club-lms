@@ -8171,7 +8171,7 @@
                   <div>
                     <label>จำนวนแสตมป์ที่ต้องสะสม</label>
                     <input type="number" id="shopStampRequired" min="2" max="50" value="5" style="width:100px;" />
-                    <p style="font-size:11px;color:#92400e;margin:3px 0 0;">เมื่อนักเรียนสะสมครบ → ได้รับรางวัลจากแอดมินอัตโนมัติ</p>
+                    <p style="font-size:11px;color:#92400e;margin:3px 0 0;">เมื่อนักเรียนสะสมครบ → กดแลกรางวัล แล้วรายการจะไปรอส่งมอบ</p>
                   </div>
                 </div>
               </div>
@@ -8207,6 +8207,15 @@
             <div class="form-box" style="margin-top:16px;">
               <h4 style="margin:0 0 12px;font-size:15px;color:#1e1b4b;">🎴 ความคืบหน้าบัตรสะสม</h4>
               <div id="adminStampProgressTable"></div>
+            </div>
+            <div class="form-box" style="margin-top:16px;border-color:#fbbf24;background:#fffbeb;">
+              <h4 style="margin:0 0 12px;font-size:15px;color:#92400e;">🎟 รายการรอรับรางวัลแสตมป์</h4>
+              <div id="adminPendingStampRedemptionsTable"></div>
+            </div>
+            <div class="form-box" style="margin-top:16px;border-color:#a78bfa;background:#faf5ff;">
+              <h4 style="margin:0 0 12px;font-size:15px;color:#5b21b6;">🎫 บัตรพิเศษรอใช้</h4>
+              <p style="margin:0 0 10px;font-size:12px;color:#7c3aed;">ใช้สำหรับรางวัลพิเศษหรือกิจกรรมพิเศษของสถาบัน เมื่อเด็กนำบัตรมาใช้ให้กด “ใช้บัตรแล้ว”</p>
+              <div id="adminPendingSpecialVouchersTable"></div>
             </div>
             <div class="form-box" style="margin-top:16px;">
               <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
@@ -9696,7 +9705,7 @@
       'teacher.online': { menus: ['ห้องเรียนครู'], collections: ['courses', 'learningMaterials'] },
       'teacher.privateLessons': { menus: ['ชั่วโมงเรียนเดี่ยว'], collections: ['students', 'attendanceHistory'] },
       'teacher.attendance': { menus: ['เช็คชื่อ'], collections: ['students(pickup fields)', 'attendanceHistory'] },
-      'teacher.students': { menus: ['รายชื่อนักเรียน', 'มอบ Quest / ให้รางวัล'], collections: ['students', 'studentGamificationProfiles', 'studentGamificationEvents', 'studentPersonalQuests', 'gamificationLeaderboard'] }
+      'teacher.students': { menus: ['รายชื่อนักเรียน', 'มอบ Quest / ให้รางวัล'], collections: ['students', 'studentGamificationProfiles', 'studentGamificationEvents', 'studentPersonalQuests', 'gamificationRedemptions', 'gamificationLeaderboard'] }
     };
 
     const TEACHER_TAB_PERMISSIONS = {
@@ -13224,6 +13233,14 @@
         const sid = jsArg(s.id || s.firebaseDocId || '');
         const tdNw = ' style="white-space:nowrap;"';
         const gamificationText = getStudentGamificationSummaryText(s);
+        const pendingStampRedemptions = getStampCardRedemptionsForStudent(s, 'pending').length;
+        const pendingSpecialVouchers = getSpecialVoucherRedemptionsForStudent(s, 'pending').length;
+        const stampBadge = pendingStampRedemptions
+          ? '<br><span style="display:inline-block;margin-top:3px;font-size:10px;background:#fef3c7;color:#92400e;border-radius:999px;padding:1px 7px;font-weight:800;">🎟 รอส่งมอบ ' + pendingStampRedemptions + '</span>'
+          : '';
+        const specialVoucherBadge = pendingSpecialVouchers
+          ? '<br><span style="display:inline-block;margin-top:3px;font-size:10px;background:#ede9fe;color:#6d28d9;border-radius:999px;padding:1px 7px;font-weight:800;">🎫 บัตรพิเศษ ' + pendingSpecialVouchers + '</span>'
+          : '';
         return '<tr>' +
           '<td' + tdNw + '>' + (tsStart + i + 1) + '</td>' +
           '<td class="student-name"' + tdNw + '>' + (s.name || '-') + '</td>' +
@@ -13233,7 +13250,7 @@
           '<td style="white-space:nowrap;max-width:180px;overflow:hidden;text-overflow:ellipsis;" title="' + (s.course || '-') + '">' + (s.course || '-') + '</td>' +
           '<td' + tdNw + '>' + (s.phone || '-') + '</td>' +
           '<td' + tdNw + '><span class="' + statusClass + '">' + (s.pickupStatus || 'ไม่มา') + '</span></td>' +
-          '<td' + tdNw + '>' + escapeHtml(gamificationText) + '</td>' +
+          '<td' + tdNw + '>' + escapeHtml(gamificationText) + stampBadge + specialVoucherBadge + '</td>' +
           '<td' + tdNw + '><button class="btn btn-blue" type="button" onclick="previewSingleStudentIdCard(\'' + sid + '\')" style="font-size:11px;padding:3px 8px;">🪪 บัตร</button></td>' +
           '<td' + tdNw + ' style="white-space:nowrap;">' +
             '<button class="btn btn-blue" type="button" onclick="openTeacherGiveExpBubble(\'' + sid + '\')" style="font-size:11px;padding:3px 8px;">🎯 Quest</button> ' +
@@ -13290,6 +13307,14 @@
       const status = student.pickupStatus || 'ไม่มา';
       const statusClass = getPickupStatusClass(status);
       const sid = jsArg(student.id || student.firebaseDocId || '');
+      const pendingStampRedemptions = getStampCardRedemptionsForStudent(student, 'pending').length;
+      const pendingSpecialVouchers = getSpecialVoucherRedemptionsForStudent(student, 'pending').length;
+      const stampBadge = pendingStampRedemptions
+        ? '<div class="teacher-mobile-muted" style="color:#92400e;font-weight:800;">🎟 รางวัลแสตมป์รอส่งมอบ ' + pendingStampRedemptions + ' รายการ</div>'
+        : '';
+      const specialVoucherBadge = pendingSpecialVouchers
+        ? '<div class="teacher-mobile-muted" style="color:#6d28d9;font-weight:800;">🎫 บัตรพิเศษรอใช้ ' + pendingSpecialVouchers + ' รายการ</div>'
+        : '';
       return '<div class="teacher-mobile-student-card">' +
         '<strong>' + escapeHtml(student.name || '-') + '</strong>' +
         '<div class="teacher-mobile-muted">Member ID: ' + escapeHtml(student.memberId || student.studentId || '-') + '</div>' +
@@ -13297,6 +13322,8 @@
         '<div class="teacher-mobile-muted">คอร์ส: ' + escapeHtml(student.course || '-') + '</div>' +
         '<div class="teacher-mobile-muted">เบอร์ผู้ปกครอง: ' + escapeHtml(student.phone || '-') + '</div>' +
         '<div class="teacher-mobile-muted">Progress: ' + escapeHtml(getStudentGamificationSummaryText(student)) + '</div>' +
+        stampBadge +
+        specialVoucherBadge +
         '<div class="teacher-mobile-card-row" style="justify-content:space-between;align-items:center;">' +
           '<span class="' + statusClass + '">' + escapeHtml(status) + '</span>' +
           '<span class="teacher-mobile-actions" style="margin:0;justify-content:flex-end;">' +
@@ -21508,7 +21535,9 @@
         '<div class="student-gamification-daily-quests" style="margin-top:14px;">' +
           '<div class="sgdq-header">Quest ที่รอยืนยัน <span class="sgdq-count">' + pendingQuests.length + '</span></div>' +
           '<div style="padding:10px 0 0;">' + questRows + historyRows + '</div>' +
-        '</div>',
+        '</div>' +
+        renderTeacherStampRedemptionsHtml(student) +
+        renderTeacherSpecialVoucherRedemptionsHtml(student),
         async function() {
           const title = bubbleValue('bubblePersonalQuestTitle') || 'Quest รายบุคคล';
           const description = bubbleValue('bubblePersonalQuestDesc') || '';
@@ -21570,7 +21599,9 @@
             '<button class="btn btn-red" type="button" onclick="deductTeacherStudentExp(\'' + sid + '\', 20)">-20 EXP</button>' +
             '<button class="btn btn-red" type="button" onclick="deductTeacherStudentExp(\'' + sid + '\', 30)">-30 EXP</button>' +
           '</div>' +
-        '</div>',
+        '</div>' +
+        renderTeacherStampRedemptionsHtml(student) +
+        renderTeacherSpecialVoucherRedemptionsHtml(student),
         async function() {
           const exp = Math.max(0, Math.min(1000, Number(bubbleValue('bubbleDirectAwardExp') || 0) || 0));
           const coins = Math.max(0, Math.min(500, Number(bubbleValue('bubbleDirectAwardCoins') || 0) || 0));
@@ -22079,6 +22110,61 @@
         }
       }
 
+      const pendingStampEl = getElement('adminPendingStampRedemptionsTable');
+      if (pendingStampEl) {
+        const pendingStampRedemptions = gamificationRedemptions.filter(function(r) {
+          return r && !r.deleted &&
+            isStampCardRedemption(r) &&
+            String(r.status || 'pending') === 'pending';
+        }).slice().sort(function(a, b) {
+          return String(b.createdAtText || '') > String(a.createdAtText || '') ? 1 : -1;
+        });
+        if (!pendingStampRedemptions.length) {
+          pendingStampEl.innerHTML = '<p style="color:#92400e;font-size:13px;">ยังไม่มีรายการรอรับรางวัลแสตมป์</p>';
+        } else {
+          const rows = pendingStampRedemptions.map(function(r) {
+            const sourceTag = r.claimedFromStampCard
+              ? '<span style="font-size:10px;background:#fef3c7;color:#92400e;border-radius:4px;padding:1px 5px;font-weight:700;margin-left:4px;">เด็กกดแลก</span>'
+              : '<span style="font-size:10px;background:#ede9fe;color:#6d28d9;border-radius:4px;padding:1px 5px;font-weight:700;margin-left:4px;">รายการเดิม</span>';
+            return '<tr>' +
+              '<td>' + escapeHtml(r.studentName || '-') + '<br><span style="font-size:11px;color:#94a3b8;">' + escapeHtml(r.memberId || '-') + '</span></td>' +
+              '<td>' + escapeHtml(r.rewardTitle || 'รางวัลแสตมป์') + sourceTag + '</td>' +
+              '<td>' + escapeHtml(r.createdAtText || '-') + '</td>' +
+              '<td><button class="btn btn-sm btn-green" onclick="adminFulfillRedemption(\'' + escapeHtml(r.firebaseDocId || r.id) + '\')">ส่งมอบแล้ว</button></td>' +
+            '</tr>';
+          }).join('');
+          pendingStampEl.innerHTML = '<table class="data-table" style="font-size:13px;"><thead><tr><th>นักเรียน</th><th>รางวัลที่รอรับ</th><th>วันที่กดแลก</th><th>จัดการ</th></tr></thead><tbody>' + rows + '</tbody></table>';
+        }
+      }
+
+      const pendingSpecialEl = getElement('adminPendingSpecialVouchersTable');
+      if (pendingSpecialEl) {
+        const pendingSpecialVouchers = gamificationRedemptions.filter(function(r) {
+          return isSpecialVoucherRedemption(r) &&
+            String(r.status || 'pending') === 'pending';
+        }).slice().sort(function(a, b) {
+          return String(b.createdAtText || '') > String(a.createdAtText || '') ? 1 : -1;
+        });
+        if (!pendingSpecialVouchers.length) {
+          pendingSpecialEl.innerHTML = '<p style="color:#7c3aed;font-size:13px;">ยังไม่มีบัตรพิเศษรอใช้</p>';
+        } else {
+          const rows = pendingSpecialVouchers.map(function(r) {
+            const sourceTag = r.fromAdmin
+              ? '<span style="font-size:10px;background:#dbeafe;color:#1d4ed8;border-radius:4px;padding:1px 5px;font-weight:700;margin-left:4px;">👤 Admin</span>'
+              : (r.fromPrizeWheel
+                ? '<span style="font-size:10px;background:#ede9fe;color:#6d28d9;border-radius:4px;padding:1px 5px;font-weight:700;margin-left:4px;">🎰 วงล้อ</span>'
+                : '<span style="font-size:10px;background:#dcfce7;color:#15803d;border-radius:4px;padding:1px 5px;font-weight:700;margin-left:4px;">🛒 ร้านค้า</span>');
+            return '<tr>' +
+              '<td>' + escapeHtml(r.studentName || '-') + '<br><span style="font-size:11px;color:#94a3b8;">' + escapeHtml(r.memberId || '-') + '</span></td>' +
+              '<td>' + escapeHtml(r.rewardTitle || 'บัตรพิเศษ') + sourceTag + (r.adminNote ? '<br><span style="font-size:11px;color:#7c3aed;">' + escapeHtml(r.adminNote) + '</span>' : '') + '</td>' +
+              '<td>' + escapeHtml(r.createdAtText || '-') + '</td>' +
+              '<td><button class="btn btn-sm btn-green" onclick="useSpecialVoucherRedemption(\'' + escapeHtml(r.firebaseDocId || r.id) + '\')">ใช้บัตรแล้ว</button></td>' +
+            '</tr>';
+          }).join('');
+          pendingSpecialEl.innerHTML = '<table class="data-table" style="font-size:13px;"><thead><tr><th>นักเรียน</th><th>บัตรพิเศษ</th><th>วันที่ได้รับ</th><th>จัดการ</th></tr></thead><tbody>' + rows + '</tbody></table>';
+        }
+      }
+
       const allRedemptions = gamificationRedemptions.filter(function(r) { return !r.deleted; })
         .slice().sort(function(a, b) { return String(b.createdAtText || '') > String(a.createdAtText || '') ? 1 : -1; });
       if (!allRedemptions.length) {
@@ -22086,18 +22172,22 @@
       } else {
         let rows = allRedemptions.map(function(r) {
           const isFulfilled = r.status === 'fulfilled';
+          const isSpecial = isSpecialVoucherRedemption(r);
+          const isStamp = isStampCardRedemption(r);
           const sourceTag = r.fromAdmin
             ? '<span style="font-size:10px;background:#dbeafe;color:#1d4ed8;border-radius:4px;padding:1px 5px;font-weight:700;margin-left:4px;">👤 Admin</span>'
-            : (r.fromPrizeWheel ? '<span style="font-size:10px;background:#ede9fe;color:#6d28d9;border-radius:4px;padding:1px 5px;font-weight:700;margin-left:4px;">🎰 วงล้อ</span>' : '');
+            : (r.fromPrizeWheel ? '<span style="font-size:10px;background:#ede9fe;color:#6d28d9;border-radius:4px;padding:1px 5px;font-weight:700;margin-left:4px;">🎰 วงล้อ</span>' : (isStamp ? '<span style="font-size:10px;background:#fef3c7;color:#92400e;border-radius:4px;padding:1px 5px;font-weight:700;margin-left:4px;">🎴 แสตมป์</span>' : ''));
+          const statusCell = isFulfilled
+            ? '<span style="color:#16a34a;font-weight:700;">' + (isSpecial ? '✓ ใช้แล้ว' : '✓ จัดส่งแล้ว') + '</span>'
+            : (isSpecial
+              ? '<button class="btn btn-sm btn-green" onclick="useSpecialVoucherRedemption(\'' + escapeHtml(r.firebaseDocId || r.id) + '\')">ใช้บัตรแล้ว</button>'
+              : '<button class="btn btn-sm btn-green" onclick="adminFulfillRedemption(\'' + escapeHtml(r.firebaseDocId || r.id) + '\')">ทำเครื่องหมายส่งแล้ว</button>');
           return '<tr>' +
             '<td>' + escapeHtml(r.studentName || '-') + '</td>' +
             '<td>' + escapeHtml(r.rewardTitle || '-') + sourceTag + '</td>' +
             '<td style="text-align:center;">' + (r.coinsPaid ? escapeHtml(r.coinsPaid) + ' 💰' : '—') + '</td>' +
             '<td>' + escapeHtml(r.createdAtText || '-') + '</td>' +
-            '<td>' + (isFulfilled
-              ? '<span style="color:#16a34a;font-weight:700;">✓ จัดส่งแล้ว</span>'
-              : '<button class="btn btn-sm btn-green" onclick="adminFulfillRedemption(\'' + escapeHtml(r.firebaseDocId || r.id) + '\')">ทำเครื่องหมายส่งแล้ว</button>') +
-            '</td>' +
+            '<td>' + statusCell + '</td>' +
           '</tr>';
         }).join('');
         redemptionsEl.innerHTML = '<table class="data-table" style="font-size:13px;"><thead><tr><th>นักเรียน</th><th>รางวัล</th><th>ราคา</th><th>วันที่</th><th>สถานะ</th></tr></thead><tbody>' + rows + '</tbody></table>';
@@ -22272,6 +22362,7 @@
       if (!firebaseReady || !db) return;
       try {
         const now = firebase.firestore.FieldValue.serverTimestamp();
+        const updatedAtText = new Date().toLocaleString('th-TH');
         const redemption = gamificationRedemptions.find(function(r) { return String(r.firebaseDocId || r.id || '') === redemptionId; });
         const reward = redemption && redemption.rewardId
           ? gamificationRewards.find(function(r) { return String(r.firebaseDocId || r.id || '') === String(redemption.rewardId || ''); })
@@ -22290,10 +22381,131 @@
             await db.collection('studentGamificationProfiles').doc(profileId).set({ prizeWheelTickets: nextTickets, updatedAt: now }, { merge: true });
           }
         }
-        await db.collection('gamificationRedemptions').doc(redemptionId).set({ status: 'fulfilled', updatedAt: now }, { merge: true });
-        if (redemption) redemption.status = 'fulfilled';
+        await db.collection('gamificationRedemptions').doc(redemptionId).set({ status: 'fulfilled', updatedAt: now, updatedAtText: updatedAtText }, { merge: true });
+        if (redemption) {
+          redemption.status = 'fulfilled';
+          redemption.updatedAtText = updatedAtText;
+        }
         renderAdminGamificationShop();
+        renderStudentGamificationPanel();
       } catch (e) { alert('อัปเดตสถานะไม่สำเร็จ: ' + (e.message || '')); }
+    }
+
+    function findStudentForRedemption(redemption) {
+      return students.find(function(student) {
+        return redemptionMatchesStudent(redemption, student);
+      }) || null;
+    }
+
+    async function fulfillStudentStampCardRedemption(redemptionId) {
+      if (!firebaseReady || !db) return;
+      const redemption = gamificationRedemptions.find(function(r) {
+        return String(r.firebaseDocId || r.id || '') === String(redemptionId || '') && !r.deleted;
+      });
+      if (!redemption || !isStampCardRedemption(redemption)) {
+        alert('ไม่พบรายการแลกรางวัลแสตมป์นี้');
+        return;
+      }
+      if (String(redemption.status || 'pending') === 'fulfilled') {
+        alert('รายการนี้ส่งมอบแล้ว');
+        return;
+      }
+      const student = findStudentForRedemption(redemption);
+      if (!student) {
+        alert('ไม่พบนักเรียนของรายการนี้');
+        return;
+      }
+      if (currentTeacher && !canTeacherManageStudentReward(student)) {
+        alert('บัญชีครูนี้ไม่มีสิทธิ์ส่งมอบรางวัลของนักเรียนคนนี้');
+        return;
+      }
+      if (!confirm('ยืนยันส่งมอบ "' + (redemption.rewardTitle || 'รางวัลแสตมป์') + '" ให้ ' + (student.name || '-') + '?')) return;
+      const teacherInfo = getActiveTeacherAwardInfo();
+      const now = firebase.firestore.FieldValue.serverTimestamp();
+      const updatedAtText = new Date().toLocaleString('th-TH');
+      try {
+        await db.collection('gamificationRedemptions').doc(redemptionId).set({
+          status: 'fulfilled',
+          fulfilledAt: now,
+          fulfilledAtText: updatedAtText,
+          fulfilledByUid: teacherInfo.uid,
+          fulfilledByTeacherId: teacherInfo.teacherId,
+          fulfilledByName: teacherInfo.teacherName,
+          updatedAt: now,
+          updatedAtText: updatedAtText
+        }, { merge: true });
+        Object.assign(redemption, {
+          status: 'fulfilled',
+          fulfilledAtText: updatedAtText,
+          fulfilledByUid: teacherInfo.uid,
+          fulfilledByTeacherId: teacherInfo.teacherId,
+          fulfilledByName: teacherInfo.teacherName,
+          updatedAtText: updatedAtText
+        });
+        addActivityLog('ส่งมอบรางวัลแสตมป์', (student.name || '-') + ' · ' + (redemption.rewardTitle || '-'));
+        renderTeacherStudents();
+        renderAdminGamificationShop();
+        renderStudentGamificationPanel();
+        openGiveExpBubbleForStudent(student);
+      } catch (e) {
+        alert('ส่งมอบรางวัลไม่สำเร็จ: ' + (e.message || e.code || ''));
+      }
+    }
+
+    async function useSpecialVoucherRedemption(redemptionId) {
+      if (!firebaseReady || !db) return;
+      const redemption = gamificationRedemptions.find(function(r) {
+        return String(r.firebaseDocId || r.id || '') === String(redemptionId || '') && !r.deleted;
+      });
+      if (!redemption || !isSpecialVoucherRedemption(redemption)) {
+        alert('ไม่พบบัตรพิเศษนี้');
+        return;
+      }
+      if (String(redemption.status || 'pending') === 'fulfilled') {
+        alert('บัตรนี้ถูกใช้แล้ว');
+        return;
+      }
+      const student = findStudentForRedemption(redemption);
+      if (!student) {
+        alert('ไม่พบนักเรียนของบัตรนี้');
+        return;
+      }
+      const isAdminUser = firebaseUserProfile && isAdminRole(firebaseUserProfile.appRole || firebaseUserProfile.role || '');
+      if (!isAdminUser && currentTeacher && !canTeacherManageStudentReward(student)) {
+        alert('บัญชีครูนี้ไม่มีสิทธิ์ใช้บัตรของนักเรียนคนนี้');
+        return;
+      }
+      if (!confirm('ยืนยันใช้บัตร "' + (redemption.rewardTitle || 'บัตรพิเศษ') + '" ให้ ' + (student.name || '-') + '?\nใช้สำหรับแลกรางวัลพิเศษหรือเข้าร่วมกิจกรรมพิเศษแล้ว')) return;
+      const teacherInfo = getActiveTeacherAwardInfo();
+      const now = firebase.firestore.FieldValue.serverTimestamp();
+      const updatedAtText = new Date().toLocaleString('th-TH');
+      try {
+        await db.collection('gamificationRedemptions').doc(redemptionId).set({
+          status: 'fulfilled',
+          usedAt: now,
+          usedAtText: updatedAtText,
+          usedByUid: teacherInfo.uid,
+          usedByTeacherId: teacherInfo.teacherId,
+          usedByName: teacherInfo.teacherName,
+          updatedAt: now,
+          updatedAtText: updatedAtText
+        }, { merge: true });
+        Object.assign(redemption, {
+          status: 'fulfilled',
+          usedAtText: updatedAtText,
+          usedByUid: teacherInfo.uid,
+          usedByTeacherId: teacherInfo.teacherId,
+          usedByName: teacherInfo.teacherName,
+          updatedAtText: updatedAtText
+        });
+        addActivityLog('ใช้บัตรพิเศษ', (student.name || '-') + ' · ' + (redemption.rewardTitle || '-'));
+        renderTeacherStudents();
+        renderAdminGamificationShop();
+        renderStudentGamificationPanel();
+        if (!isAdminUser && currentTeacher) openGiveRewardDirectBubble(student);
+      } catch (e) {
+        alert('ใช้บัตรไม่สำเร็จ: ' + (e.message || e.code || ''));
+      }
     }
 
     function adminGiveVoucher() {
@@ -22353,6 +22565,7 @@
         memberId: student.memberId || student.studentId || '',
         studentName: student.name || student.studentName || '',
         rewardId: rewardId, rewardTitle: reward.title || '',
+        rewardType: reward.rewardType || 'standard',
         coinsPaid: 0, status: 'pending', deleted: false,
         fromAdmin: true, adminNote: note,
         createdAt: firebase.firestore.FieldValue.serverTimestamp(),
@@ -23290,6 +23503,7 @@
                   studentName: currentStudent.name || '',
                   rewardId: winner.linkedRewardId,
                   rewardTitle: winner.linkedRewardTitle || (linkedRewardDoc ? linkedRewardDoc.title : '') || '',
+                  rewardType: linkedRewardDoc ? (linkedRewardDoc.rewardType || 'standard') : 'standard',
                   coinsPaid: 0, fromPrizeWheel: true, prizeWheelSpinId: spinRecord.id || '',
                   status: 'pending', deleted: false, createdAt: nowTs, createdAtText: new Date().toLocaleString('th-TH')
                 };
@@ -23697,7 +23911,12 @@
       const fulfilled = myVouchers.filter(function(r) { return r.status === 'fulfilled'; });
       function renderVoucherCard(r) {
         const isFulfilled = r.status === 'fulfilled';
-        const src = r.fromPrizeWheel ? '🎰 วงล้อ' : '🛒 ร้านค้า';
+        const isStamp = isStampCardRedemption(r);
+        const isSpecial = isSpecialVoucherRedemption(r);
+        const src = isStamp ? '🎴 บัตรสะสม' : (r.fromPrizeWheel ? '🎰 วงล้อ' : (r.fromAdmin ? '👤 Admin' : '🛒 ร้านค้า'));
+        const statusText = isStamp
+          ? (isFulfilled ? '✓ รับแล้ว' : '⏳ รอรับ')
+          : (isSpecial ? (isFulfilled ? '✓ ใช้แล้ว' : '🎫 รอใช้') : (isFulfilled ? '✓ รับแล้ว' : '⏳ รอรับ'));
         return '<div class="sg-voucher-card' + (isFulfilled ? ' sg-voucher-card--fulfilled' : '') + '">' +
           '<span class="sg-voucher-icon">🎟</span>' +
           '<div class="sg-voucher-info">' +
@@ -23705,20 +23924,149 @@
             '<div class="sg-voucher-meta">' + src + ' · ' + escapeHtml(r.createdAtText || '') + '</div>' +
           '</div>' +
           '<span class="sg-voucher-status ' + (isFulfilled ? 'sg-voucher-status--fulfilled' : 'sg-voucher-status--pending') + '">' +
-            (isFulfilled ? '✓ รับแล้ว' : '⏳ รอรับ') +
+            statusText +
           '</span>' +
         '</div>';
       }
       return '<div class="sg-vouchers">' +
         '<div class="sg-vouchers-header">🎟 บัตรแลกของสะสม' +
-          (pending.length ? ' <span class="sg-vouchers-badge">' + pending.length + ' รอรับ</span>' : '') +
+          (pending.length ? ' <span class="sg-vouchers-badge">' + pending.length + ' รอใช้/รอรับ</span>' : '') +
         '</div>' +
         '<div class="sg-vouchers-list">' +
           pending.map(renderVoucherCard).join('') +
           (fulfilled.length
-            ? '<div class="sg-vouchers-divider">รับแล้ว</div>' + fulfilled.slice(0, 5).map(renderVoucherCard).join('')
+            ? '<div class="sg-vouchers-divider">รับแล้ว / ใช้แล้ว</div>' + fulfilled.slice(0, 5).map(renderVoucherCard).join('')
             : '') +
         '</div>' +
+      '</div>';
+    }
+
+    function redemptionMatchesStudent(redemption, student) {
+      if (!redemption || !student) return false;
+      const studentDocId = getStudentRecordDocId(student);
+      const authUid = String(student.authUid || student.studentAuthUid || '').trim();
+      return String(redemption.studentId || '') === studentDocId ||
+        (authUid && String(redemption.authUid || '') === authUid);
+    }
+
+    function getRewardForRedemption(redemption) {
+      if (!redemption || !redemption.rewardId) return null;
+      return gamificationRewards.find(function(reward) {
+        return reward && !reward.deleted &&
+          String(reward.firebaseDocId || reward.id || '') === String(redemption.rewardId || '');
+      }) || null;
+    }
+
+    function isStampCardRedemption(redemption) {
+      if (!redemption || redemption.deleted === true) return false;
+      if (String(redemption.rewardType || '') === 'stampCard' || redemption.claimedFromStampCard) return true;
+      const linkedReward = getRewardForRedemption(redemption);
+      return !!(linkedReward && linkedReward.rewardType === 'stampCard');
+    }
+
+    function isSpecialVoucherRedemption(redemption) {
+      if (!redemption || redemption.deleted === true) return false;
+      const status = String(redemption.status || 'pending');
+      if (status === 'cancelled') return false;
+      const rewardType = String(redemption.rewardType || '').trim();
+      if (isStampCardRedemption(redemption)) return false;
+      if (rewardType === 'professionChangeTicket' || rewardType === 'avatarCosmetic' || rewardType === 'wheelTickets') return false;
+      const linkedReward = getRewardForRedemption(redemption);
+      if (linkedReward && linkedReward.rewardType === 'stampCard') return false;
+      if (linkedReward && linkedReward.rewardType === 'professionChangeTicket') return false;
+      if (linkedReward && linkedReward.rewardType === 'avatarCosmetic') return false;
+      if (linkedReward && linkedReward.rewardType === 'wheelTickets') return false;
+      return true;
+    }
+
+    function getSpecialVoucherRedemptionsForStudent(student, status) {
+      return gamificationRedemptions.filter(function(redemption) {
+        return isSpecialVoucherRedemption(redemption) &&
+          redemptionMatchesStudent(redemption, student) &&
+          (!status || String(redemption.status || 'pending') === status);
+      }).slice().sort(function(a, b) {
+        return String(b.createdAtText || '') > String(a.createdAtText || '') ? 1 : -1;
+      });
+    }
+
+    function getStampCardRedemptionForStudent(rewardId, student) {
+      return gamificationRedemptions.find(function(redemption) {
+        return redemption && redemption.deleted !== true &&
+          String(redemption.status || 'pending') !== 'cancelled' &&
+          isStampCardRedemption(redemption) &&
+          String(redemption.rewardId || '') === String(rewardId || '') &&
+          redemptionMatchesStudent(redemption, student);
+      }) || null;
+    }
+
+    function getStampCardRedemptionsForStudent(student, status) {
+      return gamificationRedemptions.filter(function(redemption) {
+        return redemption && redemption.deleted !== true &&
+          isStampCardRedemption(redemption) &&
+          redemptionMatchesStudent(redemption, student) &&
+          (!status || String(redemption.status || 'pending') === status);
+      }).slice().sort(function(a, b) {
+        return String(b.createdAtText || '') > String(a.createdAtText || '') ? 1 : -1;
+      });
+    }
+
+    function renderTeacherStampRedemptionsHtml(student) {
+      const pending = getStampCardRedemptionsForStudent(student, 'pending');
+      const fulfilled = getStampCardRedemptionsForStudent(student, 'fulfilled').slice(0, 3);
+      if (!pending.length && !fulfilled.length) return '';
+      const pendingRows = pending.length ? pending.map(function(redemption) {
+        const rid = jsArg(redemption.firebaseDocId || redemption.id || '');
+        return '<div class="student-gamification-quest" style="margin-bottom:8px;border-color:#d8b4fe;background:#faf5ff;">' +
+          '<span class="student-gamification-quest-icon">🎟</span>' +
+          '<div style="flex:1;min-width:0;">' +
+            '<strong>' + escapeHtml(redemption.rewardTitle || 'รางวัลแสตมป์') + '</strong>' +
+            '<p class="mini-muted">นักเรียนกดแลกแล้ว · รอส่งมอบ</p>' +
+            '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px;">' +
+              '<button class="btn btn-green" type="button" onclick="fulfillStudentStampCardRedemption(\'' + rid + '\')">ส่งมอบแล้ว</button>' +
+            '</div>' +
+          '</div>' +
+        '</div>';
+      }).join('') : '<p class="mini-muted">ยังไม่มีรางวัลแสตมป์ที่รอส่งมอบ</p>';
+      const fulfilledRows = fulfilled.length
+        ? '<div style="margin-top:8px;"><p class="mini-muted" style="font-weight:700;">ส่งมอบล่าสุด</p>' +
+          fulfilled.map(function(redemption) {
+            return '<p class="mini-muted">✓ ' + escapeHtml(redemption.rewardTitle || 'รางวัลแสตมป์') + ' · ' + escapeHtml(redemption.updatedAtText || redemption.createdAtText || '') + '</p>';
+          }).join('') + '</div>'
+        : '';
+      return '<div class="student-gamification-daily-quests" style="margin-top:14px;">' +
+        '<div class="sgdq-header">รางวัลแสตมป์รอส่งมอบ <span class="sgdq-count">' + pending.length + '</span></div>' +
+        '<div style="padding:10px 0 0;">' + pendingRows + fulfilledRows + '</div>' +
+      '</div>';
+    }
+
+    function renderTeacherSpecialVoucherRedemptionsHtml(student) {
+      const pending = getSpecialVoucherRedemptionsForStudent(student, 'pending');
+      const fulfilled = getSpecialVoucherRedemptionsForStudent(student, 'fulfilled').slice(0, 3);
+      if (!pending.length && !fulfilled.length) return '';
+      const pendingRows = pending.length ? pending.map(function(redemption) {
+        const rid = jsArg(redemption.firebaseDocId || redemption.id || '');
+        const source = redemption.fromPrizeWheel ? 'จากวงล้อ' : (redemption.fromAdmin ? 'Admin แจกให้' : 'จากร้านแลกรางวัล');
+        return '<div class="student-gamification-quest" style="margin-bottom:8px;border-color:#c4b5fd;background:#faf5ff;">' +
+          '<span class="student-gamification-quest-icon">🎫</span>' +
+          '<div style="flex:1;min-width:0;">' +
+            '<strong>' + escapeHtml(redemption.rewardTitle || 'บัตรพิเศษ') + '</strong>' +
+            '<p class="mini-muted">' + source + ' · รอใช้แลกรางวัลหรือเข้าร่วมกิจกรรมพิเศษ</p>' +
+            (redemption.adminNote ? '<p class="mini-muted">หมายเหตุ: ' + escapeHtml(redemption.adminNote) + '</p>' : '') +
+            '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px;">' +
+              '<button class="btn btn-green" type="button" onclick="useSpecialVoucherRedemption(\'' + rid + '\')">ใช้บัตรแล้ว</button>' +
+            '</div>' +
+          '</div>' +
+        '</div>';
+      }).join('') : '<p class="mini-muted">ยังไม่มีบัตรพิเศษที่รอใช้</p>';
+      const fulfilledRows = fulfilled.length
+        ? '<div style="margin-top:8px;"><p class="mini-muted" style="font-weight:700;">ใช้แล้วล่าสุด</p>' +
+          fulfilled.map(function(redemption) {
+            return '<p class="mini-muted">✓ ' + escapeHtml(redemption.rewardTitle || 'บัตรพิเศษ') + ' · ' + escapeHtml(redemption.usedAtText || redemption.updatedAtText || redemption.createdAtText || '') + '</p>';
+          }).join('') + '</div>'
+        : '';
+      return '<div class="student-gamification-daily-quests" style="margin-top:14px;">' +
+        '<div class="sgdq-header">บัตรพิเศษรอใช้ <span class="sgdq-count">' + pending.length + '</span></div>' +
+        '<div style="padding:10px 0 0;">' + pendingRows + fulfilledRows + '</div>' +
       '</div>';
     }
 
@@ -23771,14 +24119,20 @@
           const cardProg = myStampProgress[r.firebaseDocId || r.id || ''] || { stamps: 0, completed: false };
           const curStamps = Math.min(stampsRequired, Number(cardProg.stamps) || 0);
           const completed = cardProg.completed || curStamps >= stampsRequired;
+          const stampRedemption = getStampCardRedemptionForStudent(r.firebaseDocId || r.id || '', currentStudent);
+          const stampRedemptionStatus = stampRedemption ? String(stampRedemption.status || 'pending') : '';
           const stampCost = Number(r.cost) || 0;
           const canBuy = stampCost > 0 && coins >= stampCost && !completed && inStock;
           const stampsDotsHtml = Array.from({ length: stampsRequired }, function(_, i) {
             return i < curStamps ? '🟡' : '⚪';
           }).join('');
           let btnHtml;
-          if (completed) {
-            btnHtml = '<span class="sgshop-status">✓ ครบแล้ว! รอรับรางวัล</span>';
+          if (stampRedemptionStatus === 'fulfilled') {
+            btnHtml = '<span class="sgshop-status">✓ รับแล้ว</span>';
+          } else if (stampRedemption) {
+            btnHtml = '<span class="sgshop-status">⏳ รอรับ</span>';
+          } else if (completed) {
+            btnHtml = '<button type="button" class="sgshop-btn" onclick="claimStampCardReward(\'' + rid + '\')">แลกรางวัล</button>';
           } else if (!inStock) {
             btnHtml = '<span class="sgshop-status sgshop-status--out">หมดสต็อก</span>';
           } else if (stampCost <= 0) {
@@ -23970,24 +24324,58 @@
       const newStock = Math.max(0, (rewardDoc.stock || 0) - 1);
       batch.set(db.collection('gamificationRewards').doc(rewardId), { stock: newStock, updatedAt: now }, { merge: true });
       rewardDoc.stock = newStock;
-      if (nowCompleted) {
-        const redemptionId = createFirebaseDocId('gamificationRedemptions');
-        const redemption = {
-          id: redemptionId, firebaseDocId: redemptionId,
-          studentId: getStudentRecordDocId(currentStudent),
-          authUid: String((currentStudent.authUid) || (firebaseUser && firebaseUser.uid) || '').trim(),
-          memberId: currentStudent.memberId || currentStudent.studentId || '',
-          studentName: currentStudent.name || '',
-          rewardId: rewardId, rewardTitle: rewardDoc.title || '', rewardType: 'stampCard',
-          coinsPaid: 0, fromPrizeWheel: fromPrizeWheel || false, prizeWheelSpinId: prizeWheelSpinId || '',
-          status: 'pending', deleted: false, createdAt: now, createdAtText: new Date().toLocaleString('th-TH')
-        };
-        batch.set(db.collection('gamificationRedemptions').doc(redemptionId), redemption);
-        gamificationRedemptions.push(redemption);
-      }
       await batch.commit();
       updateLeaderboardProfileInMemory(profileId, getCurrentStudentGamificationProfile());
       return { newStamps: newStamps, stampsRequired: stampsRequired, nowCompleted: nowCompleted };
+    }
+
+    async function claimStampCardReward(rewardId) {
+      if (!currentStudent || !firebaseReady || !db || !firebaseUser) return;
+      const reward = gamificationRewards.find(function(r) { return String(r.firebaseDocId || r.id || '') === String(rewardId || '') && !r.deleted; });
+      if (!reward || reward.rewardType !== 'stampCard') { alert('ไม่พบบัตรสะสมนี้'); return; }
+      const profile = getCurrentStudentGamificationProfile();
+      const cardProgress = ((profile.stampProgress || {})[rewardId]) || { stamps: 0, completed: false };
+      const stampsRequired = Math.max(2, Number(reward.stampsRequired) || 5);
+      const curStamps = Math.min(stampsRequired, Number(cardProgress.stamps) || 0);
+      const completed = cardProgress.completed || curStamps >= stampsRequired;
+      if (!completed) {
+        alert('ยังสะสมแสตมป์ไม่ครบ (' + curStamps + '/' + stampsRequired + ')');
+        return;
+      }
+      const existingRedemption = getStampCardRedemptionForStudent(rewardId, currentStudent);
+      if (existingRedemption) {
+        alert(existingRedemption.status === 'fulfilled' ? 'รางวัลนี้รับแล้ว' : 'คุณกดแลกรางวัลนี้แล้ว รอทีมงานส่งมอบ');
+        renderStudentGamificationPanel();
+        return;
+      }
+      if (!confirm('ยืนยันแลกรางวัล "' + (reward.title || 'รางวัลแสตมป์') + '"?\nหลังแลกแล้วสถานะจะเป็นรอรับจากครู/ทีมงาน')) return;
+      const redemptionId = createFirebaseDocId('gamificationRedemptions');
+      const now = firebase.firestore.FieldValue.serverTimestamp();
+      const redemption = {
+        id: redemptionId,
+        firebaseDocId: redemptionId,
+        studentId: getStudentRecordDocId(currentStudent),
+        authUid: String((currentStudent.authUid) || (firebaseUser && firebaseUser.uid) || '').trim(),
+        memberId: currentStudent.memberId || currentStudent.studentId || '',
+        studentName: currentStudent.name || '',
+        rewardId: rewardId,
+        rewardTitle: reward.title || '',
+        rewardType: 'stampCard',
+        coinsPaid: 0,
+        claimedFromStampCard: true,
+        status: 'pending',
+        deleted: false,
+        createdAt: now,
+        createdAtText: new Date().toLocaleString('th-TH')
+      };
+      try {
+        await db.collection('gamificationRedemptions').doc(redemptionId).set(redemption);
+        gamificationRedemptions.push(redemption);
+        renderStudentGamificationPanel();
+        alert('ส่งคำขอแลกรางวัลแล้ว! สถานะ: รอรับ');
+      } catch (e) {
+        alert('แลกรางวัลไม่สำเร็จ: ' + (e.message || e.code || ''));
+      }
     }
 
     async function redeemGamificationReward(rewardId) {
@@ -24073,7 +24461,7 @@
         if ((profile.coins || 0) < stampCost) { alert('Coins ไม่เพียงพอ! ต้องการ ' + stampCost + ' Coins'); return; }
         const sp = (profile.stampProgress || {});
         const curCard = sp[rewardId] || { stamps: 0, completed: false };
-        if (curCard.completed) { alert('คุณสะสมแสตมป์ครบแล้ว รอรับรางวัลจากทีมงาน!'); return; }
+        if (curCard.completed) { alert('คุณสะสมแสตมป์ครบแล้ว กด "แลกรางวัล" เพื่อส่งคำขอรับรางวัล'); return; }
         const stampsRequired = Math.max(2, Number(reward.stampsRequired) || 5);
         if (!confirm('ยืนยันสะสมแสตมป์ "' + reward.title + '" ด้วย ' + stampCost + ' Coins?\n(ปัจจุบัน: ' + (curCard.stamps || 0) + '/' + stampsRequired + ' แสตมป์)')) return;
         // Deduct coins first
@@ -24088,7 +24476,7 @@
           updateLeaderboardProfileInMemory(profileId, getCurrentStudentGamificationProfile());
           renderStudentGamificationPanel();
           if (result && result.nowCompleted) {
-            alert('🎉 สะสมแสตมป์ครบ ' + result.stampsRequired + '/' + result.stampsRequired + '! ทีมงานจะติดต่อรับรางวัลเร็วๆ นี้');
+            alert('🎉 สะสมแสตมป์ครบ ' + result.stampsRequired + '/' + result.stampsRequired + '! กด "แลกรางวัล" เพื่อส่งคำขอรับรางวัล');
           } else if (result) {
             alert('✅ สะสมแสตมป์สำเร็จ! (' + result.newStamps + '/' + result.stampsRequired + ' แสตมป์)');
           }
@@ -24110,7 +24498,7 @@
         authUid: String((currentStudent.authUid) || (firebaseUser && firebaseUser.uid) || '').trim(),
         memberId: currentStudent.memberId || currentStudent.studentId || '',
         studentName: currentStudent.name || '',
-        rewardId: rewardId, rewardTitle: reward.title || '', coinsPaid: reward.cost || 0,
+        rewardId: rewardId, rewardTitle: reward.title || '', rewardType: reward.rewardType || 'standard', coinsPaid: reward.cost || 0,
         status: 'pending', deleted: false, createdAt: now, createdAtText: new Date().toLocaleString('th-TH')
       };
       try {
