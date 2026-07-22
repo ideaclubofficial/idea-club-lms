@@ -625,6 +625,34 @@
       border-color: #0284c7;
       box-shadow: 0 0 0 3px rgba(14, 165, 233, 0.15);
     }
+    .sab-question-choices {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 8px;
+    }
+    .sab-choice-btn {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      width: 100%;
+      border: 1.5px solid #bae6fd;
+      border-radius: 9px;
+      padding: 8px 10px;
+      background: #ffffff;
+      color: #0f172a;
+      font-size: 12px;
+      font-weight: 800;
+      text-align: left;
+      cursor: pointer;
+    }
+    .sab-choice-btn strong {
+      flex: 0 0 auto;
+      color: #0369a1;
+    }
+    .sab-choice-btn span {
+      min-width: 0;
+      overflow-wrap: anywhere;
+    }
     .sab-question-feedback {
       margin-top: 7px;
       min-height: 16px;
@@ -8542,6 +8570,54 @@
               <button class="btn btn-dark" type="button" onclick="renderAdminAvatarBattleSettings()" style="margin-left:6px;">รีโหลดค่า</button>
               <span id="abSettingsSaveResult" style="font-size:13px;margin-left:8px;"></span>
             </div>
+            <div class="form-box" style="margin-top:16px;">
+              <h3 style="margin:0 0 8px;">📚 คลังโจทย์ Avatar Battle</h3>
+              <p style="margin:0 0 14px;color:#64748b;">โจมตีปกติใช้โจทย์ง่าย · ใช้สกิลใช้โจทย์ยาก · ถ้าคลังไม่มีโจทย์ ระบบจะใช้โจทย์สุ่มเดิมอัตโนมัติ</p>
+              <input type="hidden" id="abQuestionEditingId" value="" />
+              <div class="form-row">
+                <div><label>วิชา</label><select id="abQuestionSubject"></select></div>
+                <div><label>ระดับชั้น</label><select id="abQuestionGrade"></select></div>
+                <div>
+                  <label>ความยาก</label>
+                  <select id="abQuestionDifficulty">
+                    <option value="easy">easy · โจมตีปกติ</option>
+                    <option value="hard">hard · ใช้สกิล</option>
+                  </select>
+                </div>
+                <div>
+                  <label>ประเภทคำตอบ</label>
+                  <select id="abQuestionType" onchange="onAvatarBattleQuestionTypeChange()">
+                    <option value="numeric">ตัวเลข</option>
+                    <option value="multipleChoice">ปรนัย 4 ตัวเลือก</option>
+                  </select>
+                </div>
+              </div>
+              <div><label>โจทย์</label><textarea id="abQuestionPrompt" rows="2" placeholder="เช่น 12 x 3 = ? หรือ ข้อใดเป็นดาวเคราะห์"></textarea></div>
+              <div id="abQuestionChoicesRow" style="display:none;margin-top:10px;">
+                <div class="form-row">
+                  <div><label>ตัวเลือก A</label><input id="abQuestionChoiceA" type="text" /></div>
+                  <div><label>ตัวเลือก B</label><input id="abQuestionChoiceB" type="text" /></div>
+                  <div><label>ตัวเลือก C</label><input id="abQuestionChoiceC" type="text" /></div>
+                  <div><label>ตัวเลือก D</label><input id="abQuestionChoiceD" type="text" /></div>
+                </div>
+              </div>
+              <div class="form-row" style="margin-top:10px;">
+                <div><label>เฉลย</label><input id="abQuestionAnswer" type="text" placeholder="ตัวเลข หรือ A/B/C/D" /></div>
+                <div><label>คำอธิบาย (ไม่บังคับ)</label><input id="abQuestionExplanation" type="text" /></div>
+              </div>
+              <div style="margin-top:10px;">
+                <button class="btn btn-green" type="button" onclick="adminSaveAvatarBattleQuestion()">บันทึกโจทย์</button>
+                <button class="btn btn-dark" type="button" onclick="adminClearAvatarBattleQuestionForm()" style="margin-left:6px;">ล้างฟอร์ม</button>
+                <span id="abQuestionSaveResult" style="font-size:13px;margin-left:8px;"></span>
+              </div>
+              <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:end;margin-top:16px;">
+                <div><label>กรองวิชา</label><select id="abQuestionFilterSubject" onchange="renderAdminAvatarBattleQuestionsTable()"></select></div>
+                <div><label>กรองระดับชั้น</label><select id="abQuestionFilterGrade" onchange="renderAdminAvatarBattleQuestionsTable()"></select></div>
+                <div><label>กรองความยาก</label><select id="abQuestionFilterDifficulty" onchange="renderAdminAvatarBattleQuestionsTable()"><option value="ทั้งหมด">ทั้งหมด</option><option value="easy">easy</option><option value="hard">hard</option></select></div>
+                <div><label>สถานะ</label><select id="abQuestionFilterStatus" onchange="renderAdminAvatarBattleQuestionsTable()"><option value="active">เปิดใช้งาน</option><option value="all">ทั้งหมด</option><option value="inactive">ปิดใช้งาน</option></select></div>
+              </div>
+              <div id="adminAvatarBattleQuestionsTable" style="margin-top:12px;"></div>
+            </div>
           </section>
 
         </div>
@@ -9083,7 +9159,10 @@
         loadStudentOwnCollection('gamificationRedemptions', studentDocIds, firebaseUser.uid),
         getFirebaseCollectionQuiet('prizeWheelItems'),
         getFirebaseCollectionQuiet('prizeWheelSettings'),
-        loadStudentOwnCollection('prizeWheelSpins', studentDocIds, firebaseUser.uid)
+        loadStudentOwnCollection('prizeWheelSpins', studentDocIds, firebaseUser.uid),
+        (firebaseReady && db ? db.collection('avatarBattleQuestions').where('active', '==', true).where('deleted', '==', false).get().then(function(snap) {
+          return snap.docs.map(function(d) { return Object.assign({ firebaseDocId: d.id }, d.data()); });
+        }).catch(function(e) { console.warn('avatarBattleQuestions student query skipped:', e); return []; }) : Promise.resolve([]))
       ]);
 
       replaceArray(courses, results[0]);
@@ -9109,6 +9188,7 @@
       const pwMainStu = pwSettingsArr.find(function(s) { return s.id === 'main' || s.firebaseDocId === 'main'; });
       if (pwMainStu) prizeWheelSettings = Object.assign({ spinCost: 30, enabled: true }, pwMainStu);
       replaceArray(prizeWheelSpins, results[20] || []);
+      replaceArray(avatarBattleQuestions, results[21] || []);
 
       console.log('student-data-load-success', {
         uid: firebaseUser.uid,
@@ -9709,7 +9789,8 @@
         getFirebaseCollection('expenses'),
         getFirebaseCollection('prizeWheelItems'),
         getFirebaseCollection('prizeWheelSpins'),
-        getFirebaseCollection('prizeWheelSettings')
+        getFirebaseCollection('prizeWheelSettings'),
+        getFirebaseCollection('avatarBattleQuestions')
       ]);
 
       replaceArray(students, results[0]);
@@ -9743,6 +9824,7 @@
       const pwSettingsItems = results[28] || [];
       const pwMain = pwSettingsItems.find(function(s) { return s.id === 'main' || s.firebaseDocId === 'main'; });
       if (pwMain) prizeWheelSettings = Object.assign({ spinCost: 30, enabled: true }, pwMain);
+      replaceArray(avatarBattleQuestions, results[29] || []);
       const mainSettings = settingsItems.find(function(item) { return item.id === 'main' || item.firebaseDocId === 'main'; });
       if (mainSettings) systemSettings = Object.assign(systemSettings, mainSettings);
       safeRun(applySystemSettingsToPage, 'settings-apply-after-load');
@@ -9909,7 +9991,7 @@
       'admin.announcements': { menus: ['ประกาศ'], collections: ['announcements'] },
       'admin.gamification': { menus: ['ร้านแลกรางวัล'], collections: ['gamificationRewards', 'gamificationRedemptions', 'studentGamificationProfiles', 'studentGamificationEvents'] },
       'admin.prizeWheel': { menus: ['วงล้อสุ่มรางวัล'], collections: ['prizeWheelItems', 'prizeWheelSettings', 'prizeWheelSpins', 'gamificationRewards'] },
-      'admin.avatarBattle': { menus: ['เกมต่อสู้ Avatar'], collections: ['prizeWheelSettings.avatarBattle', 'studentGamificationProfiles(read)'] },
+      'admin.avatarBattle': { menus: ['เกมต่อสู้ Avatar'], collections: ['prizeWheelSettings.avatarBattle', 'avatarBattleQuestions', 'studentGamificationProfiles(read)'] },
       'admin.settings': { menus: ['ตั้งค่าระบบ'], collections: ['settings'] },
       'admin.logs': { menus: ['ประวัติการแก้ไข'], collections: ['activityLogs(read)', 'activityLogs(append)'] },
       'teacher.dashboard': { menus: ['ภาพรวมครู'], collections: ['courses', 'monthlyPlanSessions'] },
@@ -10588,6 +10670,7 @@
     let gamificationRedemptionsCleanupRunning = false;
     const prizeWheelItems = [];
     const prizeWheelSpins = [];
+    const avatarBattleQuestions = [];
     const PRIZE_WHEEL_SPIN_HISTORY_LIMIT = 20;
     let prizeWheelSpinsCleanupRunning = false;
     let prizeWheelSettings = { spinCost: 30, enabled: true };
@@ -21087,6 +21170,7 @@
         pendingSkillName: '',
         pendingQuestion: null,
         pendingAction: '',
+        usedAvatarBattleQuestionIds: [],
         questionFeedback: '',
         questionFeedbackType: '',
         rewardSaving: false,
@@ -21207,7 +21291,104 @@
       return Math.floor(Math.random() * (hi - lo + 1)) + lo;
     }
 
-    function avatarBattleGenerateQuestion(profile, action, state) {
+    function normalizeAvatarBattleQuestionDifficulty(value) {
+      return String(value || '').trim() === 'hard' ? 'hard' : 'easy';
+    }
+
+    function normalizeAvatarBattleQuestionType(value) {
+      return String(value || '').trim() === 'multipleChoice' ? 'multipleChoice' : 'numeric';
+    }
+
+    function getAvatarBattleStudentSubject() {
+      const course = (typeof getCurrentStudentCourse === 'function') ? getCurrentStudentCourse() : null;
+      const subject = String(
+        (course && (course.subject || course.onlineSubject)) ||
+        (currentStudent && (currentStudent.subject || currentStudent.courseSubject)) ||
+        ''
+      ).trim();
+      if (subject) return subject;
+      const courseName = String((course && (course.name || course.title || course.courseName)) || (currentStudent && currentStudent.course) || '').trim();
+      return courseName && typeof guessSubjectFromCourse === 'function' ? guessSubjectFromCourse(courseName) : '';
+    }
+
+    function getAvatarBattleStudentGrade() {
+      const course = (typeof getCurrentStudentCourse === 'function') ? getCurrentStudentCourse() : null;
+      return String((currentStudent && (currentStudent.grade || currentStudent.classLevel || currentStudent.level)) || (course && course.grade) || '').trim();
+    }
+
+    function normalizeAvatarBattleBankQuestion(question, action, state) {
+      if (!question) return null;
+      const type = normalizeAvatarBattleQuestionType(question.questionType);
+      const prompt = String(question.prompt || question.text || '').trim();
+      const answer = String(question.answer || '').trim();
+      if (!prompt || !answer) return null;
+      const choices = question.choices && typeof question.choices === 'object' ? {
+        A: String(question.choices.A || '').trim(),
+        B: String(question.choices.B || '').trim(),
+        C: String(question.choices.C || '').trim(),
+        D: String(question.choices.D || '').trim()
+      } : {};
+      if (type === 'multipleChoice' && (!choices.A || !choices.B || !choices.C || !choices.D || !['A','B','C','D'].includes(answer.toUpperCase()))) return null;
+      const difficulty = normalizeAvatarBattleQuestionDifficulty(question.difficulty || (action === 'skill' ? 'hard' : 'easy'));
+      return {
+        prompt: prompt,
+        answer: type === 'multipleChoice' ? answer.toUpperCase() : answer,
+        difficulty: [question.subject || 'ทุกวิชา', question.grade || 'ทุกระดับชั้น', difficulty].filter(Boolean).join(' · '),
+        source: 'bank',
+        questionType: type,
+        choices: choices,
+        questionId: String(question.firebaseDocId || question.id || ''),
+        subject: question.subject || '',
+        grade: question.grade || '',
+        explanation: question.explanation || ''
+      };
+    }
+
+    function pickAvatarBattleQuestionFromBank(profile, action, state) {
+      const difficulty = action === 'skill' ? 'hard' : 'easy';
+      const studentSubject = getAvatarBattleStudentSubject();
+      const studentGrade = getAvatarBattleStudentGrade();
+      const activeQuestions = avatarBattleQuestions.filter(function(q) {
+        return q && q.deleted !== true && q.active !== false && normalizeAvatarBattleQuestionDifficulty(q.difficulty) === difficulty;
+      });
+      if (!activeQuestions.length) return null;
+      const usedIds = (state && Array.isArray(state.usedAvatarBattleQuestionIds)) ? state.usedAvatarBattleQuestionIds : [];
+      function matchesSubject(q, allowAny) {
+        const subject = String(q.subject || '').trim();
+        return allowAny || !studentSubject || !subject || subject === 'ทั้งหมด' || subject === studentSubject;
+      }
+      function matchesGrade(q, allowAny) {
+        const grade = String(q.grade || '').trim();
+        return allowAny || !studentGrade || !grade || grade === 'ทั้งหมด' || grade === studentGrade;
+      }
+      const buckets = [
+        activeQuestions.filter(function(q) { return matchesSubject(q, false) && matchesGrade(q, false); }),
+        activeQuestions.filter(function(q) { return matchesSubject(q, false); }),
+        activeQuestions.filter(function(q) { return matchesGrade(q, false); }),
+        activeQuestions
+      ];
+      for (let i = 0; i < buckets.length; i++) {
+        const bucket = buckets[i].filter(function(q) {
+          const id = String(q.firebaseDocId || q.id || '');
+          return !id || !usedIds.includes(id);
+        });
+        const source = bucket.length ? bucket : buckets[i];
+        if (!source.length) continue;
+        const picked = source[avatarBattleRandomInt(0, source.length - 1)];
+        const normalized = normalizeAvatarBattleBankQuestion(picked, action, state);
+        if (normalized) {
+          if (state && normalized.questionId) {
+            state.usedAvatarBattleQuestionIds = Array.isArray(state.usedAvatarBattleQuestionIds) ? state.usedAvatarBattleQuestionIds : [];
+            state.usedAvatarBattleQuestionIds.push(normalized.questionId);
+            if (state.usedAvatarBattleQuestionIds.length > 30) state.usedAvatarBattleQuestionIds.shift();
+          }
+          return normalized;
+        }
+      }
+      return null;
+    }
+
+    function avatarBattleGenerateFallbackQuestion(profile, action, state) {
       const level = Math.max(1, Number(profile && profile.level) || 1);
       const stageIndex = getAvatarBattleMonsterStageIndex(state && state.monster ? state.monster.stageIndex : (state && state.monsterStageIndex));
       const stageLevel = stageIndex + 1;
@@ -21249,9 +21430,16 @@
       }
       return {
         prompt: prompt,
-        answer: answer,
-        difficulty: 'Stage ' + stageLevel + (stageLevel === 3 ? ' Boss' : '') + ' · ' + (hard ? 'สกิลยากขึ้น' : 'โจมตี')
+        answer: String(answer),
+        difficulty: 'โจทย์สุ่มเดิม · Stage ' + stageLevel + (stageLevel === 3 ? ' Boss' : '') + ' · ' + (hard ? 'สกิลยากขึ้น' : 'โจมตี'),
+        source: 'generated',
+        questionType: 'numeric',
+        choices: null
       };
+    }
+
+    function avatarBattleGenerateQuestion(profile, action, state) {
+      return pickAvatarBattleQuestionFromBank(profile, action, state) || avatarBattleGenerateFallbackQuestion(profile, action, state);
     }
 
     function clearAvatarBattleQuestion(state) {
@@ -21416,24 +21604,32 @@
       renderAvatarBattlePanelAndKeepView();
     }
 
-    function submitAvatarBattleAnswer(triggerEl) {
+    function submitAvatarBattleAnswer(triggerEl, selectedChoice) {
       const profile = getCurrentStudentGamificationProfile();
       const state = getAvatarBattleState(profile);
       if (!state || state.status !== 'active' || state.rewardSaving || !state.pendingQuestion) return;
-      let input = null;
-      if (triggerEl && triggerEl.closest) {
-        const wrap = triggerEl.closest('.sab-question');
-        if (wrap) input = wrap.querySelector('.sab-answer-input');
+      const questionType = normalizeAvatarBattleQuestionType(state.pendingQuestion.questionType);
+      let raw = '';
+      if (questionType === 'multipleChoice') {
+        raw = String(selectedChoice || '').trim().toUpperCase();
+      } else {
+        let input = null;
+        if (triggerEl && triggerEl.closest) {
+          const wrap = triggerEl.closest('.sab-question');
+          if (wrap) input = wrap.querySelector('.sab-answer-input');
+        }
+        raw = input ? String(input.value || '').trim() : '';
+        if (!raw || !Number.isFinite(Number(raw))) {
+          state.questionFeedback = 'กรอกคำตอบเป็นตัวเลขก่อนนะ';
+          state.questionFeedbackType = 'bad';
+          renderAvatarBattlePanelAndKeepView();
+          return;
+        }
       }
-      const raw = input ? String(input.value || '').trim() : '';
-      const answer = Number(raw);
-      if (!raw || !Number.isFinite(answer)) {
-        state.questionFeedback = 'กรอกคำตอบเป็นตัวเลขก่อนนะ';
-        state.questionFeedbackType = 'bad';
-        renderAvatarBattlePanelAndKeepView();
-        return;
-      }
-      const correct = Number(state.pendingQuestion.answer);
+      const answer = questionType === 'multipleChoice' ? raw : String(Number(raw));
+      const correct = questionType === 'multipleChoice'
+        ? String(state.pendingQuestion.answer || '').trim().toUpperCase()
+        : String(Number(state.pendingQuestion.answer));
       const action = state.pendingAction || 'attack';
       if (answer === correct) {
         state.questionFeedback = 'ถูกต้อง! กำลังออกแอ็กชัน';
@@ -21441,8 +21637,9 @@
         resolveAvatarBattleAction(action);
         return;
       }
+      const explanation = state.pendingQuestion && state.pendingQuestion.explanation ? ' · ' + state.pendingQuestion.explanation : '';
       clearAvatarBattleQuestion(state);
-      state.questionFeedback = 'ยังไม่ถูก คำตอบคือ ' + correct;
+      state.questionFeedback = 'ยังไม่ถูก คำตอบคือ ' + correct + explanation;
       state.questionFeedbackType = 'bad';
       const stats = getAvatarBattlePlayerStats(profile);
       avatarBattleApplyMonsterCounter(state, stats, 'ตอบผิด โจมตีไม่ออก', true);
@@ -21548,16 +21745,23 @@
         const fb = state && state.questionFeedback ? String(state.questionFeedback) : '';
         return fb ? '<div class="sab-question-feedback sab-question-feedback--' + escapeHtml(state.questionFeedbackType || '') + '">' + escapeHtml(fb) + '</div>' : '';
       }
+      const qType = normalizeAvatarBattleQuestionType(q.questionType);
+      const answerHtml = qType === 'multipleChoice'
+        ? '<div class="sab-question-choices">' + ['A','B','C','D'].map(function(key) {
+            const text = q.choices && q.choices[key] ? q.choices[key] : '';
+            return '<button type="button" class="sab-choice-btn" onclick="submitAvatarBattleAnswer(this,\'' + key + '\')"><strong>' + key + '</strong><span>' + escapeHtml(text) + '</span></button>';
+          }).join('') + '</div>'
+        : '<div class="sab-question-row">' +
+            '<input class="sab-answer-input" type="number" inputmode="numeric" placeholder="พิมพ์คำตอบ" onkeydown="avatarBattleAnswerKeydown(event, this)" />' +
+            '<button type="button" class="sab-btn" onclick="submitAvatarBattleAnswer(this)">ตอบ</button>' +
+          '</div>';
       return '<div class="sab-question">' +
         '<div class="sab-question-top">' +
           '<strong>ตอบโจทย์ก่อนใช้ ' + escapeHtml(state.pendingAction === 'skill' ? (state.pendingSkillName || 'สกิล') : (state.pendingAttackName || 'โจมตี')) + '</strong>' +
           '<span>' + escapeHtml(q.difficulty || '') + '</span>' +
         '</div>' +
         '<p class="sab-question-prompt">' + escapeHtml(q.prompt || '') + '</p>' +
-        '<div class="sab-question-row">' +
-          '<input class="sab-answer-input" type="number" inputmode="numeric" placeholder="พิมพ์คำตอบ" onkeydown="avatarBattleAnswerKeydown(event, this)" />' +
-          '<button type="button" class="sab-btn" onclick="submitAvatarBattleAnswer(this)">ตอบ</button>' +
-        '</div>' +
+        answerHtml +
         '<div class="sab-question-feedback sab-question-feedback--' + escapeHtml(state.questionFeedbackType || '') + '">' + escapeHtml(state.questionFeedback || '') + '</div>' +
       '</div>';
     }
@@ -24482,6 +24686,234 @@
       }
     }
 
+    function avatarBattleSubjectOptionsHtml(selected, includeAll) {
+      const base = ['คณิตศาสตร์', 'วิทยาศาสตร์', 'ภาษาอังกฤษ', 'ภาษาไทย', 'สังคมศึกษา', 'อื่นๆ'];
+      const subjects = base.slice();
+      avatarBattleQuestions.forEach(function(q) {
+        const subject = String(q.subject || '').trim();
+        if (subject && subject !== 'ทั้งหมด' && !subjects.includes(subject)) subjects.push(subject);
+      });
+      const options = includeAll ? ['ทั้งหมด'].concat(subjects) : subjects;
+      return options.map(function(subject) {
+        return '<option value="' + escapeHtml(subject) + '"' + (String(selected || '') === subject ? ' selected' : '') + '>' + escapeHtml(subject) + '</option>';
+      }).join('');
+    }
+
+    function avatarBattleGradeOptionsHtml(selected, includeAll) {
+      const grades = ['ป.4', 'ป.5', 'ป.6', 'ม.1', 'ม.2', 'ม.3', 'ม.4', 'ม.5', 'ม.6'];
+      const options = includeAll ? ['ทั้งหมด'].concat(grades) : grades;
+      return options.map(function(grade) {
+        return '<option value="' + escapeHtml(grade) + '"' + (String(selected || '') === grade ? ' selected' : '') + '>' + escapeHtml(grade) + '</option>';
+      }).join('');
+    }
+
+    function onAvatarBattleQuestionTypeChange() {
+      const type = getElement('abQuestionType') ? getElement('abQuestionType').value : 'numeric';
+      const row = getElement('abQuestionChoicesRow');
+      if (row) row.style.display = type === 'multipleChoice' ? '' : 'none';
+      const answer = getElement('abQuestionAnswer');
+      if (answer) answer.placeholder = type === 'multipleChoice' ? 'A/B/C/D' : 'เช่น 42';
+    }
+
+    function renderAvatarBattleQuestionSelects() {
+      const subject = getElement('abQuestionSubject');
+      const grade = getElement('abQuestionGrade');
+      const filterSubject = getElement('abQuestionFilterSubject');
+      const filterGrade = getElement('abQuestionFilterGrade');
+      const currentSubject = subject ? subject.value : '';
+      const currentGrade = grade ? grade.value : '';
+      const currentFilterSubject = filterSubject ? filterSubject.value : 'ทั้งหมด';
+      const currentFilterGrade = filterGrade ? filterGrade.value : 'ทั้งหมด';
+      if (subject) subject.innerHTML = avatarBattleSubjectOptionsHtml(currentSubject || 'คณิตศาสตร์', false);
+      if (grade) grade.innerHTML = avatarBattleGradeOptionsHtml(currentGrade || 'ม.1', false);
+      if (filterSubject) filterSubject.innerHTML = avatarBattleSubjectOptionsHtml(currentFilterSubject || 'ทั้งหมด', true);
+      if (filterGrade) filterGrade.innerHTML = avatarBattleGradeOptionsHtml(currentFilterGrade || 'ทั้งหมด', true);
+    }
+
+    function adminClearAvatarBattleQuestionForm() {
+      if (getElement('abQuestionEditingId')) getElement('abQuestionEditingId').value = '';
+      if (getElement('abQuestionSubject')) getElement('abQuestionSubject').value = 'คณิตศาสตร์';
+      if (getElement('abQuestionGrade')) getElement('abQuestionGrade').value = 'ม.1';
+      if (getElement('abQuestionDifficulty')) getElement('abQuestionDifficulty').value = 'easy';
+      if (getElement('abQuestionType')) getElement('abQuestionType').value = 'numeric';
+      ['abQuestionPrompt','abQuestionAnswer','abQuestionExplanation','abQuestionChoiceA','abQuestionChoiceB','abQuestionChoiceC','abQuestionChoiceD'].forEach(function(id) {
+        if (getElement(id)) getElement(id).value = '';
+      });
+      const resultEl = getElement('abQuestionSaveResult');
+      if (resultEl) resultEl.textContent = '';
+      onAvatarBattleQuestionTypeChange();
+    }
+
+    function getAvatarBattleQuestionById(questionId) {
+      return avatarBattleQuestions.find(function(q) {
+        return String(q.firebaseDocId || q.id || '') === String(questionId || '');
+      }) || null;
+    }
+
+    function renderAdminAvatarBattleQuestionsTable() {
+      renderAvatarBattleQuestionSelects();
+      const table = getElement('adminAvatarBattleQuestionsTable');
+      if (!table) return;
+      const subjectFilter = getElement('abQuestionFilterSubject') ? getElement('abQuestionFilterSubject').value : 'ทั้งหมด';
+      const gradeFilter = getElement('abQuestionFilterGrade') ? getElement('abQuestionFilterGrade').value : 'ทั้งหมด';
+      const difficultyFilter = getElement('abQuestionFilterDifficulty') ? getElement('abQuestionFilterDifficulty').value : 'ทั้งหมด';
+      const statusFilter = getElement('abQuestionFilterStatus') ? getElement('abQuestionFilterStatus').value : 'active';
+      const filtered = avatarBattleQuestions.filter(function(q) {
+        if (!q || q.deleted === true) return false;
+        if (subjectFilter !== 'ทั้งหมด' && String(q.subject || '') !== subjectFilter) return false;
+        if (gradeFilter !== 'ทั้งหมด' && String(q.grade || '') !== gradeFilter) return false;
+        if (difficultyFilter !== 'ทั้งหมด' && normalizeAvatarBattleQuestionDifficulty(q.difficulty) !== difficultyFilter) return false;
+        if (statusFilter === 'active' && q.active === false) return false;
+        if (statusFilter === 'inactive' && q.active !== false) return false;
+        return true;
+      }).slice().sort(function(a, b) {
+        const da = normalizeAvatarBattleQuestionDifficulty(a.difficulty);
+        const db = normalizeAvatarBattleQuestionDifficulty(b.difficulty);
+        if (da !== db) return da === 'easy' ? -1 : 1;
+        const ga = gradeOrder(a.grade || '');
+        const gb = gradeOrder(b.grade || '');
+        if (ga !== gb) return ga - gb;
+        return String(a.subject || '').localeCompare(String(b.subject || ''), 'th');
+      });
+      if (!filtered.length) {
+        table.innerHTML = '<p style="color:#94a3b8;font-size:13px;">ยังไม่มีโจทย์ตามตัวกรองนี้</p>';
+        return;
+      }
+      const rows = filtered.map(function(q) {
+        const id = escapeHtml(q.firebaseDocId || q.id || '');
+        const typeLabel = normalizeAvatarBattleQuestionType(q.questionType) === 'multipleChoice' ? 'ปรนัย' : 'ตัวเลข';
+        const status = q.active === false
+          ? '<span style="color:#dc2626;font-weight:800;">ปิด</span>'
+          : '<span style="color:#16a34a;font-weight:800;">เปิด</span>';
+        return '<tr>' +
+          '<td>' + escapeHtml(q.subject || '-') + '<br><span class="mini-muted">' + escapeHtml(q.grade || '-') + '</span></td>' +
+          '<td><strong>' + escapeHtml(normalizeAvatarBattleQuestionDifficulty(q.difficulty)) + '</strong><br><span class="mini-muted">' + typeLabel + '</span></td>' +
+          '<td>' + escapeHtml(q.prompt || '-') + (q.explanation ? '<br><span class="mini-muted">เฉลยเพิ่ม: ' + escapeHtml(q.explanation) + '</span>' : '') + '</td>' +
+          '<td style="text-align:center;font-weight:800;">' + escapeHtml(q.answer || '-') + '</td>' +
+          '<td style="text-align:center;">' + status + '</td>' +
+          '<td>' +
+            '<button class="btn btn-sm btn-blue" type="button" onclick="adminEditAvatarBattleQuestion(\'' + id + '\')">แก้ไข</button> ' +
+            '<button class="btn btn-sm btn-dark" type="button" onclick="adminToggleAvatarBattleQuestionActive(\'' + id + '\')">' + (q.active === false ? 'เปิด' : 'ปิด') + '</button> ' +
+            '<button class="btn btn-sm btn-red" type="button" onclick="adminDeleteAvatarBattleQuestion(\'' + id + '\')">ลบ</button>' +
+          '</td>' +
+        '</tr>';
+      }).join('');
+      table.innerHTML = '<table class="data-table" style="font-size:13px;"><thead><tr><th>วิชา/ระดับ</th><th>ความยาก</th><th>โจทย์</th><th>เฉลย</th><th>สถานะ</th><th>จัดการ</th></tr></thead><tbody>' + rows + '</tbody></table>';
+    }
+
+    function adminEditAvatarBattleQuestion(questionId) {
+      const q = getAvatarBattleQuestionById(questionId);
+      if (!q) return;
+      if (getElement('abQuestionEditingId')) getElement('abQuestionEditingId').value = q.firebaseDocId || q.id || '';
+      renderAvatarBattleQuestionSelects();
+      if (getElement('abQuestionSubject')) getElement('abQuestionSubject').value = q.subject || 'คณิตศาสตร์';
+      if (getElement('abQuestionGrade')) getElement('abQuestionGrade').value = q.grade || 'ม.1';
+      if (getElement('abQuestionDifficulty')) getElement('abQuestionDifficulty').value = normalizeAvatarBattleQuestionDifficulty(q.difficulty);
+      if (getElement('abQuestionType')) getElement('abQuestionType').value = normalizeAvatarBattleQuestionType(q.questionType);
+      if (getElement('abQuestionPrompt')) getElement('abQuestionPrompt').value = q.prompt || '';
+      if (getElement('abQuestionAnswer')) getElement('abQuestionAnswer').value = q.answer || '';
+      if (getElement('abQuestionExplanation')) getElement('abQuestionExplanation').value = q.explanation || '';
+      const choices = q.choices || {};
+      if (getElement('abQuestionChoiceA')) getElement('abQuestionChoiceA').value = choices.A || '';
+      if (getElement('abQuestionChoiceB')) getElement('abQuestionChoiceB').value = choices.B || '';
+      if (getElement('abQuestionChoiceC')) getElement('abQuestionChoiceC').value = choices.C || '';
+      if (getElement('abQuestionChoiceD')) getElement('abQuestionChoiceD').value = choices.D || '';
+      onAvatarBattleQuestionTypeChange();
+      const resultEl = getElement('abQuestionSaveResult');
+      if (resultEl) { resultEl.textContent = 'กำลังแก้ไขโจทย์นี้'; resultEl.style.color = '#4f46e5'; }
+    }
+
+    async function adminSaveAvatarBattleQuestion() {
+      if (!canManageAvatarBattle()) { alert('ไม่มีสิทธิ์จัดการ Avatar Battle'); return; }
+      if (!firebaseReady || !db) return;
+      const resultEl = getElement('abQuestionSaveResult');
+      const editingId = getElement('abQuestionEditingId') ? getElement('abQuestionEditingId').value : '';
+      const questionType = normalizeAvatarBattleQuestionType(getElement('abQuestionType') ? getElement('abQuestionType').value : 'numeric');
+      const prompt = getElement('abQuestionPrompt') ? getElement('abQuestionPrompt').value.trim() : '';
+      let answer = getElement('abQuestionAnswer') ? getElement('abQuestionAnswer').value.trim() : '';
+      const choices = {
+        A: getElement('abQuestionChoiceA') ? getElement('abQuestionChoiceA').value.trim() : '',
+        B: getElement('abQuestionChoiceB') ? getElement('abQuestionChoiceB').value.trim() : '',
+        C: getElement('abQuestionChoiceC') ? getElement('abQuestionChoiceC').value.trim() : '',
+        D: getElement('abQuestionChoiceD') ? getElement('abQuestionChoiceD').value.trim() : ''
+      };
+      if (!prompt || !answer) {
+        if (resultEl) { resultEl.textContent = 'กรุณากรอกโจทย์และเฉลย'; resultEl.style.color = '#dc2626'; }
+        return;
+      }
+      if (questionType === 'numeric' && !Number.isFinite(Number(answer))) {
+        if (resultEl) { resultEl.textContent = 'โจทย์ตัวเลขต้องใส่เฉลยเป็นตัวเลข'; resultEl.style.color = '#dc2626'; }
+        return;
+      }
+      if (questionType === 'multipleChoice') {
+        answer = answer.toUpperCase();
+        if (!choices.A || !choices.B || !choices.C || !choices.D || !['A','B','C','D'].includes(answer)) {
+          if (resultEl) { resultEl.textContent = 'โจทย์ปรนัยต้องมีตัวเลือก A-D และเฉลยเป็น A/B/C/D'; resultEl.style.color = '#dc2626'; }
+          return;
+        }
+      }
+      const id = editingId || createFirebaseDocId('avatarBattleQuestions');
+      const now = firebase.firestore.FieldValue.serverTimestamp();
+      const payload = {
+        id: id,
+        firebaseDocId: id,
+        subject: getElement('abQuestionSubject') ? getElement('abQuestionSubject').value : 'คณิตศาสตร์',
+        grade: getElement('abQuestionGrade') ? getElement('abQuestionGrade').value : 'ม.1',
+        difficulty: normalizeAvatarBattleQuestionDifficulty(getElement('abQuestionDifficulty') ? getElement('abQuestionDifficulty').value : 'easy'),
+        questionType: questionType,
+        prompt: prompt,
+        answer: questionType === 'numeric' ? String(Number(answer)) : answer,
+        choices: questionType === 'multipleChoice' ? choices : {},
+        explanation: getElement('abQuestionExplanation') ? getElement('abQuestionExplanation').value.trim() : '',
+        active: true,
+        deleted: false,
+        updatedAt: now,
+        updatedAtText: new Date().toLocaleString('th-TH')
+      };
+      if (!editingId) {
+        payload.createdAt = now;
+        payload.createdAtText = payload.updatedAtText;
+      }
+      try {
+        if (resultEl) { resultEl.textContent = 'กำลังบันทึก...'; resultEl.style.color = '#d97706'; }
+        await db.collection('avatarBattleQuestions').doc(id).set(payload, { merge: true });
+        const existing = getAvatarBattleQuestionById(id);
+        if (existing) Object.assign(existing, payload);
+        else avatarBattleQuestions.push(payload);
+        adminClearAvatarBattleQuestionForm();
+        renderAdminAvatarBattleQuestionsTable();
+        if (resultEl) { resultEl.textContent = 'บันทึกโจทย์สำเร็จ'; resultEl.style.color = '#16a34a'; }
+        addActivityLog('บันทึกโจทย์ Avatar Battle', payload.subject + ' · ' + payload.grade + ' · ' + payload.difficulty);
+      } catch (e) {
+        if (resultEl) { resultEl.textContent = 'บันทึกไม่สำเร็จ: ' + (e.message || e.code || ''); resultEl.style.color = '#dc2626'; }
+      }
+    }
+
+    async function adminToggleAvatarBattleQuestionActive(questionId) {
+      if (!canManageAvatarBattle()) { alert('ไม่มีสิทธิ์จัดการ Avatar Battle'); return; }
+      const q = getAvatarBattleQuestionById(questionId);
+      if (!q || !firebaseReady || !db) return;
+      const nextActive = q.active === false;
+      try {
+        await db.collection('avatarBattleQuestions').doc(questionId).set({ active: nextActive, updatedAt: firebase.firestore.FieldValue.serverTimestamp(), updatedAtText: new Date().toLocaleString('th-TH') }, { merge: true });
+        q.active = nextActive;
+        renderAdminAvatarBattleQuestionsTable();
+      } catch (e) { alert('อัปเดตสถานะไม่สำเร็จ: ' + (e.message || e.code || '')); }
+    }
+
+    async function adminDeleteAvatarBattleQuestion(questionId) {
+      if (!canManageAvatarBattle()) { alert('ไม่มีสิทธิ์จัดการ Avatar Battle'); return; }
+      const q = getAvatarBattleQuestionById(questionId);
+      if (!q || !firebaseReady || !db) return;
+      if (!confirm('ลบโจทย์ Avatar Battle นี้?')) return;
+      try {
+        await db.collection('avatarBattleQuestions').doc(questionId).set({ deleted: true, active: false, updatedAt: firebase.firestore.FieldValue.serverTimestamp(), updatedAtText: new Date().toLocaleString('th-TH') }, { merge: true });
+        q.deleted = true;
+        q.active = false;
+        renderAdminAvatarBattleQuestionsTable();
+      } catch (e) { alert('ลบไม่สำเร็จ: ' + (e.message || e.code || '')); }
+    }
+
     function renderAdminAvatarBattleSettings() {
       const settings = getAvatarBattleSettings();
       const skillSettings = settings.skillSettings || getAvatarBattleSkillSettings({});
@@ -24507,6 +24939,8 @@
       });
       const enabledEl = getElement('abSkillEnabled');
       if (enabledEl) enabledEl.checked = skillSettings.enabled !== false;
+      renderAdminAvatarBattleQuestionsTable();
+      onAvatarBattleQuestionTypeChange();
     }
 
     function setAvatarBattleFieldValue(id, value) {
