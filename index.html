@@ -44975,8 +44975,8 @@ function receiptStatusText(status) {
       manualExamAnswers = {};
 
       content.innerHTML =
-        '<h3 style="font-size:16px;margin-bottom:4px;">📝 เพิ่มผลสอบจากกระดาษ</h3>' +
-        '<p style="font-size:12px;color:#6b7280;margin-bottom:12px;">เลือกนักเรียนและชุดข้อสอบ แล้วกดตัวเลือกตามที่นักเรียนกาในกระดาษ</p>' +
+        '<h3 style="font-size:16px;margin-bottom:4px;">📝 เพิ่ม/แก้ผลสอบจากกระดาษ</h3>' +
+        '<p style="font-size:12px;color:#6b7280;margin-bottom:12px;">เลือกนักเรียนและชุดข้อสอบ แล้วกดตัวเลือกตามที่นักเรียนกาในกระดาษ ถ้านักเรียนมีผลเดิม ระบบจะบันทึกทับผลเดิมให้</p>' +
         '<div style="display:flex;flex-direction:column;gap:10px;">' +
           '<div style="display:flex;gap:8px;">' +
             '<div style="flex:1;"><label style="font-size:12px;font-weight:600;">ศูนย์</label>' +
@@ -45009,7 +45009,7 @@ function receiptStatusText(status) {
         '<input id="manualExamNote" type="text" placeholder="เช่น กระดาษสอบวันที่ ..." style="width:100%;"></div>' +
         '<p id="manualExamResult" style="margin-top:10px;font-weight:600;font-size:13px;"></p>' +
         '<div style="display:flex;gap:8px;margin-top:14px;">' +
-          '<button class="btn btn-green" type="button" onclick="submitManualExamResult()" style="flex:1;">บันทึกผลสอบ</button>' +
+          '<button class="btn btn-green" type="button" onclick="submitManualExamResult()" style="flex:1;">บันทึก/แก้ผลสอบ</button>' +
           '<button class="btn btn-dark" type="button" onclick="closeOnlineExamDetailModal()" style="flex:1;">ยกเลิก</button>' +
         '</div>';
       modal.style.display = '';
@@ -45019,6 +45019,25 @@ function receiptStatusText(status) {
     // takenIds: Set of studentId/studentUid strings who already have a result for the selected course
     // Populated by renderManualExamQuestions() via a live Firestore query
     var manualExamTakenIds = new Set();
+    var manualExamExistingResultsByStudentKey = {};
+
+    function addManualExamExistingResultKey(key, result) {
+      const cleanKey = String(key || '').trim();
+      if (!cleanKey || !result) return;
+      manualExamTakenIds.add(cleanKey);
+      manualExamExistingResultsByStudentKey[cleanKey] = result;
+    }
+
+    function getManualExamExistingResultForStudent(student) {
+      if (!student) return null;
+      const keys = [student.id, student.firebaseDocId, student.authUid, student.uid, student.memberId, student.studentId]
+        .map(function(value) { return String(value || '').trim(); })
+        .filter(Boolean);
+      for (var i = 0; i < keys.length; i++) {
+        if (manualExamExistingResultsByStudentKey[keys[i]]) return manualExamExistingResultsByStudentKey[keys[i]];
+      }
+      return null;
+    }
 
     function updateManualExamStudentOptions() {
       const center = (getElement('manualExamCenterSel') || {}).value || '';
@@ -45041,30 +45060,28 @@ function receiptStatusText(status) {
           const courseGrade = getOnlineExamCourseGrade(selectedCourse);
           if (courseGrade && String(s.grade || '').trim() !== courseGrade) return false;
         }
-        if (courseId) {
-          const sId = String(s.id || s.firebaseDocId || '');
-          const sUid = String(s.authUid || '');
-          if (manualExamTakenIds.has(sId) || (sUid && manualExamTakenIds.has(sUid))) return false;
-        }
         return true;
       }).sort(function(a, b) {
         return String(a.memberId || a.studentId || '').localeCompare(String(b.memberId || b.studentId || ''), undefined, { numeric: true });
       });
 
+      const takenCount = courseId ? filteredStudents.filter(function(s) { return !!getManualExamExistingResultForStudent(s); }).length : 0;
       const noteEl = getElement('manualExamStudentNote');
       if (noteEl) {
         noteEl.textContent = courseId
-          ? '(ยังไม่ได้สอบ ' + filteredStudents.length + ' คน)'
+          ? '(เลือกได้ ' + filteredStudents.length + ' คน' + (takenCount ? ' · มีผลเดิม ' + takenCount + ' คน' : '') + ')'
           : '';
       }
 
       const placeholder = courseId
-        ? (filteredStudents.length ? '-- เลือกนักเรียน (' + filteredStudents.length + ' คน) --' : '-- นักเรียนทุกคนสอบแล้ว --')
+        ? (filteredStudents.length ? '-- เลือกนักเรียน (' + filteredStudents.length + ' คน) --' : '-- ไม่พบนักเรียนตามเงื่อนไข --')
         : '-- เลือกชุดข้อสอบก่อน --';
       studentSel.innerHTML = '<option value="">' + placeholder + '</option>' +
         filteredStudents.map(function(s) {
+          const existing = getManualExamExistingResultForStudent(s);
+          const existingLabel = existing ? ' · มีผลแล้ว' : '';
           return '<option value="' + escapeHtml(s.id || s.firebaseDocId || '') + '">' +
-            escapeHtml((s.memberId ? '[' + s.memberId + '] ' : '') + (s.name || '') + (s.nickname ? ' (' + s.nickname + ')' : '') + (s.grade ? ' · ' + s.grade : '')) +
+            escapeHtml((s.memberId ? '[' + s.memberId + '] ' : '') + (s.name || '') + (s.nickname ? ' (' + s.nickname + ')' : '') + (s.grade ? ' · ' + s.grade : '') + existingLabel) +
           '</option>';
         }).join('');
 
@@ -45111,6 +45128,7 @@ function receiptStatusText(status) {
       const fallback = getElement('manualExamFallback');
       manualExamAnswers = {};
       manualExamTakenIds = new Set();
+      manualExamExistingResultsByStudentKey = {};
 
       if (!courseId || !course) {
         updateManualExamStudentOptions();
@@ -45133,8 +45151,13 @@ function receiptStatusText(status) {
             const r = d.data();
             if (r.resultStatus === 'absent') return;
             if (r.allowRetake === true) return;
-            if (r.studentId) manualExamTakenIds.add(String(r.studentId));
-            if (r.studentUid) manualExamTakenIds.add(String(r.studentUid));
+            const result = Object.assign({ _docId: d.id }, r);
+            addManualExamExistingResultKey(d.id, result);
+            addManualExamExistingResultKey(r.studentId, result);
+            addManualExamExistingResultKey(r.studentUid, result);
+            addManualExamExistingResultKey(r.authUid, result);
+            addManualExamExistingResultKey(r.memberId, result);
+            addManualExamExistingResultKey(r.studentMemberId, result);
           });
         } catch(e) {
           console.warn('renderManualExamQuestions: could not load taken ids', e);
@@ -45260,20 +45283,14 @@ function receiptStatusText(status) {
         if (correct > total && total > 0) { if (resultEl) { resultEl.textContent = 'จำนวนข้อถูกมากกว่าจำนวนข้อทั้งหมด'; resultEl.style.color = '#dc2626'; } return; }
       }
 
-      // Guard: prevent duplicate submission (manualExamTakenIds is fresh from last Firestore query)
-      const sId = String(student.id || student.firebaseDocId || '');
-      const sUid = String(student.authUid || '');
-      if (manualExamTakenIds.has(sId) || (sUid && manualExamTakenIds.has(sUid))) {
-        if (resultEl) { resultEl.textContent = 'นักเรียนคนนี้มีผลสอบชุดนี้แล้ว ไม่สามารถบันทึกซ้ำได้'; resultEl.style.color = '#dc2626'; }
-        await renderManualExamQuestions();
-        return;
-      }
+      const existingResult = getManualExamExistingResultForStudent(student);
+      if (existingResult && !confirm('นักเรียนคนนี้มีผลสอบชุดนี้แล้ว ต้องการบันทึกทับผลเดิมใช่ไหม?')) return;
 
       const score50val = total > 0 ? onlineExamGetScore50Value(correct, total) : 0;
       const now = new Date();
       const nowText = now.toLocaleDateString('th-TH', { year: 'numeric', month: 'long', day: 'numeric' }) + ' ' + now.toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' });
 
-      const newId = createFirebaseDocId('onlineExamResults');
+      const newId = existingResult ? existingResult._docId : createFirebaseDocId('onlineExamResults');
       const doc = {
         firebaseDocId: newId,
         studentUid: student.authUid || student.uid || '',
@@ -45301,15 +45318,19 @@ function receiptStatusText(status) {
       if (answers) doc.answers = answers;
 
       try {
-        await db.collection('onlineExamResults').doc(newId).set(doc);
-        addActivityLog('เพิ่มผลสอบจากกระดาษ', (student.name || '-') + ' · ' + (course.subject || '') + ' · ถูก ' + correct + '/' + total);
-        onlineExamGradeAllResults.push(Object.assign({ _docId: newId }, doc));
+        await db.collection('onlineExamResults').doc(newId).set(doc, { merge: true });
+        addActivityLog(existingResult ? 'แก้ผลสอบจากกระดาษ' : 'เพิ่มผลสอบจากกระดาษ', (student.name || '-') + ' · ' + (course.subject || '') + ' · ถูก ' + correct + '/' + total);
+        const localDoc = Object.assign({}, existingResult || {}, doc, { _docId: newId });
+        const existingIndex = onlineExamGradeAllResults.findIndex(function(r) { return r._docId === newId; });
+        if (existingIndex >= 0) onlineExamGradeAllResults.splice(existingIndex, 1, localDoc);
+        else onlineExamGradeAllResults.push(localDoc);
         onlineExamGradeGroupedRows = buildOnlineExamGroupedRows(onlineExamGradeAllResults);
         // Update local taken-ids cache so dropdown refreshes immediately
-        if (sId) manualExamTakenIds.add(sId);
-        if (sUid) manualExamTakenIds.add(sUid);
+        [student.id, student.firebaseDocId, student.authUid, student.uid, student.memberId, student.studentId].forEach(function(key) {
+          addManualExamExistingResultKey(key, localDoc);
+        });
         updateManualExamStudentOptions();
-        if (resultEl) { resultEl.textContent = 'บันทึกผลสอบเรียบร้อย — ' + (student.name || '-') + ' · ถูก ' + correct + '/' + total + ' ข้อ · ' + score50val.toFixed(1).replace(/\.0$/, '') + '/50 คะแนน'; resultEl.style.color = '#16a34a'; }
+        if (resultEl) { resultEl.textContent = (existingResult ? 'แก้ผลสอบเรียบร้อย — ' : 'บันทึกผลสอบเรียบร้อย — ') + (student.name || '-') + ' · ถูก ' + correct + '/' + total + ' ข้อ · ' + score50val.toFixed(1).replace(/\.0$/, '') + '/50 คะแนน'; resultEl.style.color = '#16a34a'; }
         renderOnlineExamGradingPage(onlineExamGradePage);
         safeRun(renderAdminScoreTables, 'admin-score-refresh-after-manual');
         manualExamAnswers = {};
