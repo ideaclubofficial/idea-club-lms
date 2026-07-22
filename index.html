@@ -25350,6 +25350,11 @@
             existingProfile.coins = newCoins;
             existingProfile.ownedAvatarItems = nextOwned;
             existingProfile.equippedAvatarItems = nextEquipped;
+          } else {
+            profile.coins = newCoins;
+            profile.ownedAvatarItems = nextOwned;
+            profile.equippedAvatarItems = nextEquipped;
+            studentGamificationProfiles.push(profile);
           }
           gamificationRedemptions.push(redemption);
           updateLeaderboardProfileInMemory(profileId, getCurrentStudentGamificationProfile());
@@ -25376,21 +25381,45 @@
         }
         const stampsRequired = Math.max(2, Number(reward.stampsRequired) || 5);
         if (!confirm('ยืนยันสะสมแสตมป์ "' + reward.title + '" ด้วย ' + stampCost + ' Coins?\n(ปัจจุบัน: ' + (curCard.stamps || 0) + '/' + stampsRequired + ' แสตมป์)')) return;
-        // Deduct coins first
         const profileId = String(profile.firebaseDocId || profile.id || getStudentGamificationProfileId(currentStudent));
         const newCoins = Math.max(0, (profile.coins || 0) - stampCost);
-        profile.coins = newCoins;
+        const newStamps = (Number(curCard.stamps) || 0) + 1;
+        const nowCompleted = newStamps >= stampsRequired;
+        const nextStampProgress = Object.assign({}, sp);
+        nextStampProgress[rewardId] = { stamps: newStamps, completed: nowCompleted };
+        const now = firebase.firestore.FieldValue.serverTimestamp();
+        const profilePayload = {
+          firebaseDocId: profileId,
+          id: profileId,
+          studentId: getStudentRecordDocId(currentStudent),
+          authUid: String((currentStudent.authUid) || (firebaseUser && firebaseUser.uid) || '').trim(),
+          memberId: currentStudent.memberId || currentStudent.studentId || '',
+          studentName: currentStudent.name || '',
+          nickname: currentStudent.nickname || '',
+          coins: newCoins,
+          stampProgress: nextStampProgress,
+          deleted: false,
+          updatedAt: now
+        };
         try {
-          await db.collection('studentGamificationProfiles').doc(profileId).set({ coins: newCoins, updatedAt: firebase.firestore.FieldValue.serverTimestamp() }, { merge: true });
-          const result = await addStudentStampMark(rewardId, reward, false, '');
+          const batch = db.batch();
+          batch.set(db.collection('studentGamificationProfiles').doc(profileId), profilePayload, { merge: true });
+          await batch.commit();
           const existingProfile = findCurrentStudentGamificationProfile();
-          if (existingProfile) existingProfile.coins = newCoins;
+          if (existingProfile) {
+            existingProfile.coins = newCoins;
+            existingProfile.stampProgress = nextStampProgress;
+          } else {
+            profile.coins = newCoins;
+            profile.stampProgress = nextStampProgress;
+            studentGamificationProfiles.push(profile);
+          }
           updateLeaderboardProfileInMemory(profileId, getCurrentStudentGamificationProfile());
           renderStudentGamificationPanel();
-          if (result && result.nowCompleted) {
-            alert('🎉 สะสมแสตมป์ครบ ' + result.stampsRequired + '/' + result.stampsRequired + '! กด "แลกรางวัล" เพื่อส่งคำขอรับรางวัล');
-          } else if (result) {
-            alert('✅ สะสมแสตมป์สำเร็จ! (' + result.newStamps + '/' + result.stampsRequired + ' แสตมป์)');
+          if (nowCompleted) {
+            alert('🎉 สะสมแสตมป์ครบ ' + stampsRequired + '/' + stampsRequired + '! กด "แลกรางวัล" เพื่อส่งคำขอรับรางวัล');
+          } else {
+            alert('✅ สะสมแสตมป์สำเร็จ! (' + newStamps + '/' + stampsRequired + ' แสตมป์)');
           }
         } catch (e) { alert('สะสมแสตมป์ไม่สำเร็จ: ' + (e.message || e.code || '')); }
         return;
