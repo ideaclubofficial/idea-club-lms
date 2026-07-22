@@ -7471,7 +7471,7 @@
                     <input type="date" id="onlineExamGradeDateTo" onchange="renderOnlineExamGradingReport()">
                   </div>
                   <div style="align-self:flex-end;display:flex;gap:6px;flex-wrap:wrap;">
-                    <button id="onlineExamGradeRefreshBtn" class="btn btn-blue" onclick="renderOnlineExamGradingReport()">🔄 รีเฟรช</button>
+                    <button id="onlineExamGradeRefreshBtn" class="btn btn-blue" onclick="refreshOnlineExamGradingReport()">🔄 รีเฟรช</button>
                     <button class="btn btn-green" onclick="showAddManualExamResultModal()" type="button">📝 เพิ่มผลสอบจากกระดาษ</button>
                   </div>
                 </div>
@@ -10799,6 +10799,9 @@
     let onlineExamGradeFilterChangeTimer = null;
     let onlineExamGradeRefreshSeq = 0;
     let onlineExamDirtyGroups = {};
+    let onlineExamGradeResultCacheKey = '';
+    let onlineExamGradeResultCache = [];
+    let onlineExamGradeResultCacheLoaded = false;
     const ONLINE_EXAM_GRADE_PAGE_SIZE = 20;
     const ONLINE_EXAM_GRADE_REFRESH_TIMEOUT_MS = 30000;
     const ONLINE_EXAM_SUBJECT_ORDER = ['คณิตศาสตร์', 'วิทยาศาสตร์', 'ภาษาอังกฤษ', 'ภาษาไทย', 'สังคมศึกษา', 'อื่นๆ'];
@@ -44171,6 +44174,7 @@ function receiptStatusText(status) {
       try {
         await db.collection('onlineExamResults').doc(result._docId).delete();
         onlineExamGradeAllResults = onlineExamGradeAllResults.filter(function(r) { return r._docId !== result._docId; });
+        resetOnlineExamGradeResultCache();
         onlineExamGradeGroupedRows = buildOnlineExamGroupedRows(onlineExamGradeAllResults);
         addActivityLog('ลบผลสอบ / เปิดทำใหม่', (group.studentName || '-') + ' · ' + subject);
         renderOnlineExamGradingPage(onlineExamGradePage);
@@ -44256,6 +44260,7 @@ function receiptStatusText(status) {
         }
       }
       addActivityLog('ประกาศผลข้อสอบรายแถว', (group.studentName || '-') + ' · ' + count + ' วิชา');
+      resetOnlineExamGradeResultCache();
       renderOnlineExamGradingPage(onlineExamGradePage);
       safeRun(renderAdminScoreTables, 'admin-score-refresh-after-group-publish');
       const resultEl = getElement('scoreAdjustResult');
@@ -44279,6 +44284,7 @@ function receiptStatusText(status) {
         }
       }
       addActivityLog('ซ่อนผลข้อสอบรายแถว', group.studentName || group.key);
+      resetOnlineExamGradeResultCache();
       renderOnlineExamGradingPage(onlineExamGradePage);
     }
 
@@ -44301,6 +44307,7 @@ function receiptStatusText(status) {
         }
       }
       addActivityLog(allowRetake ? 'เปิดทำข้อสอบใหม่รายแถว' : 'ปิดทำข้อสอบใหม่รายแถว', group.studentName || group.key);
+      resetOnlineExamGradeResultCache();
       renderOnlineExamGradingPage(onlineExamGradePage);
     }
 
@@ -44319,6 +44326,7 @@ function receiptStatusText(status) {
       }
       addActivityLog('ลบผลสอบรายแถว / เปิดทำใหม่ Interactive', (group.studentName || '-') + ' · ' + docIds.length + ' วิชา');
       onlineExamGradeAllResults = onlineExamGradeAllResults.filter(function(result) { return !docIds.includes(result._docId); });
+      resetOnlineExamGradeResultCache();
       onlineExamGradeGroupedRows = buildOnlineExamGroupedRows(onlineExamGradeAllResults);
       renderOnlineExamGradingPage(onlineExamGradePage);
     }
@@ -44339,6 +44347,65 @@ function receiptStatusText(status) {
       if (!btn) return;
       btn.disabled = !!isLoading;
       btn.textContent = isLoading ? '⏳ กำลังรีเฟรช...' : '🔄 รีเฟรช';
+    }
+
+    function getOnlineExamGradeFilterScope() {
+      return {
+        subject: (getElement('onlineExamGradeSubjectFilter') || {}).value || '',
+        grade: (getElement('onlineExamGradeLevelFilter') || {}).value || '',
+        month: (getElement('onlineExamGradeMonthFilter') || {}).value || ''
+      };
+    }
+
+    function getOnlineExamGradeResultCacheKey(scope) {
+      const filter = scope || getOnlineExamGradeFilterScope();
+      return [filter.month || '', filter.grade || '', filter.subject || ''].join('|');
+    }
+
+    function resetOnlineExamGradeResultCache() {
+      onlineExamGradeResultCacheKey = '';
+      onlineExamGradeResultCache = [];
+      onlineExamGradeResultCacheLoaded = false;
+    }
+
+    async function loadOnlineExamResultsForGradeScope(scope, forceRefresh) {
+      const filter = scope || getOnlineExamGradeFilterScope();
+      const cacheKey = getOnlineExamGradeResultCacheKey(filter);
+      if (!forceRefresh && onlineExamGradeResultCacheLoaded && onlineExamGradeResultCacheKey === cacheKey) {
+        return onlineExamGradeResultCache.slice();
+      }
+      if (!onlineExamCourseCache.length) await runOnlineExamGradeWithTimeout(loadOnlineExamCourses(), 'โหลดชุดข้อสอบ');
+      const targetCourses = getOnlineExamGradingTargetCourses(filter.month, filter.subject, filter.grade);
+      const courseIds = targetCourses.map(function(course) { return String(course.firebaseDocId || ''); }).filter(Boolean);
+      const byId = {};
+      const canUseCourseScopedQueries = courseIds.length && (filter.month || filter.grade || filter.subject) && courseIds.length <= 30;
+      if (canUseCourseScopedQueries) {
+        const snapshots = await Promise.all(courseIds.map(function(courseId) {
+          return runOnlineExamGradeWithTimeout(
+            db.collection('onlineExamResults').where('courseId', '==', courseId).get(),
+            'โหลดผลสอบ'
+          );
+        }));
+        snapshots.forEach(function(snap) {
+          snap.docs.forEach(function(d) {
+            byId[d.id] = Object.assign({ _docId: d.id }, d.data());
+          });
+        });
+      } else {
+        const snap = await runOnlineExamGradeWithTimeout(
+          db.collection('onlineExamResults').orderBy('submittedAt', 'desc').limit(300).get().catch(function() {
+            return db.collection('onlineExamResults').limit(300).get();
+          }),
+          'โหลดผลสอบ'
+        );
+        snap.docs.forEach(function(d) {
+          byId[d.id] = Object.assign({ _docId: d.id }, d.data());
+        });
+      }
+      onlineExamGradeResultCacheKey = cacheKey;
+      onlineExamGradeResultCache = Object.keys(byId).map(function(id) { return byId[id]; });
+      onlineExamGradeResultCacheLoaded = true;
+      return onlineExamGradeResultCache.slice();
     }
 
     function getOnlineExamMissingStudents(targetCourses, expectedStudents, allResults) {
@@ -44478,40 +44545,24 @@ function receiptStatusText(status) {
 
     async function populateOnlineExamStudentSelect() {
       if (!firebaseReady || !db) return;
-      const subjectFilter = (getElement('onlineExamGradeSubjectFilter') || {}).value || '';
-      const gradeFilter = (getElement('onlineExamGradeLevelFilter') || {}).value || '';
-      const monthFilter = (getElement('onlineExamGradeMonthFilter') || {}).value || '';
+      const scope = getOnlineExamGradeFilterScope();
       const studentSel = getElement('onlineExamGradeStudentSelect');
       if (!studentSel) return;
       const currentStudentUid = studentSel.value || '';
       studentSel.innerHTML = '<option value="">-- ทุกคน --</option>';
 
       try {
-        if (!onlineExamCourseCache.length) await loadOnlineExamCourses();
-        const snap = await db.collection('onlineExamResults')
-          .orderBy('submittedAt', 'desc')
-          .limit(500)
-          .get()
-          .catch(function() {
-            return db.collection('onlineExamResults').limit(500).get();
-          });
+        const results = await loadOnlineExamResultsForGradeScope(scope, false);
 
         const seen = {};
-        snap.docs.forEach(function(d) {
-          const data = Object.assign({ _docId: d.id }, d.data());
-          if (!onlineExamGradingResultMatchesFilters(data, subjectFilter, gradeFilter)) return;
-          if (monthFilter) {
-            const course = getOnlineExamResultCourse(data);
-            const resultMonth = (course && course.examMonth) || getThaiMonthYearFromText(data.submittedAtText || '');
-            if (resultMonth !== monthFilter) return;
-          }
-          if (!seen[data.studentUid]) {
-            seen[data.studentUid] = true;
-            const opt = document.createElement('option');
-            opt.value = data.studentUid;
-            opt.textContent = (data.studentName || '') + (data.studentId ? ' (' + data.studentId + ')' : '');
-            studentSel.appendChild(opt);
-          }
+        results.forEach(function(data) {
+          const key = String(data.studentUid || data.authUid || data.studentId || data.memberId || data.studentMemberId || data.studentName || '').trim();
+          if (!key || seen[key]) return;
+          seen[key] = true;
+          const opt = document.createElement('option');
+          opt.value = key;
+          opt.textContent = (data.studentName || '') + (getOnlineExamResultMemberId(data) ? ' (' + getOnlineExamResultMemberId(data) + ')' : '');
+          studentSel.appendChild(opt);
         });
         if (currentStudentUid && seen[currentStudentUid]) studentSel.value = currentStudentUid;
       } catch (e) {
@@ -44527,6 +44578,7 @@ function receiptStatusText(status) {
 
     function onlineExamGradeFilterChange() {
       if (onlineExamGradeFilterChangeTimer) clearTimeout(onlineExamGradeFilterChangeTimer);
+      resetOnlineExamGradeResultCache();
       onlineExamGradeFilterChangeTimer = setTimeout(function() {
         populateOnlineExamStudentSelect()
           .then(function() { return renderOnlineExamGradingReport(); })
@@ -44536,15 +44588,21 @@ function receiptStatusText(status) {
       }, 120);
     }
 
-    async function renderOnlineExamGradingReport() {
+    function refreshOnlineExamGradingReport() {
+      resetOnlineExamGradeResultCache();
+      return renderOnlineExamGradingReport(true);
+    }
+
+    async function renderOnlineExamGradingReport(forceRefresh) {
       if (!hasPermission('admin.onlineExams')) return;
       if (!firebaseReady || !db) return;
       const requestId = ++onlineExamGradeRefreshSeq;
 
-      const subjectFilter = (getElement('onlineExamGradeSubjectFilter') || {}).value || '';
-      const gradeFilter = (getElement('onlineExamGradeLevelFilter') || {}).value || '';
-      const monthFilter = (getElement('onlineExamGradeMonthFilter') || {}).value || '';
-      const studentUid = (getElement('onlineExamGradeStudentSelect') || {}).value || '';
+      const scope = getOnlineExamGradeFilterScope();
+      const subjectFilter = scope.subject;
+      const gradeFilter = scope.grade;
+      const monthFilter = scope.month;
+      const studentKey = (getElement('onlineExamGradeStudentSelect') || {}).value || '';
       const statusFilter = (getElement('onlineExamGradeStatusFilter') || {}).value || '';
       const dateFrom = (getElement('onlineExamGradeDateFrom') || {}).value || '';
       const dateTo = (getElement('onlineExamGradeDateTo') || {}).value || '';
@@ -44558,21 +44616,9 @@ function receiptStatusText(status) {
       setOnlineExamGradeRefreshLoading(true);
 
       try {
-        if (!onlineExamCourseCache.length) {
-          await runOnlineExamGradeWithTimeout(loadOnlineExamCourses(), 'โหลดชุดข้อสอบ');
-          if (requestId !== onlineExamGradeRefreshSeq) return;
-        }
-        let q = db.collection('onlineExamResults');
-        if (studentUid) q = q.where('studentUid', '==', studentUid);
-
-        const snap = await runOnlineExamGradeWithTimeout(q.orderBy('submittedAt', 'desc').limit(500).get().catch(function() {
-          let q2 = db.collection('onlineExamResults');
-          if (studentUid) q2 = q2.where('studentUid', '==', studentUid);
-          return q2.limit(500).get();
-        }), 'โหลดผลสอบ');
+        let allResults = await loadOnlineExamResultsForGradeScope(scope, !!forceRefresh);
         if (requestId !== onlineExamGradeRefreshSeq) return;
 
-        let allResults = snap.docs.map(function(d) { return Object.assign({ _docId: d.id }, d.data()); });
         let results = allResults.slice();
 
         results = results.filter(function(r) {
@@ -44583,6 +44629,14 @@ function receiptStatusText(status) {
             const course = getOnlineExamResultCourse(r);
             const resultMonth = (course && course.examMonth) || getThaiMonthYearFromText(r.submittedAtText || '');
             return resultMonth === monthFilter;
+          });
+        }
+        if (studentKey) {
+          results = results.filter(function(r) {
+            const keys = [r.studentUid, r.authUid, r.studentId, r.memberId, r.studentMemberId, r.studentName]
+              .map(function(value) { return String(value || '').trim(); })
+              .filter(Boolean);
+            return keys.includes(String(studentKey));
           });
         }
         if (statusFilter) {
@@ -44607,9 +44661,12 @@ function receiptStatusText(status) {
 
         const targetCourses = getOnlineExamGradingTargetCourses(monthFilter, subjectFilter, gradeFilter);
         let expectedStudents = getOnlineExamExpectedStudents(gradeFilter, targetCourses);
-        if (studentUid) {
+        if (studentKey) {
           expectedStudents = expectedStudents.filter(function(student) {
-            return String(student.authUid || student.uid || '') === String(studentUid);
+            const keys = [student.authUid, student.uid, student.id, student.firebaseDocId, student.memberId, student.studentId, student.name]
+              .map(function(value) { return String(value || '').trim(); })
+              .filter(Boolean);
+            return keys.includes(String(studentKey));
           });
         }
         const missingStudents = getOnlineExamMissingStudents(targetCourses, expectedStudents, allResults);
@@ -44737,6 +44794,7 @@ function receiptStatusText(status) {
           await awardGamificationForPublishedOnlineExamResult(r);
         }
         onlineExamGradeGroupedRows = buildOnlineExamGroupedRows(onlineExamGradeAllResults);
+        resetOnlineExamGradeResultCache();
         renderOnlineExamGradingPage(onlineExamGradePage);
         safeRun(renderAdminScoreTables, 'admin-score-refresh-after-publish');
       } catch(e) { alert('ประกาศผลไม่สำเร็จ: ' + (e.message || e)); }
@@ -44882,6 +44940,7 @@ function receiptStatusText(status) {
         addActivityLog('บันทึกขาดสอบ', (student.name || '-') + ' · ' + courseLabel);
         onlineExamGradeAllResults.push(Object.assign({ _docId: newId }, absentDoc));
         onlineExamGradeGroupedRows = buildOnlineExamGroupedRows(onlineExamGradeAllResults);
+        resetOnlineExamGradeResultCache();
         item.missingCourses = (item.missingCourses || []).filter(function(c) { return (c.firebaseDocId || '') !== courseFirebaseDocId; });
         onlineExamGradeMissingItems = onlineExamGradeMissingItems.filter(function(x) { return (x.missingCourses || []).length > 0; });
         onlineExamGradeMissingHtml = renderOnlineExamMissingStudentsHtml(onlineExamGradeMissingItems, getOnlineExamGradingTargetCourses(
@@ -44958,6 +45017,7 @@ function receiptStatusText(status) {
       try {
         await db.collection('onlineExamResults').doc(result._docId).delete();
         onlineExamGradeAllResults = onlineExamGradeAllResults.filter(function(r) { return r._docId !== result._docId; });
+        resetOnlineExamGradeResultCache();
         onlineExamGradeGroupedRows = buildOnlineExamGroupedRows(onlineExamGradeAllResults);
         addActivityLog('ยกเลิกขาดสอบ', (group.studentName || '-') + ' · ' + subject);
         renderOnlineExamGradingPage(onlineExamGradePage);
@@ -45324,6 +45384,7 @@ function receiptStatusText(status) {
         const existingIndex = onlineExamGradeAllResults.findIndex(function(r) { return r._docId === newId; });
         if (existingIndex >= 0) onlineExamGradeAllResults.splice(existingIndex, 1, localDoc);
         else onlineExamGradeAllResults.push(localDoc);
+        resetOnlineExamGradeResultCache();
         onlineExamGradeGroupedRows = buildOnlineExamGroupedRows(onlineExamGradeAllResults);
         // Update local taken-ids cache so dropdown refreshes immediately
         [student.id, student.firebaseDocId, student.authUid, student.uid, student.memberId, student.studentId].forEach(function(key) {
