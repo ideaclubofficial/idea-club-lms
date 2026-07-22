@@ -23052,9 +23052,10 @@
         const now = firebase.firestore.FieldValue.serverTimestamp();
         const updatedAtText = new Date().toLocaleString('th-TH');
         const redemption = gamificationRedemptions.find(function(r) { return String(r.firebaseDocId || r.id || '') === redemptionId; });
-        const isStampRedemption = isStampCardRedemption(redemption);
-        const deliveredRewardTitle = isStampRedemption ? promptStampCardDeliveryReward(redemption) : '';
-        if (isStampRedemption && !deliveredRewardTitle) return;
+        if (isStampCardRedemption(redemption)) {
+          openStampCardDeliveryBubble(redemptionId);
+          return;
+        }
         const reward = redemption && redemption.rewardId
           ? gamificationRewards.find(function(r) { return String(r.firebaseDocId || r.id || '') === String(redemption.rewardId || ''); })
           : null;
@@ -23073,18 +23074,9 @@
           }
         }
         const fulfillmentPayload = { status: 'fulfilled', updatedAt: now, updatedAtText: updatedAtText };
-        if (isStampRedemption) {
-          fulfillmentPayload.fulfilledRewardTitle = deliveredRewardTitle;
-          fulfillmentPayload.deliveredRewardTitle = deliveredRewardTitle;
-          fulfillmentPayload.fulfilledAt = now;
-          fulfillmentPayload.fulfilledAtText = updatedAtText;
-        }
         await db.collection('gamificationRedemptions').doc(redemptionId).set(fulfillmentPayload, { merge: true });
         if (redemption) {
           Object.assign(redemption, fulfillmentPayload);
-        }
-        if (isStampRedemption) {
-          addActivityLog('ส่งมอบรางวัลแสตมป์', (redemption && redemption.studentName || '-') + ' · ' + deliveredRewardTitle);
         }
         renderAdminGamificationShop();
         renderStudentGamificationPanel();
@@ -23101,25 +23093,30 @@
       return String((redemption && (redemption.fulfilledRewardTitle || redemption.deliveredRewardTitle || redemption.deliveryRewardTitle)) || '').trim();
     }
 
-    function promptStampCardDeliveryReward(redemption) {
-      const current = getStampCardDeliveredRewardTitle(redemption) || '';
-      const requested = String((redemption && redemption.rewardTitle) || 'รางวัลแสตมป์').trim();
-      const defaultValue = current || requested || 'ขนม 1 ชิ้น';
-      const answer = prompt(
-        'เลือก/พิมพ์ชื่อรางวัลที่จะส่งให้นักเรียน\nเช่น ขนม 1 ชิ้น, ฟรีหมุนวงล้อ, ของรางวัลพิเศษ',
-        defaultValue
-      );
-      if (answer === null) return '';
-      const title = String(answer || '').trim();
-      if (!title) {
-        alert('กรุณาระบุชื่อรางวัลที่จะส่งมอบ');
-        return '';
-      }
-      return title;
+    function getStampDeliveryRewardOptions(redemption) {
+      const values = ['ขนม 1 ชิ้น', 'ฟรีหมุนวงล้อ', 'ของรางวัลพิเศษ'];
+      if (redemption && redemption.rewardTitle) values.unshift(redemption.rewardTitle);
+      gamificationRewards.forEach(function(reward) {
+        if (!reward || reward.deleted || reward.active === false || reward.rewardType === 'stampCard') return;
+        const title = String(reward.title || '').trim();
+        if (title && !values.includes(title)) values.push(title);
+      });
+      return values.filter(function(value, index, list) {
+        return value && list.indexOf(value) === index;
+      }).slice(0, 12);
     }
 
-    async function fulfillStudentStampCardRedemption(redemptionId) {
-      if (!firebaseReady || !db) return;
+    function onStampDeliveryRewardPresetChange() {
+      const preset = bubbleSelectValue('bubbleStampDeliveryPreset');
+      const input = getElement('bubbleStampDeliveryTitle');
+      if (!input || !preset || preset === '__custom__') {
+        if (input && preset === '__custom__') input.focus();
+        return;
+      }
+      input.value = preset;
+    }
+
+    function openStampCardDeliveryBubble(redemptionId) {
       const redemption = gamificationRedemptions.find(function(r) {
         return String(r.firebaseDocId || r.id || '') === String(redemptionId || '') && !r.deleted;
       });
@@ -23136,21 +23133,91 @@
         alert('ไม่พบนักเรียนของรายการนี้');
         return;
       }
-      if (currentTeacher && !canTeacherManageStudentReward(student)) {
+      const isAdminUser = firebaseUserProfile && isAdminRole(firebaseUserProfile.appRole || firebaseUserProfile.role || '');
+      if (!isAdminUser && currentTeacher && !canTeacherManageStudentReward(student)) {
         alert('บัญชีครูนี้ไม่มีสิทธิ์ส่งมอบรางวัลของนักเรียนคนนี้');
         return;
       }
-      const deliveredRewardTitle = promptStampCardDeliveryReward(redemption);
-      if (!deliveredRewardTitle) return;
-      if (!confirm('ยืนยันส่งมอบ "' + deliveredRewardTitle + '" ให้ ' + (student.name || '-') + '?')) return;
+      const currentTitle = getStampCardDeliveredRewardTitle(redemption) || redemption.rewardTitle || 'ขนม 1 ชิ้น';
+      const options = getStampDeliveryRewardOptions(redemption);
+      const optionHtml = options.map(function(title) {
+        return '<option value="' + escapeHtml(title) + '"' + (title === currentTitle ? ' selected' : '') + '>' + escapeHtml(title) + '</option>';
+      }).join('') + '<option value="__custom__">พิมพ์เอง</option>';
+      const reward = getRewardForRedemption(redemption);
+      const body = '<div class="form-row">' +
+          '<div><label>นักเรียน</label><input type="text" readonly value="' + escapeHtml((student.name || redemption.studentName || '-') + ' · ' + (student.memberId || redemption.memberId || '-')) + '" /></div>' +
+        '</div>' +
+        '<div class="form-row">' +
+          '<div><label>บัตรสะสมที่เด็กกดแลก</label><input type="text" readonly value="' + escapeHtml(redemption.rewardTitle || (reward && reward.title) || 'รางวัลแสตมป์') + '" /></div>' +
+        '</div>' +
+        '<div class="form-row">' +
+          '<div><label>เลือกรางวัลที่จะส่งจริง</label><select id="bubbleStampDeliveryPreset" onchange="onStampDeliveryRewardPresetChange()">' + optionHtml + '</select></div>' +
+        '</div>' +
+        '<div><label>ชื่อรางวัลที่จะส่งจริง</label><input id="bubbleStampDeliveryTitle" type="text" value="' + escapeHtml(currentTitle) + '" placeholder="เช่น ขนม 1 ชิ้น / ฟรีหมุนวงล้อ / ของรางวัลพิเศษ" /></div>' +
+        '<p class="mini-muted" style="margin-top:8px;">เมื่อบันทึก ระบบจะปิดรายการนี้และ reset แสตมป์ของบัตรนี้ให้เด็กเริ่มสะสมรอบใหม่</p>';
+      openEditBubble('เลือกและส่งมอบรางวัลแสตมป์', body, function() {
+        completeStampCardDelivery(redemptionId);
+      });
+    }
+
+    function resetStampProgressLocally(student, rewardId) {
+      if (!student || !rewardId) return null;
+      const actualProfile = findStudentGamificationProfile(student);
+      const profile = actualProfile || getStudentGamificationProfile(student);
+      if (!profile) return null;
+      const stampProgress = Object.assign({}, profile.stampProgress || {});
+      stampProgress[rewardId] = { stamps: 0, completed: false };
+      const profileId = String((actualProfile && (actualProfile.firebaseDocId || actualProfile.id)) || profile.firebaseDocId || profile.id || getStudentGamificationProfileId(student));
+      return { profileId: profileId, stampProgress: stampProgress, profile: profile, actualProfile: actualProfile };
+    }
+
+    function applyStampProgressResetLocally(resetInfo) {
+      if (!resetInfo) return;
+      if (resetInfo.profile) resetInfo.profile.stampProgress = resetInfo.stampProgress;
+      if (resetInfo.actualProfile && resetInfo.actualProfile !== resetInfo.profile) resetInfo.actualProfile.stampProgress = resetInfo.stampProgress;
+    }
+
+    async function completeStampCardDelivery(redemptionId) {
+      if (!firebaseReady || !db) return;
+      const redemption = gamificationRedemptions.find(function(r) {
+        return String(r.firebaseDocId || r.id || '') === String(redemptionId || '') && !r.deleted;
+      });
+      if (!redemption || !isStampCardRedemption(redemption)) {
+        const resultEl = getElement('editBubbleResult');
+        if (resultEl) { resultEl.textContent = 'ไม่พบรายการแลกรางวัลแสตมป์นี้'; resultEl.style.color = '#dc2626'; }
+        return;
+      }
+      if (String(redemption.status || 'pending') === 'fulfilled') {
+        alert('รายการนี้ส่งมอบแล้ว');
+        closeEditBubble();
+        return;
+      }
+      const student = findStudentForRedemption(redemption);
+      if (!student) { alert('ไม่พบนักเรียนของรายการนี้'); return; }
+      const isAdminUser = firebaseUserProfile && isAdminRole(firebaseUserProfile.appRole || firebaseUserProfile.role || '');
+      if (!isAdminUser && currentTeacher && !canTeacherManageStudentReward(student)) {
+        alert('บัญชีครูนี้ไม่มีสิทธิ์ส่งมอบรางวัลของนักเรียนคนนี้');
+        return;
+      }
+      const deliveredRewardTitle = bubbleValue('bubbleStampDeliveryTitle');
+      const resultEl = getElement('editBubbleResult');
+      if (!deliveredRewardTitle) {
+        if (resultEl) { resultEl.textContent = 'กรุณาระบุชื่อรางวัลที่จะส่งมอบ'; resultEl.style.color = '#dc2626'; }
+        return;
+      }
+      if (!confirm('ยืนยันส่งมอบ "' + deliveredRewardTitle + '" ให้ ' + (student.name || redemption.studentName || '-') + '?\nหลังส่งมอบ ระบบจะ reset แสตมป์ให้เริ่มสะสมใหม่')) return;
       const teacherInfo = getActiveTeacherAwardInfo();
       const now = firebase.firestore.FieldValue.serverTimestamp();
       const updatedAtText = new Date().toLocaleString('th-TH');
+      const resetInfo = resetStampProgressLocally(student, redemption.rewardId || '');
       try {
-        await db.collection('gamificationRedemptions').doc(redemptionId).set({
+        if (resultEl) { resultEl.textContent = 'กำลังส่งมอบ...'; resultEl.style.color = '#d97706'; }
+        const batch = db.batch();
+        batch.set(db.collection('gamificationRedemptions').doc(redemptionId), {
           status: 'fulfilled',
           fulfilledRewardTitle: deliveredRewardTitle,
           deliveredRewardTitle: deliveredRewardTitle,
+          stampResetAfterFulfillment: !!(resetInfo && resetInfo.profileId),
           fulfilledAt: now,
           fulfilledAtText: updatedAtText,
           fulfilledByUid: teacherInfo.uid,
@@ -23159,24 +23226,40 @@
           updatedAt: now,
           updatedAtText: updatedAtText
         }, { merge: true });
+        if (resetInfo && resetInfo.profileId) {
+          batch.set(db.collection('studentGamificationProfiles').doc(resetInfo.profileId), {
+            stampProgress: resetInfo.stampProgress,
+            updatedAt: now
+          }, { merge: true });
+        }
+        await batch.commit();
+        applyStampProgressResetLocally(resetInfo);
         Object.assign(redemption, {
           status: 'fulfilled',
           fulfilledRewardTitle: deliveredRewardTitle,
           deliveredRewardTitle: deliveredRewardTitle,
+          stampResetAfterFulfillment: !!(resetInfo && resetInfo.profileId),
           fulfilledAtText: updatedAtText,
           fulfilledByUid: teacherInfo.uid,
           fulfilledByTeacherId: teacherInfo.teacherId,
           fulfilledByName: teacherInfo.teacherName,
           updatedAtText: updatedAtText
         });
-        addActivityLog('ส่งมอบรางวัลแสตมป์', (student.name || '-') + ' · ' + deliveredRewardTitle);
+        addActivityLog('ส่งมอบรางวัลแสตมป์', (student.name || redemption.studentName || '-') + ' · ' + deliveredRewardTitle);
         renderTeacherStudents();
         renderAdminGamificationShop();
         renderStudentGamificationPanel();
-        openGiveExpBubbleForStudent(student);
+        if (resultEl) { resultEl.textContent = 'ส่งมอบแล้ว และ reset แสตมป์ให้เริ่มสะสมใหม่'; resultEl.style.color = '#16a34a'; }
+        scheduleEditBubbleClose(700, function() {
+          if (!isAdminUser && currentTeacher) openGiveExpBubbleForStudent(student);
+        });
       } catch (e) {
-        alert('ส่งมอบรางวัลไม่สำเร็จ: ' + (e.message || e.code || ''));
+        if (resultEl) { resultEl.textContent = 'ส่งมอบรางวัลไม่สำเร็จ: ' + (e.message || e.code || ''); resultEl.style.color = '#dc2626'; }
       }
+    }
+
+    async function fulfillStudentStampCardRedemption(redemptionId) {
+      openStampCardDeliveryBubble(redemptionId);
     }
 
     async function useSpecialVoucherRedemption(redemptionId) {
@@ -24939,8 +25022,10 @@
 
     function getStampCardRedemptionForStudent(rewardId, student) {
       return gamificationRedemptions.find(function(redemption) {
+        const redemptionStatus = String(redemption && redemption.status || 'pending');
         return redemption && redemption.deleted !== true &&
-          String(redemption.status || 'pending') !== 'cancelled' &&
+          redemptionStatus !== 'cancelled' &&
+          redemptionStatus !== 'fulfilled' &&
           isStampCardRedemption(redemption) &&
           String(redemption.rewardId || '') === String(rewardId || '') &&
           redemptionMatchesStudent(redemption, student);
