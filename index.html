@@ -8371,7 +8371,7 @@
             </div>
             <div class="form-box" style="margin-top:16px;border-color:#a78bfa;background:#faf5ff;">
               <h4 style="margin:0 0 12px;font-size:15px;color:#5b21b6;">🎫 บัตรพิเศษรอใช้</h4>
-              <p style="margin:0 0 10px;font-size:12px;color:#7c3aed;">ใช้สำหรับรางวัลพิเศษหรือกิจกรรมพิเศษของสถาบัน เมื่อเด็กนำบัตรมาใช้ให้กด “ใช้บัตรแล้ว”</p>
+              <p style="margin:0 0 10px;font-size:12px;color:#7c3aed;">ใช้สำหรับเข้าร่วมกิจกรรมพิเศษ หรือแลกของรางวัลใหญ่ของสถาบัน เมื่อเด็กนำบัตรมาใช้ให้กด “เลือกการใช้บัตร”</p>
               <div id="adminPendingSpecialVouchersTable"></div>
             </div>
             <div class="form-box" style="margin-top:16px;">
@@ -23030,9 +23030,9 @@
                 : '<span style="font-size:10px;background:#dcfce7;color:#15803d;border-radius:4px;padding:1px 5px;font-weight:700;margin-left:4px;">🛒 ร้านค้า</span>');
             return '<tr>' +
               '<td>' + escapeHtml(r.studentName || '-') + '<br><span style="font-size:11px;color:#94a3b8;">' + escapeHtml(r.memberId || '-') + '</span></td>' +
-              '<td>' + escapeHtml(r.rewardTitle || 'บัตรพิเศษ') + sourceTag + (r.adminNote ? '<br><span style="font-size:11px;color:#7c3aed;">' + escapeHtml(r.adminNote) + '</span>' : '') + '</td>' +
+              '<td>' + escapeHtml(r.rewardTitle || 'บัตรพิเศษ') + sourceTag + (r.adminNote ? '<br><span style="font-size:11px;color:#7c3aed;">' + escapeHtml(r.adminNote) + '</span>' : '') + '<br><span style="font-size:11px;color:#7c3aed;">เลือกได้ว่าจะใช้เข้ากิจกรรมพิเศษหรือแลกของรางวัลใหญ่</span></td>' +
               '<td>' + escapeHtml(r.createdAtText || '-') + '</td>' +
-              '<td><button class="btn btn-sm btn-green" onclick="useSpecialVoucherRedemption(\'' + escapeHtml(r.firebaseDocId || r.id) + '\')">ใช้บัตรแล้ว</button></td>' +
+              '<td><button class="btn btn-sm btn-green" onclick="useSpecialVoucherRedemption(\'' + escapeHtml(r.firebaseDocId || r.id) + '\')">เลือกการใช้บัตร</button></td>' +
             '</tr>';
           }).join('');
           pendingSpecialEl.innerHTML = '<table class="data-table" style="font-size:13px;"><thead><tr><th>นักเรียน</th><th>บัตรพิเศษ</th><th>วันที่ได้รับ</th><th>จัดการ</th></tr></thead><tbody>' + rows + '</tbody></table>';
@@ -23055,11 +23055,16 @@
           const statusCell = isFulfilled
             ? '<span style="color:#16a34a;font-weight:700;">' + (isSpecial ? '✓ ใช้แล้ว' : '✓ จัดส่งแล้ว') + '</span>'
             : (isSpecial
-              ? '<button class="btn btn-sm btn-green" onclick="useSpecialVoucherRedemption(\'' + escapeHtml(r.firebaseDocId || r.id) + '\')">ใช้บัตรแล้ว</button>'
+              ? '<button class="btn btn-sm btn-green" onclick="useSpecialVoucherRedemption(\'' + escapeHtml(r.firebaseDocId || r.id) + '\')">เลือกการใช้บัตร</button>'
               : '<button class="btn btn-sm btn-green" onclick="adminFulfillRedemption(\'' + escapeHtml(r.firebaseDocId || r.id) + '\')">' + (isStamp ? 'เลือกและส่งมอบ' : 'ทำเครื่องหมายส่งแล้ว') + '</button>');
           const deliveredTitle = getStampCardDeliveredRewardTitle(r);
+          const specialUseTitle = isSpecial ? getSpecialVoucherUseTitle(r) : '';
+          const specialUseMeta = isSpecial && specialUseTitle
+            ? '<br><span style="font-size:11px;color:#7c3aed;font-weight:700;">ใช้กับ: ' + escapeHtml(getSpecialVoucherUseTypeLabel(r.specialVoucherUseType)) + ' · ' + escapeHtml(specialUseTitle) + '</span>'
+            : '';
           const rewardCell = escapeHtml(r.rewardTitle || '-') + sourceTag +
-            (deliveredTitle ? '<br><span style="font-size:11px;color:#16a34a;font-weight:700;">ส่งจริง: ' + escapeHtml(deliveredTitle) + '</span>' : '');
+            (deliveredTitle ? '<br><span style="font-size:11px;color:#16a34a;font-weight:700;">ส่งจริง: ' + escapeHtml(deliveredTitle) + '</span>' : '') +
+            specialUseMeta;
           return '<tr>' +
             '<td>' + escapeHtml(r.studentName || '-') + '</td>' +
             '<td>' + rewardCell + '</td>' +
@@ -23297,6 +23302,27 @@
       return String((redemption && (redemption.fulfilledRewardTitle || redemption.deliveredRewardTitle || redemption.deliveryRewardTitle)) || '').trim();
     }
 
+    function getSpecialVoucherUseTypeLabel(useType) {
+      const type = String(useType || '').trim();
+      if (type === 'event') return 'กิจกรรมพิเศษ';
+      if (type === 'majorReward') return 'ของรางวัลใหญ่';
+      if (type === 'other') return 'อื่น ๆ';
+      return 'ใช้บัตรพิเศษ';
+    }
+
+    function getSpecialVoucherUseTitle(redemption) {
+      return String((redemption && (redemption.specialVoucherUseTitle || redemption.usedRewardTitle || redemption.deliveredRewardTitle)) || '').trim();
+    }
+
+    function onSpecialVoucherUseTypeChange() {
+      const type = bubbleSelectValue('bubbleSpecialVoucherUseType') || 'event';
+      const titleEl = getElement('bubbleSpecialVoucherUseTitle');
+      if (!titleEl) return;
+      if (type === 'event') titleEl.placeholder = 'เช่น IDEA Camp / กิจกรรมวันวิทยาศาสตร์';
+      else if (type === 'majorReward') titleEl.placeholder = 'เช่น ของรางวัลใหญ่รอบเดือน / ชุดของขวัญ';
+      else titleEl.placeholder = 'เช่น สิทธิ์พิเศษจากสถาบัน';
+    }
+
     function getStampDeliveryRewardOptions(redemption) {
       const values = ['ขนม 1 ชิ้น', 'ฟรีหมุนวงล้อ', 'ของรางวัลพิเศษ'];
       if (redemption && redemption.rewardTitle) values.unshift(redemption.rewardTitle);
@@ -23466,9 +23492,8 @@
       openStampCardDeliveryBubble(redemptionId);
     }
 
-    async function useSpecialVoucherRedemption(redemptionId) {
+    function useSpecialVoucherRedemption(redemptionId) {
       if (!canManageGamification()) { alert('ไม่มีสิทธิ์จัดการร้านแลกรางวัล'); return; }
-      if (!firebaseReady || !db) return;
       const redemption = gamificationRedemptions.find(function(r) {
         return String(r.firebaseDocId || r.id || '') === String(redemptionId || '') && !r.deleted;
       });
@@ -23490,13 +23515,73 @@
         alert('บัญชีครูนี้ไม่มีสิทธิ์ใช้บัตรของนักเรียนคนนี้');
         return;
       }
-      if (!confirm('ยืนยันใช้บัตร "' + (redemption.rewardTitle || 'บัตรพิเศษ') + '" ให้ ' + (student.name || '-') + '?\nใช้สำหรับแลกรางวัลพิเศษหรือเข้าร่วมกิจกรรมพิเศษแล้ว')) return;
+      const body =
+        '<div style="display:flex;flex-direction:column;gap:12px;">' +
+          '<div style="padding:10px 12px;border-radius:10px;background:#faf5ff;border:1px solid #c4b5fd;color:#5b21b6;font-size:13px;">' +
+            '<strong>' + escapeHtml(student.name || redemption.studentName || '-') + '</strong><br>' +
+            '<span>บัตร: ' + escapeHtml(redemption.rewardTitle || 'บัตรพิเศษ') + '</span>' +
+          '</div>' +
+          '<div><label style="font-size:13px;font-weight:700;display:block;margin-bottom:4px;">ประเภทการใช้บัตร</label>' +
+            '<select id="bubbleSpecialVoucherUseType" onchange="onSpecialVoucherUseTypeChange()" style="width:100%;">' +
+              '<option value="event">ใช้เข้าร่วมกิจกรรมพิเศษ</option>' +
+              '<option value="majorReward">แลกของรางวัลใหญ่</option>' +
+              '<option value="other">อื่น ๆ</option>' +
+            '</select></div>' +
+          '<div><label style="font-size:13px;font-weight:700;display:block;margin-bottom:4px;">ชื่อกิจกรรม / รางวัลจริง</label>' +
+            '<input id="bubbleSpecialVoucherUseTitle" type="text" placeholder="เช่น IDEA Camp / ของรางวัลใหญ่รอบเดือน" style="width:100%;" /></div>' +
+          '<div><label style="font-size:13px;font-weight:700;display:block;margin-bottom:4px;">หมายเหตุ (ไม่บังคับ)</label>' +
+            '<textarea id="bubbleSpecialVoucherUsedNote" rows="2" placeholder="รายละเอียดเพิ่มเติม เช่น รอบกิจกรรม วันที่จัด หรือหมายเลขของรางวัล" style="width:100%;box-sizing:border-box;"></textarea></div>' +
+          '<p id="bubbleSpecialVoucherUseResult" style="margin:0;font-size:12px;color:#64748b;"></p>' +
+        '</div>';
+      openEditBubble('เลือกการใช้บัตรพิเศษ', body, function() {
+        completeSpecialVoucherUse(redemptionId);
+      });
+      onSpecialVoucherUseTypeChange();
+    }
+
+    async function completeSpecialVoucherUse(redemptionId) {
+      if (!canManageGamification()) { alert('ไม่มีสิทธิ์จัดการร้านแลกรางวัล'); return; }
+      if (!firebaseReady || !db) return;
+      const resultEl = getElement('bubbleSpecialVoucherUseResult');
+      const redemption = gamificationRedemptions.find(function(r) {
+        return String(r.firebaseDocId || r.id || '') === String(redemptionId || '') && !r.deleted;
+      });
+      if (!redemption || !isSpecialVoucherRedemption(redemption)) {
+        if (resultEl) { resultEl.textContent = 'ไม่พบบัตรพิเศษนี้'; resultEl.style.color = '#dc2626'; }
+        return;
+      }
+      if (String(redemption.status || 'pending') === 'fulfilled') {
+        if (resultEl) { resultEl.textContent = 'บัตรนี้ถูกใช้แล้ว'; resultEl.style.color = '#dc2626'; }
+        return;
+      }
+      const student = findStudentForRedemption(redemption);
+      if (!student) {
+        if (resultEl) { resultEl.textContent = 'ไม่พบนักเรียนของบัตรนี้'; resultEl.style.color = '#dc2626'; }
+        return;
+      }
+      const isAdminUser = firebaseUserProfile && isAdminRole(firebaseUserProfile.appRole || firebaseUserProfile.role || '');
+      if (!isAdminUser && currentTeacher && !canTeacherManageStudentReward(student)) {
+        if (resultEl) { resultEl.textContent = 'บัญชีครูนี้ไม่มีสิทธิ์ใช้บัตรของนักเรียนคนนี้'; resultEl.style.color = '#dc2626'; }
+        return;
+      }
+      const useType = bubbleSelectValue('bubbleSpecialVoucherUseType') || 'event';
+      const useTitle = bubbleValue('bubbleSpecialVoucherUseTitle');
+      const usedNote = bubbleValue('bubbleSpecialVoucherUsedNote');
+      if (!useTitle) {
+        if (resultEl) { resultEl.textContent = 'กรุณาระบุชื่อกิจกรรมหรือรางวัลจริง'; resultEl.style.color = '#dc2626'; }
+        return;
+      }
+      if (!confirm('ยืนยันใช้บัตร "' + (redemption.rewardTitle || 'บัตรพิเศษ') + '" ให้ ' + (student.name || '-') + '?\nประเภท: ' + getSpecialVoucherUseTypeLabel(useType) + '\nรายการ: ' + useTitle)) return;
       const teacherInfo = getActiveTeacherAwardInfo();
       const now = firebase.firestore.FieldValue.serverTimestamp();
       const updatedAtText = new Date().toLocaleString('th-TH');
       try {
+        if (resultEl) { resultEl.textContent = 'กำลังบันทึกการใช้บัตร...'; resultEl.style.color = '#d97706'; }
         await db.collection('gamificationRedemptions').doc(redemptionId).set({
           status: 'fulfilled',
+          specialVoucherUseType: useType,
+          specialVoucherUseTitle: useTitle,
+          specialVoucherUsedNote: usedNote,
           usedAt: now,
           usedAtText: updatedAtText,
           usedByUid: teacherInfo.uid,
@@ -23507,19 +23592,25 @@
         }, { merge: true });
         Object.assign(redemption, {
           status: 'fulfilled',
+          specialVoucherUseType: useType,
+          specialVoucherUseTitle: useTitle,
+          specialVoucherUsedNote: usedNote,
           usedAtText: updatedAtText,
           usedByUid: teacherInfo.uid,
           usedByTeacherId: teacherInfo.teacherId,
           usedByName: teacherInfo.teacherName,
           updatedAtText: updatedAtText
         });
-        addActivityLog('ใช้บัตรพิเศษ', (student.name || '-') + ' · ' + (redemption.rewardTitle || '-'));
+        addActivityLog('ใช้บัตรพิเศษ', (student.name || '-') + ' · ' + getSpecialVoucherUseTypeLabel(useType) + ' · ' + useTitle);
         renderTeacherStudents();
         renderAdminGamificationShop();
         renderStudentGamificationPanel();
-        if (!isAdminUser && currentTeacher) openGiveRewardDirectBubble(student);
+        if (resultEl) { resultEl.textContent = 'บันทึกการใช้บัตรสำเร็จ'; resultEl.style.color = '#16a34a'; }
+        scheduleEditBubbleClose(700, function() {
+          if (!isAdminUser && currentTeacher) openGiveRewardDirectBubble(student);
+        });
       } catch (e) {
-        alert('ใช้บัตรไม่สำเร็จ: ' + (e.message || e.code || ''));
+        if (resultEl) { resultEl.textContent = 'ใช้บัตรไม่สำเร็จ: ' + (e.message || e.code || ''); resultEl.style.color = '#dc2626'; }
       }
     }
 
@@ -25358,7 +25449,9 @@
         const isSpecial = isSpecialVoucherRedemption(r);
         const src = isStamp ? '🎴 บัตรสะสม' : (r.fromPrizeWheel ? '🎰 วงล้อ' : (r.fromAdmin ? '👤 Admin' : '🛒 ร้านค้า'));
         const deliveredTitle = isStamp ? getStampCardDeliveredRewardTitle(r) : '';
-        const titleText = deliveredTitle || r.rewardTitle || 'ของรางวัลพิเศษ';
+        const specialUseTitle = isSpecial ? getSpecialVoucherUseTitle(r) : '';
+        const specialUseLabel = isSpecial && specialUseTitle ? getSpecialVoucherUseTypeLabel(r.specialVoucherUseType) + ': ' + specialUseTitle : '';
+        const titleText = deliveredTitle || specialUseTitle || r.rewardTitle || 'ของรางวัลพิเศษ';
         const statusText = isStamp
           ? (isFulfilled ? '✓ รับแล้ว' : '⏳ รอรับ')
           : (isSpecial ? (isFulfilled ? '✓ ใช้แล้ว' : '🎫 รอใช้') : (isFulfilled ? '✓ รับแล้ว' : '⏳ รอรับ'));
@@ -25366,7 +25459,7 @@
           '<span class="sg-voucher-icon">🎟</span>' +
           '<div class="sg-voucher-info">' +
             '<div class="sg-voucher-title">' + escapeHtml(titleText) + '</div>' +
-            '<div class="sg-voucher-meta">' + src + (deliveredTitle && r.rewardTitle ? ' · จากคำขอ: ' + escapeHtml(r.rewardTitle) : '') + ' · ' + escapeHtml(r.createdAtText || '') + '</div>' +
+            '<div class="sg-voucher-meta">' + src + (deliveredTitle && r.rewardTitle ? ' · จากคำขอ: ' + escapeHtml(r.rewardTitle) : '') + (specialUseLabel ? ' · ใช้กับ ' + escapeHtml(specialUseLabel) : '') + ' · ' + escapeHtml(r.createdAtText || '') + '</div>' +
           '</div>' +
           '<span class="sg-voucher-status ' + (isFulfilled ? 'sg-voucher-status--fulfilled' : 'sg-voucher-status--pending') + '">' +
             statusText +
@@ -25513,7 +25606,7 @@
             '<p class="mini-muted">' + source + ' · รอใช้แลกรางวัลหรือเข้าร่วมกิจกรรมพิเศษ</p>' +
             (redemption.adminNote ? '<p class="mini-muted">หมายเหตุ: ' + escapeHtml(redemption.adminNote) + '</p>' : '') +
             '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px;">' +
-              '<button class="btn btn-green" type="button" onclick="useSpecialVoucherRedemption(\'' + rid + '\')">ใช้บัตรแล้ว</button>' +
+              '<button class="btn btn-green" type="button" onclick="useSpecialVoucherRedemption(\'' + rid + '\')">เลือกการใช้บัตร</button>' +
             '</div>' +
           '</div>' +
         '</div>';
@@ -25521,7 +25614,9 @@
       const fulfilledRows = fulfilled.length
         ? '<div style="margin-top:8px;"><p class="mini-muted" style="font-weight:700;">ใช้แล้วล่าสุด</p>' +
           fulfilled.map(function(redemption) {
-            return '<p class="mini-muted">✓ ' + escapeHtml(redemption.rewardTitle || 'บัตรพิเศษ') + ' · ' + escapeHtml(redemption.usedAtText || redemption.updatedAtText || redemption.createdAtText || '') + '</p>';
+            const useTitle = getSpecialVoucherUseTitle(redemption);
+            const useMeta = useTitle ? ' · ' + getSpecialVoucherUseTypeLabel(redemption.specialVoucherUseType) + ': ' + useTitle : '';
+            return '<p class="mini-muted">✓ ' + escapeHtml(redemption.rewardTitle || 'บัตรพิเศษ') + escapeHtml(useMeta) + ' · ' + escapeHtml(redemption.usedAtText || redemption.updatedAtText || redemption.createdAtText || '') + '</p>';
           }).join('') + '</div>'
         : '';
       return '<div class="student-gamification-daily-quests" style="margin-top:14px;">' +
