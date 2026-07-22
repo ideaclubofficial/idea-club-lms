@@ -486,18 +486,21 @@ service cloud.firestore {
 
     match /gamificationRewards/{docId} {
       allow read: if signedIn();
-      allow create: if hasAdminPermission('admin.settings');
-      allow update: if hasAdminPermission('admin.settings') || isStudentRewardStockDecrement();
+      allow create: if hasAnyAdminPermission(['admin.gamification', 'admin.prizeWheel', 'admin.settings']);
+      allow update: if hasAnyAdminPermission(['admin.gamification', 'admin.prizeWheel', 'admin.settings']) || isStudentRewardStockDecrement();
       allow delete: if isAdmin();
     }
 
     match /gamificationRedemptions/{docId} {
       allow read: if hasStaffAccountType() || ownsExistingGamificationDoc()
                    || (signedIn() && resource.data.authUid == request.auth.uid);
-      allow create: if hasStaffAccountType() || ownsIncomingGamificationDoc()
+      allow create: if hasAnyAdminPermission(['admin.gamification', 'admin.prizeWheel', 'admin.settings'])
+                   || hasStaffAccountType()
+                   || ownsIncomingGamificationDoc()
                    || (signedIn() && request.resource.data.authUid == request.auth.uid
                        && request.resource.data.deleted == false);
-      allow update, delete: if hasStaffAccountType();
+      allow update: if hasAnyAdminPermission(['admin.gamification', 'admin.prizeWheel', 'admin.settings']) || hasStaffAccountType();
+      allow delete: if isAdmin();
     }
 
     match /monthlyQuestions/{docId} {
@@ -645,13 +648,13 @@ service cloud.firestore {
 
     match /prizeWheelItems/{docId} {
       allow read: if signedIn();
-      allow create, update: if hasAdminPermission('admin.settings');
+      allow create, update: if hasAnyAdminPermission(['admin.prizeWheel', 'admin.settings']);
       allow delete: if isAdmin();
     }
 
     match /prizeWheelSettings/{docId} {
       allow read: if signedIn();
-      allow create, update: if hasAdminPermission('admin.settings');
+      allow create, update: if hasAnyAdminPermission(['admin.prizeWheel', 'admin.settings']);
       allow delete: if isAdmin();
     }
 
@@ -661,7 +664,14 @@ service cloud.firestore {
       allow create: if signedIn()
                      && request.resource.data.authUid == request.auth.uid
                      && request.resource.data.deleted == false;
-      allow update, delete: if isAdmin();
+      allow update: if hasAnyAdminPermission(['admin.prizeWheel', 'admin.settings']);
+      allow delete: if isAdmin();
+    }
+
+    match /expenses/{docId} {
+      allow read: if hasAnyAdminPermission(['admin.finance', 'admin.expenses']);
+      allow create, update: if hasAnyAdminPermission(['admin.finance', 'admin.expenses']);
+      allow delete: if isAdmin();
     }
 
     match /{document=**} {
