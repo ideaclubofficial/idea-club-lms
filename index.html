@@ -4690,6 +4690,7 @@
           <a onclick="showTeacherTab('teacher-private-lessons')"><span class="menu-icon">🕒</span>ชั่วโมงเรียนเดี่ยว</a>
           <a onclick="showTeacherTab('teacher-attendance')"><span class="menu-icon">✅</span>เช็คชื่อนักเรียน</a>
           <a onclick="showTeacherTab('teacher-students')"><span class="menu-icon">👨‍🎓</span>รายชื่อนักเรียน</a>
+          <a id="teacherToolsSidebarLink" onclick="showTeacherTab('teacher-tools')"><span class="menu-icon">🧰</span>เครื่องมือที่ได้รับสิทธิ์</a>
           <a onclick="showTeacherTab('teacher-profile')"><span class="menu-icon">👤</span>ข้อมูลส่วนตัว</a>
           <a onclick="showPublic()"><span class="menu-icon">🏠</span>ออก</a>
         </aside>
@@ -4787,6 +4788,7 @@
             <button type="button" onclick="teacherMobileGo('teacher-attendance')"><span>เช็คชื่อ</span></button>
             <button type="button" onclick="teacherMobileGo('teacher-private-lessons')"><span>1:1</span></button>
             <button type="button" onclick="teacherMobileGo('teacher-students')"><span>นักเรียน</span></button>
+            <button id="teacherMobileToolsNavButton" type="button" onclick="teacherMobileGo('teacher-tools')"><span>เครื่องมือ</span></button>
             <button type="button" onclick="teacherMobileOpenProfile()"><span>โปรไฟล์</span></button>
             <button id="teacherMobileNavToggle" class="teacher-mobile-nav-toggle" type="button" onclick="toggleTeacherMobileBottomNav()" aria-label="ย่อเมนู"><span id="teacherMobileNavToggleText">⌄</span></button>
           </nav>
@@ -4984,6 +4986,17 @@
               </table>
             </div>
             <div id="teacherStudentsPagination" class="test-actions" style="margin-top:10px;"></div>
+          </section>
+
+          <section id="teacher-tools" class="teacher-tab hidden">
+            <div class="form-box">
+              <h3>เครื่องมือที่ได้รับสิทธิ์</h3>
+              <p style="margin-bottom:18px; color:#6b7280;">เครื่องมือเสริมสำหรับบัญชีครูตามสิทธิ์ที่ได้รับ โดยยังอยู่ในหน้าครูเท่านั้น</p>
+              <div id="teacherToolsList" class="test-actions"></div>
+            </div>
+            <br />
+            <div id="teacherEmbeddedToolEmpty" class="notice">เลือกเครื่องมือที่ต้องการใช้งาน</div>
+            <div id="teacherEmbeddedToolMount"></div>
           </section>
 
           <section id="teacher-attendance" class="teacher-tab hidden">
@@ -9768,7 +9781,8 @@
       'teacher-online': 'teacher.online',
       'teacher-private-lessons': 'teacher.attendance',
       'teacher-attendance': 'teacher.attendance',
-      'teacher-students': 'teacher.students'
+      'teacher-students': 'teacher.students',
+      'teacher-tools': 'teacher.dashboard'
     };
 
     const COURSE_FEATURES = [
@@ -9871,6 +9885,17 @@
       };
     }
 
+    const TEACHER_ZONE_BLOCKED_ADMIN_PERMISSIONS = ['admin.full', 'admin.users', 'admin.settings'];
+
+    function getBlockedTeacherZonePermissions(role, permissions) {
+      const normalizedRole = normalizeAppRole(role || 'Teacher');
+      if (!['Teacher', 'Assistant'].includes(normalizedRole)) return [];
+      const selected = Array.isArray(permissions) ? permissions : [];
+      return TEACHER_ZONE_BLOCKED_ADMIN_PERMISSIONS.filter(function(permission) {
+        return selected.includes(permission);
+      });
+    }
+
     function renderTeacherPermissionAuditBox() {
       const box = getElement('teacherPermissionAuditBox');
       if (!box) return;
@@ -9881,10 +9906,15 @@
       const menuText = summary.menus.length ? summary.menus.join(', ') : 'ไม่มีเมนูเพิ่มเติม';
       const collectionText = summary.collections.length ? summary.collections.join(', ') : 'อ่านข้อมูลพื้นฐานเท่านั้น';
       const hasFull = permissions.includes('admin.full');
+      const blockedTeacherPermissions = getBlockedTeacherZonePermissions(role, permissions);
+      const blockedWarning = blockedTeacherPermissions.length
+        ? '<p style="color:#dc2626;">สิทธิ์ ' + escapeHtml(blockedTeacherPermissions.map(getPermissionTitle).join(', ')) + ' เป็นสิทธิ์เสี่ยงสูงสำหรับบัญชีครู ต้องใช้ role Admin/Manager/Admin-like และจะไม่แสดงในหน้าเครื่องมือครู</p>'
+        : '';
       box.innerHTML = '<strong>ตรวจสิทธิ์ก่อนบันทึก</strong>' +
         '<p><span class="mini-muted">Role:</span> ' + escapeHtml(roleText) + '</p>' +
         '<p><span class="mini-muted">เมนูที่จะเปิด:</span> ' + escapeHtml(menuText) + '</p>' +
         '<p><span class="mini-muted">Firestore ที่รองรับ:</span> ' + escapeHtml(collectionText) + '</p>' +
+        blockedWarning +
         (hasFull ? '<p style="color:#dc2626;">บัญชีนี้มี admin.full ใช้ได้เฉพาะ Super Admin / Admin เท่านั้น</p>' : '<p style="color:#16a34a;">สิทธิ์เมนูและ write rules ถูกจับคู่ตาม permission ที่เลือกแล้ว</p>');
     }
 
@@ -10152,8 +10182,32 @@
     }
 
     function canOpenAdminTab(tabId) {
+      if (!isPrimaryAdminRole(getActiveAccessRecord())) return false;
       const permission = ADMIN_TAB_PERMISSIONS[tabId];
       return !permission || hasAnyPermission(permission);
+    }
+
+    function getTeacherZoneTools(record) {
+      const activeRecord = record || getActiveAccessRecord();
+      if (!isPrimaryTeacherOnlyRole(activeRecord)) return [];
+      const permissions = getEffectivePermissions(activeRecord);
+      return TEACHER_ADMIN_SHORTCUTS.filter(function(item) {
+        return permissions.includes(item.permission);
+      });
+    }
+
+    function canOpenTeacherTool(tabId) {
+      return getTeacherZoneTools().some(function(item) {
+        return item.tabId === tabId;
+      });
+    }
+
+    function canUseAdminTabOperation(tabId) {
+      return canOpenAdminTab(tabId) || canOpenTeacherTool(tabId);
+    }
+
+    function hasTeacherZoneTools(record) {
+      return getTeacherZoneTools(record).length > 0;
     }
 
     function canOpenTeacherTab(tabId) {
@@ -10161,6 +10215,7 @@
       const activeRecord = getActiveAccessRecord();
       const primaryRole = getPrimaryAppRole(activeRecord);
       const accountType = String(activeRecord.accountType || '').trim().toLowerCase();
+      if (tabId === 'teacher-tools') return hasTeacherZoneTools(activeRecord);
       if (accountType === 'teacher' || isTeacherRole(primaryRole)) {
         if (['teacher-profile', 'teacher-dashboard', 'teacher-students'].includes(tabId)) return true;
       }
@@ -10173,7 +10228,7 @@
     }
 
     function findFirstAllowedTeacherTab() {
-      const order = ['teacher-dashboard','teacher-profile','teacher-online','teacher-private-lessons','teacher-attendance','teacher-students'];
+      const order = ['teacher-dashboard','teacher-profile','teacher-online','teacher-private-lessons','teacher-attendance','teacher-students','teacher-tools'];
       return order.find(function(tabId) { return canOpenTeacherTab(tabId); }) || 'teacher-dashboard';
     }
 
@@ -10749,6 +10804,7 @@
     }
 
     function hideAllMain() {
+      if (typeof restoreTeacherEmbeddedTool === 'function') restoreTeacherEmbeddedTool();
       getElement('publicInterface').classList.add('hidden');
       getElement('teacherInterface').classList.add('hidden');
       getElement('adminInterface').classList.add('hidden');
@@ -10834,28 +10890,32 @@
       { tabId: 'admin-monthly-planner', permission: 'admin.monthlyPlanner', label: 'แผนสอนรายเดือน' },
       { tabId: 'admin-announcements', permission: 'admin.announcements', label: 'ประกาศ' },
       { tabId: 'admin-gamification-shop', permission: 'admin.gamification', label: 'ร้านแลกรางวัล' },
-      { tabId: 'admin-prize-wheel', permission: 'admin.prizeWheel', label: 'วงล้อสุ่มรางวัล' },
-      { tabId: 'admin-settings', permission: 'admin.settings', label: 'ตั้งค่าระบบ' },
-      { tabId: 'admin-activity-log', permission: 'admin.logs', label: 'ประวัติการแก้ไข' }
+      { tabId: 'admin-prize-wheel', permission: 'admin.prizeWheel', label: 'วงล้อสุ่มรางวัล' }
     ];
 
     function getTeacherAdminShortcuts() {
-      const activeRecord = getActiveAccessRecord();
-      if (!isPrimaryTeacherOnlyRole(activeRecord) || !hasAnyAdminPermission(activeRecord)) return [];
-      return TEACHER_ADMIN_SHORTCUTS.filter(function(item) {
-        return hasPermission(item.permission);
-      });
+      return getTeacherZoneTools();
     }
 
     function renderTeacherAdminShortcuts() {
       const card = getElement('teacherAdminShortcutCard');
       const list = getElement('teacherAdminShortcutList');
-      if (!card || !list) return;
       const shortcuts = getTeacherAdminShortcuts();
-      card.classList.toggle('hidden', !shortcuts.length);
-      list.innerHTML = shortcuts.map(function(item) {
-        return '<button class="btn btn-blue" type="button" onclick="openTeacherAdminShortcut(\'' + jsArg(item.tabId) + '\')">' + item.label + '</button>';
-      }).join('');
+      if (card && list) {
+        card.classList.toggle('hidden', !shortcuts.length);
+        list.innerHTML = shortcuts.map(function(item) {
+          return '<button class="btn btn-blue" type="button" onclick="openTeacherAdminShortcut(\'' + jsArg(item.tabId) + '\')">' + item.label + '</button>';
+        }).join('');
+      }
+      const toolsList = getElement('teacherToolsList');
+      if (toolsList) {
+        toolsList.innerHTML = shortcuts.map(function(item) {
+          return '<button class="btn btn-blue" type="button" onclick="openTeacherAdminShortcut(\'' + jsArg(item.tabId) + '\')">' + item.label + '</button>';
+        }).join('') || '<span class="mini-muted">ยังไม่มีเครื่องมือเสริม</span>';
+      }
+      const mobileToolsButton = getElement('teacherMobileToolsNavButton');
+      if (mobileToolsButton) mobileToolsButton.classList.toggle('hidden', !shortcuts.length);
+      if (!shortcuts.length && getElement('teacherEmbeddedToolMount')) restoreTeacherEmbeddedTool();
     }
 
     function setTeacherAdminReturnVisible(visible) {
@@ -10872,26 +10932,59 @@
       link.classList.toggle('hidden', !visible);
     }
 
-    function openTeacherAdminShortcut(tabId) {
-      if (!isPrimaryTeacherOnlyRole(getActiveAccessRecord()) || !canOpenAdminTab(tabId)) {
+    let teacherEmbeddedAdminTabId = '';
+    let teacherEmbeddedAdminTab = null;
+    let teacherEmbeddedAdminPlaceholder = null;
+
+    function restoreTeacherEmbeddedTool() {
+      if (teacherEmbeddedAdminTab && teacherEmbeddedAdminPlaceholder && teacherEmbeddedAdminPlaceholder.parentNode) {
+        teacherEmbeddedAdminTab.classList.add('hidden');
+        teacherEmbeddedAdminPlaceholder.parentNode.insertBefore(teacherEmbeddedAdminTab, teacherEmbeddedAdminPlaceholder);
+        teacherEmbeddedAdminPlaceholder.parentNode.removeChild(teacherEmbeddedAdminPlaceholder);
+      }
+      teacherEmbeddedAdminTabId = '';
+      teacherEmbeddedAdminTab = null;
+      teacherEmbeddedAdminPlaceholder = null;
+      const empty = getElement('teacherEmbeddedToolEmpty');
+      if (empty) empty.classList.remove('hidden');
+    }
+
+    function renderTeacherEmbeddedTool(tabId) {
+      if (!canOpenTeacherTool(tabId)) {
         alert('บัญชีนี้ไม่มีสิทธิ์เข้าเมนูนี้');
         return;
       }
-      hideAllMain();
-      getElement('adminInterface').classList.remove('hidden');
-      getElement('mainMenu').classList.add('hidden');
-      getElement('adminMenu').classList.add('hidden');
-      getElement('profileMenu').classList.remove('hidden');
-      getElement('profilePanel').classList.add('hidden');
-      refreshProfileBox();
-      setTeacherAdminReturnVisible(true);
-      applyRoleAccessToUI();
-      showAdminTab(tabId);
+      const mount = getElement('teacherEmbeddedToolMount');
+      const section = getElement(tabId);
+      if (!mount || !section) return;
+      if (teacherEmbeddedAdminTabId !== tabId) restoreTeacherEmbeddedTool();
+      if (!teacherEmbeddedAdminTab) {
+        teacherEmbeddedAdminPlaceholder = document.createComment('teacher-embedded-admin-tab:' + tabId);
+        section.parentNode.insertBefore(teacherEmbeddedAdminPlaceholder, section);
+        mount.appendChild(section);
+        teacherEmbeddedAdminTab = section;
+        teacherEmbeddedAdminTabId = tabId;
+      }
+      document.querySelectorAll('#teacherEmbeddedToolMount .admin-tab').forEach(function(tab) { tab.classList.add('hidden'); });
+      section.classList.remove('hidden');
+      const empty = getElement('teacherEmbeddedToolEmpty');
+      if (empty) empty.classList.add('hidden');
+      renderAdminTabContent(tabId);
       window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+
+    function openTeacherAdminShortcut(tabId) {
+      if (!canOpenTeacherTab('teacher-tools')) {
+        alert('บัญชีนี้ไม่มีสิทธิ์เข้าเมนูนี้');
+        return;
+      }
+      showTeacherTab('teacher-tools', { silent: true });
+      renderTeacherEmbeddedTool(tabId);
     }
 
     function returnToTeacherPanel() {
       setTeacherAdminReturnVisible(false);
+      restoreTeacherEmbeddedTool();
       showTeacherPanel(currentTeacher || getActiveAccessRecord());
     }
 
@@ -12772,12 +12865,14 @@
       document.querySelectorAll('.teacher-tab').forEach(function(tab) { tab.classList.add('hidden'); });
       const selectedTab = getElement(tabId);
       if (selectedTab) selectedTab.classList.remove('hidden');
+      if (tabId !== 'teacher-tools') restoreTeacherEmbeddedTool();
       renderTeacherCourseOptions();
       if (tabId === 'teacher-students') renderTeacherStudents();
       if (tabId === 'teacher-dashboard') { renderTodayTeachingList(); renderTeacherDashboardSummary(); }
       if (tabId === 'teacher-online') renderTeacherOnlineClasses();
       if (tabId === 'teacher-private-lessons') renderTeacherPrivateLessons();
       if (tabId === 'teacher-attendance') { initAttendanceDateToToday({ resetManualOverride: true }); refreshAttendanceData(); }
+      if (tabId === 'teacher-tools') renderTeacherAdminShortcuts();
       if (tabId === 'teacher-profile') renderProfileSettingsForRole('teacher');
       safeRun(renderTeacherMobileHome, 'teacher-mobile-home-tab');
       safeRun(renderTeacherMobileOnlineClasses, 'teacher-mobile-online-tab');
@@ -14889,7 +14984,7 @@
         return;
       }
       if ((currentTeacher || firebaseUserProfile) && isPrimaryTeacherOnlyRole(getActiveAccessRecord())) {
-        alert('บัญชีครูเข้าได้เฉพาะหน้าครู หากได้รับสิทธิ์แอดมินบางส่วนให้ใช้ shortcut ในหน้าครู');
+        alert('บัญชีครูเข้าได้เฉพาะหน้าครู หากได้รับสิทธิ์เสริมให้ใช้แท็บเครื่องมือที่ได้รับสิทธิ์ในหน้าครู');
         return;
       }
       if (!skipCheck) {
@@ -14912,6 +15007,7 @@
         }
       }
 
+      restoreTeacherEmbeddedTool();
       hideAllMain();
       setTeacherAdminReturnVisible(false);
       if (firebaseUserProfile && firebaseUserProfile.role === 'admin') {
@@ -14934,6 +15030,10 @@
 
     function showAdminTab(tabId) {
       if (!canOpenAdminTab(tabId)) {
+        if (canOpenTeacherTool(tabId)) {
+          openTeacherAdminShortcut(tabId);
+          return;
+        }
         const fallback = findFirstAllowedAdminTab();
         if (fallback && fallback !== tabId) {
           alert('บัญชีนี้ไม่มีสิทธิ์เข้าเมนูนี้');
@@ -14941,10 +15041,15 @@
         }
         return;
       }
+      restoreTeacherEmbeddedTool();
       applyRoleAccessToUI();
       document.querySelectorAll('.admin-tab').forEach(function(tab) { tab.classList.add('hidden'); });
       const selectedTab = getElement(tabId);
       if (selectedTab) selectedTab.classList.remove('hidden');
+      renderAdminTabContent(tabId);
+    }
+
+    function renderAdminTabContent(tabId) {
       if (tabId === 'admin-dashboard') safeRun(renderAdminDashboard, 'admin-dashboard');
       if (tabId === 'admin-profile') safeRun(function() { renderProfileSettingsForRole('admin'); }, 'admin-profile');
       if (tabId === 'admin-students') {
@@ -15264,7 +15369,7 @@
         ? '<button class="btn btn-green" type="button" onclick="' + actionCall('approveStudentCourse', s.id) + '">อนุมัติคอร์ส</button>' +
           '<button class="btn btn-red" type="button" onclick="' + actionCall('cancelStudentCourse', s.id) + '">ยกเลิกคอร์ส</button>'
         : '';
-      const privateLessonBtn = canOpenAdminTab('admin-monthly-planner')
+      const privateLessonBtn = canUseAdminTabOperation('admin-monthly-planner')
         ? '<button class="btn btn-blue" type="button" onclick="' + actionCall('openOneOnOneMonthlyPlanSessionFormForStudent', s.id) + '">เพิ่มคาบ 1:1</button>'
         : '';
       return '<div class="row-action-stack">' +
@@ -36935,7 +37040,7 @@ function receiptStatusText(status) {
 
     async function openOneOnOneMonthlyPlanSessionFormForStudent(studentId) {
       const result = getElement('monthlyPlanSaveResult');
-      if (!canOpenAdminTab('admin-monthly-planner')) {
+      if (!canUseAdminTabOperation('admin-monthly-planner')) {
         alert('บัญชีนี้ไม่มีสิทธิ์เข้าเมนูแผนสอนรายเดือน');
         return;
       }
