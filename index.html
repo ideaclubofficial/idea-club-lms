@@ -9826,7 +9826,10 @@
       if (pwMain) prizeWheelSettings = Object.assign({ spinCost: 30, enabled: true }, pwMain);
       replaceArray(avatarBattleQuestions, results[29] || []);
       const mainSettings = settingsItems.find(function(item) { return item.id === 'main' || item.firebaseDocId === 'main'; });
-      if (mainSettings) systemSettings = Object.assign(systemSettings, mainSettings);
+      if (mainSettings) {
+        systemSettings = Object.assign(systemSettings, mainSettings);
+        cacheStartupSettings(systemSettings);
+      }
       safeRun(applySystemSettingsToPage, 'settings-apply-after-load');
       safeRun(renderSystemSettingsForm, 'settings-form-after-load');
       // Sync pre-repair: fix in-memory status immediately so first render is correct
@@ -9875,6 +9878,86 @@
       academicYear: String(new Date().getFullYear() + 543),
       defaultPassword: '000000'
     };
+    const STARTUP_SETTINGS_CACHE_KEY = 'ideaClubStartupSettings';
+    let startupSettingsLoadPromise = null;
+    let paymentQrAssetLookupStarted = false;
+
+    function cacheStartupSettings(settings) {
+      if (!settings || typeof settings !== 'object') return;
+      const cached = {};
+      [
+        'instituteName',
+        'lineOfficial',
+        'phone',
+        'logoUrl',
+        'loginLogoUrl',
+        'faviconUrl',
+        'qrUrl',
+        'academicYear',
+        'defaultPassword'
+      ].forEach(function(key) {
+        if (settings[key] !== undefined) cached[key] = settings[key];
+      });
+      try {
+        localStorage.setItem(STARTUP_SETTINGS_CACHE_KEY, JSON.stringify(Object.assign(cached, {
+          cachedAt: Date.now()
+        })));
+      } catch (error) {
+        console.warn('startup settings cache skipped:', error);
+      }
+    }
+
+    function applyStartupSettingsCache() {
+      try {
+        const raw = localStorage.getItem(STARTUP_SETTINGS_CACHE_KEY);
+        if (!raw) return false;
+        const cached = JSON.parse(raw);
+        if (!cached || typeof cached !== 'object') return false;
+        systemSettings = Object.assign(systemSettings, cached, { id: 'main', firebaseDocId: 'main' });
+        safeRun(applySystemSettingsToPage, 'settings-apply-cache');
+        if (systemSettings.qrUrl) safeRun(function() { setPaymentQrImage(systemSettings.qrUrl); }, 'payment-qr-cache');
+        return true;
+      } catch (error) {
+        console.warn('startup settings cache read skipped:', error);
+        return false;
+      }
+    }
+
+    function scheduleIdleTask(callback, timeout) {
+      if (window.requestIdleCallback) {
+        window.requestIdleCallback(callback, { timeout: timeout || 1500 });
+        return;
+      }
+      window.setTimeout(callback, Math.min(timeout || 1500, 800));
+    }
+
+    function refreshStartupSettings() {
+      if (!firebaseReady || !db) return Promise.resolve(null);
+      if (startupSettingsLoadPromise) return startupSettingsLoadPromise;
+      startupSettingsLoadPromise = db.collection('settings').doc('main').get().then(function(doc) {
+        if (!doc.exists) return null;
+        const fresh = Object.assign({ id: 'main', firebaseDocId: 'main' }, doc.data());
+        systemSettings = Object.assign(systemSettings, fresh);
+        cacheStartupSettings(systemSettings);
+        safeRun(applySystemSettingsToPage, 'settings-apply-startup-refresh');
+        if (systemSettings.qrUrl) safeRun(function() { setPaymentQrImage(systemSettings.qrUrl); }, 'payment-qr-startup-settings');
+        return fresh;
+      }).catch(function(error) {
+        console.warn('startup settings refresh skipped:', error);
+        return null;
+      }).finally(function() {
+        startupSettingsLoadPromise = null;
+      });
+      return startupSettingsLoadPromise;
+    }
+
+    function schedulePaymentQrAssetLookup() {
+      if (paymentQrAssetLookupStarted || (systemSettings && systemSettings.qrUrl)) return;
+      paymentQrAssetLookupStarted = true;
+      scheduleIdleTask(function() {
+        safeRun(loadPaymentQrFromGithubAsset, 'load-payment-qr-github-idle');
+      }, 2500);
+    }
 
     const sortState = {
       students: { key: 'memberId', direction: 'asc' },
@@ -31527,6 +31610,7 @@ function receiptStatusText(status) {
       './qr-code.png'
     ];
     let paymentQrData = '';
+    let paymentQrAssetLookupFinished = false;
 
     function renderQrPlaceholder(message) {
       const html = '<div style="padding:18px; text-align:center; color:#0f4cbd; font-weight:bold;">' +
@@ -31555,6 +31639,7 @@ function receiptStatusText(status) {
 
     function tryLoadQrPath(index) {
       if (index >= DEFAULT_PAYMENT_QR_PATHS.length) {
+        paymentQrAssetLookupFinished = true;
         paymentQrData = '';
         renderQrPlaceholder('ยังไม่พบไฟล์ QR Code<br>ให้วางไฟล์ชื่อ <strong>payment-qr.jpg</strong> ไว้ในโฟลเดอร์ <strong>assets</strong> ของ GitHub');
         return;
@@ -31562,7 +31647,10 @@ function receiptStatusText(status) {
 
       const path = DEFAULT_PAYMENT_QR_PATHS[index];
       const testImage = new Image();
-      testImage.onload = function() { setPaymentQrImage(path); };
+      testImage.onload = function() {
+        paymentQrAssetLookupFinished = true;
+        setPaymentQrImage(path);
+      };
       testImage.onerror = function() { tryLoadQrPath(index + 1); };
       testImage.src = path + '?v=' + Date.now();
     }
@@ -31572,6 +31660,7 @@ function receiptStatusText(status) {
         setPaymentQrImage(systemSettings.qrUrl);
         return;
       }
+      if (paymentQrAssetLookupFinished) return;
       tryLoadQrPath(0);
     }
 
@@ -47592,7 +47681,10 @@ function receiptStatusText(status) {
         }
       }, 'url-memberId-autofill');
 
-      safeRun(loadPaymentQrFromGithubAsset, 'load-payment-qr-github-init');
+      safeRun(applyStartupSettingsCache, 'settings-cache-init');
+      safeRun(function() {
+        refreshStartupSettings().finally(schedulePaymentQrAssetLookup);
+      }, 'settings-startup-refresh');
       safeRun(initializeThaiMonthYearPickers, 'month-year-pickers-init');
       safeRun(function() { renderPermissionCheckboxes('teacherPermissionList', getDefaultPermissionsForRole('Teacher'), 'teacher-permission'); }, 'teacher-permissions-init');
       safeRun(function() { setSelectedCourseFeatures(getDefaultCourseFeaturesByAccess('Online'), 'Online'); }, 'course-features-init');
@@ -47603,7 +47695,9 @@ function receiptStatusText(status) {
       safeRun(applyRoleAccessToUI, 'role-access-ui-init');
       safeRun(updateMemberIdPreview, 'member-id-preview');
       safeRun(updateTeacherIdPreview, 'teacher-id-preview');
-      safeRun(renderSystemSettingsForm, 'settings-init');
+      scheduleIdleTask(function() {
+        safeRun(renderSystemSettingsForm, 'settings-init-idle');
+      }, 1200);
       safeRun(applySystemSettingsToPage, 'settings-apply-init');
       safeRun(updatePaymentSlipOcrAvailability, 'payment-slip-ocr-availability');
       safeRun(startAttendanceDateMonitor, 'attendance-date-monitor-init');
@@ -49611,16 +49705,27 @@ function receiptStatusText(status) {
     (function setupAutoPatchReload() {
       const VERSION_URL = 'app-version.json';
       const POLL_INTERVAL_MS = 60 * 1000;
+      const FETCH_TIMEOUT_MS = 4000;
       let loadedVersion = null;
       let reloadStarted = false;
+      let checkInFlight = false;
 
       async function fetchAppVersion() {
         const url = new URL(VERSION_URL, window.location.href);
         url.searchParams.set('ts', String(Date.now()));
-        const response = await fetch(url.toString(), { cache: 'no-store' });
-        if (!response.ok) return null;
-        const data = await response.json();
-        return data && typeof data.version === 'string' ? data.version.trim() : null;
+        const controller = window.AbortController ? new AbortController() : null;
+        const timeoutId = controller ? window.setTimeout(function() { controller.abort(); }, FETCH_TIMEOUT_MS) : null;
+        try {
+          const response = await fetch(url.toString(), {
+            cache: 'no-store',
+            signal: controller ? controller.signal : undefined
+          });
+          if (!response.ok) return null;
+          const data = await response.json();
+          return data && typeof data.version === 'string' ? data.version.trim() : null;
+        } finally {
+          if (timeoutId) window.clearTimeout(timeoutId);
+        }
       }
 
       function reloadWithVersion(version) {
@@ -49632,6 +49737,8 @@ function receiptStatusText(status) {
       }
 
       async function checkForPatchUpdate() {
+        if (reloadStarted || checkInFlight) return;
+        checkInFlight = true;
         try {
           const latestVersion = await fetchAppVersion();
           if (!latestVersion) return;
@@ -49644,10 +49751,21 @@ function receiptStatusText(status) {
           }
         } catch (error) {
           console.warn('Unable to check app version for auto reload.', error);
+        } finally {
+          checkInFlight = false;
         }
       }
 
-      checkForPatchUpdate();
+      if (document.readyState === 'complete') {
+        checkForPatchUpdate();
+      } else {
+        window.addEventListener('load', checkForPatchUpdate, { once: true });
+      }
+      document.addEventListener('visibilitychange', function() {
+        if (!document.hidden) checkForPatchUpdate();
+      });
+      window.addEventListener('focus', checkForPatchUpdate);
+      window.addEventListener('online', checkForPatchUpdate);
       window.setInterval(checkForPatchUpdate, POLL_INTERVAL_MS);
     })();
   </script>
