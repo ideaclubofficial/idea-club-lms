@@ -31846,8 +31846,9 @@ function receiptStatusText(status) {
         const exists = adminScoreRecords.some(function(record) {
           const sameStudentId = record.studentId && student.id && String(record.studentId) === String(student.id);
           const sameAuthUid = record.authUid && student.authUid && String(record.authUid) === String(student.authUid);
+          const sameMemberId = record.memberId && (student.memberId || student.studentId) && String(record.memberId) === String(student.memberId || student.studentId);
           const sameName = record.student === student.name;
-          return record.month === selectedMonth && record.grade === selectedGrade && (sameStudentId || sameAuthUid || sameName);
+          return record.month === selectedMonth && record.grade === selectedGrade && (sameStudentId || sameAuthUid || sameMemberId || sameName);
         });
 
         if (exists) {
@@ -31933,8 +31934,10 @@ function receiptStatusText(status) {
 
       for (let i = 0; i < rows.length; i++) {
         const row = rows[i];
-        const recordId = Number(row.getAttribute('data-score-id'));
-        const record = adminScoreRecords.find(function(item) { return Number(item.id) === recordId; });
+        const recordId = String(row.getAttribute('data-score-id') || '');
+        const record = adminScoreRecords.find(function(item) {
+          return String(item.id || item.firebaseDocId || '') === recordId;
+        });
         if (!record) continue;
         record.scores = record.scores || {};
         row.querySelectorAll('.score-input[data-subject]').forEach(function(inp) {
@@ -32018,6 +32021,14 @@ function receiptStatusText(status) {
       return getAdminScoreRecordsForScope(scope);
     }
 
+    function getOnlineExamGroupsForPublishScope(scope) {
+      if (!scope || !scope.month) return [];
+      return (onlineExamGradeGroupedRows || []).filter(function(group) {
+        if (!group || group.month !== scope.month) return false;
+        return scope.grade ? group.grade === scope.grade : !!group.grade;
+      });
+    }
+
     async function publishAllScoreSetsByCurrentFilters() {
       syncAdminScoreFiltersFromOnlineExamFilters();
       const scope = getAdminScorePublishFilterScope();
@@ -32032,16 +32043,25 @@ function receiptStatusText(status) {
       }
 
       const records = getAdminScoreRecordsForPublishScope(scope);
+      const pendingGroups = getOnlineExamGroupsForPublishScope(scope).filter(function(group) {
+        return getOnlineExamGroupPendingResults(group).length > 0;
+      });
       const gradeSet = {};
       records.forEach(function(record) {
         if (record.grade) gradeSet[record.grade] = true;
+      });
+      pendingGroups.forEach(function(group) {
+        if (group.grade) gradeSet[group.grade] = true;
       });
       const grades = Object.keys(gradeSet).sort(function(a, b) {
         return gradeOrder(a) - gradeOrder(b);
       });
       const scopeText = scope.grade ? ('ระดับชั้น ' + scope.grade) : 'ทุกระดับชั้น';
+      const pendingResultCount = pendingGroups.reduce(function(sum, group) {
+        return sum + getOnlineExamGroupPendingResults(group).length;
+      }, 0);
 
-      if (!records.length) {
+      if (!records.length && !pendingResultCount) {
         if (result) {
           result.textContent = 'ยังไม่มีคะแนนสำหรับประกาศผลใน ' + scope.month + ' · ' + scopeText;
           result.style.color = '#dc2626';
@@ -32049,13 +32069,24 @@ function receiptStatusText(status) {
         return;
       }
 
-      if (!confirm('ประกาศคะแนนทั้งหมดของ ' + scope.month + ' · ' + scopeText + ' (' + records.length + ' รายการ)?')) return;
+      if (!confirm('ประกาศคะแนนทั้งหมดของ ' + scope.month + ' · ' + scopeText + ' (' + records.length + ' ใบคะแนน' + (pendingResultCount ? ' + ผลสอบรอประกาศ ' + pendingResultCount + ' รายการ' : '') + ')?')) return;
 
       let failed = 0;
-      for (let i = 0; i < records.length; i++) {
-        records[i].status = 'published';
+      let publishedOnlineCount = 0;
+      for (let p = 0; p < pendingGroups.length; p++) {
         try {
-          await setFirebaseDocument('adminScoreRecords', records[i]);
+          publishedOnlineCount += Number(await publishOnlineExamGroupedResults(pendingGroups[p].key) || 0);
+        } catch (error) {
+          failed++;
+          console.error('publish all online exam group error:', error);
+        }
+      }
+
+      const publishRecords = getAdminScoreRecordsForPublishScope(scope);
+      for (let i = 0; i < publishRecords.length; i++) {
+        publishRecords[i].status = 'published';
+        try {
+          await setFirebaseDocument('adminScoreRecords', publishRecords[i]);
         } catch (error) {
           failed++;
           console.error('publish all score record firebase error:', error);
@@ -32071,12 +32102,12 @@ function receiptStatusText(status) {
         }
       }
 
-      await awardGamificationForPublishedScoreSet(records);
+      await awardGamificationForPublishedScoreSet(publishRecords);
       renderAdminScoreTables();
       renderScoreHistoryByMonth();
       renderStudentExamFilters();
       if (result) {
-        result.textContent = 'ประกาศคะแนนทั้งหมด ' + scope.month + ' · ' + scopeText + ' แล้ว ' + (records.length - Math.min(failed, records.length)) + ' รายการ · แจก EXP จากคะแนนสอบแล้ว' + (failed ? ' · พบข้อผิดพลาด ' + failed + ' รายการ' : '');
+        result.textContent = 'ประกาศคะแนนทั้งหมด ' + scope.month + ' · ' + scopeText + ' แล้ว ' + (publishRecords.length - Math.min(failed, publishRecords.length)) + ' ใบคะแนน' + (publishedOnlineCount ? ' · ผลสอบออนไลน์ ' + publishedOnlineCount + ' รายการ' : '') + ' · แจก EXP จากคะแนนสอบแล้ว' + (failed ? ' · พบข้อผิดพลาด ' + failed + ' รายการ' : '');
         result.style.color = failed ? '#d97706' : '#0f4cbd';
       }
     }
@@ -44208,6 +44239,7 @@ function receiptStatusText(status) {
       const pending = getOnlineExamGroupPendingResults(group);
       if (!group || !pending.length) return;
       let count = 0;
+      let failed = 0;
       for (var i = 0; i < pending.length; i++) {
         try {
           await db.collection('onlineExamResults').doc(pending[i]._docId).set(
@@ -44219,12 +44251,18 @@ function receiptStatusText(status) {
           await awardGamificationForPublishedOnlineExamResult(pending[i]);
           count++;
         } catch (e) {
+          failed++;
           console.warn('publish grouped result error', pending[i]._docId, e);
         }
       }
       addActivityLog('ประกาศผลข้อสอบรายแถว', (group.studentName || '-') + ' · ' + count + ' วิชา');
       renderOnlineExamGradingPage(onlineExamGradePage);
       safeRun(renderAdminScoreTables, 'admin-score-refresh-after-group-publish');
+      const resultEl = getElement('scoreAdjustResult');
+      if (resultEl && failed) {
+        resultEl.textContent = 'ประกาศผลของ "' + (group.studentName || '-') + '" สำเร็จ ' + count + ' วิชา · ไม่สำเร็จ ' + failed + ' วิชา';
+        resultEl.style.color = '#d97706';
+      }
       return count;
     }
 
@@ -44737,11 +44775,13 @@ function receiptStatusText(status) {
       const correctCount = getOnlineExamResultCorrectCount(r);
       const score50val = r.score50 !== undefined ? r.score50 : onlineExamGetScore50Value(correctCount, totalQ);
       const nickname = getOnlineExamResultNickname(r) || '-';
+      const memberId = getOnlineExamResultMemberId(r);
 
       var record = adminScoreRecords.find(function(rec) {
         if (rec.grade !== grade || rec.month !== month) return false;
         if (rec.authUid && r.studentUid && rec.authUid === r.studentUid) return true;
         if (rec.studentId && r.studentId && String(rec.studentId) === String(r.studentId)) return true;
+        if (rec.memberId && memberId && String(rec.memberId) === String(memberId)) return true;
         if (rec.student && r.studentName && rec.student === r.studentName) return true;
         return false;
       });
@@ -44754,7 +44794,7 @@ function receiptStatusText(status) {
           month: month,
           grade: grade,
           studentId: r.studentId || '',
-          memberId: r.memberId || r.studentMemberId || r.studentId || '',
+          memberId: memberId || r.memberId || r.studentMemberId || r.studentId || '',
           authUid: r.studentUid || '',
           student: r.studentName || '-',
           nickname: nickname,
@@ -44766,12 +44806,17 @@ function receiptStatusText(status) {
         adminScoreRecords.push(record);
       }
 
+      record.studentId = record.studentId || r.studentId || '';
+      record.memberId = record.memberId || memberId || r.memberId || r.studentMemberId || r.studentId || '';
+      record.authUid = record.authUid || r.studentUid || r.authUid || '';
+      record.student = (record.student && record.student !== '-') ? record.student : (r.studentName || '-');
       record.nickname = (record.nickname && record.nickname !== '-') ? record.nickname : nickname;
       record.scores = record.scores || {};
       record.correctCounts = record.correctCounts || {};
       record.scoreTotals = record.scoreTotals || {};
-      // Preserve manually adjusted score — only write original if no prior value exists
-      if (!isFinite(record.correctCounts[subject])) {
+      // Preserve manually adjusted score from either the grouped editor (correctCounts)
+      // or the legacy score table (scores).
+      if (!isFinite(record.correctCounts[subject]) && !isFinite(record.scores[subject])) {
         record.scores[subject] = score50val;
         record.correctCounts[subject] = correctCount;
       }
@@ -44783,6 +44828,7 @@ function receiptStatusText(status) {
         await syncScoreReportFromAdmin(month, grade, 'published');
       } catch(e) {
         console.warn('syncOnlineExamScoreToRecords error:', e);
+        throw e;
       }
     }
 
