@@ -8420,8 +8420,8 @@
               <div id="adminPendingStampRedemptionsTable"></div>
             </div>
             <div class="form-box" style="margin-top:16px;border-color:#a78bfa;background:#faf5ff;">
-              <h4 style="margin:0 0 12px;font-size:15px;color:#5b21b6;">🎫 บัตรพิเศษรอใช้</h4>
-              <p style="margin:0 0 10px;font-size:12px;color:#7c3aed;">ใช้สำหรับเข้าร่วมกิจกรรมพิเศษ หรือแลกของรางวัลใหญ่ของสถาบัน เมื่อเด็กนำบัตรมาใช้ให้กด “เลือกการใช้บัตร”</p>
+              <h4 style="margin:0 0 12px;font-size:15px;color:#5b21b6;">🎫 บัตรรางวัลพิเศษรอใช้</h4>
+              <p style="margin:0 0 10px;font-size:12px;color:#7c3aed;">ตารางนี้แสดงเฉพาะบัตรรางวัลพิเศษที่ยังรอใช้ สำหรับเข้าร่วมกิจกรรมพิเศษหรือแลกของรางวัลใหญ่ เมื่อเด็กนำบัตรมาใช้ให้กด “เลือกการใช้บัตร”</p>
               <div id="adminPendingSpecialVouchersTable"></div>
             </div>
             <div class="form-box" style="margin-top:16px;border-color:#bfdbfe;background:#eff6ff;">
@@ -8445,7 +8445,7 @@
             <div class="form-box" style="margin-top:16px;">
               <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
                 <h4 style="margin:0;font-size:15px;color:#1e1b4b;">ประวัติการแลกรางวัล</h4>
-                <button class="btn btn-blue btn-sm" onclick="adminGiveVoucher()">➕ แจกบัตรพิเศษ</button>
+                <button class="btn btn-blue btn-sm" onclick="adminGiveVoucher()">➕ แจกบัตรรางวัลพิเศษ</button>
               </div>
               <div id="adminRedemptionsTable"></div>
             </div>
@@ -13944,12 +13944,12 @@
         const tdNw = ' style="white-space:nowrap;"';
         const gamificationText = getStudentGamificationSummaryText(s);
         const pendingStampRedemptions = getStampCardRedemptionsForStudent(s, 'pending').length;
-        const pendingSpecialVouchers = getSpecialVoucherRedemptionsForStudent(s, 'pending').length;
+        const specialVoucherSummary = getSpecialVoucherSummaryForStudent(s);
         const stampBadge = pendingStampRedemptions
           ? '<br><span style="display:inline-block;margin-top:3px;font-size:10px;background:#fef3c7;color:#92400e;border-radius:999px;padding:1px 7px;font-weight:800;">🎟 รอส่งมอบ ' + pendingStampRedemptions + '</span>'
           : '';
-        const specialVoucherBadge = pendingSpecialVouchers
-          ? '<br><span style="display:inline-block;margin-top:3px;font-size:10px;background:#ede9fe;color:#6d28d9;border-radius:999px;padding:1px 7px;font-weight:800;">🎫 บัตรพิเศษ ' + pendingSpecialVouchers + '</span>'
+        const specialVoucherBadge = specialVoucherSummary.totalCount
+          ? '<br><span style="display:inline-block;margin-top:3px;font-size:10px;background:#ede9fe;color:#6d28d9;border-radius:999px;padding:1px 7px;font-weight:800;">🎫 บัตรรางวัลพิเศษ: เหลือ ' + specialVoucherSummary.pendingCount + ' ใบ · ใช้แล้ว ' + specialVoucherSummary.usedCount + ' ใบ</span>'
           : '';
         return '<tr>' +
           '<td' + tdNw + '>' + (tsStart + i + 1) + '</td>' +
@@ -14018,12 +14018,12 @@
       const statusClass = getPickupStatusClass(status);
       const sid = jsArg(student.id || student.firebaseDocId || '');
       const pendingStampRedemptions = getStampCardRedemptionsForStudent(student, 'pending').length;
-      const pendingSpecialVouchers = getSpecialVoucherRedemptionsForStudent(student, 'pending').length;
+      const specialVoucherSummary = getSpecialVoucherSummaryForStudent(student);
       const stampBadge = pendingStampRedemptions
         ? '<div class="teacher-mobile-muted" style="color:#92400e;font-weight:800;">🎟 รางวัลแสตมป์รอส่งมอบ ' + pendingStampRedemptions + ' รายการ</div>'
         : '';
-      const specialVoucherBadge = pendingSpecialVouchers
-        ? '<div class="teacher-mobile-muted" style="color:#6d28d9;font-weight:800;">🎫 บัตรพิเศษรอใช้ ' + pendingSpecialVouchers + ' รายการ</div>'
+      const specialVoucherBadge = specialVoucherSummary.totalCount
+        ? '<div class="teacher-mobile-muted" style="color:#6d28d9;font-weight:800;">🎫 บัตรรางวัลพิเศษ: เหลือ ' + specialVoucherSummary.pendingCount + ' ใบ · ใช้แล้ว ' + specialVoucherSummary.usedCount + ' ใบ</div>'
         : '';
       return '<div class="teacher-mobile-student-card">' +
         '<strong>' + escapeHtml(student.name || '-') + '</strong>' +
@@ -23499,7 +23499,7 @@
           return String(b.createdAtText || '') > String(a.createdAtText || '') ? 1 : -1;
         });
         if (!pendingSpecialVouchers.length) {
-          pendingSpecialEl.innerHTML = '<p style="color:#7c3aed;font-size:13px;">ยังไม่มีบัตรพิเศษรอใช้</p>';
+          pendingSpecialEl.innerHTML = '<p style="color:#7c3aed;font-size:13px;">ยังไม่มีบัตรรางวัลพิเศษรอใช้</p>';
         } else {
           const rows = pendingSpecialVouchers.map(function(r) {
             const sourceTag = getSpecialVoucherSourceBadgeHtml(r);
@@ -23510,7 +23510,7 @@
               '<td><button class="btn btn-sm btn-green" onclick="useSpecialVoucherRedemption(\'' + escapeHtml(r.firebaseDocId || r.id) + '\')">เลือกการใช้บัตร</button></td>' +
             '</tr>';
           }).join('');
-          pendingSpecialEl.innerHTML = '<table class="data-table" style="font-size:13px;"><thead><tr><th>นักเรียน</th><th>บัตรพิเศษ</th><th>วันที่ได้รับ</th><th>จัดการ</th></tr></thead><tbody>' + rows + '</tbody></table>';
+          pendingSpecialEl.innerHTML = '<table class="data-table" style="font-size:13px;"><thead><tr><th>นักเรียน</th><th>บัตรรางวัลพิเศษ</th><th>วันที่ได้รับ</th><th>จัดการ</th></tr></thead><tbody>' + rows + '</tbody></table>';
         }
       }
       renderAdminSpecialVoucherActivities();
@@ -26491,6 +26491,18 @@
       });
     }
 
+    function getSpecialVoucherSummaryForStudent(student) {
+      const summary = { pendingCount: 0, usedCount: 0, totalCount: 0 };
+      gamificationRedemptions.forEach(function(redemption) {
+        if (!isSpecialVoucherRedemption(redemption) || !redemptionMatchesStudent(redemption, student)) return;
+        const status = String(redemption.status || 'pending');
+        if (status === 'pending') summary.pendingCount += 1;
+        if (status === 'fulfilled') summary.usedCount += 1;
+      });
+      summary.totalCount = summary.pendingCount + summary.usedCount;
+      return summary;
+    }
+
     function getStampCardRedemptionForStudent(rewardId, student) {
       return gamificationRedemptions.find(function(redemption) {
         const redemptionStatus = String(redemption && redemption.status || 'pending');
@@ -26539,6 +26551,7 @@
     function renderTeacherSpecialVoucherRedemptionsHtml(student) {
       const pending = getSpecialVoucherRedemptionsForStudent(student, 'pending');
       const fulfilled = getSpecialVoucherRedemptionsForStudent(student, 'fulfilled').slice(0, 3);
+      const summary = getSpecialVoucherSummaryForStudent(student);
       if (!pending.length && !fulfilled.length) return '';
       const pendingRows = pending.length ? pending.map(function(redemption) {
         const rid = jsArg(redemption.firebaseDocId || redemption.id || '');
@@ -26564,7 +26577,8 @@
           }).join('') + '</div>'
         : '';
       return '<div class="student-gamification-daily-quests" style="margin-top:14px;">' +
-        '<div class="sgdq-header">บัตรพิเศษรอใช้ <span class="sgdq-count">' + pending.length + '</span></div>' +
+        '<div class="sgdq-header">บัตรรางวัลพิเศษ <span class="sgdq-count">' + summary.pendingCount + '</span></div>' +
+        '<p class="mini-muted" style="margin:8px 0 0;color:#6d28d9;font-weight:800;">เหลือ ' + summary.pendingCount + ' ใบ · ใช้แล้ว ' + summary.usedCount + ' ใบ</p>' +
         '<div style="padding:10px 0 0;">' + pendingRows + fulfilledRows + '</div>' +
       '</div>';
     }
