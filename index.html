@@ -9189,6 +9189,20 @@
         getFirebaseCollectionQuiet('prizeWheelItems'),
         getFirebaseCollectionQuiet('prizeWheelSettings'),
         loadStudentOwnCollection('prizeWheelSpins', studentDocIds, firebaseUser.uid),
+        (firebaseReady && db ? Promise.all([
+          db.collection('onlineExamCourses').where('status', '==', 'active').get().catch(function(e) { console.warn('onlineExamCourses active query skipped:', e); return { docs: [] }; }),
+          db.collection('onlineExamCourses').where('publishStatus', '==', 'published').get().catch(function(e) { console.warn('onlineExamCourses published query skipped:', e); return { docs: [] }; })
+        ]).then(function(snaps) {
+          const byId = {};
+          snaps.forEach(function(snap) {
+            (snap.docs || []).forEach(function(d) {
+              const c = Object.assign({ firebaseDocId: d.id }, d.data());
+              if (!c.firebaseDocId || c.deleted === true || c.isActive === false || c.status === 'inactive') return;
+              byId[c.firebaseDocId] = c;
+            });
+          });
+          return Object.keys(byId).map(function(id) { return byId[id]; });
+        }).catch(function(e) { console.warn('onlineExamCourses student battle query skipped:', e); return []; }) : Promise.resolve([])),
         (firebaseReady && db ? db.collection('avatarBattleQuestions').where('active', '==', true).where('deleted', '==', false).get().then(function(snap) {
           return snap.docs.map(function(d) { return Object.assign({ firebaseDocId: d.id }, d.data()); });
         }).catch(function(e) { console.warn('avatarBattleQuestions student query skipped:', e); return []; }) : Promise.resolve([]))
@@ -9217,7 +9231,8 @@
       const pwMainStu = pwSettingsArr.find(function(s) { return s.id === 'main' || s.firebaseDocId === 'main'; });
       if (pwMainStu) prizeWheelSettings = Object.assign({ spinCost: 30, enabled: true }, pwMainStu);
       replaceArray(prizeWheelSpins, results[20] || []);
-      replaceArray(avatarBattleQuestions, results[21] || []);
+      onlineExamCourseCache = results[21] || [];
+      replaceArray(avatarBattleQuestions, results[22] || []);
 
       console.log('student-data-load-success', {
         uid: firebaseUser.uid,
@@ -9231,7 +9246,8 @@
         monthlyPlanSessionsLoaded: results[11].length,
         gamificationProfilesLoaded: results[12].length,
         gamificationEventsLoaded: results[13].length,
-        collections: ['students:own', 'courses', 'onDemandClips', 'announcements', 'scoreReports', 'adminScoreRecords', 'paymentMonths', 'lineGroups', 'payments:own', 'receipts:own', 'paymentBundles:own', 'monthlyExamLinks', 'monthlyPlanSessions', 'studentGamificationProfiles:own', 'studentGamificationEvents:own', 'studentPersonalQuests:own']
+        onlineExamCoursesLoaded: (results[21] || []).length,
+        collections: ['students:own', 'courses', 'onDemandClips', 'announcements', 'scoreReports', 'adminScoreRecords', 'paymentMonths', 'lineGroups', 'payments:own', 'receipts:own', 'paymentBundles:own', 'monthlyExamLinks', 'monthlyPlanSessions', 'studentGamificationProfiles:own', 'studentGamificationEvents:own', 'studentPersonalQuests:own', 'onlineExamCourses:battle']
       });
       startStudentPaymentListeners(studentDocIds, firebaseUser.uid);
       return studentRecord;
@@ -21587,6 +21603,103 @@
       return null;
     }
 
+    function getAvatarBattleOnlineExamChoiceKey(index) {
+      return ['A', 'B', 'C', 'D'][Number(index) || 0] || '';
+    }
+
+    function isAvatarBattleClosedOnlineExamCourse(course) {
+      if (!course || course.deleted === true || course.isActive === false || course.status === 'inactive') return false;
+      if (!Array.isArray(course.questions) || !course.questions.length) return false;
+      const closeDate = parseOnlineExamDateTimeValue(course.closeAt);
+      return !!(closeDate && closeDate.getTime() <= Date.now());
+    }
+
+    function normalizeAvatarBattleOnlineExamQuestion(course, question, action, state) {
+      if (!course || !question) return null;
+      const prompt = String(question.text || '').trim();
+      const choicesArray = Array.isArray(question.choices) ? question.choices : [];
+      const choiceHtmlsArray = Array.isArray(question.choiceHtmls) ? question.choiceHtmls : [];
+      const correctIndex = normalizeOnlineExamCorrectIndex(question.correctIndex);
+      if (!prompt || choicesArray.length < 4 || correctIndex < 0 || correctIndex > 3) return null;
+      const choices = {};
+      const choiceHtmls = {};
+      for (let i = 0; i < 4; i++) {
+        const key = getAvatarBattleOnlineExamChoiceKey(i);
+        choices[key] = String(choicesArray[i] || '').trim();
+        choiceHtmls[key] = choiceHtmlsArray[i] || null;
+        if (!choices[key] && !choiceHtmls[key]) return null;
+      }
+      const subject = String(course.subject || '').trim();
+      const grade = String(getOnlineExamCourseGrade(course) || course.grade || '').trim();
+      const courseId = String(course.firebaseDocId || course.id || '');
+      const questionId = String(question.questionId || '');
+      return {
+        prompt: prompt,
+        promptHtml: question.textHtml || '',
+        answer: getAvatarBattleOnlineExamChoiceKey(correctIndex),
+        difficulty: ['ข้อสอบออนไลน์', subject || 'ทุกวิชา', grade || 'ทุกระดับชั้น'].filter(Boolean).join(' · '),
+        source: 'onlineExam',
+        questionType: 'multipleChoice',
+        choices: choices,
+        choiceHtmls: choiceHtmls,
+        questionId: ['onlineExam', courseId, questionId].filter(Boolean).join(':'),
+        sourceQuestionId: questionId,
+        courseId: courseId,
+        courseTitle: course.title || '',
+        subject: subject,
+        grade: grade,
+        explanation: question.explanation || ''
+      };
+    }
+
+    function pickAvatarBattleQuestionFromClosedOnlineExams(profile, action, state) {
+      const studentSubject = getAvatarBattleStudentSubject();
+      const studentGrade = getAvatarBattleStudentGrade();
+      const courses = (onlineExamCourseCache || []).filter(isAvatarBattleClosedOnlineExamCourse);
+      if (!courses.length) return null;
+      const usedIds = (state && Array.isArray(state.usedAvatarBattleQuestionIds)) ? state.usedAvatarBattleQuestionIds : [];
+      function courseSubject(course) {
+        return String(course.subject || '').trim();
+      }
+      function courseGrade(course) {
+        return String(getOnlineExamCourseGrade(course) || course.grade || '').trim();
+      }
+      function matchesSubject(course, allowAny) {
+        const subject = courseSubject(course);
+        return allowAny || !studentSubject || !subject || subject === 'ทั้งหมด' || subject === studentSubject;
+      }
+      function matchesGrade(course, allowAny) {
+        const grade = courseGrade(course);
+        return allowAny || !studentGrade || !grade || grade === 'ทั้งหมด' || grade === studentGrade;
+      }
+      const buckets = [
+        courses.filter(function(c) { return matchesSubject(c, false) && matchesGrade(c, false); }),
+        courses.filter(function(c) { return matchesSubject(c, false); }),
+        courses.filter(function(c) { return matchesGrade(c, false); }),
+        courses
+      ];
+      for (let i = 0; i < buckets.length; i++) {
+        const candidates = [];
+        buckets[i].forEach(function(course) {
+          (course.questions || []).forEach(function(question) {
+            const normalized = normalizeAvatarBattleOnlineExamQuestion(course, question, action, state);
+            if (normalized) candidates.push(normalized);
+          });
+        });
+        if (!candidates.length) continue;
+        const fresh = candidates.filter(function(q) { return !q.questionId || !usedIds.includes(q.questionId); });
+        const source = fresh.length ? fresh : candidates;
+        const picked = source[avatarBattleRandomInt(0, source.length - 1)];
+        if (state && picked && picked.questionId) {
+          state.usedAvatarBattleQuestionIds = Array.isArray(state.usedAvatarBattleQuestionIds) ? state.usedAvatarBattleQuestionIds : [];
+          state.usedAvatarBattleQuestionIds.push(picked.questionId);
+          if (state.usedAvatarBattleQuestionIds.length > 30) state.usedAvatarBattleQuestionIds.shift();
+        }
+        return picked || null;
+      }
+      return null;
+    }
+
     function avatarBattleGenerateFallbackQuestion(profile, action, state) {
       const level = Math.max(1, Number(profile && profile.level) || 1);
       const stageIndex = getAvatarBattleMonsterStageIndex(state && state.monster ? state.monster.stageIndex : (state && state.monsterStageIndex));
@@ -21638,7 +21751,9 @@
     }
 
     function avatarBattleGenerateQuestion(profile, action, state) {
-      return pickAvatarBattleQuestionFromBank(profile, action, state) || avatarBattleGenerateFallbackQuestion(profile, action, state);
+      return pickAvatarBattleQuestionFromBank(profile, action, state)
+        || pickAvatarBattleQuestionFromClosedOnlineExams(profile, action, state)
+        || avatarBattleGenerateFallbackQuestion(profile, action, state);
     }
 
     function clearAvatarBattleQuestion(state) {
@@ -21964,6 +22079,7 @@
           '<strong>ตอบโจทย์ก่อนใช้ ' + escapeHtml(state.pendingAction === 'skill' ? (state.pendingSkillName || 'สกิล') : (state.pendingAttackName || 'โจมตี')) + '</strong>' +
           '<span>' + escapeHtml(q.difficulty || '') + '</span>' +
         '</div>' +
+        (q.source === 'onlineExam' && q.courseTitle ? '<p style="font-size:11px;color:#64748b;margin:0 0 6px;">จากชุดข้อสอบ: ' + escapeHtml(q.courseTitle) + '</p>' : '') +
         '<p class="sab-question-prompt">' + onlineExamRichTextHtml(q.prompt || '', q.promptHtml || '') + '</p>' +
         answerHtml +
         '<div class="sab-question-feedback sab-question-feedback--' + escapeHtml(state.questionFeedbackType || '') + '">' + escapeHtml(state.questionFeedback || '') + '</div>' +
