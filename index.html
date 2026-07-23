@@ -604,6 +604,16 @@
       line-height: 1.2;
       text-align: center;
     }
+    .sab-question-image {
+      display: block;
+      max-width: 100%;
+      max-height: min(240px, 42vw);
+      margin: 0 auto 10px;
+      border: 1px solid #bae6fd;
+      border-radius: 10px;
+      object-fit: contain;
+      background: #ffffff;
+    }
     .sab-question-row {
       display: flex;
       gap: 8px;
@@ -652,6 +662,16 @@
     .sab-choice-btn span {
       min-width: 0;
       overflow-wrap: anywhere;
+    }
+    .sab-choice-btn img {
+      display: block;
+      max-width: 100%;
+      max-height: min(120px, 28vw);
+      margin-top: 6px;
+      border: 1px solid #e2e8f0;
+      border-radius: 8px;
+      object-fit: contain;
+      background: #ffffff;
     }
     .sab-question-feedback {
       margin-top: 7px;
@@ -21663,15 +21683,18 @@
       const prompt = String(question.text || '').trim();
       const choicesArray = Array.isArray(question.choices) ? question.choices : [];
       const choiceHtmlsArray = Array.isArray(question.choiceHtmls) ? question.choiceHtmls : [];
+      const choiceImagesArray = Array.isArray(question.choiceImages) ? question.choiceImages : [];
       const correctIndex = normalizeOnlineExamCorrectIndex(question.correctIndex);
       if (!prompt || choicesArray.length < 4 || correctIndex < 0 || correctIndex > 3) return null;
       const choices = {};
       const choiceHtmls = {};
+      const choiceImages = {};
       for (let i = 0; i < 4; i++) {
         const key = getAvatarBattleOnlineExamChoiceKey(i);
         choices[key] = String(choicesArray[i] || '').trim();
         choiceHtmls[key] = choiceHtmlsArray[i] || null;
-        if (!choices[key] && !choiceHtmls[key]) return null;
+        choiceImages[key] = parseDriveImageUrl(choiceImagesArray[i] || '') || null;
+        if (!choices[key] && !choiceHtmls[key] && !choiceImages[key]) return null;
       }
       const subject = String(course.subject || '').trim();
       const grade = String(getOnlineExamCourseGrade(course) || course.grade || '').trim();
@@ -21686,6 +21709,8 @@
         questionType: 'multipleChoice',
         choices: choices,
         choiceHtmls: choiceHtmls,
+        choiceImages: choiceImages,
+        imageUrl: parseDriveImageUrl(question.imageUrl || '') || '',
         questionId: ['onlineExam', courseId, questionId].filter(Boolean).join(':'),
         sourceQuestionId: questionId,
         courseId: courseId,
@@ -22112,12 +22137,18 @@
         ? '<div class="sab-question-choices">' + ['A','B','C','D'].map(function(key) {
             const text = q.choices && q.choices[key] ? q.choices[key] : '';
             const rich = q.choiceHtmls && q.choiceHtmls[key] ? q.choiceHtmls[key] : '';
-            return '<button type="button" class="sab-choice-btn" onclick="submitAvatarBattleAnswer(this,\'' + key + '\')"><strong>' + key + '</strong><span>' + onlineExamRichTextHtml(text, rich) + '</span></button>';
+            const img = q.choiceImages && q.choiceImages[key] ? parseDriveImageUrl(q.choiceImages[key]) : '';
+            const imgHtml = img ? '<img src="' + escapeHtml(img) + '" onerror="this.style.display=\'none\'" alt="รูปตัวเลือก ' + escapeHtml(key) + '">' : '';
+            return '<button type="button" class="sab-choice-btn" onclick="submitAvatarBattleAnswer(this,\'' + key + '\')"><strong>' + key + '</strong><span>' + onlineExamRichTextHtml(text, rich) + imgHtml + '</span></button>';
           }).join('') + '</div>'
         : '<div class="sab-question-row">' +
             '<input class="sab-answer-input" type="number" inputmode="numeric" placeholder="พิมพ์คำตอบ" onkeydown="avatarBattleAnswerKeydown(event, this)" />' +
             '<button type="button" class="sab-btn" onclick="submitAvatarBattleAnswer(this)">ตอบ</button>' +
           '</div>';
+      const questionImageUrl = q.imageUrl ? parseDriveImageUrl(q.imageUrl) : '';
+      const questionImageHtml = questionImageUrl
+        ? '<img class="sab-question-image" src="' + escapeHtml(questionImageUrl) + '" onerror="this.style.display=\'none\'" alt="รูปประกอบโจทย์">'
+        : '';
       return '<div class="sab-question">' +
         '<div class="sab-question-top">' +
           '<strong>ตอบโจทย์ก่อนใช้ ' + escapeHtml(state.pendingAction === 'skill' ? (state.pendingSkillName || 'สกิล') : (state.pendingAttackName || 'โจมตี')) + '</strong>' +
@@ -22125,6 +22156,7 @@
         '</div>' +
         (q.source === 'onlineExam' && q.courseTitle ? '<p style="font-size:11px;color:#64748b;margin:0 0 6px;">จากชุดข้อสอบ: ' + escapeHtml(q.courseTitle) + '</p>' : '') +
         '<p class="sab-question-prompt">' + onlineExamRichTextHtml(q.prompt || '', q.promptHtml || '') + '</p>' +
+        questionImageHtml +
         answerHtml +
         '<div class="sab-question-feedback sab-question-feedback--' + escapeHtml(state.questionFeedbackType || '') + '">' + escapeHtml(state.questionFeedback || '') + '</div>' +
       '</div>';
@@ -25299,11 +25331,20 @@
         const courseId = escapeHtml(course.firebaseDocId || course.id || '');
         const closeDate = parseOnlineExamDateTimeValue(course.closeAt);
         const questionsHtml = item.usableQuestions.slice(0, 12).map(function(q, index) {
+          const questionImageHtml = q.imageUrl
+            ? '<img src="' + escapeHtml(parseDriveImageUrl(q.imageUrl)) + '" onerror="this.style.display=\'none\'" style="display:block;max-height:96px;max-width:180px;border:1px solid #e2e8f0;border-radius:8px;margin:5px 0 0 36px;object-fit:contain;background:#fff;" alt="รูปประกอบข้อ ' + (index + 1) + '">'
+            : '';
+          const choiceImagesHtml = ['A','B','C','D'].map(function(key) {
+            const img = q.choiceImages && q.choiceImages[key] ? parseDriveImageUrl(q.choiceImages[key]) : '';
+            return img ? '<img src="' + escapeHtml(img) + '" onerror="this.style.display=\'none\'" style="height:46px;max-width:72px;border:1px solid #e2e8f0;border-radius:6px;object-fit:contain;background:#fff;" alt="รูปตัวเลือก ' + escapeHtml(key) + '">' : '';
+          }).filter(Boolean).join('');
           return '<div style="padding:7px 0;border-top:1px solid #f1f5f9;">' +
             '<div style="display:flex;gap:8px;align-items:flex-start;">' +
               '<span style="font-size:11px;font-weight:800;color:#4f46e5;min-width:28px;">ข้อ ' + (index + 1) + '</span>' +
               '<div style="font-size:12px;color:#0f172a;line-height:1.5;white-space:pre-wrap;flex:1;">' + onlineExamRichTextHtml(q.prompt || '-', q.promptHtml || '') + '</div>' +
             '</div>' +
+            questionImageHtml +
+            (choiceImagesHtml ? '<div style="display:flex;gap:5px;flex-wrap:wrap;margin:6px 0 0 36px;">' + choiceImagesHtml + '</div>' : '') +
             '<p style="font-size:11px;color:#16a34a;margin:3px 0 0 36px;">เฉลย ' + escapeHtml(q.answer || '-') + '</p>' +
           '</div>';
         }).join('');
