@@ -8424,10 +8424,28 @@
               <p style="margin:0 0 10px;font-size:12px;color:#7c3aed;">ใช้สำหรับเข้าร่วมกิจกรรมพิเศษ หรือแลกของรางวัลใหญ่ของสถาบัน เมื่อเด็กนำบัตรมาใช้ให้กด “เลือกการใช้บัตร”</p>
               <div id="adminPendingSpecialVouchersTable"></div>
             </div>
+            <div class="form-box" style="margin-top:16px;border-color:#bfdbfe;background:#eff6ff;">
+              <h4 style="margin:0 0 12px;font-size:15px;color:#1d4ed8;">🎪 กิจกรรมพิเศษสำหรับใช้บัตร</h4>
+              <div class="form-row">
+                <div><label>ชื่อกิจกรรม</label><input type="text" id="specialVoucherActivityTitle" placeholder="เช่น IDEA Camp" /></div>
+                <div><label>วันที่ / รอบกิจกรรม</label><input type="text" id="specialVoucherActivityDateText" placeholder="เช่น 15 ส.ค. 2569 / รอบบ่าย" /></div>
+              </div>
+              <div><label>รายละเอียด</label><textarea id="specialVoucherActivityDesc" rows="2" placeholder="รายละเอียดกิจกรรมสำหรับครูเลือกตอนใช้บัตร"></textarea></div>
+              <div style="margin-top:10px;">
+                <button class="btn btn-blue" type="button" onclick="adminSaveSpecialVoucherActivity()">บันทึกกิจกรรม</button>
+                <button class="btn btn-dark" type="button" onclick="adminClearSpecialVoucherActivityForm()" style="margin-left:6px;">ล้างฟอร์ม</button>
+                <span id="specialVoucherActivitySaveResult" style="font-size:13px;margin-left:8px;"></span>
+              </div>
+              <div id="adminSpecialVoucherActivitiesTable" style="margin-top:12px;"></div>
+            </div>
+            <div class="form-box" style="margin-top:16px;border-color:#c4b5fd;background:#f5f3ff;">
+              <h4 style="margin:0 0 12px;font-size:15px;color:#5b21b6;">📋 ประวัติใช้บัตรเข้ากิจกรรม</h4>
+              <div id="adminSpecialVoucherActivityHistoryTable"></div>
+            </div>
             <div class="form-box" style="margin-top:16px;">
               <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
                 <h4 style="margin:0;font-size:15px;color:#1e1b4b;">ประวัติการแลกรางวัล</h4>
-                <button class="btn btn-blue btn-sm" onclick="adminGiveVoucher()">➕ แจกบัตรแลกของ</button>
+                <button class="btn btn-blue btn-sm" onclick="adminGiveVoucher()">➕ แจกบัตรพิเศษ</button>
               </div>
               <div id="adminRedemptionsTable"></div>
             </div>
@@ -9251,6 +9269,9 @@
         (firebaseReady && db ? db.collection('gamificationLeaderboard').orderBy('level', 'desc').orderBy('exp', 'desc').limit(10).get().then(function(snap) { return snap.docs.map(function(d) { return Object.assign({ firebaseDocId: d.id }, d.data()); }).filter(function(x) { return x.deleted !== true; }); }).catch(function() { return []; }) : Promise.resolve([])),
         getFirebaseCollectionQuiet('gamificationRewards'),
         loadStudentOwnCollection('gamificationRedemptions', studentDocIds, firebaseUser.uid),
+        (firebaseReady && db ? db.collection('specialVoucherActivities').where('active', '==', true).where('deleted', '==', false).get().then(function(snap) {
+          return snap.docs.map(function(d) { return Object.assign({ firebaseDocId: d.id }, d.data()); });
+        }).catch(function(e) { console.warn('specialVoucherActivities student query skipped:', e); return []; }) : Promise.resolve([])),
         getFirebaseCollectionQuiet('prizeWheelItems'),
         getFirebaseCollectionQuiet('prizeWheelSettings'),
         loadStudentOwnCollection('prizeWheelSpins', studentDocIds, firebaseUser.uid),
@@ -9291,13 +9312,14 @@
       replaceArray(leaderboardProfiles, results[15] || []);
       replaceArray(gamificationRewards, results[16] || []);
       replaceArray(gamificationRedemptions, results[17] || []);
-      replaceArray(prizeWheelItems, results[18] || []);
-      const pwSettingsArr = results[19] || [];
+      replaceArray(specialVoucherActivities, results[18] || []);
+      replaceArray(prizeWheelItems, results[19] || []);
+      const pwSettingsArr = results[20] || [];
       const pwMainStu = pwSettingsArr.find(function(s) { return s.id === 'main' || s.firebaseDocId === 'main'; });
       if (pwMainStu) prizeWheelSettings = Object.assign({ spinCost: 30, enabled: true }, pwMainStu);
-      replaceArray(prizeWheelSpins, results[20] || []);
-      onlineExamCourseCache = results[21] || [];
-      replaceArray(avatarBattleQuestions, results[22] || []);
+      replaceArray(prizeWheelSpins, results[21] || []);
+      onlineExamCourseCache = results[22] || [];
+      replaceArray(avatarBattleQuestions, results[23] || []);
 
       console.log('student-data-load-success', {
         uid: firebaseUser.uid,
@@ -9896,6 +9918,7 @@
         getFirebaseCollection('settings'),
         getFirebaseCollection('gamificationRewards'),
         getFirebaseCollection('gamificationRedemptions'),
+        getFirebaseCollection('specialVoucherActivities'),
         getFirebaseCollection('expenses'),
         getFirebaseCollection('prizeWheelItems'),
         getFirebaseCollection('prizeWheelSpins'),
@@ -9928,13 +9951,14 @@
       const settingsItems = results[22];
       replaceArray(gamificationRewards, results[23] || []);
       replaceArray(gamificationRedemptions, results[24] || []);
-      replaceArray(expenses, results[25] || []);
-      replaceArray(prizeWheelItems, results[26] || []);
-      replaceArray(prizeWheelSpins, results[27] || []);
-      const pwSettingsItems = results[28] || [];
+      replaceArray(specialVoucherActivities, results[25] || []);
+      replaceArray(expenses, results[26] || []);
+      replaceArray(prizeWheelItems, results[27] || []);
+      replaceArray(prizeWheelSpins, results[28] || []);
+      const pwSettingsItems = results[29] || [];
       const pwMain = pwSettingsItems.find(function(s) { return s.id === 'main' || s.firebaseDocId === 'main'; });
       if (pwMain) prizeWheelSettings = Object.assign({ spinCost: 30, enabled: true }, pwMain);
-      replaceArray(avatarBattleQuestions, results[29] || []);
+      replaceArray(avatarBattleQuestions, results[30] || []);
       const mainSettings = settingsItems.find(function(item) { return item.id === 'main' || item.firebaseDocId === 'main'; });
       if (mainSettings) {
         systemSettings = Object.assign(systemSettings, mainSettings);
@@ -10182,7 +10206,7 @@
       'admin.monthlyPlanner': { menus: ['แผนสอนรายเดือน / การจัดตาราง'], collections: ['monthlyPlans', 'monthlyPlanSessions', 'holidays', 'courseTeachingSettings', 'teacherPreferenceRules'] },
       'admin.users': { menus: ['ครู / สิทธิ์'], collections: ['teachers', 'users(staff/teacher profile)', 'counters(teacherId)'] },
       'admin.announcements': { menus: ['ประกาศ'], collections: ['announcements'] },
-      'admin.gamification': { menus: ['ร้านแลกรางวัล'], collections: ['gamificationRewards', 'gamificationRedemptions', 'studentGamificationProfiles', 'studentGamificationEvents'] },
+      'admin.gamification': { menus: ['ร้านแลกรางวัล'], collections: ['gamificationRewards', 'gamificationRedemptions', 'specialVoucherActivities', 'studentGamificationProfiles', 'studentGamificationEvents'] },
       'admin.prizeWheel': { menus: ['วงล้อสุ่มรางวัล'], collections: ['prizeWheelItems', 'prizeWheelSettings', 'prizeWheelSpins', 'gamificationRewards'] },
       'admin.avatarBattle': { menus: ['เกมต่อสู้ Avatar'], collections: ['prizeWheelSettings.avatarBattle', 'avatarBattleQuestions', 'studentGamificationProfiles(read)'] },
       'admin.settings': { menus: ['ตั้งค่าระบบ'], collections: ['settings'] },
@@ -10191,7 +10215,7 @@
       'teacher.online': { menus: ['ห้องเรียนครู'], collections: ['courses', 'learningMaterials'] },
       'teacher.privateLessons': { menus: ['ชั่วโมงเรียนเดี่ยว'], collections: ['students', 'attendanceHistory'] },
       'teacher.attendance': { menus: ['เช็คชื่อ'], collections: ['students(pickup fields)', 'attendanceHistory'] },
-      'teacher.students': { menus: ['รายชื่อนักเรียน', 'มอบ Quest / ให้รางวัล'], collections: ['students', 'studentGamificationProfiles', 'studentGamificationEvents', 'studentPersonalQuests', 'gamificationRedemptions', 'gamificationLeaderboard'] }
+      'teacher.students': { menus: ['รายชื่อนักเรียน', 'มอบ Quest / ให้รางวัล'], collections: ['students', 'studentGamificationProfiles', 'studentGamificationEvents', 'studentPersonalQuests', 'gamificationRedemptions', 'specialVoucherActivities', 'gamificationLeaderboard'] }
     };
 
     const TEACHER_TAB_PERMISSIONS = {
@@ -10859,6 +10883,7 @@
     const leaderboardProfiles = [];
     const gamificationRewards = [];
     const gamificationRedemptions = [];
+    const specialVoucherActivities = [];
     const GAMIFICATION_REDEMPTION_HISTORY_LIMIT = 20;
     let gamificationRedemptionsCleanupRunning = false;
     const prizeWheelItems = [];
@@ -23426,7 +23451,7 @@
             const sourceTag = getSpecialVoucherSourceBadgeHtml(r);
             return '<tr>' +
               '<td>' + escapeHtml(r.studentName || '-') + '<br><span style="font-size:11px;color:#94a3b8;">' + escapeHtml(r.memberId || '-') + '</span></td>' +
-              '<td>' + escapeHtml(r.rewardTitle || 'บัตรพิเศษ') + sourceTag + (r.adminNote ? '<br><span style="font-size:11px;color:#7c3aed;">' + escapeHtml(r.adminNote) + '</span>' : '') + '<br><span style="font-size:11px;color:#7c3aed;">เลือกได้ว่าจะใช้เข้ากิจกรรมพิเศษหรือแลกของรางวัลใหญ่</span></td>' +
+              '<td>' + escapeHtml(getSpecialVoucherDisplayTitle(r)) + sourceTag + (r.adminNote ? '<br><span style="font-size:11px;color:#7c3aed;">' + escapeHtml(r.adminNote) + '</span>' : '') + '<br><span style="font-size:11px;color:#7c3aed;">เลือกได้ว่าจะใช้เข้ากิจกรรมพิเศษหรือแลกของรางวัลใหญ่</span></td>' +
               '<td>' + escapeHtml(r.createdAtText || '-') + '</td>' +
               '<td><button class="btn btn-sm btn-green" onclick="useSpecialVoucherRedemption(\'' + escapeHtml(r.firebaseDocId || r.id) + '\')">เลือกการใช้บัตร</button></td>' +
             '</tr>';
@@ -23434,6 +23459,8 @@
           pendingSpecialEl.innerHTML = '<table class="data-table" style="font-size:13px;"><thead><tr><th>นักเรียน</th><th>บัตรพิเศษ</th><th>วันที่ได้รับ</th><th>จัดการ</th></tr></thead><tbody>' + rows + '</tbody></table>';
         }
       }
+      renderAdminSpecialVoucherActivities();
+      renderAdminSpecialVoucherActivityHistory();
 
       const allRedemptions = gamificationRedemptions.filter(function(r) { return !r.deleted; })
         .slice().sort(sortGamificationRedemptionsNewestFirst)
@@ -23458,7 +23485,8 @@
           const specialUseMeta = isSpecial && specialUseTitle
             ? '<br><span style="font-size:11px;color:#7c3aed;font-weight:700;">ใช้กับ: ' + escapeHtml(getSpecialVoucherUseTypeLabel(r.specialVoucherUseType)) + ' · ' + escapeHtml(specialUseTitle) + '</span>'
             : '';
-          const rewardCell = escapeHtml(r.rewardTitle || '-') + sourceTag +
+          const rewardTitle = isSpecial ? getSpecialVoucherDisplayTitle(r) : (r.rewardTitle || '-');
+          const rewardCell = escapeHtml(rewardTitle) + sourceTag +
             (deliveredTitle ? '<br><span style="font-size:11px;color:#16a34a;font-weight:700;">ส่งจริง: ' + escapeHtml(deliveredTitle) + '</span>' : '') +
             specialUseMeta;
           return '<tr>' +
@@ -23654,6 +23682,229 @@
       }
     }
 
+    function sortSpecialVoucherActivities(a, b) {
+      const aActive = a && a.active !== false ? 0 : 1;
+      const bActive = b && b.active !== false ? 0 : 1;
+      if (aActive !== bActive) return aActive - bActive;
+      return String(a && (a.activityDateText || a.title || '')).localeCompare(String(b && (b.activityDateText || b.title || '')), 'th', { numeric: true });
+    }
+
+    function getActiveSpecialVoucherActivities() {
+      return specialVoucherActivities.filter(function(activity) {
+        return activity && activity.deleted !== true && activity.active !== false;
+      }).slice().sort(sortSpecialVoucherActivities);
+    }
+
+    function findSpecialVoucherActivity(activityId) {
+      return specialVoucherActivities.find(function(activity) {
+        return activity && activity.deleted !== true &&
+          String(activity.firebaseDocId || activity.id || '') === String(activityId || '');
+      }) || null;
+    }
+
+    function renderSpecialVoucherActivityOptionsHtml(selectedId) {
+      const active = getActiveSpecialVoucherActivities();
+      if (!active.length) return '<option value="">ยังไม่มีกิจกรรมที่เปิดใช้งาน</option>';
+      return '<option value="">-- เลือกกิจกรรม --</option>' + active.map(function(activity) {
+        const id = String(activity.firebaseDocId || activity.id || '');
+        const label = (activity.title || '-') + (activity.activityDateText ? ' · ' + activity.activityDateText : '');
+        return '<option value="' + escapeHtml(id) + '"' + (String(selectedId || '') === id ? ' selected' : '') + '>' + escapeHtml(label) + '</option>';
+      }).join('');
+    }
+
+    function adminClearSpecialVoucherActivityForm() {
+      ['specialVoucherActivityTitle','specialVoucherActivityDateText','specialVoucherActivityDesc'].forEach(function(id) {
+        const el = getElement(id);
+        if (el) el.value = '';
+      });
+      const resultEl = getElement('specialVoucherActivitySaveResult');
+      if (resultEl) resultEl.textContent = '';
+    }
+
+    function renderAdminSpecialVoucherActivities() {
+      const el = getElement('adminSpecialVoucherActivitiesTable');
+      if (!el) return;
+      const activities = specialVoucherActivities.filter(function(activity) {
+        return activity && activity.deleted !== true;
+      }).slice().sort(sortSpecialVoucherActivities);
+      if (!activities.length) {
+        el.innerHTML = '<p style="color:#64748b;font-size:13px;margin:0;">ยังไม่มีกิจกรรมพิเศษ</p>';
+        return;
+      }
+      const rows = activities.map(function(activity) {
+        const activityId = escapeHtml(activity.firebaseDocId || activity.id || '');
+        const active = activity.active !== false;
+        return '<tr>' +
+          '<td>' + escapeHtml(activity.title || '-') + (activity.description ? '<br><span style="font-size:11px;color:#64748b;">' + escapeHtml(activity.description) + '</span>' : '') + '</td>' +
+          '<td>' + escapeHtml(activity.activityDateText || '-') + '</td>' +
+          '<td style="text-align:center;">' + (active ? '<span style="color:#16a34a;font-weight:800;">เปิดใช้งาน</span>' : '<span style="color:#b91c1c;font-weight:800;">ปิดใช้งาน</span>') + '</td>' +
+          '<td style="white-space:nowrap;">' +
+            '<button class="btn btn-sm" type="button" onclick="adminEditSpecialVoucherActivity(\'' + activityId + '\')">แก้ไข</button> ' +
+            '<button class="btn btn-sm ' + (active ? 'btn-red' : 'btn-green') + '" type="button" onclick="adminToggleSpecialVoucherActivity(\'' + activityId + '\')">' + (active ? 'ปิด' : 'เปิด') + '</button> ' +
+            '<button class="btn btn-sm btn-danger" type="button" onclick="adminDeleteSpecialVoucherActivity(\'' + activityId + '\')">ลบ</button>' +
+          '</td>' +
+        '</tr>';
+      }).join('');
+      el.innerHTML = '<table class="data-table" style="font-size:13px;"><thead><tr><th>กิจกรรม</th><th>วันที่/รอบ</th><th>สถานะ</th><th>จัดการ</th></tr></thead><tbody>' + rows + '</tbody></table>';
+    }
+
+    function renderAdminSpecialVoucherActivityHistory() {
+      const el = getElement('adminSpecialVoucherActivityHistoryTable');
+      if (!el) return;
+      const eventUses = gamificationRedemptions.filter(function(redemption) {
+        return redemption && redemption.deleted !== true &&
+          isSpecialVoucherRedemption(redemption) &&
+          String(redemption.status || '') === 'fulfilled' &&
+          String(redemption.specialVoucherUseType || '') === 'event';
+      }).slice().sort(sortGamificationRedemptionsNewestFirst).slice(0, GAMIFICATION_REDEMPTION_HISTORY_LIMIT);
+      if (!eventUses.length) {
+        el.innerHTML = '<p style="color:#7c3aed;font-size:13px;margin:0;">ยังไม่มีประวัติใช้บัตรเข้ากิจกรรม</p>';
+        return;
+      }
+      const rows = eventUses.map(function(redemption) {
+        const title = redemption.specialVoucherActivityTitle || redemption.specialVoucherUseTitle || '-';
+        const activityDate = redemption.specialVoucherActivityDateText || '';
+        return '<tr>' +
+          '<td>' + escapeHtml(redemption.studentName || '-') + '<br><span style="font-size:11px;color:#94a3b8;">' + escapeHtml(redemption.memberId || '-') + '</span></td>' +
+          '<td>' + escapeHtml(title) + (activityDate ? '<br><span style="font-size:11px;color:#64748b;">' + escapeHtml(activityDate) + '</span>' : '') + '</td>' +
+          '<td>' + escapeHtml(getSpecialVoucherDisplayTitle(redemption)) + '</td>' +
+          '<td>' + escapeHtml(redemption.usedAtText || redemption.updatedAtText || '-') + '<br><span style="font-size:11px;color:#64748b;">โดย ' + escapeHtml(redemption.usedByName || '-') + '</span></td>' +
+        '</tr>';
+      }).join('');
+      el.innerHTML = '<table class="data-table" style="font-size:13px;"><thead><tr><th>นักเรียน</th><th>กิจกรรม</th><th>บัตร</th><th>วันที่ใช้</th></tr></thead><tbody>' + rows + '</tbody></table>';
+    }
+
+    async function adminSaveSpecialVoucherActivity() {
+      if (!canManageGamification()) { alert('ไม่มีสิทธิ์จัดการกิจกรรมพิเศษ'); return; }
+      if (!firebaseReady || !db || !firebaseUser) return;
+      const title = String((getElement('specialVoucherActivityTitle') || {}).value || '').trim();
+      const activityDateText = String((getElement('specialVoucherActivityDateText') || {}).value || '').trim();
+      const description = String((getElement('specialVoucherActivityDesc') || {}).value || '').trim();
+      const resultEl = getElement('specialVoucherActivitySaveResult');
+      if (!title) {
+        if (resultEl) { resultEl.textContent = 'กรุณาใส่ชื่อกิจกรรม'; resultEl.style.color = '#dc2626'; }
+        return;
+      }
+      const id = createFirebaseDocId('specialVoucherActivities');
+      const now = firebase.firestore.FieldValue.serverTimestamp();
+      const createdAtText = new Date().toLocaleString('th-TH');
+      const createdByName = String((firebaseUserProfile && (firebaseUserProfile.name || firebaseUserProfile.displayName || firebaseUserProfile.teacherName)) || '');
+      const activity = {
+        id: id,
+        firebaseDocId: id,
+        title: title,
+        description: description,
+        activityDateText: activityDateText,
+        active: true,
+        deleted: false,
+        createdAt: now,
+        createdAtText: createdAtText,
+        updatedAt: now,
+        updatedAtText: createdAtText,
+        createdByUid: firebaseUser.uid,
+        createdByName: createdByName
+      };
+      try {
+        if (resultEl) { resultEl.textContent = 'กำลังบันทึก...'; resultEl.style.color = '#d97706'; }
+        await db.collection('specialVoucherActivities').doc(id).set(activity);
+        specialVoucherActivities.push(activity);
+        adminClearSpecialVoucherActivityForm();
+        renderAdminSpecialVoucherActivities();
+        addActivityLog('สร้างกิจกรรมใช้บัตรพิเศษ', title);
+        if (resultEl) { resultEl.textContent = 'บันทึกกิจกรรมสำเร็จ'; resultEl.style.color = '#16a34a'; }
+      } catch (e) {
+        if (resultEl) { resultEl.textContent = 'บันทึกไม่สำเร็จ: ' + (e.message || e.code || ''); resultEl.style.color = '#dc2626'; }
+      }
+    }
+
+    function adminEditSpecialVoucherActivity(activityId) {
+      if (!canManageGamification()) { alert('ไม่มีสิทธิ์จัดการกิจกรรมพิเศษ'); return; }
+      const activity = findSpecialVoucherActivity(activityId);
+      if (!activity) { alert('ไม่พบกิจกรรมนี้'); return; }
+      const body =
+        '<div style="display:flex;flex-direction:column;gap:12px;">' +
+          '<div><label style="font-size:13px;font-weight:700;display:block;margin-bottom:4px;">ชื่อกิจกรรม</label><input id="bubbleSpecialActivityTitle" type="text" value="' + escapeHtml(activity.title || '') + '" style="width:100%;" /></div>' +
+          '<div><label style="font-size:13px;font-weight:700;display:block;margin-bottom:4px;">วันที่ / รอบกิจกรรม</label><input id="bubbleSpecialActivityDateText" type="text" value="' + escapeHtml(activity.activityDateText || '') + '" style="width:100%;" /></div>' +
+          '<div><label style="font-size:13px;font-weight:700;display:block;margin-bottom:4px;">รายละเอียด</label><textarea id="bubbleSpecialActivityDesc" rows="2" style="width:100%;box-sizing:border-box;">' + escapeHtml(activity.description || '') + '</textarea></div>' +
+          '<p id="bubbleSpecialActivityResult" style="margin:0;font-size:12px;color:#64748b;"></p>' +
+        '</div>';
+      openEditBubble('แก้ไขกิจกรรมพิเศษ', body, function() {
+        adminSaveSpecialVoucherActivityBubble(activityId);
+      });
+    }
+
+    async function adminSaveSpecialVoucherActivityBubble(activityId) {
+      if (!canManageGamification()) { alert('ไม่มีสิทธิ์จัดการกิจกรรมพิเศษ'); return; }
+      if (!firebaseReady || !db) return;
+      const title = bubbleValue('bubbleSpecialActivityTitle');
+      const activityDateText = bubbleValue('bubbleSpecialActivityDateText');
+      const description = bubbleValue('bubbleSpecialActivityDesc');
+      const resultEl = getElement('bubbleSpecialActivityResult') || getElement('editBubbleResult');
+      if (!title) {
+        if (resultEl) { resultEl.textContent = 'กรุณาใส่ชื่อกิจกรรม'; resultEl.style.color = '#dc2626'; }
+        return;
+      }
+      const updatedAtText = new Date().toLocaleString('th-TH');
+      const updates = {
+        title: title,
+        activityDateText: activityDateText,
+        description: description,
+        updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
+        updatedAtText: updatedAtText
+      };
+      try {
+        if (resultEl) { resultEl.textContent = 'กำลังบันทึก...'; resultEl.style.color = '#d97706'; }
+        await db.collection('specialVoucherActivities').doc(activityId).set(updates, { merge: true });
+        const activity = findSpecialVoucherActivity(activityId);
+        if (activity) Object.assign(activity, updates);
+        renderAdminSpecialVoucherActivities();
+        addActivityLog('แก้ไขกิจกรรมใช้บัตรพิเศษ', title);
+        if (resultEl) { resultEl.textContent = 'บันทึกกิจกรรมสำเร็จ'; resultEl.style.color = '#16a34a'; }
+        scheduleEditBubbleClose(600);
+      } catch (e) {
+        if (resultEl) { resultEl.textContent = 'บันทึกไม่สำเร็จ: ' + (e.message || e.code || ''); resultEl.style.color = '#dc2626'; }
+      }
+    }
+
+    async function adminToggleSpecialVoucherActivity(activityId) {
+      if (!canManageGamification()) { alert('ไม่มีสิทธิ์จัดการกิจกรรมพิเศษ'); return; }
+      const activity = findSpecialVoucherActivity(activityId);
+      if (!activity || !firebaseReady || !db) return;
+      const nextActive = activity.active === false;
+      try {
+        await db.collection('specialVoucherActivities').doc(activityId).set({
+          active: nextActive,
+          updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
+          updatedAtText: new Date().toLocaleString('th-TH')
+        }, { merge: true });
+        activity.active = nextActive;
+        renderAdminSpecialVoucherActivities();
+      } catch (e) {
+        alert('อัปเดตกิจกรรมไม่สำเร็จ: ' + (e.message || e.code || ''));
+      }
+    }
+
+    async function adminDeleteSpecialVoucherActivity(activityId) {
+      if (!canManageGamification()) { alert('ไม่มีสิทธิ์จัดการกิจกรรมพิเศษ'); return; }
+      const activity = findSpecialVoucherActivity(activityId);
+      if (!activity) return;
+      if (!confirm('ลบกิจกรรม "' + (activity.title || '-') + '"? ประวัติการใช้บัตรเดิมจะยังเก็บชื่อกิจกรรมไว้')) return;
+      try {
+        await db.collection('specialVoucherActivities').doc(activityId).set({
+          deleted: true,
+          active: false,
+          updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
+          updatedAtText: new Date().toLocaleString('th-TH')
+        }, { merge: true });
+        activity.deleted = true;
+        activity.active = false;
+        renderAdminSpecialVoucherActivities();
+        addActivityLog('ลบกิจกรรมใช้บัตรพิเศษ', activity.title || activityId);
+      } catch (e) {
+        alert('ลบกิจกรรมไม่สำเร็จ: ' + (e.message || e.code || ''));
+      }
+    }
+
     async function adminFulfillRedemption(redemptionId) {
       if (!canManageGamification()) { alert('ไม่มีสิทธิ์จัดการร้านแลกรางวัล'); return; }
       if (!firebaseReady || !db) return;
@@ -23710,16 +23961,41 @@
       return 'ใช้บัตรพิเศษ';
     }
 
+    function normalizeSpecialVoucherDisplayTitle(title, fallback) {
+      const text = String(title || '').trim();
+      const normalizedFallback = arguments.length > 1 ? fallback : 'บัตรรางวัลพิเศษ';
+      if (!text) return normalizedFallback;
+      if (text === 'ของรางวัลพิเศษ' || text === 'บัตรแลก' || text === 'ของรางวัลพิเศษ (บัตรแลก)') return normalizedFallback;
+      return text;
+    }
+
+    function getSpecialVoucherDisplayTitle(redemption) {
+      return normalizeSpecialVoucherDisplayTitle(redemption && redemption.rewardTitle, 'บัตรรางวัลพิเศษ');
+    }
+
     function getSpecialVoucherUseTitle(redemption) {
-      return String((redemption && (redemption.specialVoucherUseTitle || redemption.usedRewardTitle || redemption.deliveredRewardTitle)) || '').trim();
+      return normalizeSpecialVoucherDisplayTitle((redemption && (redemption.specialVoucherUseTitle || redemption.usedRewardTitle || redemption.deliveredRewardTitle)) || '', '');
+    }
+
+    function canUseSpecialVoucherForStudent(student) {
+      const isAdminUser = firebaseUserProfile && isAdminRole(firebaseUserProfile.appRole || firebaseUserProfile.role || '');
+      if (isAdminUser || canManageGamification()) return true;
+      return !!(currentTeacher && student && canTeacherManageStudentReward(student));
     }
 
     function onSpecialVoucherUseTypeChange() {
       const type = bubbleSelectValue('bubbleSpecialVoucherUseType') || 'event';
       const titleEl = getElement('bubbleSpecialVoucherUseTitle');
+      const activityRow = getElement('bubbleSpecialVoucherActivityRow');
+      const manualRow = getElement('bubbleSpecialVoucherManualTitleRow');
+      const activitySelect = getElement('bubbleSpecialVoucherActivityId');
+      if (activityRow) activityRow.style.display = type === 'event' ? '' : 'none';
+      if (manualRow) manualRow.style.display = type === 'event' ? 'none' : '';
+      if (activitySelect && type === 'event') {
+        activitySelect.innerHTML = renderSpecialVoucherActivityOptionsHtml(activitySelect.value);
+      }
       if (!titleEl) return;
-      if (type === 'event') titleEl.placeholder = 'เช่น IDEA Camp / กิจกรรมวันวิทยาศาสตร์';
-      else if (type === 'majorReward') titleEl.placeholder = 'เช่น ของรางวัลใหญ่รอบเดือน / ชุดของขวัญ';
+      if (type === 'majorReward') titleEl.placeholder = 'เช่น ของรางวัลใหญ่รอบเดือน / ชุดของขวัญ';
       else titleEl.placeholder = 'เช่น สิทธิ์พิเศษจากสถาบัน';
     }
 
@@ -23915,7 +24191,6 @@
     }
 
     function useSpecialVoucherRedemption(redemptionId) {
-      if (!canManageGamification()) { alert('ไม่มีสิทธิ์จัดการร้านแลกรางวัล'); return; }
       const redemption = gamificationRedemptions.find(function(r) {
         return String(r.firebaseDocId || r.id || '') === String(redemptionId || '') && !r.deleted;
       });
@@ -23932,16 +24207,16 @@
         alert('ไม่พบนักเรียนของบัตรนี้');
         return;
       }
-      const isAdminUser = firebaseUserProfile && isAdminRole(firebaseUserProfile.appRole || firebaseUserProfile.role || '');
-      if (!isAdminUser && currentTeacher && !canTeacherManageStudentReward(student)) {
+      if (!canUseSpecialVoucherForStudent(student)) {
         alert('บัญชีครูนี้ไม่มีสิทธิ์ใช้บัตรของนักเรียนคนนี้');
         return;
       }
+      const voucherTitle = getSpecialVoucherDisplayTitle(redemption);
       const body =
         '<div style="display:flex;flex-direction:column;gap:12px;">' +
           '<div style="padding:10px 12px;border-radius:10px;background:#faf5ff;border:1px solid #c4b5fd;color:#5b21b6;font-size:13px;">' +
             '<strong>' + escapeHtml(student.name || redemption.studentName || '-') + '</strong><br>' +
-            '<span>บัตร: ' + escapeHtml(redemption.rewardTitle || 'บัตรพิเศษ') + '</span>' +
+            '<span>บัตร: ' + escapeHtml(voucherTitle) + '</span>' +
           '</div>' +
           '<div><label style="font-size:13px;font-weight:700;display:block;margin-bottom:4px;">ประเภทการใช้บัตร</label>' +
             '<select id="bubbleSpecialVoucherUseType" onchange="onSpecialVoucherUseTypeChange()" style="width:100%;">' +
@@ -23949,7 +24224,10 @@
               '<option value="majorReward">แลกของรางวัลใหญ่</option>' +
               '<option value="other">อื่น ๆ</option>' +
             '</select></div>' +
-          '<div><label style="font-size:13px;font-weight:700;display:block;margin-bottom:4px;">ชื่อกิจกรรม / รางวัลจริง</label>' +
+          '<div id="bubbleSpecialVoucherActivityRow"><label style="font-size:13px;font-weight:700;display:block;margin-bottom:4px;">กิจกรรมพิเศษ</label>' +
+            '<select id="bubbleSpecialVoucherActivityId" style="width:100%;">' + renderSpecialVoucherActivityOptionsHtml('') + '</select>' +
+            '<p style="margin:4px 0 0;font-size:11px;color:#7c3aed;">เลือกจากกิจกรรมที่แอดมินเปิดใช้งานไว้</p></div>' +
+          '<div id="bubbleSpecialVoucherManualTitleRow" style="display:none;"><label style="font-size:13px;font-weight:700;display:block;margin-bottom:4px;">ชื่อกิจกรรม / รางวัลจริง</label>' +
             '<input id="bubbleSpecialVoucherUseTitle" type="text" placeholder="เช่น IDEA Camp / ของรางวัลใหญ่รอบเดือน" style="width:100%;" /></div>' +
           '<div><label style="font-size:13px;font-weight:700;display:block;margin-bottom:4px;">หมายเหตุ (ไม่บังคับ)</label>' +
             '<textarea id="bubbleSpecialVoucherUsedNote" rows="2" placeholder="รายละเอียดเพิ่มเติม เช่น รอบกิจกรรม วันที่จัด หรือหมายเลขของรางวัล" style="width:100%;box-sizing:border-box;"></textarea></div>' +
@@ -23962,7 +24240,6 @@
     }
 
     async function completeSpecialVoucherUse(redemptionId) {
-      if (!canManageGamification()) { alert('ไม่มีสิทธิ์จัดการร้านแลกรางวัล'); return; }
       if (!firebaseReady || !db) return;
       const resultEl = getElement('bubbleSpecialVoucherUseResult');
       const redemption = gamificationRedemptions.find(function(r) {
@@ -23982,18 +24259,25 @@
         return;
       }
       const isAdminUser = firebaseUserProfile && isAdminRole(firebaseUserProfile.appRole || firebaseUserProfile.role || '');
-      if (!isAdminUser && currentTeacher && !canTeacherManageStudentReward(student)) {
+      if (!canUseSpecialVoucherForStudent(student)) {
         if (resultEl) { resultEl.textContent = 'บัญชีครูนี้ไม่มีสิทธิ์ใช้บัตรของนักเรียนคนนี้'; resultEl.style.color = '#dc2626'; }
         return;
       }
       const useType = bubbleSelectValue('bubbleSpecialVoucherUseType') || 'event';
-      const useTitle = bubbleValue('bubbleSpecialVoucherUseTitle');
+      const activityId = useType === 'event' ? bubbleSelectValue('bubbleSpecialVoucherActivityId') : '';
+      const activity = activityId ? findSpecialVoucherActivity(activityId) : null;
+      const useTitle = useType === 'event' ? String((activity && activity.title) || '').trim() : bubbleValue('bubbleSpecialVoucherUseTitle');
+      const activityDateText = useType === 'event' ? String((activity && activity.activityDateText) || '').trim() : '';
       const usedNote = bubbleValue('bubbleSpecialVoucherUsedNote');
+      if (useType === 'event' && (!activity || activity.active === false)) {
+        if (resultEl) { resultEl.textContent = 'กรุณาเลือกกิจกรรมที่เปิดใช้งาน'; resultEl.style.color = '#dc2626'; }
+        return;
+      }
       if (!useTitle) {
         if (resultEl) { resultEl.textContent = 'กรุณาระบุชื่อกิจกรรมหรือรางวัลจริง'; resultEl.style.color = '#dc2626'; }
         return;
       }
-      if (!confirm('ยืนยันใช้บัตร "' + (redemption.rewardTitle || 'บัตรพิเศษ') + '" ให้ ' + (student.name || '-') + '?\nประเภท: ' + getSpecialVoucherUseTypeLabel(useType) + '\nรายการ: ' + useTitle)) return;
+      if (!confirm('ยืนยันใช้บัตร "' + getSpecialVoucherDisplayTitle(redemption) + '" ให้ ' + (student.name || '-') + '?\nประเภท: ' + getSpecialVoucherUseTypeLabel(useType) + '\nรายการ: ' + useTitle)) return;
       const teacherInfo = getActiveTeacherAwardInfo();
       const now = firebase.firestore.FieldValue.serverTimestamp();
       const updatedAtText = new Date().toLocaleString('th-TH');
@@ -24003,6 +24287,9 @@
           status: 'fulfilled',
           specialVoucherUseType: useType,
           specialVoucherUseTitle: useTitle,
+          specialVoucherActivityId: activityId,
+          specialVoucherActivityTitle: activity ? (activity.title || '') : '',
+          specialVoucherActivityDateText: activityDateText,
           specialVoucherUsedNote: usedNote,
           usedAt: now,
           usedAtText: updatedAtText,
@@ -24016,6 +24303,9 @@
           status: 'fulfilled',
           specialVoucherUseType: useType,
           specialVoucherUseTitle: useTitle,
+          specialVoucherActivityId: activityId,
+          specialVoucherActivityTitle: activity ? (activity.title || '') : '',
+          specialVoucherActivityDateText: activityDateText,
           specialVoucherUsedNote: usedNote,
           usedAtText: updatedAtText,
           usedByUid: teacherInfo.uid,
@@ -24038,7 +24328,7 @@
 
     function adminGiveVoucher() {
       if (!firebaseUserProfile || firebaseUserProfile.role !== 'admin') {
-        alert('เฉพาะ Admin เท่านั้นที่สามารถแจกบัตรแลกของได้');
+        alert('เฉพาะ Admin เท่านั้นที่สามารถแจกบัตรพิเศษได้');
         return;
       }
       const activeRewards = gamificationRewards.filter(function(r) { return !r.deleted; });
@@ -24060,10 +24350,10 @@
       const rewardOptions = activeRewards.map(function(r) {
         const id = escapeHtml(String(r.firebaseDocId || r.id || ''));
         const tag = r.rewardType === 'stampCard' ? ' [เพิ่มแสตมป์]' : (r.rewardType === 'specialVoucher' ? ' [บัตรพิเศษ]' : '');
-        return '<option value="' + id + '">' + escapeHtml((r.title || '-') + tag) + '</option>';
+        return '<option value="' + id + '">' + escapeHtml((r.title ? normalizeSpecialVoucherDisplayTitle(r.title) : '-') + tag) + '</option>';
       }).join('');
 
-      openEditBubble('🎟 แจกบัตรแลกของ',
+      openEditBubble('🎟 แจกบัตรพิเศษ',
         '<div style="display:flex;flex-direction:column;gap:14px;padding:2px 0;">' +
           '<div><label style="font-size:13px;font-weight:700;display:block;margin-bottom:4px;">นักเรียน</label>' +
             '<select id="gv_studentId" style="width:100%;">' + studentOptions + '</select></div>' +
@@ -24140,7 +24430,7 @@
       try {
         await db.collection('gamificationRedemptions').doc(redemptionId).set(redemption);
         gamificationRedemptions.push(redemption);
-        if (resultEl) resultEl.textContent = studentAuthUid ? '✅ แจกบัตรแลกของสำเร็จ' : '✅ บันทึกแล้ว (นักเรียนยังไม่ผูกบัญชี — จะไม่แสดงในหน้านักเรียน)';
+        if (resultEl) resultEl.textContent = studentAuthUid ? '✅ แจกบัตรพิเศษสำเร็จ' : '✅ บันทึกแล้ว (นักเรียนยังไม่ผูกบัญชี — จะไม่แสดงในหน้านักเรียน)';
         window.setTimeout(function() {
           getElement('editBubbleOverlay').classList.add('hidden');
           editBubbleSaveHandler = null;
@@ -26038,7 +26328,7 @@
           return String(b.createdAtText || '') > String(a.createdAtText || '') ? 1 : -1;
         });
       if (!myVouchers.length) return '<div class="sg-vouchers">' +
-        '<div class="sg-vouchers-header">🎟 บัตรแลกของสะสม</div>' +
+        '<div class="sg-vouchers-header">🎟 บัตรสะสม / บัตรพิเศษ</div>' +
         '<div style="padding:10px 14px;font-size:11px;color:#a78bfa;text-align:center;">ยังไม่มีบัตรสะสม</div>' +
         '</div>';
       const pending = myVouchers.filter(function(r) { return r.status !== 'fulfilled'; });
@@ -26051,7 +26341,7 @@
         const deliveredTitle = isStamp ? getStampCardDeliveredRewardTitle(r) : '';
         const specialUseTitle = isSpecial ? getSpecialVoucherUseTitle(r) : '';
         const specialUseLabel = isSpecial && specialUseTitle ? getSpecialVoucherUseTypeLabel(r.specialVoucherUseType) + ': ' + specialUseTitle : '';
-        const titleText = deliveredTitle || specialUseTitle || r.rewardTitle || 'บัตรรางวัลพิเศษ';
+        const titleText = deliveredTitle || specialUseTitle || (isSpecial ? getSpecialVoucherDisplayTitle(r) : (r.rewardTitle || 'บัตรรางวัลพิเศษ'));
         const statusText = isStamp
           ? (isFulfilled ? '✓ รับแล้ว' : '⏳ รอรับ')
           : (isSpecial ? (isFulfilled ? '✓ ใช้แล้ว' : '🎫 รอใช้') : (isFulfilled ? '✓ รับแล้ว' : '⏳ รอรับ'));
@@ -26059,7 +26349,7 @@
           '<span class="sg-voucher-icon">🎟</span>' +
           '<div class="sg-voucher-info">' +
             '<div class="sg-voucher-title">' + escapeHtml(titleText) + '</div>' +
-            '<div class="sg-voucher-meta">' + src + (deliveredTitle && r.rewardTitle ? ' · จากคำขอ: ' + escapeHtml(r.rewardTitle) : '') + (specialUseLabel ? ' · ใช้กับ ' + escapeHtml(specialUseLabel) : '') + ' · ' + escapeHtml(r.createdAtText || '') + '</div>' +
+            '<div class="sg-voucher-meta">' + src + (deliveredTitle && r.rewardTitle ? ' · จากคำขอ: ' + escapeHtml(isSpecial ? getSpecialVoucherDisplayTitle(r) : r.rewardTitle) : '') + (specialUseLabel ? ' · ใช้กับ ' + escapeHtml(specialUseLabel) : '') + ' · ' + escapeHtml(r.createdAtText || '') + '</div>' +
           '</div>' +
           '<span class="sg-voucher-status ' + (isFulfilled ? 'sg-voucher-status--fulfilled' : 'sg-voucher-status--pending') + '">' +
             statusText +
@@ -26067,7 +26357,7 @@
         '</div>';
       }
       return '<div class="sg-vouchers">' +
-        '<div class="sg-vouchers-header">🎟 บัตรแลกของสะสม' +
+        '<div class="sg-vouchers-header">🎟 บัตรสะสม / บัตรพิเศษ' +
           (pending.length ? ' <span class="sg-vouchers-badge">' + pending.length + ' รอใช้/รอรับ</span>' : '') +
         '</div>' +
         '<div class="sg-vouchers-list">' +
@@ -26202,7 +26492,7 @@
         return '<div class="student-gamification-quest" style="margin-bottom:8px;border-color:#c4b5fd;background:#faf5ff;">' +
           '<span class="student-gamification-quest-icon">🎫</span>' +
           '<div style="flex:1;min-width:0;">' +
-            '<strong>' + escapeHtml(redemption.rewardTitle || 'บัตรพิเศษ') + '</strong>' +
+            '<strong>' + escapeHtml(getSpecialVoucherDisplayTitle(redemption)) + '</strong>' +
             '<p class="mini-muted">' + source + ' · รอใช้แลกรางวัลหรือเข้าร่วมกิจกรรมพิเศษ</p>' +
             (redemption.adminNote ? '<p class="mini-muted">หมายเหตุ: ' + escapeHtml(redemption.adminNote) + '</p>' : '') +
             '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px;">' +
@@ -26216,7 +26506,7 @@
           fulfilled.map(function(redemption) {
             const useTitle = getSpecialVoucherUseTitle(redemption);
             const useMeta = useTitle ? ' · ' + getSpecialVoucherUseTypeLabel(redemption.specialVoucherUseType) + ': ' + useTitle : '';
-            return '<p class="mini-muted">✓ ' + escapeHtml(redemption.rewardTitle || 'บัตรพิเศษ') + escapeHtml(useMeta) + ' · ' + escapeHtml(redemption.usedAtText || redemption.updatedAtText || redemption.createdAtText || '') + '</p>';
+            return '<p class="mini-muted">✓ ' + escapeHtml(getSpecialVoucherDisplayTitle(redemption)) + escapeHtml(useMeta) + ' · ' + escapeHtml(redemption.usedAtText || redemption.updatedAtText || redemption.createdAtText || '') + '</p>';
           }).join('') + '</div>'
         : '';
       return '<div class="student-gamification-daily-quests" style="margin-top:14px;">' +
@@ -41275,7 +41565,8 @@ function receiptStatusText(status) {
         onDemandClips: onDemandClips || [],
         studentGamificationProfiles: studentGamificationProfiles || [],
         studentGamificationEvents: studentGamificationEvents || [],
-        studentPersonalQuests: studentPersonalQuests || []
+        studentPersonalQuests: studentPersonalQuests || [],
+        specialVoucherActivities: specialVoucherActivities || []
       };
       const blob = new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json;charset=utf-8;' });
       const url = URL.createObjectURL(blob);
