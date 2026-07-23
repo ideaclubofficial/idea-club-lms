@@ -33389,12 +33389,13 @@ function receiptStatusText(status) {
     function renderScoreStatsBar(label, value, color) {
       const safeValue = Math.max(0, Math.min(50, Number(value || 0)));
       const width = Math.round((safeValue / 50) * 1000) / 10;
+      const displayValue = Math.round(safeValue);
       return '<div style="display:grid;grid-template-columns:48px 1fr 44px;align-items:center;gap:8px;margin:5px 0;">' +
         '<span style="font-size:11px;color:#4b5563;white-space:nowrap;">' + escapeHtml(label) + '</span>' +
         '<div style="height:8px;background:#e5e7eb;border-radius:99px;overflow:hidden;">' +
           '<div style="height:100%;width:' + width + '%;background:' + color + ';border-radius:99px;"></div>' +
         '</div>' +
-        '<strong style="font-size:11px;text-align:right;color:#111827;">' + safeValue.toFixed(1).replace(/\.0$/, '') + '</strong>' +
+        '<strong style="font-size:11px;text-align:right;color:#111827;">' + displayValue + '</strong>' +
       '</div>';
     }
 
@@ -44689,7 +44690,7 @@ function receiptStatusText(status) {
       const groupKey = jsArg(group.key);
       const subjectArg = jsArg(subject);
       const correctText = data.correct + '/' + (data.total || '-');
-      const scoreText = data.total ? (data.score50.toFixed(1).replace(/\.0$/, '') + '/50') : '-';
+      const scoreText = data.total ? onlineExamFormatScore50Value(data.score50) : '-';
       const adjustedBadge = data.adjusted ? '<span style="display:inline-block;margin-left:4px;color:#d97706;font-size:10px;">ปรับ</span>' : '';
       const isPublished = data.result && (data.result.resultStatus === 'published');
       const btnStyle = isPublished
@@ -45410,7 +45411,7 @@ function receiptStatusText(status) {
       const month = getOnlineExamResultMonth(r);
       const totalQ = getOnlineExamResultTotalQuestions(r);
       const correctCount = getOnlineExamResultCorrectCount(r);
-      const score50val = r.score50 !== undefined ? r.score50 : onlineExamGetScore50Value(correctCount, totalQ);
+      const score50val = r.score50 !== undefined ? onlineExamNormalizeScore50(r.score50) : onlineExamGetScore50Value(correctCount, totalQ);
       const nickname = getOnlineExamResultNickname(r) || '-';
       const memberId = getOnlineExamResultMemberId(r);
 
@@ -45880,7 +45881,7 @@ function receiptStatusText(status) {
         const score50val = totalQ > 0 ? onlineExamGetScore50Value(correct, totalQ) : 0;
         const summaryEl = getElement('manualExamScoreSummary');
         if (summaryEl) {
-          summaryEl.textContent = 'ถูก ' + correct + ' / ' + totalQ + ' ข้อ · คะแนน ' + score50val.toFixed(1).replace(/\.0$/, '') + '/50' + (unanswered ? ' · ยังไม่ได้กา ' + unanswered + ' ข้อ' : ' ✓ ครบแล้ว');
+          summaryEl.textContent = 'ถูก ' + correct + ' / ' + totalQ + ' ข้อ · คะแนน ' + onlineExamFormatScore50Value(score50val) + (unanswered ? ' · ยังไม่ได้กา ' + unanswered + ' ข้อ' : ' ✓ ครบแล้ว');
           summaryEl.style.color = unanswered ? '#1d4ed8' : '#16a34a';
         }
       }
@@ -45970,7 +45971,7 @@ function receiptStatusText(status) {
           addManualExamExistingResultKey(key, localDoc);
         });
         updateManualExamStudentOptions();
-        if (resultEl) { resultEl.textContent = (existingResult ? 'แก้ผลสอบเรียบร้อย — ' : 'บันทึกผลสอบเรียบร้อย — ') + (student.name || '-') + ' · ถูก ' + correct + '/' + total + ' ข้อ · ' + score50val.toFixed(1).replace(/\.0$/, '') + '/50 คะแนน'; resultEl.style.color = '#16a34a'; }
+        if (resultEl) { resultEl.textContent = (existingResult ? 'แก้ผลสอบเรียบร้อย — ' : 'บันทึกผลสอบเรียบร้อย — ') + (student.name || '-') + ' · ถูก ' + correct + '/' + total + ' ข้อ · ' + onlineExamFormatScore50Value(score50val) + ' คะแนน'; resultEl.style.color = '#16a34a'; }
         renderOnlineExamGradingPage(onlineExamGradePage);
         safeRun(renderAdminScoreTables, 'admin-score-refresh-after-manual');
         manualExamAnswers = {};
@@ -47145,16 +47146,25 @@ function receiptStatusText(status) {
 
     // ---- Score /50 Helpers ----
 
+    function onlineExamNormalizeScore50(value) {
+      const score = Number(value || 0) || 0;
+      return Math.max(0, Math.min(50, Math.round(score)));
+    }
+
     function onlineExamGetScore50Value(correctCount, totalQuestions) {
       const total = Number(totalQuestions || 0) || 0;
       const correct = Number(correctCount || 0) || 0;
       if (!total) return 0;
-      return Math.round((correct / total) * 50 * 10) / 10;
+      return onlineExamNormalizeScore50((correct / total) * 50);
+    }
+
+    function onlineExamFormatScore50Value(score) {
+      return onlineExamNormalizeScore50(score) + '/50';
     }
 
     function onlineExamFormatScore50(correctCount, totalQuestions) {
       const score = onlineExamGetScore50Value(correctCount, totalQuestions);
-      return score.toFixed(1).replace(/\.0$/, '') + '/50';
+      return onlineExamFormatScore50Value(score);
     }
 
     // ---- Shuffle Utility ----
