@@ -8355,6 +8355,7 @@
                   <label>ประเภทรางวัล</label>
                   <select id="shopRewardType" onchange="onShopRewardTypeChange()">
                     <option value="standard">รางวัลมาตรฐาน (แลกครั้งเดียว)</option>
+                    <option value="specialVoucher">🎫 บัตรรางวัลพิเศษ</option>
                     <option value="stampCard">บัตรสะสม (สะสมแสตมป์)</option>
                     <option value="wheelTickets">🎟 ตั๋วหมุนวงล้อ</option>
                     <option value="avatarCosmetic">👗 ไอเท็มแต่ง Avatar</option>
@@ -23306,6 +23307,7 @@
           const isStamp = r.rewardType === 'stampCard';
           const isTickets = r.rewardType === 'wheelTickets';
           const isAvatar = r.rewardType === 'avatarCosmetic';
+          const isSpecialVoucher = r.rewardType === 'specialVoucher';
           const isSaleActive = r.active !== false;
           const saleStatus = isSaleActive
             ? '<span style="display:inline-flex;align-items:center;gap:4px;border-radius:999px;background:#dcfce7;color:#15803d;font-size:11px;font-weight:800;padding:3px 8px;white-space:nowrap;">เปิดขาย</span>'
@@ -23313,7 +23315,7 @@
           const saleToggleClass = isSaleActive ? 'btn-red' : 'btn-green';
           const saleToggleLabel = isSaleActive ? 'ปิดการขาย' : 'เปิดการขาย';
           const cosmetic = isAvatar ? getAvatarCosmeticById(r.avatarCosmeticId) : null;
-          const typeLabel = isStamp ? '🎴 บัตรสะสม (' + (r.stampsRequired || '?') + ' แสตมป์)' : isTickets ? '🎟 ตั๋วหมุนวงล้อ (' + (r.ticketsAwarded || 1) + ' ตั๋ว)' : isAvatar ? '👗 Avatar (' + (cosmetic ? cosmetic.label : (r.avatarCosmeticId || '-')) + ')' : '🎁 มาตรฐาน';
+          const typeLabel = isStamp ? '🎴 บัตรสะสม (' + (r.stampsRequired || '?') + ' แสตมป์)' : isTickets ? '🎟 ตั๋วหมุนวงล้อ (' + (r.ticketsAwarded || 1) + ' ตั๋ว)' : isAvatar ? '👗 Avatar (' + (cosmetic ? cosmetic.label : (r.avatarCosmeticId || '-')) + ')' : isSpecialVoucher ? '🎫 บัตรรางวัลพิเศษ' : '🎁 มาตรฐาน';
           const repeatStatus = rewardAllowsRepeatPurchase(r)
             ? '<span style="display:inline-flex;border-radius:999px;background:#e0f2fe;color:#0369a1;font-size:11px;font-weight:800;padding:3px 8px;white-space:nowrap;">ซื้อซ้ำได้</span>'
             : '<span style="display:inline-flex;border-radius:999px;background:#f1f5f9;color:#475569;font-size:11px;font-weight:800;padding:3px 8px;white-space:nowrap;">ครั้งเดียว</span>';
@@ -23421,11 +23423,7 @@
           pendingSpecialEl.innerHTML = '<p style="color:#7c3aed;font-size:13px;">ยังไม่มีบัตรพิเศษรอใช้</p>';
         } else {
           const rows = pendingSpecialVouchers.map(function(r) {
-            const sourceTag = r.fromAdmin
-              ? '<span style="font-size:10px;background:#dbeafe;color:#1d4ed8;border-radius:4px;padding:1px 5px;font-weight:700;margin-left:4px;">👤 Admin</span>'
-              : (r.fromPrizeWheel
-                ? '<span style="font-size:10px;background:#ede9fe;color:#6d28d9;border-radius:4px;padding:1px 5px;font-weight:700;margin-left:4px;">🎰 วงล้อ</span>'
-                : '<span style="font-size:10px;background:#dcfce7;color:#15803d;border-radius:4px;padding:1px 5px;font-weight:700;margin-left:4px;">🛒 ร้านค้า</span>');
+            const sourceTag = getSpecialVoucherSourceBadgeHtml(r);
             return '<tr>' +
               '<td>' + escapeHtml(r.studentName || '-') + '<br><span style="font-size:11px;color:#94a3b8;">' + escapeHtml(r.memberId || '-') + '</span></td>' +
               '<td>' + escapeHtml(r.rewardTitle || 'บัตรพิเศษ') + sourceTag + (r.adminNote ? '<br><span style="font-size:11px;color:#7c3aed;">' + escapeHtml(r.adminNote) + '</span>' : '') + '<br><span style="font-size:11px;color:#7c3aed;">เลือกได้ว่าจะใช้เข้ากิจกรรมพิเศษหรือแลกของรางวัลใหญ่</span></td>' +
@@ -23449,7 +23447,7 @@
           const isStamp = isStampCardRedemption(r);
           const sourceTag = r.fromAdmin
             ? '<span style="font-size:10px;background:#dbeafe;color:#1d4ed8;border-radius:4px;padding:1px 5px;font-weight:700;margin-left:4px;">👤 Admin</span>'
-            : (r.fromPrizeWheel ? '<span style="font-size:10px;background:#ede9fe;color:#6d28d9;border-radius:4px;padding:1px 5px;font-weight:700;margin-left:4px;">🎰 วงล้อ</span>' : (isStamp ? '<span style="font-size:10px;background:#fef3c7;color:#92400e;border-radius:4px;padding:1px 5px;font-weight:700;margin-left:4px;">🎴 แสตมป์</span>' : ''));
+            : (r.fromStampCardClaim ? '<span style="font-size:10px;background:#fef3c7;color:#92400e;border-radius:4px;padding:1px 5px;font-weight:700;margin-left:4px;">🎴 แลกแสตมป์</span>' : (r.fromPrizeWheel ? '<span style="font-size:10px;background:#ede9fe;color:#6d28d9;border-radius:4px;padding:1px 5px;font-weight:700;margin-left:4px;">🎰 วงล้อ</span>' : (isStamp ? '<span style="font-size:10px;background:#fef3c7;color:#92400e;border-radius:4px;padding:1px 5px;font-weight:700;margin-left:4px;">🎴 แสตมป์</span>' : '')));
           const statusCell = isFulfilled
             ? '<span style="color:#16a34a;font-weight:700;">' + (isSpecial ? '✓ ใช้แล้ว' : '✓ จัดส่งแล้ว') + '</span>'
             : (isSpecial
@@ -23495,6 +23493,7 @@
       const isStamp = r.rewardType === 'stampCard';
       const isTickets = r.rewardType === 'wheelTickets';
       const isAvatar = r.rewardType === 'avatarCosmetic';
+      const isSpecialVoucher = r.rewardType === 'specialVoucher';
       const allowsRepeat = rewardAllowsRepeatPurchase(r);
       const formHtml =
         '<div style="display:flex;flex-direction:column;gap:12px;padding:2px 0;">' +
@@ -23505,7 +23504,8 @@
               '<input type="text" id="bGR_category" value="' + escapeHtml(r.category || '') + '" style="width:100%;" /></div>' +
             '<div><label style="font-size:13px;font-weight:700;display:block;margin-bottom:4px;">ประเภท</label>' +
               '<select id="bGR_type" onchange="var s=document.getElementById(\'bGR_stampRow\'),t=document.getElementById(\'bGR_ticketsRow\'),a=document.getElementById(\'bGR_avatarRow\');if(s)s.style.display=this.value===\'stampCard\'?\'\':\'none\';if(t)t.style.display=this.value===\'wheelTickets\'?\'\':\'none\';if(a)a.style.display=this.value===\'avatarCosmetic\'?\'\':\'none\';">' +
-                '<option value="standard"' + (!isStamp && !isTickets && !isAvatar ? ' selected' : '') + '>รางวัลมาตรฐาน</option>' +
+                '<option value="standard"' + (!isStamp && !isTickets && !isAvatar && !isSpecialVoucher ? ' selected' : '') + '>รางวัลมาตรฐาน</option>' +
+                '<option value="specialVoucher"' + (isSpecialVoucher ? ' selected' : '') + '>🎫 บัตรรางวัลพิเศษ</option>' +
                 '<option value="stampCard"' + (isStamp ? ' selected' : '') + '>บัตรสะสม</option>' +
                 '<option value="wheelTickets"' + (isTickets ? ' selected' : '') + '>🎟 ตั๋วหมุนวงล้อ</option>' +
                 '<option value="avatarCosmetic"' + (isAvatar ? ' selected' : '') + '>👗 ไอเท็มแต่ง Avatar</option>' +
@@ -23557,6 +23557,7 @@
         if (!title) title = avatarCosmetic.icon + ' ' + avatarCosmetic.label;
         if (!category) category = 'แต่ง Avatar';
       }
+      if (rewardType === 'specialVoucher' && !category) category = 'บัตรพิเศษ';
       if (!title) { alert('กรุณาใส่ชื่อรางวัล'); return; }
       if (rewardType === 'avatarCosmetic' && !avatarCosmetic) { alert('กรุณาเลือกไอเท็มแต่ง Avatar'); return; }
       if (!firebaseReady || !db) return;
@@ -23599,6 +23600,7 @@
         if (!title) title = avatarCosmetic.icon + ' ' + avatarCosmetic.label;
         if (!category) category = 'แต่ง Avatar';
       }
+      if (rewardType === 'specialVoucher' && !category) category = 'บัตรพิเศษ';
       if (!title) { if (resultEl) { resultEl.textContent = 'กรุณาใส่ชื่อรางวัล'; resultEl.style.color = '#dc2626'; } return; }
       if (rewardType === 'avatarCosmetic' && !avatarCosmetic) { if (resultEl) { resultEl.textContent = 'กรุณาเลือกไอเท็มแต่ง Avatar'; resultEl.style.color = '#dc2626'; } return; }
       if (!firebaseReady || !db) return;
@@ -23610,7 +23612,7 @@
         await db.collection('gamificationRewards').doc(id).set(reward);
         gamificationRewards.push(reward);
         if (resultEl) { resultEl.textContent = 'บันทึกรางวัลสำเร็จ!'; resultEl.style.color = '#16a34a'; }
-        addActivityLog('สร้างรางวัล', title + ' · ' + (rewardType === 'stampCard' ? 'บัตรสะสม ' + stampsRequired + ' แสตมป์' : rewardType === 'wheelTickets' ? '🎟 ' + ticketsAwarded + ' ตั๋ว' : rewardType === 'avatarCosmetic' ? '👗 ' + (avatarCosmetic ? avatarCosmetic.label : avatarCosmeticId) + ' · ' + cost + ' Coins' : cost + ' Coins') + ' · ' + (allowRepeatPurchase ? 'ซื้อซ้ำได้' : 'แลกครั้งเดียว'));
+        addActivityLog('สร้างรางวัล', title + ' · ' + (rewardType === 'stampCard' ? 'บัตรสะสม ' + stampsRequired + ' แสตมป์' : rewardType === 'wheelTickets' ? '🎟 ' + ticketsAwarded + ' ตั๋ว' : rewardType === 'avatarCosmetic' ? '👗 ' + (avatarCosmetic ? avatarCosmetic.label : avatarCosmeticId) + ' · ' + cost + ' Coins' : rewardType === 'specialVoucher' ? '🎫 บัตรรางวัลพิเศษ · ' + cost + ' Coins' : cost + ' Coins') + ' · ' + (allowRepeatPurchase ? 'ซื้อซ้ำได้' : 'แลกครั้งเดียว'));
         adminClearGamificationRewardForm();
         renderAdminGamificationShop();
       } catch (e) {
@@ -23803,6 +23805,33 @@
       if (!resetInfo) return;
       if (resetInfo.profile) resetInfo.profile.stampProgress = resetInfo.stampProgress;
       if (resetInfo.actualProfile && resetInfo.actualProfile !== resetInfo.profile) resetInfo.actualProfile.stampProgress = resetInfo.stampProgress;
+    }
+
+    function getStampCardSpecialVoucherTitle(reward) {
+      const configuredTitle = String((reward && (reward.specialVoucherTitle || reward.fulfilledRewardTitle || reward.deliveredRewardTitle || reward.rewardTitle)) || '').trim();
+      if (configuredTitle) return configuredTitle;
+      const cardTitle = String((reward && reward.title) || '').trim();
+      return cardTitle ? 'บัตรรางวัลพิเศษ - ' + cardTitle : 'บัตรรางวัลพิเศษ';
+    }
+
+    function getSpecialVoucherSourceLabel(redemption) {
+      if (redemption && redemption.fromStampCardClaim) return 'จากแลกแสตมป์';
+      if (redemption && redemption.fromPrizeWheel) return 'จากวงล้อ';
+      if (redemption && redemption.fromAdmin) return 'Admin แจกให้';
+      return 'จากร้านแลกรางวัล';
+    }
+
+    function getSpecialVoucherSourceBadgeHtml(redemption) {
+      if (redemption && redemption.fromStampCardClaim) {
+        return '<span style="font-size:10px;background:#fef3c7;color:#92400e;border-radius:4px;padding:1px 5px;font-weight:700;margin-left:4px;">🎴 แลกแสตมป์</span>';
+      }
+      if (redemption && redemption.fromAdmin) {
+        return '<span style="font-size:10px;background:#dbeafe;color:#1d4ed8;border-radius:4px;padding:1px 5px;font-weight:700;margin-left:4px;">👤 Admin</span>';
+      }
+      if (redemption && redemption.fromPrizeWheel) {
+        return '<span style="font-size:10px;background:#ede9fe;color:#6d28d9;border-radius:4px;padding:1px 5px;font-weight:700;margin-left:4px;">🎰 วงล้อ</span>';
+      }
+      return '<span style="font-size:10px;background:#dcfce7;color:#15803d;border-radius:4px;padding:1px 5px;font-weight:700;margin-left:4px;">🛒 ร้านค้า</span>';
     }
 
     async function completeStampCardDelivery(redemptionId) {
@@ -24035,7 +24064,7 @@
       }).join('');
       const rewardOptions = activeRewards.map(function(r) {
         const id = escapeHtml(String(r.firebaseDocId || r.id || ''));
-        const tag = r.rewardType === 'stampCard' ? ' [เพิ่มแสตมป์]' : '';
+        const tag = r.rewardType === 'stampCard' ? ' [เพิ่มแสตมป์]' : (r.rewardType === 'specialVoucher' ? ' [บัตรพิเศษ]' : '');
         return '<option value="' + id + '">' + escapeHtml((r.title || '-') + tag) + '</option>';
       }).join('');
 
@@ -26023,7 +26052,7 @@
         const isFulfilled = r.status === 'fulfilled';
         const isStamp = isStampCardRedemption(r);
         const isSpecial = isSpecialVoucherRedemption(r);
-        const src = isStamp ? '🎴 บัตรสะสม' : (r.fromPrizeWheel ? '🎰 วงล้อ' : (r.fromAdmin ? '👤 Admin' : '🛒 ร้านค้า'));
+        const src = isStamp ? '🎴 บัตรสะสม' : (r.fromStampCardClaim ? '🎴 แลกแสตมป์' : (r.fromPrizeWheel ? '🎰 วงล้อ' : (r.fromAdmin ? '👤 Admin' : '🛒 ร้านค้า')));
         const deliveredTitle = isStamp ? getStampCardDeliveredRewardTitle(r) : '';
         const specialUseTitle = isSpecial ? getSpecialVoucherUseTitle(r) : '';
         const specialUseLabel = isSpecial && specialUseTitle ? getSpecialVoucherUseTypeLabel(r.specialVoucherUseType) + ': ' + specialUseTitle : '';
@@ -26174,7 +26203,7 @@
       if (!pending.length && !fulfilled.length) return '';
       const pendingRows = pending.length ? pending.map(function(redemption) {
         const rid = jsArg(redemption.firebaseDocId || redemption.id || '');
-        const source = redemption.fromPrizeWheel ? 'จากวงล้อ' : (redemption.fromAdmin ? 'Admin แจกให้' : 'จากร้านแลกรางวัล');
+        const source = getSpecialVoucherSourceLabel(redemption);
         return '<div class="student-gamification-quest" style="margin-bottom:8px;border-color:#c4b5fd;background:#faf5ff;">' +
           '<span class="student-gamification-quest-icon">🎫</span>' +
           '<div style="flex:1;min-width:0;">' +
@@ -26220,6 +26249,7 @@
         if (reward.rewardType === 'avatarCosmetic') return { key: 'avatar', label: '👗 แต่ง Avatar' };
         if (reward.rewardType === 'stampCard') return { key: 'stamp', label: '🎴 บัตรสะสม' };
         if (reward.rewardType === 'wheelTickets') return { key: 'wheelTickets', label: '🎟 บัตรหมุนวงล้อ' };
+        if (reward.rewardType === 'specialVoucher') return { key: 'specialVoucher', label: '🎫 บัตรรางวัลพิเศษ' };
         const cat = String(reward.category || '').trim() || 'รางวัลทั่วไป';
         return { key: 'standard:' + cat, label: '🎁 ' + cat };
       }
@@ -26324,6 +26354,7 @@
 
         // Wheel tickets reward
         const isWheelTickets = r.rewardType === 'wheelTickets';
+        const isSpecialVoucherReward = r.rewardType === 'specialVoucher';
         const alreadyRedeemed = !allowRepeat && currentStudent && studentHasRedeemedReward(r, currentStudent);
         const canAfford = coins >= (r.cost || 0);
         let btnHtml;
@@ -26331,12 +26362,14 @@
           btnHtml = '<span class="sgshop-status">✓ แลกแล้ว</span>';
         } else {
           btnHtml = '<button type="button" class="sgshop-btn' + (canAfford ? '' : ' sgshop-btn--disabled') + '" onclick="redeemGamificationReward(\'' + rid + '\')" ' + (canAfford ? '' : 'disabled') + '>' +
-            (canAfford ? (isWheelTickets ? '🎟 แลกตั๋ว' : 'แลกรางวัล') : 'Coins ไม่พอ') + '</button>';
+            (canAfford ? (isWheelTickets ? '🎟 แลกตั๋ว' : isSpecialVoucherReward ? '🎫 แลกบัตร' : 'แลกรางวัล') : 'Coins ไม่พอ') + '</button>';
         }
-        const ticketDesc = isWheelTickets ? '🎟 ' + (r.ticketsAwarded || 1) + ' ตั๋วหมุนวงล้อ' + (r.description ? ' · ' + r.description : '') : (r.description || '');
+        const ticketDesc = isWheelTickets
+          ? '🎟 ' + (r.ticketsAwarded || 1) + ' ตั๋วหมุนวงล้อ' + (r.description ? ' · ' + r.description : '')
+          : (isSpecialVoucherReward ? 'ใช้เข้าร่วมกิจกรรมพิเศษหรือแลกของรางวัลใหญ่' + (r.description ? ' · ' + r.description : '') : (r.description || ''));
         const cardHtml = '<div class="sgshop-card">' +
           '<div class="sgshop-info">' +
-            '<span class="sgshop-cat">' + (isWheelTickets ? '🎟 ตั๋วหมุนวงล้อ' : escapeHtml(r.category || 'รางวัล')) + escapeHtml(isWheelTickets && r.category ? ' · ' + r.category : '') + '</span>' +
+            '<span class="sgshop-cat">' + (isWheelTickets ? '🎟 ตั๋วหมุนวงล้อ' : isSpecialVoucherReward ? '🎫 บัตรรางวัลพิเศษ' : escapeHtml(r.category || 'รางวัล')) + escapeHtml((isWheelTickets || isSpecialVoucherReward) && r.category ? ' · ' + r.category : '') + '</span>' +
             '<strong class="sgshop-title">' + escapeHtml(r.title || '-') + '</strong>' +
             '<p class="sgshop-desc">' + escapeHtml(ticketDesc) + '</p>' +
           '</div>' +
@@ -26498,9 +26531,12 @@
         renderStudentGamificationPanel();
         return;
       }
-      if (!confirm('ยืนยันแลกรางวัล "' + (reward.title || 'รางวัลแสตมป์') + '"?\nหลังแลกแล้วสถานะจะเป็นรอรับจากครู/ทีมงาน')) return;
+      if (!confirm('ยืนยันแลกแสตมป์ "' + (reward.title || 'รางวัลแสตมป์') + '"?\nระบบจะออกบัตรรางวัลพิเศษให้ทันที และ reset แสตมป์ให้เริ่มสะสมใหม่')) return;
       const redemptionId = createFirebaseDocId('gamificationRedemptions');
       const now = firebase.firestore.FieldValue.serverTimestamp();
+      const createdAtText = new Date().toLocaleString('th-TH');
+      const resetInfo = resetStampProgressLocally(currentStudent, rewardId);
+      const specialVoucherTitle = getStampCardSpecialVoucherTitle(reward);
       const redemption = {
         id: redemptionId,
         firebaseDocId: redemptionId,
@@ -26508,21 +26544,40 @@
         authUid: String((currentStudent.authUid) || (firebaseUser && firebaseUser.uid) || '').trim(),
         memberId: currentStudent.memberId || currentStudent.studentId || '',
         studentName: currentStudent.name || '',
-        rewardId: rewardId,
-        rewardTitle: reward.title || '',
-        rewardType: 'stampCard',
+        rewardTitle: specialVoucherTitle,
+        rewardType: 'standard',
         coinsPaid: 0,
-        claimedFromStampCard: true,
+        fromStampCardClaim: true,
+        sourceStampCardRewardId: rewardId,
+        sourceStampCardTitle: reward.title || '',
+        stampResetAfterClaim: !!(resetInfo && resetInfo.profileId),
         status: 'pending',
         deleted: false,
         createdAt: now,
-        createdAtText: new Date().toLocaleString('th-TH')
+        createdAtText: createdAtText
       };
       try {
-        await db.collection('gamificationRedemptions').doc(redemptionId).set(redemption);
+        const batch = db.batch();
+        batch.set(db.collection('gamificationRedemptions').doc(redemptionId), redemption);
+        if (resetInfo && resetInfo.profileId) {
+          batch.set(db.collection('studentGamificationProfiles').doc(resetInfo.profileId), {
+            firebaseDocId: resetInfo.profileId,
+            id: resetInfo.profileId,
+            studentId: getStudentRecordDocId(currentStudent),
+            authUid: String((currentStudent.authUid) || (firebaseUser && firebaseUser.uid) || '').trim(),
+            memberId: currentStudent.memberId || currentStudent.studentId || '',
+            studentName: currentStudent.name || '',
+            nickname: currentStudent.nickname || '',
+            stampProgress: resetInfo.stampProgress,
+            deleted: false,
+            updatedAt: now
+          }, { merge: true });
+        }
+        await batch.commit();
+        applyStampProgressResetLocally(resetInfo);
         gamificationRedemptions.push(redemption);
         renderStudentGamificationPanel();
-        alert('ส่งคำขอแลกรางวัลแล้ว! สถานะ: รอรับ');
+        alert('แลกสำเร็จ! ได้รับบัตรรางวัลพิเศษ และเริ่มสะสมแสตมป์รอบใหม่แล้ว');
       } catch (e) {
         alert('แลกรางวัลไม่สำเร็จ: ' + (e.message || e.code || ''));
       }
@@ -26620,7 +26675,7 @@
         if ((profile.coins || 0) < stampCost) { alert('Coins ไม่เพียงพอ! ต้องการ ' + stampCost + ' Coins'); return; }
         const sp = (profile.stampProgress || {});
         const curCard = sp[rewardId] || { stamps: 0, completed: false };
-        if (curCard.completed) { alert('คุณสะสมแสตมป์ครบแล้ว กด "แลกรางวัล" เพื่อส่งคำขอรับรางวัล'); return; }
+        if (curCard.completed) { alert('คุณสะสมแสตมป์ครบแล้ว กด "แลกรางวัล" เพื่อรับบัตรรางวัลพิเศษและเริ่มสะสมรอบใหม่'); return; }
         if (!rewardAllowsRepeatPurchase(reward) && (Number(curCard.stamps) || 0) > 0) {
           alert('บัตรสะสมนี้ตั้งค่าให้ซื้อได้ครั้งเดียว');
           renderStudentGamificationPanel();
@@ -26664,7 +26719,7 @@
           updateLeaderboardProfileInMemory(profileId, getCurrentStudentGamificationProfile());
           renderStudentGamificationPanel();
           if (nowCompleted) {
-            alert('🎉 สะสมแสตมป์ครบ ' + stampsRequired + '/' + stampsRequired + '! กด "แลกรางวัล" เพื่อส่งคำขอรับรางวัล');
+            alert('🎉 สะสมแสตมป์ครบ ' + stampsRequired + '/' + stampsRequired + '! กด "แลกรางวัล" เพื่อรับบัตรรางวัลพิเศษ');
           } else {
             alert('✅ สะสมแสตมป์สำเร็จ! (' + newStamps + '/' + stampsRequired + ' แสตมป์)');
           }
@@ -26698,7 +26753,9 @@
         gamificationRedemptions.push(redemption);
         updateLeaderboardProfileInMemory(profileId, getCurrentStudentGamificationProfile());
         renderStudentGamificationPanel();
-        alert('🎉 แลกรางวัล "' + reward.title + '" สำเร็จ! ทีมงานจะติดต่อกลับเร็วๆ นี้');
+        alert(reward.rewardType === 'specialVoucher'
+          ? '🎫 แลกบัตรรางวัลพิเศษ "' + reward.title + '" สำเร็จ! สถานะ: รอใช้'
+          : '🎉 แลกรางวัล "' + reward.title + '" สำเร็จ! ทีมงานจะติดต่อกลับเร็วๆ นี้');
       } catch (e) {
         alert('แลกรางวัลไม่สำเร็จ: ' + (e.message || e.code || ''));
       }
