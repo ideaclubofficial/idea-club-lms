@@ -8647,6 +8647,16 @@
               </div>
               <div id="adminAvatarBattleQuestionsTable" style="margin-top:12px;"></div>
             </div>
+            <div class="form-box" style="margin-top:16px;">
+              <div style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start;flex-wrap:wrap;">
+                <div>
+                  <h3 style="margin:0 0 6px;">🧾 ข้อสอบออนไลน์ที่ Avatar Battle ดึงมาใช้</h3>
+                  <p style="margin:0;color:#64748b;font-size:13px;">แสดงเฉพาะชุดข้อสอบออนไลน์ที่ปิดสอบแล้ว และมีโจทย์ปรนัย 4 ตัวเลือกที่ใช้ใน Battle ได้</p>
+                </div>
+                <button class="btn btn-dark" type="button" onclick="refreshAdminAvatarBattleOnlineExamSources()">รีโหลดข้อสอบออนไลน์</button>
+              </div>
+              <div id="adminAvatarBattleOnlineExamSources" style="margin-top:12px;"></div>
+            </div>
           </section>
 
         </div>
@@ -25217,6 +25227,87 @@
       table.innerHTML = '<table class="data-table" style="font-size:13px;"><thead><tr><th>วิชา/ระดับ</th><th>ความยาก</th><th>โจทย์</th><th>เฉลย</th><th>สถานะ</th><th>จัดการ</th></tr></thead><tbody>' + rows + '</tbody></table>';
     }
 
+    function getAvatarBattleClosedOnlineExamSources() {
+      return (onlineExamCourseCache || []).filter(isAvatarBattleClosedOnlineExamCourse).map(function(course) {
+        const usableQuestions = (course.questions || []).map(function(q) {
+          return normalizeAvatarBattleOnlineExamQuestion(course, q, 'attack', null);
+        }).filter(Boolean);
+        return {
+          course: course,
+          usableQuestions: usableQuestions
+        };
+      }).filter(function(item) {
+        return item.usableQuestions.length > 0;
+      }).sort(function(a, b) {
+        const ga = gradeOrder(getOnlineExamCourseGrade(a.course) || a.course.grade || '');
+        const gb = gradeOrder(getOnlineExamCourseGrade(b.course) || b.course.grade || '');
+        if (ga !== gb) return ga - gb;
+        const sa = String(a.course.subject || '');
+        const sb = String(b.course.subject || '');
+        if (sa !== sb) return sa.localeCompare(sb, 'th');
+        const ca = parseOnlineExamDateTimeValue(a.course.closeAt);
+        const cb = parseOnlineExamDateTimeValue(b.course.closeAt);
+        return (cb ? cb.getTime() : 0) - (ca ? ca.getTime() : 0);
+      });
+    }
+
+    function renderAdminAvatarBattleOnlineExamSources() {
+      const container = getElement('adminAvatarBattleOnlineExamSources');
+      if (!container) return;
+      const sources = getAvatarBattleClosedOnlineExamSources();
+      const totalQuestions = sources.reduce(function(sum, item) { return sum + item.usableQuestions.length; }, 0);
+      if (!sources.length) {
+        container.innerHTML = '<div style="padding:14px;border:1px dashed #cbd5e1;border-radius:10px;background:#f8fafc;color:#64748b;font-size:13px;">ยังไม่มีข้อสอบออนไลน์ที่ปิดสอบแล้วและใช้ใน Avatar Battle ได้<br><span style="font-size:12px;color:#94a3b8;">ต้องมี closeAt ที่ผ่านแล้ว และโจทย์ต้องมีตัวเลือกครบ 4 ข้อพร้อมเฉลย</span></div>';
+        return;
+      }
+      const rows = sources.map(function(item) {
+        const course = item.course;
+        const courseId = escapeHtml(course.firebaseDocId || course.id || '');
+        const closeDate = parseOnlineExamDateTimeValue(course.closeAt);
+        const questionsHtml = item.usableQuestions.slice(0, 12).map(function(q, index) {
+          return '<div style="padding:7px 0;border-top:1px solid #f1f5f9;">' +
+            '<div style="display:flex;gap:8px;align-items:flex-start;">' +
+              '<span style="font-size:11px;font-weight:800;color:#4f46e5;min-width:28px;">ข้อ ' + (index + 1) + '</span>' +
+              '<div style="font-size:12px;color:#0f172a;line-height:1.5;white-space:pre-wrap;flex:1;">' + onlineExamRichTextHtml(q.prompt || '-', q.promptHtml || '') + '</div>' +
+            '</div>' +
+            '<p style="font-size:11px;color:#16a34a;margin:3px 0 0 36px;">เฉลย ' + escapeHtml(q.answer || '-') + '</p>' +
+          '</div>';
+        }).join('');
+        const moreCount = Math.max(0, item.usableQuestions.length - 12);
+        return '<details style="border:1px solid #e2e8f0;border-radius:10px;background:#fff;margin-bottom:8px;overflow:hidden;">' +
+          '<summary style="cursor:pointer;padding:10px 12px;list-style:none;display:flex;justify-content:space-between;gap:10px;align-items:center;flex-wrap:wrap;">' +
+            '<span>' +
+              '<strong style="color:#0f172a;">' + escapeHtml(course.title || courseId || '-') + '</strong>' +
+              '<span style="display:block;font-size:11px;color:#64748b;margin-top:2px;">' + escapeHtml(course.subject || 'ทุกวิชา') + ' · ' + escapeHtml(getOnlineExamCourseGrade(course) || course.grade || 'ทุกระดับชั้น') + ' · ปิดสอบ ' + escapeHtml(closeDate ? formatThaiDateTime(closeDate) : '-') + '</span>' +
+            '</span>' +
+            '<span style="font-size:12px;font-weight:800;color:#16a34a;background:#dcfce7;border-radius:99px;padding:3px 9px;">ใช้ได้ ' + item.usableQuestions.length + ' ข้อ</span>' +
+          '</summary>' +
+          '<div style="padding:0 12px 10px;">' +
+            questionsHtml +
+            (moreCount ? '<p style="font-size:11px;color:#64748b;margin:6px 0 0;">ยังมีอีก ' + moreCount + ' ข้อในชุดนี้</p>' : '') +
+          '</div>' +
+        '</details>';
+      }).join('');
+      container.innerHTML =
+        '<p style="font-size:12px;color:#475569;margin:0 0 10px;">พบ ' + sources.length + ' ชุดข้อสอบ · รวมโจทย์ที่ Battle สุ่มได้ ' + totalQuestions + ' ข้อ</p>' +
+        rows;
+    }
+
+    async function refreshAdminAvatarBattleOnlineExamSources() {
+      const container = getElement('adminAvatarBattleOnlineExamSources');
+      if (!canManageAvatarBattle()) {
+        if (container) container.innerHTML = '<p style="color:#dc2626;font-size:13px;">ไม่มีสิทธิ์จัดการ Avatar Battle</p>';
+        return;
+      }
+      if (container) container.innerHTML = '<p style="color:#64748b;font-size:13px;">กำลังโหลดข้อสอบออนไลน์...</p>';
+      try {
+        await loadOnlineExamCourses();
+        renderAdminAvatarBattleOnlineExamSources();
+      } catch (e) {
+        if (container) container.innerHTML = '<p style="color:#dc2626;font-size:13px;">โหลดข้อสอบออนไลน์ไม่สำเร็จ: ' + escapeHtml(e.message || e.code || '') + '</p>';
+      }
+    }
+
     function adminEditAvatarBattleQuestion(questionId) {
       const q = getAvatarBattleQuestionById(questionId);
       if (!q) return;
@@ -25388,6 +25479,13 @@
       const enabledEl = getElement('abSkillEnabled');
       if (enabledEl) enabledEl.checked = skillSettings.enabled !== false;
       renderAdminAvatarBattleQuestionsTable();
+      renderAdminAvatarBattleOnlineExamSources();
+      if (canManageAvatarBattle() && !(onlineExamCourseCache || []).length && firebaseReady && db) {
+        loadOnlineExamCourses().then(renderAdminAvatarBattleOnlineExamSources).catch(function(e) {
+          const container = getElement('adminAvatarBattleOnlineExamSources');
+          if (container) container.innerHTML = '<p style="color:#dc2626;font-size:13px;">โหลดข้อสอบออนไลน์ไม่สำเร็จ: ' + escapeHtml(e.message || e.code || '') + '</p>';
+        });
+      }
       onAvatarBattleQuestionTypeChange();
     }
 
