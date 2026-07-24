@@ -9152,6 +9152,7 @@
       const gamificationProfileQueries = buildStudentOwnedQueries('studentGamificationProfiles');
       const gamificationEventQueries = buildStudentOwnedQueries('studentGamificationEvents');
       const personalQuestQueries = buildStudentOwnedQueries('studentPersonalQuests');
+      const gamificationRedemptionQueries = buildStudentOwnedQueries('gamificationRedemptions');
       const prizeWheelSpinQueries = buildStudentOwnedQueries('prizeWheelSpins');
 
       const paymentUnsubs = paymentsQueries.map(function(q) {
@@ -9210,24 +9211,21 @@
         }, function(err) { console.warn('prizeWheelSpins listener error:', err); });
       });
 
-      // Real-time listener for gamificationRedemptions — authUid only (studentId query blocked by Firestore rules for students)
-      const redemptionQuery = (authUid && firebaseReady && db)
-        ? db.collection('gamificationRedemptions').where('authUid', '==', String(authUid))
-        : null;
-      const redemptionUnsub = redemptionQuery ? redemptionQuery.onSnapshot(function(snapshot) {
-        if (snapshot.metadata && snapshot.metadata.hasPendingWrites) return;
-        const changes = snapshot.docChanges();
-        if (applyDocChanges(gamificationRedemptions, changes)) {
-          if (!prizeWheelSpinning) renderStudentGamificationPanel();
-        }
-      }, function(err) { console.warn('gamificationRedemptions listener error:', err); }) : function() {};
+      const redemptionUnsubs = gamificationRedemptionQueries.map(function(q) {
+        return q.onSnapshot(function(snapshot) {
+          if (snapshot.metadata && snapshot.metadata.hasPendingWrites) return;
+          const changes = snapshot.docChanges();
+          if (applyDocChanges(gamificationRedemptions, changes)) {
+            if (!prizeWheelSpinning) renderStudentGamificationPanel();
+          }
+        }, function(err) { console.warn('gamificationRedemptions listener error:', err); });
+      });
 
       studentPaymentsUnsubscribe = function() { paymentUnsubs.forEach(function(u) { try { u(); } catch(e) {} }); };
       studentReceiptsUnsubscribe = function() { receiptUnsubs.forEach(function(u) { try { u(); } catch(e) {} }); };
       studentPaymentBundlesUnsubscribe = function() { bundleUnsubs.forEach(function(u) { try { u(); } catch(e) {} }); };
       studentGamificationUnsubscribe = function() {
-        gamificationProfileUnsubs.concat(gamificationEventUnsubs, personalQuestUnsubs, prizeWheelSpinUnsubs).forEach(function(u) { try { u(); } catch(e) {} });
-        try { redemptionUnsub(); } catch(e) {}
+        gamificationProfileUnsubs.concat(gamificationEventUnsubs, personalQuestUnsubs, redemptionUnsubs, prizeWheelSpinUnsubs).forEach(function(u) { try { u(); } catch(e) {} });
       };
     }
 
@@ -12386,6 +12384,20 @@
             currentStudent = student;
             currentTeacher = null;
             currentAdmin = null;
+            const studentDocIdForProfile = getStudentRecordDocId(student);
+            if (studentDocIdForProfile) {
+              const studentLinkPatch = {
+                linkedStudentId: studentDocIdForProfile,
+                studentDocId: studentDocIdForProfile,
+                memberId: student.memberId || student.studentId || firebaseUserProfile.memberId || '',
+                studentId: student.studentId || student.memberId || firebaseUserProfile.studentId || '',
+                updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+              };
+              firebaseUserProfile = Object.assign({}, firebaseUserProfile, studentLinkPatch);
+              db.collection('users').doc(firebaseUser.uid).set(studentLinkPatch, { merge: true }).catch(function(error) {
+                console.warn('student linked profile sync skipped:', error);
+              });
+            }
             const sanitizedStudentUserProfile = sanitizeStudentProfile(firebaseUserProfile);
             setSuperAdminMode(false);
             ['superAdminTeacherLink', 'superAdminAdminLink'].forEach(function(id) {
@@ -20981,6 +20993,23 @@
       });
     }
 
+    function getStudentGamificationAuthUid(student) {
+      if (!student) return '';
+      const directUid = String(student.authUid || student.studentAuthUid || '').trim();
+      if (directUid) return directUid;
+      const profile = findStudentGamificationProfile(student);
+      const profileUid = String(profile && profile.authUid || '').trim();
+      if (profileUid) return profileUid;
+      const studentDocId = getStudentRecordDocId(student);
+      const memberId = String(student.memberId || student.studentId || '').trim();
+      const matchedProfile = studentGamificationProfiles.find(function(item) {
+        if (!item || item.deleted === true) return false;
+        return (studentDocId && String(item.studentId || '') === studentDocId) ||
+          (memberId && String(item.memberId || item.studentMemberId || '') === memberId);
+      });
+      return String(matchedProfile && matchedProfile.authUid || '').trim();
+    }
+
     function studentGamificationEventMatchesCurrentStudent(event) {
       if (!event || !currentStudent) return false;
       const studentDocId = getStudentRecordDocId(currentStudent);
@@ -24469,11 +24498,12 @@
       }
 
       const redemptionId = createFirebaseDocId('gamificationRedemptions');
-      const studentAuthUid = String(student.authUid || '').trim();
+      const studentAuthUid = getStudentGamificationAuthUid(student);
       const redemption = {
         id: redemptionId, firebaseDocId: redemptionId,
         studentId: getStudentRecordDocId(student),
         authUid: studentAuthUid,
+        studentAuthUid: studentAuthUid,
         memberId: student.memberId || student.studentId || '',
         studentName: student.name || student.studentName || '',
         rewardId: rewardId, rewardTitle: reward.title || '',
@@ -26373,14 +26403,14 @@
 
     function renderStudentVouchersHtml() {
       if (!currentStudent) return '';
-      const studentDocId = getStudentRecordDocId(currentStudent);
       const authUid = String((currentStudent.authUid) || (firebaseUser && firebaseUser.uid) || '').trim();
       const myVouchers = gamificationRedemptions
         .filter(function(r) {
           if (r.deleted || r.status === 'cancelled') return false;
           if (String(r.rewardType || '') === 'professionChangeTicket') return false;
           if (String(r.rewardType || '') === 'avatarCosmetic') return false;
-          return String(r.studentId || '') === studentDocId || String(r.authUid || '') === authUid;
+          return redemptionMatchesStudent(r, currentStudent) ||
+            (authUid && (String(r.authUid || '') === authUid || String(r.studentAuthUid || '') === authUid));
         })
         .sort(function(a, b) {
           var sa = a.status === 'fulfilled' ? 1 : 0, sb = b.status === 'fulfilled' ? 1 : 0;
