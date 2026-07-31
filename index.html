@@ -17855,7 +17855,7 @@
     }
 
     function getExpectedPaymentAmountForStudent(student, month) {
-      const studentOverride = (student && month) ? getStudentMonthPriceOverride(month, student.id) : 0;
+      const studentOverride = (student && month) ? getStudentMonthPriceOverrideForStudent(month, student) : 0;
       if (studentOverride > 0) return studentOverride;
       const course = getCourseByStudentOrName(student, student ? student.course : '');
       const monthlyCoursePrice = course ? getMonthCoursePrice(month, course.id) : 0;
@@ -19552,6 +19552,7 @@
     function isStudentPaymentRecord(student, record) {
       if (!student || !record) return false;
       const targetId = student.id !== undefined && student.id !== null ? String(student.id) : '';
+      const targetFirebaseDocId = student.firebaseDocId !== undefined && student.firebaseDocId !== null ? String(student.firebaseDocId) : '';
       const targetStudentId = student.studentId !== undefined && student.studentId !== null ? String(student.studentId) : '';
       const targetMemberId = student.memberId ? String(student.memberId).trim() : '';
       const targetAuthUid = student.authUid ? String(student.authUid) : (firebaseUser ? String(firebaseUser.uid) : '');
@@ -19566,6 +19567,7 @@
       const recordPhone = String(record.phone || record.studentPhone || '').replace(/[^0-9]/g, '');
 
       if (targetId && recordStudentId && targetId === recordStudentId) return true;
+      if (targetFirebaseDocId && recordStudentId && targetFirebaseDocId === recordStudentId) return true;
       if (targetStudentId && recordStudentId && targetStudentId === recordStudentId) return true;
       if (targetMemberId && recordMemberId && targetMemberId === recordMemberId) return true;
       if (targetAuthUid && recordAuthUid && targetAuthUid === recordAuthUid) return true;
@@ -19678,10 +19680,11 @@
       const listAmount = getExpectedPaymentAmountForStudent(student, month);
       const paymentId = createFirebaseDocId('payments');
       const nowText = new Date().toLocaleDateString('th-TH');
+      const studentKey = getPrimaryStudentIdentityKey(student);
       return {
         id: paymentId,
         firebaseDocId: paymentId,
-        studentId: student.id || '',
+        studentId: studentKey || '',
         memberId: student.memberId || '',
         studentName: student.name || '',
         studentAuthUid: student.authUid || (firebaseUser ? firebaseUser.uid : ''),
@@ -29333,18 +29336,22 @@
     async function saveStudentMonthPriceOverride(monthStr, studentId, amount) {
       const item = getPaymentMonthItem(monthStr);
       if (!item) return;
-      const student = students.find(function(s) { return String(s.id) === String(studentId); }) || null;
+      const student = findStudentByIdentityKey(studentId);
       const payment = student ? findPaymentForStudentMonth(student, monthStr) : null;
       if (payment && !canAdjustPaymentAmount(payment)) {
         renderPaymentRecordPreview('รายการนี้มีสลิป/ชำระแล้ว/อยู่ในยอดรวม จึงแก้ยอดเรียกเก็บไม่ได้', true);
         return;
       }
       if (!item.studentPrices) item.studentPrices = {};
+      const priceKey = student ? getPrimaryStudentIdentityKey(student) : String(studentId || '').trim();
+      if (!priceKey) return;
       const numAmt = Number(amount) || 0;
       if (numAmt > 0) {
-        item.studentPrices[String(studentId)] = numAmt;
+        item.studentPrices[priceKey] = numAmt;
       } else {
-        delete item.studentPrices[String(studentId)];
+        getStudentIdentityKeys(student || { id: studentId }).forEach(function(key) {
+          delete item.studentPrices[key];
+        });
       }
       try {
         await setFirebaseDocument('paymentMonths', item);
@@ -29395,7 +29402,7 @@
     }
 
     async function syncStudentMonthPriceOverrideToPayment(monthStr, studentId) {
-      const student = students.find(function(s) { return String(s.id) === String(studentId); }) || null;
+      const student = findStudentByIdentityKey(studentId);
       if (!student) return { status: 'no-student' };
       const payment = findPaymentForStudentMonth(student, monthStr);
       if (!payment) return { status: 'no-payment' };
@@ -29415,9 +29422,11 @@
       const item = getPaymentMonthItem(month);
       if (!item) return false;
       if (!item.studentPrices) item.studentPrices = {};
+      const student = findStudentByIdentityKey(studentId);
+      const priceKey = student ? getPrimaryStudentIdentityKey(student) : studentId;
       const numAmt = Number(amount || 0) || 0;
-      if (numAmt > 0) item.studentPrices[String(studentId)] = numAmt;
-      else delete item.studentPrices[String(studentId)];
+      if (numAmt > 0) item.studentPrices[String(priceKey)] = numAmt;
+      else getStudentIdentityKeys(student || { id: studentId }).forEach(function(key) { delete item.studentPrices[key]; });
       await setFirebaseDocument('paymentMonths', item);
       return true;
     }
@@ -29773,7 +29782,7 @@
       if (!currentStudent || !currentStudent.courseId) return visible;
       return visible.filter(function(item) {
         const skipped = item && item.skippedStudents ? item.skippedStudents : {};
-        if (skipped[String(currentStudent.id || '')]) return false;
+        if (getStudentIdentityKeys(currentStudent).some(function(key) { return !!skipped[key]; })) return false;
         return item && item.month && isStudentBillingMonthActive(item.month);
       });
     }
@@ -29804,6 +29813,41 @@
       return Number(item.studentPrices[String(studentId)] || 0) || 0;
     }
 
+    function getStudentIdentityKeys(student) {
+      if (!student) return [];
+      const keys = [
+        student.id,
+        student.firebaseDocId,
+        student.authUid,
+        student.uid,
+        student.memberId,
+        student.studentId
+      ].map(function(value) { return String(value || '').trim(); }).filter(Boolean);
+      return keys.filter(function(key, index, list) { return list.indexOf(key) === index; });
+    }
+
+    function getPrimaryStudentIdentityKey(student) {
+      const keys = getStudentIdentityKeys(student);
+      return keys[0] || '';
+    }
+
+    function findStudentByIdentityKey(studentKey) {
+      const key = String(studentKey || '').trim();
+      if (!key) return null;
+      return (students || []).find(function(student) {
+        return getStudentIdentityKeys(student).includes(key);
+      }) || null;
+    }
+
+    function getStudentMonthPriceOverrideForStudent(monthStr, student) {
+      const keys = getStudentIdentityKeys(student);
+      for (let i = 0; i < keys.length; i++) {
+        const amount = getStudentMonthPriceOverride(monthStr, keys[i]);
+        if (amount > 0) return amount;
+      }
+      return 0;
+    }
+
     function getPaymentCoursePriceCount(item) {
       if (!item || !item.coursePrices) return 0;
       return Object.keys(item.coursePrices).filter(function(key) { return Number(item.coursePrices[key] || 0) > 0; }).length;
@@ -29830,7 +29874,8 @@
     function findPaymentForStudentMonth(student, month) {
       const m = String(month || '').trim();
       return payments.find(function(p) {
-        return String(p.studentId || '') === String(student.id || '') && String(p.month || '').trim() === m;
+        const pMonth = String(p.paymentMonth || p.month || p.billingMonth || '').trim();
+        return isStudentPaymentRecord(student, p) && pMonth === m;
       }) || null;
     }
 
@@ -29843,7 +29888,7 @@
       const pmItem = getPaymentMonthItem(month);
       const skipped = pmItem && pmItem.skippedStudents ? pmItem.skippedStudents : {};
       return getMonthlyPaymentTargetStudents().filter(function(s) {
-        if (skipped[String(s.id)]) return false;
+        if (getStudentIdentityKeys(s).some(function(key) { return !!skipped[key]; })) return false;
         if (!s.billingStartMonth) return true;
         return compareThaiMonthYear(s.billingStartMonth, month) <= 0;
       });
@@ -29870,7 +29915,7 @@
         ? new Set(selectedStudentIds.map(function(id) { return String(id); }))
         : null;
       const targetStudents = getMonthlyPaymentTargetStudentsForMonth(month).filter(function(student) {
-        return !selectedSet || selectedSet.has(String(student.id));
+        return !selectedSet || getStudentIdentityKeys(student).some(function(key) { return selectedSet.has(String(key)); });
       });
       let created = 0;
       let updated = 0;
@@ -30008,7 +30053,7 @@
       try {
         await savePaymentCoursePricesForMonth(month);
         const paymentCounts = await createOrUpdateMonthlyPaymentRecordsForMonth(month, [studentId]);
-        const student = students.find(function(s) { return String(s.id) === String(studentId); }) || {};
+        const student = findStudentByIdentityKey(studentId) || {};
         const paymentSummary = 'บันทึกยอดรายคนแล้ว: ' + (student.name || 'นักเรียน') + ' · สร้าง ' + paymentCounts.created + ' รายการ, อัปเดต ' + paymentCounts.updated + ' รายการ, ข้าม ' + paymentCounts.skipped + ' รายการ';
         if (courseResult) { courseResult.textContent = 'บันทึกราคาคอร์สของเดือนนี้แล้ว'; courseResult.style.color = '#16a34a'; }
         if (result) { result.textContent = paymentSummary; result.style.color = '#16a34a'; }
@@ -30048,14 +30093,15 @@
       try {
         if (!pmItem.skippedStudents) pmItem.skippedStudents = {};
         selectedIds.forEach(function(studentId) {
-          pmItem.skippedStudents[String(studentId)] = true;
+          const student = findStudentByIdentityKey(studentId);
+          const skipKey = student ? getPrimaryStudentIdentityKey(student) : String(studentId);
+          pmItem.skippedStudents[skipKey] = true;
         });
         await setFirebaseDocument('paymentMonths', pmItem);
 
         for (const studentId of selectedIds) {
-          const payment = payments.find(function(p) {
-            return String(p.studentId || '') === String(studentId) && p.month === month;
-          });
+          const student = findStudentByIdentityKey(studentId);
+          const payment = student ? findPaymentForStudentMonth(student, month) : null;
           if (!payment) continue;
           if (!isPaymentRecordUpdatable(payment)) {
             skippedPayments++;
@@ -30087,18 +30133,18 @@
       if (!pmItem) return;
       if (!confirm('ยืนยันยกเลิกยอดเรียกเก็บรอบ ' + month + ' ของนักเรียนรายนี้?')) return;
       if (!pmItem.skippedStudents) pmItem.skippedStudents = {};
-      pmItem.skippedStudents[String(studentId)] = true;
+      const student = findStudentByIdentityKey(studentId);
+      const skipKey = student ? getPrimaryStudentIdentityKey(student) : String(studentId);
+      pmItem.skippedStudents[skipKey] = true;
       await setFirebaseDocument('paymentMonths', pmItem);
-      const payment = payments.find(function(p) {
-        return String(p.studentId || '') === String(studentId) && p.month === month;
-      });
+      const payment = student ? findPaymentForStudentMonth(student, month) : null;
       if (payment && isPaymentRecordUpdatable(payment)) {
         payment.status = 'ยกเว้น';
         payment.paymentStatus = 'ยกเว้น';
         payment.adminNote = (payment.adminNote ? payment.adminNote + ' | ' : '') + 'ยกเว้นรอบ ' + month;
         await setFirebaseDocument('payments', payment);
       }
-      addActivityLog('ยกเลิกยอดเรียกเก็บรายบุคคล', (students.find(function(s) { return String(s.id) === String(studentId); }) || {}).name + ' · ' + month);
+      addActivityLog('ยกเลิกยอดเรียกเก็บรายบุคคล', (student || {}).name + ' · ' + month);
       renderPaymentRecordPreview();
       renderPaymentTable();
     }
@@ -30106,17 +30152,18 @@
     async function restoreStudentMonthPayment(month, studentId) {
       const pmItem = getPaymentMonthItem(month);
       if (!pmItem || !pmItem.skippedStudents) return;
-      delete pmItem.skippedStudents[String(studentId)];
-      await setFirebaseDocument('paymentMonths', pmItem);
-      const payment = payments.find(function(p) {
-        return String(p.studentId || '') === String(studentId) && p.month === month && p.status === 'ยกเว้น';
+      const student = findStudentByIdentityKey(studentId);
+      getStudentIdentityKeys(student || { id: studentId }).forEach(function(key) {
+        delete pmItem.skippedStudents[key];
       });
+      await setFirebaseDocument('paymentMonths', pmItem);
+      const payment = student ? findPaymentForStudentMonth(student, month) : null;
       if (payment) {
         payment.status = 'รอชำระเงิน';
         payment.paymentStatus = 'รอชำระเงิน';
         await setFirebaseDocument('payments', payment);
       }
-      addActivityLog('คืนสิทธิ์ยอดเรียกเก็บ', (students.find(function(s) { return String(s.id) === String(studentId); }) || {}).name + ' · ' + month);
+      addActivityLog('คืนสิทธิ์ยอดเรียกเก็บ', (student || {}).name + ' · ' + month);
       renderPaymentRecordPreview();
       renderPaymentTable();
     }
@@ -30145,17 +30192,19 @@
         if (!s.billingStartMonth) return true;
         return compareThaiMonthYear(s.billingStartMonth, month) <= 0;
       });
-      const previewIds = new Set(previewStudents.map(function(s) { return String(s.id); }));
+      const previewIds = new Set(previewStudents.map(getPrimaryStudentIdentityKey).filter(Boolean));
       const excludedStudents = allEligibleStudents.filter(function(s) {
-        return !previewIds.has(String(s.id));
+        return !getStudentIdentityKeys(s).some(function(key) { return previewIds.has(key); });
       });
       const rows = previewStudents.map(function(student) {
+        const studentKey = getPrimaryStudentIdentityKey(student);
         const expectedAmount = getMonthlyPaymentAmountForStudent(student, month);
         const payment = findPaymentForStudentMonth(student, month);
         const amount = payment ? getPaymentFinalAmount(payment) : expectedAmount;
-        const isSkipped = !!skipped[String(student.id)];
+        const isSkipped = getStudentIdentityKeys(student).some(function(key) { return !!skipped[key]; });
         return {
           student: student,
+          studentKey: studentKey,
           amount: amount,
           expectedAmount: expectedAmount,
           payment: payment,
@@ -30188,21 +30237,22 @@
         const recordStatus = isSkipped ? '<span class="status-absent">ยกเว้นรอบนี้</span>' : (payment ? '<span class="status-paid">สร้างแล้ว</span>' : '<span class="status-waiting">ยังไม่ได้สร้าง</span>');
         const recordStatusText = isSkipped ? 'ยกเว้น' : (payment ? 'สร้างแล้ว' : 'ยังไม่ได้สร้าง');
         const displayStatusClass = displayStatus === 'ชำระแล้ว' ? 'status-paid' : (displayStatus === 'ค้างชำระ' || displayStatus === 'สลิปไม่ผ่าน' || displayStatus === 'ยกเว้น' ? 'status-absent' : 'status-waiting');
-        const override = getStudentMonthPriceOverride(month, student.id);
+        const studentKey = row.studentKey || getPrimaryStudentIdentityKey(student);
+        const override = getStudentMonthPriceOverrideForStudent(month, student);
         const canEditOverride = !isSkipped && (!payment || canAdjustPaymentAmount(payment));
         const inputStyle = 'width:90px;border:1px solid ' + (override > 0 ? '#3b82f6;color:#1d4ed8;font-weight:700' : '#d1d5db;color:#6b7280') + ';border-radius:6px;padding:3px 6px;font-size:13px;' + (canEditOverride ? '' : 'background:#f3f4f6;cursor:not-allowed;');
         const overrideTitle = canEditOverride ? 'ปรับยอดพิเศษรายคน' : 'รายการนี้มีสลิป/ชำระแล้ว/อยู่ในยอดรวม จึงแก้ยอดไม่ได้';
-        const overrideTd = '<td><input type="number" min="0" style="' + inputStyle + '" placeholder="ปกติ" value="' + (override > 0 ? override : '') + '" title="' + overrideTitle + '"' + (canEditOverride ? ' onblur="saveStudentMonthPriceOverride(' + jsArg(month) + ',' + jsArg(student.id) + ',this.value)" onkeydown="if(event.key===\'Enter\')this.blur()"' : ' disabled') + '></td>';
+        const overrideTd = '<td><input type="number" min="0" style="' + inputStyle + '" placeholder="ปกติ" value="' + (override > 0 ? override : '') + '" title="' + overrideTitle + '"' + (canEditOverride ? ' onblur="saveStudentMonthPriceOverride(' + jsArg(month) + ',' + jsArg(studentKey) + ',this.value)" onkeydown="if(event.key===\'Enter\')this.blur()"' : ' disabled') + '></td>';
         const amountDiffNote = (payment && row.expectedAmount !== row.amount) ? '<br><span class="mini-muted">ราคาปกติ: ' + formatPrice(row.expectedAmount) + '</span>' : '';
         const canSelect = !isSkipped && (!payment || canAdjustPaymentAmount(payment));
         const selectTitle = canSelect ? 'เลือกรายการนี้' : 'รายการนี้ไม่สามารถอัปเดตหรือยกเลิกเป็นชุดได้';
-        const saveRowButton = canSelect ? '<button class="btn btn-green" style="font-size:12px;padding:4px 10px;" type="button" onclick="saveSinglePaymentCoursePriceAndRecord(\'' + jsArg(month) + '\',\'' + jsArg(student.id) + '\')">บันทึกยอด</button>' : '';
-        return '<tr data-student-id="' + escapeHtml(String(student.id || '')) + '"' +
+        const saveRowButton = canSelect ? '<button class="btn btn-green" style="font-size:12px;padding:4px 10px;" type="button" onclick="saveSinglePaymentCoursePriceAndRecord(\'' + jsArg(month) + '\',\'' + jsArg(studentKey) + '\')">บันทึกยอด</button>' : '';
+        return '<tr data-student-id="' + escapeHtml(String(studentKey || '')) + '"' +
             ' data-name="' + escapeHtml((student.name || '').toLowerCase()) + '"' +
             ' data-course="' + escapeHtml(student.course || '') + '"' +
             ' data-location="' + escapeHtml(student.preferredLocation || '') + '"' +
             ' data-record-status="' + recordStatusText + '" style="' + (isSkipped ? 'opacity:0.45;' : '') + '">' +
-          '<td style="text-align:center;"><input class="payment-preview-select" type="checkbox" data-student-id="' + escapeHtml(String(student.id || '')) + '" onchange="updatePaymentPreviewSelectionSummary()" title="' + selectTitle + '"' + (canSelect ? '' : ' disabled') + '></td>' +
+          '<td style="text-align:center;"><input class="payment-preview-select" type="checkbox" data-student-id="' + escapeHtml(String(studentKey || '')) + '" onchange="updatePaymentPreviewSelectionSummary()" title="' + selectTitle + '"' + (canSelect ? '' : ' disabled') + '></td>' +
           '<td style="word-break:break-word;white-space:normal;"><strong>' + escapeHtml(student.name || '-') + '</strong>' + (student.nickname ? ' <span style="color:#6b7280;font-weight:400;font-size:13px;">(' + escapeHtml(student.nickname) + ')</span>' : '') + '<br><span class="mini-muted">' + escapeHtml(student.memberId || student.phone || '-') + '</span></td>' +
           '<td style="white-space:nowrap;">' + escapeHtml(student.course || '-') + '</td>' +
           '<td style="white-space:nowrap;"><strong>' + formatPrice(row.amount) + '</strong>' + amountDiffNote + '</td>' +
@@ -30210,8 +30260,8 @@
           '<td style="white-space:nowrap;">' + recordStatus + '</td>' +
           '<td style="white-space:nowrap;">' + (payment ? '<span class="' + displayStatusClass + '">' + escapeHtml(displayStatus) + '</span>' : '-') + '</td>' +
           '<td><div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">' + (isSkipped
-            ? '<button class="btn btn-dark" style="font-size:12px;padding:4px 10px;" type="button" onclick="restoreStudentMonthPayment(\'' + jsArg(month) + '\',\'' + jsArg(student.id) + '\')">คืนสิทธิ์</button>'
-            : saveRowButton + '<button class="btn btn-red" style="font-size:12px;padding:4px 10px;" type="button" onclick="voidStudentMonthPayment(\'' + jsArg(month) + '\',\'' + jsArg(student.id) + '\')">ยกเลิกยอด</button>'
+            ? '<button class="btn btn-dark" style="font-size:12px;padding:4px 10px;" type="button" onclick="restoreStudentMonthPayment(\'' + jsArg(month) + '\',\'' + jsArg(studentKey) + '\')">คืนสิทธิ์</button>'
+            : saveRowButton + '<button class="btn btn-red" style="font-size:12px;padding:4px 10px;" type="button" onclick="voidStudentMonthPayment(\'' + jsArg(month) + '\',\'' + jsArg(studentKey) + '\')">ยกเลิกยอด</button>'
           ) + '</div></td>' +
         '</tr>';
       }).join('') : '<tr><td colspan="8">ยังไม่มีนักเรียนที่เข้าเงื่อนไขสำหรับสร้างรายการเรียกเก็บ</td></tr>';
