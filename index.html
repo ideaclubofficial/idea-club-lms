@@ -3726,6 +3726,67 @@
       transform-origin: top left;
       display: inline-block;
     }
+    .edit-bubble-overlay {
+      position: fixed;
+      inset: 0;
+      z-index: 1400;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 18px;
+      background: rgba(15,23,42,0.55);
+      overflow: auto;
+    }
+    .edit-bubble-overlay.hidden {
+      display: none !important;
+    }
+    .edit-bubble {
+      width: min(96vw, 760px);
+      max-height: min(92dvh, 920px);
+      overflow: auto;
+      -webkit-overflow-scrolling: touch;
+      background: #fff;
+      border-radius: 16px;
+      padding: 20px;
+      box-shadow: 0 24px 72px rgba(15,23,42,0.28);
+    }
+    .edit-bubble-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 12px;
+      margin-bottom: 14px;
+    }
+    .edit-bubble-header h3 {
+      margin: 0;
+      min-width: 0;
+    }
+    .edit-bubble-close {
+      width: 34px;
+      height: 34px;
+      border: 0;
+      border-radius: 999px;
+      background: #f3f4f6;
+      color: #111827;
+      cursor: pointer;
+      font-size: 22px;
+      line-height: 1;
+      flex-shrink: 0;
+    }
+    #editBubbleBody {
+      min-width: 0;
+      overflow-x: hidden;
+    }
+    .overdue-notice-preview {
+      width: 100%;
+      max-width: 100%;
+      overflow-x: auto;
+      -webkit-overflow-scrolling: touch;
+      padding: 2px 2px 8px;
+    }
+    .overdue-notice-preview .overdue-notice {
+      min-width: 0;
+    }
 
     input[type="text"],
     input[type="password"],
@@ -11238,6 +11299,8 @@
 
     function openEditBubble(title, bodyHtml, saveHandler) {
       clearEditBubbleCloseTimer();
+      const profilePanel = getElement('profilePanel');
+      if (profilePanel) profilePanel.classList.add('hidden');
       editBubbleInstanceId++;
       getElement('editBubbleTitle').textContent = title;
       getElement('editBubbleBody').innerHTML = '<div class="edit-bubble-note">แก้ไขข้อมูลในกล่องนี้ แล้วกด “บันทึกการแก้ไข”</div>' + bodyHtml;
@@ -11249,6 +11312,8 @@
 
     function openViewBubble(title, bodyHtml) {
       clearEditBubbleCloseTimer();
+      const profilePanel = getElement('profilePanel');
+      if (profilePanel) profilePanel.classList.add('hidden');
       editBubbleInstanceId++;
       getElement('editBubbleTitle').textContent = title;
       getElement('editBubbleBody').innerHTML = bodyHtml;
@@ -31380,12 +31445,13 @@
 
       return '<style>' +
         '.overdue-notice *{box-sizing:border-box;font-family:\'Sarabun\',\'Noto Sans Thai\',Arial,sans-serif;}' +
-        '.overdue-notice{width:100%;max-width:680px;margin:0 auto;border:2px solid #ea580c;border-radius:14px;padding:28px 28px 24px;background:#fff;}' +
+        '.overdue-notice{width:100%;max-width:680px;min-width:0;margin:0 auto;border:2px solid #ea580c;border-radius:14px;padding:28px 28px 24px;background:#fff;overflow-wrap:anywhere;}' +
         '.overdue-notice h1{color:#ea580c;font-size:20px;font-weight:800;margin:0 0 4px;}' +
         '.overdue-notice .notice-sub{color:#6b7280;font-size:13px;margin:0 0 20px;}' +
         '.overdue-notice .notice-body{font-size:14px;line-height:1.8;color:#1f2937;}' +
-        '.overdue-notice table{width:100%;border-collapse:collapse;margin:16px 0;border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;}' +
+        '.overdue-notice table{width:100%;table-layout:fixed;border-collapse:collapse;margin:16px 0;border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;}' +
         '.overdue-notice thead tr{background:#ea580c;color:#fff;}' +
+        '.overdue-notice th,.overdue-notice td{overflow-wrap:anywhere;word-break:break-word;}' +
         '.overdue-notice thead th{padding:10px 14px;text-align:left;font-size:13px;font-weight:700;}' +
         '.overdue-notice thead th:last-child{text-align:right;}' +
         '.overdue-notice .total-row td{background:#fff7ed;font-weight:800;font-size:15px;color:#ea580c;padding:10px 14px;border-top:2px solid #ea580c;}' +
@@ -31398,7 +31464,7 @@
         '.overdue-notice .payment-qr-box--missing{display:block;text-align:center;font-size:13px;}' +
         '.overdue-notice .contact-box{background:#fff7ed;border:1px solid #fed7aa;border-radius:8px;padding:12px 16px;margin-top:16px;font-size:13px;color:#9a3412;}' +
         '.overdue-notice .signature{margin-top:24px;text-align:right;font-size:13px;color:#374151;}' +
-        '@media(max-width:560px){.overdue-notice .payment-qr-box{flex-direction:column;text-align:center;}.overdue-notice .payment-qr-box img{width:150px;height:150px;}}' +
+        '@media(max-width:560px){.overdue-notice{padding:18px 14px 16px;}.overdue-notice .payment-qr-box{flex-direction:column;text-align:center;}.overdue-notice .payment-qr-box img{width:150px;height:150px;}}' +
         '@media print{.overdue-notice{border-radius:0;border:2px solid #ea580c;}}' +
       '</style>' +
       '<div class="overdue-notice">' +
@@ -31439,7 +31505,7 @@
       const pid = jsArg(String(paymentId));
       const fileBase = 'overdue-notice-' + getSafeFileName(String(paymentId)).slice(0, 12);
       openViewBubble('ใบแจ้งยอดค้างชำระ',
-        html +
+        '<div class="overdue-notice-preview">' + html + '</div>' +
         '<div class="test-actions">' +
           '<button class="btn btn-orange" type="button" onclick="downloadHtmlAsPdf(\'ใบแจ้งหนี้\', overdueNoticeHtml(\'' + pid + '\'), \'' + fileBase + '.pdf\')">ดาวน์โหลด PDF</button>' +
           '<button class="btn btn-green" type="button" onclick="downloadHtmlAsImage(\'ใบแจ้งหนี้\', overdueNoticeHtml(\'' + pid + '\'), \'' + fileBase + '.png\')">บันทึกเป็นรูป</button>' +
