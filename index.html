@@ -21353,8 +21353,12 @@
     function getAvatarBattleSettings() {
       const raw = (prizeWheelSettings && prizeWheelSettings.avatarBattle) || {};
       const defaults = AVATAR_BATTLE_DEFAULT_SETTINGS;
+      function positiveOrDefault(value, fallback) {
+        const num = Number(value);
+        return Number.isFinite(num) && num > 0 ? num : fallback;
+      }
       const settings = {
-        dailyExpCap: Math.max(0, Number(raw.dailyExpCap !== undefined ? raw.dailyExpCap : defaults.dailyExpCap) || 0),
+        dailyExpCap: Math.round(positiveOrDefault(raw.dailyExpCap, defaults.dailyExpCap)),
         dailyCoinCap: Math.max(0, Number(raw.dailyCoinCap !== undefined ? raw.dailyCoinCap : defaults.dailyCoinCap) || 0),
         stageRewards: [],
         skillSettings: getAvatarBattleSkillSettings(raw)
@@ -21364,7 +21368,7 @@
         settings.stageRewards.push({
           id: def.id,
           stage: def.stage,
-          rewardExp: Math.max(0, Number(src.rewardExp !== undefined ? src.rewardExp : def.rewardExp) || 0),
+          rewardExp: Math.round(positiveOrDefault(src.rewardExp, def.rewardExp)),
           rewardCoins: Math.max(0, Number(src.rewardCoins !== undefined ? src.rewardCoins : def.rewardCoins) || 0)
         });
       });
@@ -22128,11 +22132,12 @@
       state.rewardSaving = true;
       renderAvatarBattlePanelAndKeepView();
       try {
-        await saveAvatarBattleDailyReward(profile, reward);
         if (reward.exp > 0 || reward.coins > 0) {
           const sourceId = avatarBattleTodayKey() + '_' + Date.now() + '_' + Math.floor(Math.random() * 10000);
-          await awardStudentGamification('avatarBattle', sourceId, reward.exp, reward.coins, 'Mini Game ต่อสู้ Avatar: ' + reward.reason);
+          const awardResult = await awardStudentGamification('avatarBattle', sourceId, reward.exp, reward.coins, 'Mini Game ต่อสู้ Avatar: ' + reward.reason);
+          if (!awardResult) throw new Error('บันทึกรางวัลสะสมไม่สำเร็จ');
         }
+        await saveAvatarBattleDailyReward(getCurrentStudentGamificationProfile(), reward);
         state.rewardGranted = true;
         state.rewardSaving = false;
         state.rewardText = reward.exp || reward.coins
@@ -22258,6 +22263,11 @@
     }
 
     function startAvatarBattleGame() {
+      resetAvatarBattleState();
+      renderAvatarBattlePanelAndKeepView();
+    }
+
+    function continueAvatarBattleNextStage() {
       resetAvatarBattleState();
       renderAvatarBattlePanelAndKeepView();
     }
@@ -22411,6 +22421,10 @@
       const powerText = 'โจมตี ' + avatarBattleMultiplierToPercent(stats.normalAttackMultiplier || 1) + '% · Passive ' + avatarBattleMultiplierToPercent(skill.passivePower || 0) + '%';
       const statusText = state.status === 'won' ? 'ชนะรอบนี้' : state.status === 'lost' ? 'พร้อมเริ่มใหม่' : state.pendingQuestion ? 'รอตอบโจทย์' : 'Turn ' + state.turn;
       const capText = 'วันนี้รับแล้ว ' + daily.exp + '/' + battleSettings.dailyExpCap + ' EXP · ' + daily.coins + '/' + battleSettings.dailyCoinCap + ' Coins · เล่นแล้ว ' + daily.plays + ' รอบ';
+      const nextStageNo = getAvatarBattleMonsterStageIndex(state.monsterStageIndex) + 1;
+      const resetButtonHtml = state.status === 'won'
+        ? '<button type="button" class="sab-btn sab-btn--reset" onclick="continueAvatarBattleNextStage()">ต่อสู้ถัดไป: Stage ' + escapeHtml(nextStageNo) + '</button>'
+        : '<button type="button" class="sab-btn sab-btn--reset" onclick="startAvatarBattleGame()">เริ่มใหม่</button>';
       return '<div class="student-avatar-battle">' +
         '<div class="student-avatar-battle-header">' +
           '<strong>⚔️ Mini Game: Avatar Battle</strong>' +
@@ -22433,7 +22447,7 @@
           '<div class="sab-actions">' +
             '<button type="button" class="sab-btn" onclick="avatarBattlePlayerAction(\'attack\')"' + (actionDisabled ? ' disabled' : '') + '>' + escapeHtml(skill.attackName || 'โจมตี') + '</button>' +
             '<button type="button" class="sab-btn sab-btn--skill" onclick="avatarBattlePlayerAction(\'skill\')"' + (skillDisabled ? ' disabled' : '') + '>' + escapeHtml(state.skillCooldown > 0 ? 'พร้อมใน ' + state.skillCooldown : skill.name || 'ใช้สกิล') + '</button>' +
-            '<button type="button" class="sab-btn sab-btn--reset" onclick="startAvatarBattleGame()">เริ่มใหม่</button>' +
+            resetButtonHtml +
           '</div>' +
           '<div class="sab-log">' + escapeHtml(state.rewardSaving ? 'กำลังบันทึกรางวัล...' : (state.log || 'เริ่มต่อสู้ได้เลย')) + '</div>' +
           (state.skillEffectText ? '<div class="sab-skill-effect">' + escapeHtml(state.skillEffectText) + '</div>' : '') +
@@ -26272,21 +26286,25 @@
         return;
       }
       const resultEl = getElement('abSettingsSaveResult');
-      function fieldNumber(id, fallback) {
+      function fieldNumber(id, fallback, minValue) {
         const el = getElement(id);
-        return Math.max(0, Math.round(Number(el ? el.value : fallback) || 0));
+        const rawText = el ? String(el.value || '').trim() : '';
+        const raw = rawText === '' ? Number(fallback) : Number(rawText);
+        const min = minValue !== undefined ? Number(minValue) : 0;
+        const safe = Number.isFinite(raw) ? raw : Number(fallback);
+        return Math.max(Number.isFinite(min) ? min : 0, Math.round(safe || 0));
       }
       const defaultSkill = AVATAR_BATTLE_DEFAULT_SETTINGS.skillSettings;
       const skillEnabledEl = getElement('abSkillEnabled');
       const settings = {
-        dailyExpCap: fieldNumber('abDailyExpCap', AVATAR_BATTLE_DEFAULT_SETTINGS.dailyExpCap),
+        dailyExpCap: fieldNumber('abDailyExpCap', AVATAR_BATTLE_DEFAULT_SETTINGS.dailyExpCap, 1),
         dailyCoinCap: fieldNumber('abDailyCoinCap', AVATAR_BATTLE_DEFAULT_SETTINGS.dailyCoinCap),
         stageRewards: AVATAR_BATTLE_DEFAULT_SETTINGS.stageRewards.map(function(def, index) {
           const stageNo = index + 1;
           return {
             id: def.id,
             stage: def.stage,
-            rewardExp: fieldNumber('abStage' + stageNo + 'Exp', def.rewardExp),
+            rewardExp: fieldNumber('abStage' + stageNo + 'Exp', def.rewardExp, 1),
             rewardCoins: fieldNumber('abStage' + stageNo + 'Coins', def.rewardCoins)
           };
         }),
