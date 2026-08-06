@@ -28197,14 +28197,52 @@
       return bundle.status || bundle.paymentStatus || 'รอชำระเงิน';
     }
 
-    function getScopedPaymentBundles() {
+    function getPaymentBundleFinalAmount(bundle) {
+      if (!bundle) return 0;
+      const directAmount = Number(bundle.totalAmount || bundle.amount || bundle.finalAmount || 0) || 0;
+      if (directAmount > 0) return directAmount;
+      const items = Array.isArray(bundle.paymentItems) ? bundle.paymentItems : [];
+      return items.reduce(function(sum, item) {
+        return sum + (Number(item.amount || item.finalAmount || 0) || 0);
+      }, 0);
+    }
+
+    function getPaymentBundleScopedAmount(bundle, scope) {
+      if (!bundle) return 0;
+      const items = Array.isArray(bundle.paymentItems) ? bundle.paymentItems : [];
+      if (!items.length) return getPaymentBundleFinalAmount(bundle);
+      const matchedItems = items.filter(function(item) {
+        const payment = findPaymentByAnyId(item.paymentId) || item;
+        return paymentMatchesDashboardScope(payment, scope, false);
+      });
+      if (!matchedItems.length) return 0;
+      const itemTotal = matchedItems.reduce(function(sum, item) {
+        const payment = findPaymentByAnyId(item.paymentId);
+        return sum + (Number(item.amount || item.finalAmount || (payment ? getPaymentFinalAmount(payment) : 0) || 0) || 0);
+      }, 0);
+      return itemTotal || (matchedItems.length === items.length ? getPaymentBundleFinalAmount(bundle) : 0);
+    }
+
+    function isActivePaymentBundle(bundle) {
+      return !!(bundle && getPaymentBundleDisplayStatus(bundle) !== 'ยกเลิก');
+    }
+
+    function shouldCountPaymentAsStandaloneForDashboard(payment) {
+      return !isPaymentInActiveBundle(payment);
+    }
+
+    function getDashboardScopedPaymentBundles(includeStatus) {
       const scope = getPaymentDashboardFilterScope();
       return (paymentBundles || [])
-        .filter(function(bundle) { return getPaymentBundleDisplayStatus(bundle) !== 'ยกเลิก'; })
+        .filter(isActivePaymentBundle)
         .filter(function(bundle) {
-          return scope.status === 'ทั้งหมด' || getPaymentBundleDisplayStatus(bundle).includes(scope.status);
+          return !includeStatus || scope.status === 'ทั้งหมด' || getPaymentBundleDisplayStatus(bundle).includes(scope.status);
         })
         .filter(function(bundle) { return paymentBundleMatchesScope(bundle, scope); });
+    }
+
+    function getScopedPaymentBundles() {
+      return getDashboardScopedPaymentBundles(true);
     }
 
     function getPendingPaymentBundles(scopeAware) {
@@ -28212,6 +28250,37 @@
         return getPaymentBundleDisplayStatus(bundle) !== 'ยกเลิก';
       });
       return list.filter(function(bundle) { return getPaymentBundleDisplayStatus(bundle) === 'รอตรวจสลิป'; });
+    }
+
+    function getPaymentDashboardAmountTotals() {
+      const scope = getPaymentDashboardFilterScope();
+      const scopedPayments = getDashboardScopedPayments(false).filter(shouldCountPaymentAsStandaloneForDashboard);
+      const scopedBundles = getDashboardScopedPaymentBundles(false);
+      const paidAmount = scopedPayments
+        .filter(function(p) { return getPaymentDisplayStatus(p) === 'ชำระแล้ว'; })
+        .reduce(function(sum, p) { return sum + getPaymentFinalAmount(p); }, 0) +
+        scopedBundles
+          .filter(function(bundle) { return getPaymentBundleDisplayStatus(bundle) === 'ชำระแล้ว'; })
+          .reduce(function(sum, bundle) { return sum + getPaymentBundleScopedAmount(bundle, scope); }, 0);
+
+      let expectedAmount = 0;
+      if (scope.month && scope.month !== 'ทั้งหมด') {
+        const targetStudents = getMonthlyPaymentTargetStudentsForMonth(scope.month)
+          .filter(function(student) { return studentMatchesPaymentDashboardScope(student, scope); });
+        expectedAmount = targetStudents.reduce(function(sum, student) {
+          const payment = findPaymentForStudentMonth(student, scope.month);
+          return sum + (payment ? getPaymentFinalAmount(payment) : getExpectedPaymentAmountForStudent(student, scope.month));
+        }, 0);
+      } else {
+        expectedAmount = scopedPayments.reduce(function(sum, p) { return sum + getPaymentFinalAmount(p); }, 0) +
+          scopedBundles.reduce(function(sum, bundle) { return sum + getPaymentBundleScopedAmount(bundle, scope); }, 0);
+      }
+
+      return {
+        scope: scope,
+        paidAmount: paidAmount,
+        expectedAmount: expectedAmount
+      };
     }
 
     function renderPaymentBundleDetailRows(bundle) {
@@ -31104,7 +31173,8 @@
     }
 
     function updatePaymentSummary() {
-      const filtered = getDashboardScopedPayments(false);
+      const filtered = getDashboardScopedPayments(false).filter(shouldCountPaymentAsStandaloneForDashboard);
+      const scopedBundles = getDashboardScopedPaymentBundles(false);
       let pending = 0, overdue = 0, paid = 0;
       filtered.forEach(function(p) {
         const statusText = getPaymentDisplayStatus(p);
@@ -31112,7 +31182,13 @@
         if (statusText.includes('ค้าง')) overdue++;
         if (statusText.includes('ชำระแล้ว')) paid++;
       });
-      const pendingBundles = getPendingPaymentBundles(true).length;
+      let pendingBundles = 0;
+      scopedBundles.forEach(function(bundle) {
+        const statusText = getPaymentBundleDisplayStatus(bundle);
+        if (statusText.includes('รอตรวจ')) pendingBundles++;
+        if (statusText.includes('ค้าง')) overdue++;
+        if (statusText.includes('ชำระแล้ว')) paid++;
+      });
       if (getElement('pendingSlipCount')) getElement('pendingSlipCount').textContent = (pending + pendingBundles) + ' รายการ';
       if (getElement('pendingBundleSlipCount')) getElement('pendingBundleSlipCount').textContent = pendingBundles + ' รายการ';
       if (getElement('overdueCount')) getElement('overdueCount').textContent = overdue + ' รายการ';
@@ -41138,53 +41214,34 @@ function receiptStatusText(status) {
     }
 
     function updatePaymentAmountSummary() {
-      const scope = getPaymentDashboardFilterScope();
-      const scopedPayments = getDashboardScopedPayments(false);
-      const paidAmount = scopedPayments
-        .filter(function(p) { return getPaymentDisplayStatus(p) === 'ชำระแล้ว'; })
-        .reduce(function(sum, p) { return sum + getPaymentFinalAmount(p); }, 0);
+      const totals = getPaymentDashboardAmountTotals();
 
-      let expectedAmount = 0;
-      if (scope.month && scope.month !== 'ทั้งหมด') {
-        const targetStudents = getMonthlyPaymentTargetStudentsForMonth(scope.month)
-          .filter(function(student) { return studentMatchesPaymentDashboardScope(student, scope); });
-        expectedAmount = targetStudents.reduce(function(sum, student) {
-          const payment = findPaymentForStudentMonth(student, scope.month);
-          return sum + (payment ? getPaymentFinalAmount(payment) : getExpectedPaymentAmountForStudent(student, scope.month));
-        }, 0);
-      } else {
-        expectedAmount = scopedPayments.reduce(function(sum, p) { return sum + getPaymentFinalAmount(p); }, 0);
-      }
-
-      if (getElement('paidAmountThisMonth')) getElement('paidAmountThisMonth').textContent = formatPrice(paidAmount);
-      if (getElement('expectedAmountThisMonth')) getElement('expectedAmountThisMonth').textContent = formatPrice(expectedAmount);
+      if (getElement('paidAmountThisMonth')) getElement('paidAmountThisMonth').textContent = formatPrice(totals.paidAmount);
+      if (getElement('expectedAmountThisMonth')) getElement('expectedAmountThisMonth').textContent = formatPrice(totals.expectedAmount);
     }
 
     function renderDashboardPaymentSummary() {
       const box = getElement('dashboardPaymentSummary');
       if (!box) return;
-      const month = getElement('dashboardPaymentMonthFilter') ? getElement('dashboardPaymentMonthFilter').value : (paymentMonths[0] ? paymentMonths[0].month : '');
-      const monthPayments = payments.filter(function(p) { return !month || p.month === month; });
-      const monthBundles = (paymentBundles || []).filter(function(bundle) {
-        if (getPaymentBundleDisplayStatus(bundle) === 'ยกเลิก') return false;
-        const months = Array.isArray(bundle.months) ? bundle.months : [];
-        return !month || months.includes(month);
-      });
-      const enrolledStudents = students.filter(function(s) { return isActiveStudentForDashboard(s) && s.courseId; });
-      const paid = monthPayments.filter(function(p) { return getPaymentDisplayStatus(p) === 'ชำระแล้ว'; });
-      const pending = monthPayments.filter(function(p) { return getPaymentDisplayStatus(p) === 'รอตรวจสลิป'; });
-      const pendingBundles = monthBundles.filter(function(bundle) { return getPaymentBundleDisplayStatus(bundle) === 'รอตรวจสลิป'; });
-      const overdue = monthPayments.filter(function(p) { return getPaymentDisplayStatus(p) === 'ค้างชำระ'; });
-      const paidAmount = paid.reduce(function(sum, p) { return sum + getPaymentFinalAmount(p); }, 0);
-      let expectedAmount = 0;
-      enrolledStudents.forEach(function(s) { expectedAmount += getExpectedPaymentAmountForStudent(s, month); });
-      box.innerHTML = '<div class="status-display-row"><span class="status-label">เดือน</span><strong>' + (month || '-') + '</strong></div>' +
-        '<div class="status-display-row"><span class="status-label">นักเรียนที่ต้องชำระ</span><strong>' + enrolledStudents.length + ' คน</strong></div>' +
-        '<div class="status-display-row"><span class="status-label">ชำระแล้ว</span><strong class="status-paid">' + paid.length + ' รายการ · ' + formatPrice(paidAmount) + '</strong></div>' +
+      const totals = getPaymentDashboardAmountTotals();
+      const scope = totals.scope;
+      const scopedPayments = getDashboardScopedPayments(false).filter(shouldCountPaymentAsStandaloneForDashboard);
+      const scopedBundles = getDashboardScopedPaymentBundles(false);
+      const targetStudents = scope.month && scope.month !== 'ทั้งหมด'
+        ? getMonthlyPaymentTargetStudentsForMonth(scope.month).filter(function(s) { return studentMatchesPaymentDashboardScope(s, scope); })
+        : students.filter(function(s) { return isActiveStudentForDashboard(s) && s.courseId && studentMatchesPaymentDashboardScope(s, scope); });
+      const paid = scopedPayments.filter(function(p) { return getPaymentDisplayStatus(p) === 'ชำระแล้ว'; });
+      const paidBundles = scopedBundles.filter(function(bundle) { return getPaymentBundleDisplayStatus(bundle) === 'ชำระแล้ว'; });
+      const pending = scopedPayments.filter(function(p) { return getPaymentDisplayStatus(p) === 'รอตรวจสลิป'; });
+      const pendingBundles = scopedBundles.filter(function(bundle) { return getPaymentBundleDisplayStatus(bundle) === 'รอตรวจสลิป'; });
+      const overdue = scopedPayments.filter(function(p) { return getPaymentDisplayStatus(p) === 'ค้างชำระ'; });
+      box.innerHTML = '<div class="status-display-row"><span class="status-label">เดือน</span><strong>' + (scope.month || '-') + '</strong></div>' +
+        '<div class="status-display-row"><span class="status-label">นักเรียนที่ต้องชำระ</span><strong>' + targetStudents.length + ' คน</strong></div>' +
+        '<div class="status-display-row"><span class="status-label">ชำระแล้ว</span><strong class="status-paid">' + (paid.length + paidBundles.length) + ' รายการ · ' + formatPrice(totals.paidAmount) + '</strong></div>' +
         '<div class="status-display-row"><span class="status-label">รอตรวจสลิป</span><strong class="status-waiting">' + (pending.length + pendingBundles.length) + ' รายการ</strong></div>' +
         '<div class="status-display-row"><span class="status-label">สลิปยอดรวมรอตรวจ</span><strong class="status-waiting">' + pendingBundles.length + ' รายการ</strong></div>' +
         '<div class="status-display-row"><span class="status-label">ค้างชำระ</span><strong class="status-absent">' + overdue.length + ' รายการ</strong></div>' +
-        '<div class="status-display-row"><span class="status-label">ยอดที่ควรได้รับ</span><strong>' + formatPrice(expectedAmount) + '</strong></div>';
+        '<div class="status-display-row"><span class="status-label">ยอดที่ควรได้รับ</span><strong>' + formatPrice(totals.expectedAmount) + '</strong></div>';
     }
 
     // ── Finance Summary (Income / Expense Tracking) ──────────────────────────
