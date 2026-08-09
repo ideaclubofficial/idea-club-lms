@@ -8338,7 +8338,7 @@
               <div class="form-row">
                 <div>
                   <label>วิชา</label>
-                  <select id="adminOnDemandSubject">
+                  <select id="adminOnDemandSubject" onchange="syncOnDemandPlaylistNameFromSelection()">
                     <option value="">-- เลือกวิชา --</option>
                     <option>คณิตศาสตร์</option>
                     <option>วิทยาศาสตร์</option>
@@ -8349,7 +8349,7 @@
                 </div>
                 <div>
                   <label>ระดับชั้น</label>
-                  <select id="adminOnDemandGrade">
+                  <select id="adminOnDemandGrade" onchange="syncOnDemandPlaylistNameFromSelection()">
                     <option value="">-- เลือกระดับชั้น --</option>
                     <option>ป.4</option>
                     <option>ป.5</option>
@@ -18705,10 +18705,57 @@
     function renderOnDemandCourseSelect() {
     }
 
+    function buildOnDemandAutoPlaylistName(subject, grade) {
+      subject = String(subject || '').trim();
+      grade = String(grade || '').trim();
+      return subject && grade ? (subject + ' ' + grade) : '';
+    }
+
+    function syncOnDemandPlaylistNameFromSelection(options) {
+      options = options || {};
+      const subjectEl = getElement(options.subjectId || 'adminOnDemandSubject');
+      const gradeEl = getElement(options.gradeId || 'adminOnDemandGrade');
+      const nameEl = getElement(options.nameId || 'adminOnDemandClipName');
+      if (!subjectEl || !gradeEl || !nameEl) return;
+      const nextAutoName = buildOnDemandAutoPlaylistName(subjectEl.value, gradeEl.value);
+      const currentName = String(nameEl.value || '').trim();
+      const lastAutoName = String(nameEl.dataset.autoValue || '').trim();
+      if (!nextAutoName) {
+        nameEl.dataset.autoValue = '';
+        return;
+      }
+      if (!currentName || (lastAutoName && currentName === lastAutoName)) {
+        nameEl.value = nextAutoName;
+        nameEl.dataset.autoValue = nextAutoName;
+        return;
+      }
+      nameEl.dataset.autoValue = lastAutoName;
+    }
+
+    function initializeOnDemandPlaylistAutoName(options) {
+      options = options || {};
+      const subjectEl = getElement(options.subjectId || 'adminOnDemandSubject');
+      const gradeEl = getElement(options.gradeId || 'adminOnDemandGrade');
+      const nameEl = getElement(options.nameId || 'adminOnDemandClipName');
+      if (!subjectEl || !gradeEl || !nameEl) return;
+      const autoName = buildOnDemandAutoPlaylistName(subjectEl.value, gradeEl.value);
+      const currentName = String(nameEl.value || '').trim();
+      nameEl.dataset.autoValue = autoName && currentName === autoName ? autoName : '';
+    }
+
+    function syncBubbleOnDemandPlaylistNameFromSelection() {
+      syncOnDemandPlaylistNameFromSelection({
+        subjectId: 'bubbleOnDemandSubject',
+        gradeId: 'bubbleOnDemandGrade',
+        nameId: 'bubbleOnDemandClipName'
+      });
+    }
+
     function loadOnDemandForm() {
       if (getElement('editingOnDemandClipId') && getElement('editingOnDemandClipId').value) return;
       if (getElement('adminOnDemandSubject')) getElement('adminOnDemandSubject').value = '';
       if (getElement('adminOnDemandGrade')) getElement('adminOnDemandGrade').value = '';
+      if (getElement('adminOnDemandClipName')) getElement('adminOnDemandClipName').dataset.autoValue = '';
     }
 
     function parsePdfFilesFromText(text) {
@@ -19013,11 +19060,11 @@
 
       openEditBubble('แก้ไข ชุดคลิป / คลิป On-demand',
         '<div class="form-row">' +
-          '<div><label>วิชา</label><select id="bubbleOnDemandSubject">' + subjectOptionsHtml(item.subject) + '</select></div>' +
-          '<div><label>ระดับชั้น</label><select id="bubbleOnDemandGrade">' + gradeOptionsHtml(item.grade) + '</select></div>' +
+          '<div><label>วิชา</label><select id="bubbleOnDemandSubject" onchange="syncBubbleOnDemandPlaylistNameFromSelection()">' + subjectOptionsHtml(item.subject) + '</select></div>' +
+          '<div><label>ระดับชั้น</label><select id="bubbleOnDemandGrade" onchange="syncBubbleOnDemandPlaylistNameFromSelection()">' + gradeOptionsHtml(item.grade) + '</select></div>' +
         '</div>' +
         '<div class="form-row">' +
-          '<div><label>ชื่อชุดคลิป</label><input id="bubbleOnDemandClipName" type="text" value="' + item.playlistName + '"></div>' +
+          '<div><label>ชื่อชุดคลิป</label><input id="bubbleOnDemandClipName" type="text" value="' + escapeHtml(item.playlistName || '') + '"></div>' +
           '<div><label>วันที่คลิป</label><input id="bubbleOnDemandClipDate" type="date" value="' + escapeHtml(item.clipDate || '') + '"></div>' +
         '</div>' +
         '<label>ชื่อคลิป / บทเรียน</label><input id="bubbleOnDemandTitle" type="text" value="' + item.clipTitle + '">' +
@@ -19055,6 +19102,7 @@
           getElement('videoSaveResult').style.color = '#16a34a';
         }
       );
+      initializeOnDemandPlaylistAutoName({ subjectId: 'bubbleOnDemandSubject', gradeId: 'bubbleOnDemandGrade', nameId: 'bubbleOnDemandClipName' });
     }
 
     function deleteOnDemandClip(id) {
@@ -19073,6 +19121,10 @@
       getElement('editingOnDemandClipId').value = '';
       if (getElement('adminOnDemandSubject')) getElement('adminOnDemandSubject').value = '';
       if (getElement('adminOnDemandGrade')) getElement('adminOnDemandGrade').value = '';
+      if (getElement('adminOnDemandClipName')) {
+        getElement('adminOnDemandClipName').value = '';
+        getElement('adminOnDemandClipName').dataset.autoValue = '';
+      }
       getElement('adminOnDemandTitle').value = '';
       getElement('adminOnDemandLink').value = '';
       if (getElement('adminOnDemandClipDate')) getElement('adminOnDemandClipDate').value = '';
