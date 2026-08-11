@@ -5739,6 +5739,56 @@
             </div>
             <br />
             <div class="form-box">
+              <h3>เลื่อนชั้นนักเรียน</h3>
+              <p style="margin-bottom:18px; color:#6b7280;">ปรับระดับชั้นเป็นรอบ โดยไม่เปลี่ยน Member ID, คอร์ส, การเงิน, ใบเสร็จ หรือประวัติเดิม</p>
+              <div class="form-row">
+                <div>
+                  <label>ชั้นต้นทาง</label>
+                  <select id="gradePromotionFromGrade" onchange="syncGradePromotionTarget(); renderGradePromotionPreview()">
+                    <option value="">เลือกชั้นต้นทาง</option>
+                    <option value="ป.4">ป.4</option><option value="ป.5">ป.5</option><option value="ป.6">ป.6</option>
+                    <option value="ม.1">ม.1</option><option value="ม.2">ม.2</option><option value="ม.3">ม.3</option>
+                    <option value="ม.4">ม.4</option><option value="ม.5">ม.5</option><option value="ม.6">ม.6</option>
+                  </select>
+                </div>
+                <div>
+                  <label>ชั้นปลายทาง</label>
+                  <select id="gradePromotionToGrade" onchange="renderGradePromotionPreview()">
+                    <option value="">เลือกชั้นปลายทาง</option>
+                    <option value="ป.4">ป.4</option><option value="ป.5">ป.5</option><option value="ป.6">ป.6</option>
+                    <option value="ม.1">ม.1</option><option value="ม.2">ม.2</option><option value="ม.3">ม.3</option>
+                    <option value="ม.4">ม.4</option><option value="ม.5">ม.5</option><option value="ม.6">ม.6</option>
+                    <option value="graduate">จบการศึกษา / จบคอร์ส</option>
+                  </select>
+                </div>
+                <div>
+                  <label>ศูนย์</label>
+                  <select id="gradePromotionLocation" onchange="renderGradePromotionPreview()">
+                    <option value="ทั้งหมด">ทั้งหมด</option>
+                    <option>IDEA CLUB ศูนย์ นครสวรรค์</option>
+                    <option>IDEA CLUB ศูนย์ หนองฉาง</option>
+                  </select>
+                </div>
+                <div>
+                  <label>สถานะการเรียน</label>
+                  <select id="gradePromotionLearningStatus" onchange="renderGradePromotionPreview()">
+                    <option value="เรียนอยู่">เรียนอยู่</option>
+                    <option value="ทั้งหมด">ทั้งหมด</option>
+                    <option value="พักเรียน">พักเรียน</option>
+                    <option value="ลาออก">ลาออก</option>
+                    <option value="จบคอร์ส">จบคอร์ส</option>
+                  </select>
+                </div>
+              </div>
+              <div class="admin-toolbar">
+                <button class="btn btn-blue" type="button" onclick="renderGradePromotionPreview()">ดูตัวอย่าง</button>
+                <button class="btn btn-green" type="button" onclick="confirmGradePromotionRound()">ยืนยันเลื่อนชั้น</button>
+              </div>
+              <p id="gradePromotionResult" style="margin-top:10px;font-weight:bold;"></p>
+              <div id="gradePromotionPreview" style="margin-top:14px;"></div>
+            </div>
+            <br />
+            <div class="form-box">
               <h3>รายชื่อนักเรียน</h3>
               <div class="form-row">
                 <div>
@@ -15756,6 +15806,7 @@
       if (tabId === 'admin-students') {
         safeRun(renderAdminStudentCourseOptions, 'admin-student-course-options');
         safeRun(renderAdminStudents, 'admin-students');
+        safeRun(renderGradePromotionPreview, 'grade-promotion-preview');
         safeRun(updateMemberIdPreview, 'member-id-preview-admin-students');
       }
       if (tabId === 'admin-private-students') {
@@ -16110,6 +16161,192 @@
       if (status === 'ค้างชำระ') return 'ค้างชำระ';
       if (status === 'รอชำระเงิน') return 'รอชำระเงิน';
       return status || 'รอชำระเงิน';
+    }
+
+    function getNextGradeValue(grade) {
+      const idx = GRADE_ORDER.indexOf(String(grade || '').trim());
+      if (idx === -1) return '';
+      return idx >= GRADE_ORDER.length - 1 ? 'graduate' : GRADE_ORDER[idx + 1];
+    }
+
+    function syncGradePromotionTarget() {
+      const fromEl = getElement('gradePromotionFromGrade');
+      const toEl = getElement('gradePromotionToGrade');
+      if (!fromEl || !toEl) return;
+      const next = getNextGradeValue(fromEl.value);
+      if (next) toEl.value = next;
+    }
+
+    function getGradePromotionFormState() {
+      return {
+        fromGrade: getElement('gradePromotionFromGrade') ? getElement('gradePromotionFromGrade').value : '',
+        toGrade: getElement('gradePromotionToGrade') ? getElement('gradePromotionToGrade').value : '',
+        location: getElement('gradePromotionLocation') ? getElement('gradePromotionLocation').value : 'ทั้งหมด',
+        learningStatus: getElement('gradePromotionLearningStatus') ? getElement('gradePromotionLearningStatus').value : 'เรียนอยู่'
+      };
+    }
+
+    function getGradePromotionCourseMismatch(student, toGrade) {
+      if (!student || !student.courseId || toGrade === 'graduate') return '';
+      const course = getCourseByStudentOrName(student, student.course || '');
+      if (!course || !course.grade) return '';
+      return String(course.grade || '').trim() === String(toGrade || '').trim()
+        ? ''
+        : 'คอร์สปัจจุบันเป็น ' + (course.grade || '-') + ' ไม่ตรงกับชั้นปลายทาง ' + toGrade;
+    }
+
+    function getGradePromotionPreviewData() {
+      const state = getGradePromotionFormState();
+      const result = { state: state, promotable: [], skipped: [], ready: false, message: '' };
+      if (!state.fromGrade || !state.toGrade) {
+        result.message = 'กรุณาเลือกชั้นต้นทางและชั้นปลายทาง';
+        return result;
+      }
+      if (state.toGrade !== 'graduate' && state.fromGrade === state.toGrade) {
+        result.message = 'ชั้นต้นทางและชั้นปลายทางเหมือนกัน กรุณาเลือกชั้นปลายทางใหม่';
+        return result;
+      }
+      if (state.fromGrade !== 'ม.6' && state.toGrade === 'graduate') {
+        result.message = 'จบการศึกษาใช้สำหรับนักเรียน ม.6 เท่านั้น';
+        return result;
+      }
+      result.ready = true;
+      (students || []).forEach(function(student) {
+        if (!student || student.deleted) return;
+        if (String(student.grade || '').trim() !== state.fromGrade) return;
+        if (state.location !== 'ทั้งหมด' && String(student.preferredLocation || '').trim() !== state.location) return;
+        const learningStatus = getStudentLearningStatus(student);
+        if (state.learningStatus !== 'ทั้งหมด' && learningStatus !== state.learningStatus) return;
+        const reasons = [];
+        if (state.toGrade !== 'graduate' && learningStatus !== 'เรียนอยู่') {
+          reasons.push('สถานะการเรียนเป็น ' + (learningStatus || '-'));
+        }
+        if (state.toGrade === 'graduate' && state.fromGrade !== 'ม.6') {
+          reasons.push('ไม่ใช่นักเรียน ม.6');
+        }
+        const mismatch = getGradePromotionCourseMismatch(student, state.toGrade);
+        if (mismatch) reasons.push(mismatch);
+        const row = { student: student, reasons: reasons };
+        if (reasons.length) result.skipped.push(row);
+        else result.promotable.push(row);
+      });
+      return result;
+    }
+
+    function renderGradePromotionStudentRows(rows, emptyText, includeReason) {
+      if (!rows.length) return '<p class="mini-muted">' + emptyText + '</p>';
+      const visibleRows = rows.slice(0, 30).map(function(row) {
+        const s = row.student || {};
+        return '<tr>' +
+          '<td>' + escapeHtml(s.memberId || s.studentId || '-') + '</td>' +
+          '<td>' + escapeHtml(s.name || '-') + '</td>' +
+          '<td>' + escapeHtml(s.nickname || '-') + '</td>' +
+          '<td>' + escapeHtml(s.grade || '-') + '</td>' +
+          '<td>' + escapeHtml(s.course || '-') + '</td>' +
+          '<td>' + escapeHtml(getStudentLearningStatus(s) || '-') + '</td>' +
+          (includeReason ? '<td>' + escapeHtml((row.reasons || []).join(' / ') || '-') + '</td>' : '') +
+        '</tr>';
+      }).join('');
+      const hiddenCount = rows.length - Math.min(rows.length, 30);
+      return '<div class="table-wrap"><table><thead><tr><th>Member ID</th><th>ชื่อ</th><th>ชื่อเล่น</th><th>ชั้น</th><th>คอร์ส</th><th>สถานะ</th>' + (includeReason ? '<th>เหตุผล</th>' : '') + '</tr></thead><tbody>' + visibleRows + '</tbody></table></div>' +
+        (hiddenCount > 0 ? '<p class="mini-muted">และอีก ' + hiddenCount + ' คน</p>' : '');
+    }
+
+    function renderGradePromotionPreview() {
+      const box = getElement('gradePromotionPreview');
+      const resultEl = getElement('gradePromotionResult');
+      if (!box) return;
+      const data = getGradePromotionPreviewData();
+      if (!data.ready) {
+        box.innerHTML = '<div class="notice">' + escapeHtml(data.message || 'เลือกเงื่อนไขเพื่อดูตัวอย่าง') + '</div>';
+        if (resultEl) resultEl.textContent = '';
+        return data;
+      }
+      const targetText = data.state.toGrade === 'graduate' ? 'จบการศึกษา / จบคอร์ส' : data.state.toGrade;
+      box.innerHTML =
+        '<div class="notice"><strong>รอบเลื่อนชั้น: ' + escapeHtml(data.state.fromGrade) + ' → ' + escapeHtml(targetText) + '</strong>' +
+        '<p>ศูนย์: ' + escapeHtml(data.state.location) + ' · สถานะ: ' + escapeHtml(data.state.learningStatus) + '</p>' +
+        '<p>เลื่อนได้ ' + data.promotable.length + ' คน · ข้าม ' + data.skipped.length + ' คน</p></div>' +
+        '<h3 style="font-size:16px;margin:14px 0 8px;">รายชื่อที่จะอัปเดต</h3>' +
+        renderGradePromotionStudentRows(data.promotable, 'ยังไม่มีนักเรียนที่เลื่อนได้ตามเงื่อนไขนี้', false) +
+        '<h3 style="font-size:16px;margin:14px 0 8px;">รายชื่อที่ข้าม</h3>' +
+        renderGradePromotionStudentRows(data.skipped, 'ไม่มีรายการที่ต้องข้าม', true);
+      if (resultEl) {
+        resultEl.textContent = data.promotable.length ? 'ตรวจสอบตัวอย่างแล้ว หากถูกต้องกดยืนยันเลื่อนชั้น' : 'ไม่มีนักเรียนที่เลื่อนได้';
+        resultEl.style.color = data.promotable.length ? '#0f4cbd' : '#dc2626';
+      }
+      return data;
+    }
+
+    async function confirmGradePromotionRound() {
+      if (!hasPermission('admin.students')) { alert('ไม่มีสิทธิ์'); return; }
+      const data = renderGradePromotionPreview();
+      const resultEl = getElement('gradePromotionResult');
+      if (!data || !data.ready || !data.promotable.length) {
+        alert('ไม่มีนักเรียนที่เลื่อนได้ตามเงื่อนไขนี้');
+        return;
+      }
+      const targetText = data.state.toGrade === 'graduate' ? 'จบการศึกษา / จบคอร์ส' : data.state.toGrade;
+      if (!confirm('ยืนยันอัปเดตนักเรียน ' + data.promotable.length + ' คน จาก ' + data.state.fromGrade + ' เป็น ' + targetText + ' ?\n\nระบบจะไม่เปลี่ยน Member ID, คอร์ส, payment, receipt หรือคะแนนเดิม')) return;
+      const nowText = new Date().toLocaleString('th-TH');
+      const nowMonth = getThaiMonthFromDate(new Date().toISOString().slice(0, 10));
+      const actor = getElement('profileName') ? getElement('profileName').textContent : '';
+      try {
+        for (let i = 0; i < data.promotable.length; i++) {
+          const student = data.promotable[i].student;
+          const history = Array.isArray(student.gradePromotionHistory) ? student.gradePromotionHistory.slice() : [];
+          history.push({
+            previousGrade: student.grade || '',
+            promotedToGrade: data.state.toGrade === 'graduate' ? 'จบการศึกษา' : data.state.toGrade,
+            location: student.preferredLocation || '',
+            courseId: student.courseId || '',
+            course: student.course || '',
+            promotedAtText: nowText,
+            promotedAtMonth: nowMonth,
+            promotedBy: actor
+          });
+          const nextStudent = Object.assign({}, student, {
+            gradePromotionHistory: history,
+            previousGrade: student.grade || '',
+            promotedToGrade: data.state.toGrade === 'graduate' ? 'จบการศึกษา' : data.state.toGrade,
+            promotedAtText: nowText,
+            promotedAtMonth: nowMonth,
+            promotedBy: actor,
+            statusChangedAtText: data.state.toGrade === 'graduate' ? nowText : student.statusChangedAtText,
+            statusChangedAtMonth: data.state.toGrade === 'graduate' ? nowMonth : student.statusChangedAtMonth
+          });
+          if (data.state.toGrade === 'graduate') {
+            nextStudent.learningStatus = 'จบคอร์ส';
+            nextStudent.status = 'จบคอร์ส';
+            nextStudent.courseStatus = 'จบคอร์ส';
+          } else {
+            nextStudent.grade = data.state.toGrade;
+          }
+          await setFirebaseDocument('students', nextStudent);
+          Object.assign(student, nextStudent);
+        }
+        await addActivityLog('เลื่อนชั้นนักเรียน', data.state.fromGrade + ' → ' + targetText + ' · ' + data.promotable.length + ' คน');
+        renderAdminStudents();
+        renderPrivateStudents();
+        renderTeacherStudents();
+        renderMemberTable();
+        renderAdminDashboard();
+        renderStudentCourses();
+        updateStudentCourseDisplay();
+        renderGradePromotionPreview();
+        if (resultEl) {
+          resultEl.textContent = 'อัปเดตรอบเลื่อนชั้นเรียบร้อย ' + data.promotable.length + ' คน';
+          resultEl.style.color = '#16a34a';
+        }
+        alert('เลื่อนชั้นเรียบร้อย ' + data.promotable.length + ' คน');
+      } catch (error) {
+        console.error('confirmGradePromotionRound error:', error);
+        if (resultEl) {
+          resultEl.textContent = 'เลื่อนชั้นไม่สำเร็จ: ' + (error.message || error.code || 'ไม่ทราบสาเหตุ');
+          resultEl.style.color = '#dc2626';
+        }
+        alert('เลื่อนชั้นไม่สำเร็จ: ' + (error.message || error.code || 'ไม่ทราบสาเหตุ'));
+      }
     }
 
     function renderAdminStudents() {
