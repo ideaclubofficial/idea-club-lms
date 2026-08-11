@@ -6481,7 +6481,7 @@
                     <summary style="cursor:pointer; font-weight:700; color:#9ca3af;">เครื่องมือซ่อมข้อมูล</summary>
                     <p style="color:#6b7280; margin:10px 0;">ปกติไม่ต้องใช้ ใช้เฉพาะกรณีต้องซ่อมข้อมูล</p>
                     <button class="btn btn-dark" type="button" onclick="createMonthlyPaymentRecords()">สร้าง payment records ล่วงหน้าของเดือนนี้</button>
-                    <button class="btn btn-blue" type="button" style="margin-top:8px;" onclick="repairPaymentStatusFromReceipts().then(function(n){ alert(n ? 'ซ่อมแล้ว ' + n + ' รายการ' : 'ไม่พบรายการที่ต้องซ่อม'); })">ซ่อมสถานะ/ราคาจากใบเสร็จ</button>
+                    <button class="btn btn-blue" type="button" style="margin-top:8px;" onclick="runRepairPaymentStatusFromReceipts()">ซ่อมสถานะ/ราคาจากใบเสร็จ</button>
                     <p style="color:#6b7280; font-size:12px; margin-top:4px;">กดเมื่อ: นักเรียนที่ชำระแล้วยังขึ้นรอชำระ หรือราคาแสดงผิด — ระบบจะซ่อมจากใบเสร็จที่ออกไปแล้ว</p>
                   </details>
                 </div>
@@ -7362,7 +7362,7 @@
                     <label>ส่งออกข้อมูลปัจจุบัน (คลิกเพื่อคัดลอก)</label>
                     <textarea id="onlineExamJsonExport" readonly rows="4"
                       style="font-family:monospace;font-size:11px;background:#1e293b;color:#34d399;width:100%;"
-                      onclick="this.select()"></textarea>
+                      onclick="selectElementText(this)"></textarea>
                     <button class="btn" onclick="exportOnlineExamJson()" style="margin-top:6px;">🔄 ดึงค่า JSON ล่าสุด</button>
                   </div>
                   <div>
@@ -8946,6 +8946,10 @@
       return document.getElementById(id);
     }
 
+    function selectElementText(element) {
+      if (element && typeof element.select === 'function') element.select();
+    }
+
     function safeRun(fn, label) {
       try {
         if (typeof fn === 'function') return fn();
@@ -9078,25 +9082,26 @@
           const primaryRole = getPrimaryAppRole(profile);
           const uid = user.uid;
           if (isAdminRole(primaryRole)) {
-            const linkedTeacherId = String(profile.linkedTeacherId || profile.teacherDocId || profile.teacherId || '').trim();
-            currentTeacher = teachers.find(function(t) {
-              return (linkedTeacherId && (String(t.firebaseDocId || t.id || '') === linkedTeacherId || String(t.teacherId || '') === linkedTeacherId)) ||
-                     t.authUid === uid;
-            }) || null;
+            const linkedTeacherProfile = findLinkedTeacherProfileForUserProfile(profile, uid);
             currentAdmin = profile;
             currentStudent = null;
             setSuperAdminMode(getEffectivePermissions(profile).includes('admin.full') || primaryRole === 'SuperAdmin' || primaryRole === 'Admin');
             setSessionExpiry();
             hideAuthLoadingOverlay();
+            if (linkedTeacherProfile) {
+              currentTeacher = buildTeacherSessionFromProfile(linkedTeacherProfile, profile, user.email || profile.email || '', profile.loginId || profile.username || user.email || '');
+              console.log('admin-teacher-restore-teacher-first', {
+                uid: uid,
+                teacherId: currentTeacher.teacherId || currentTeacher.id || '',
+                appRole: profile.appRole || profile.role || ''
+              });
+              showTeacherPanel(currentTeacher);
+              return;
+            }
+            currentTeacher = null;
             showAdminPanel(true);
           } else if (isTeacherRole(primaryRole)) {
-            const linkedTeacherId = String(profile.linkedTeacherId || profile.teacherDocId || profile.teacherId || '').trim();
-            const profileTeacherId = String(profile.teacherId || '').trim();
-            const teacherProfile = teachers.find(function(t) {
-              return (linkedTeacherId && (String(t.firebaseDocId || t.id || '') === linkedTeacherId || String(t.teacherId || '') === linkedTeacherId)) ||
-                     (profileTeacherId && String(t.teacherId || '') === profileTeacherId) ||
-                     t.authUid === uid;
-            }) || { id: uid, authUid: uid, name: profile.name || profile.displayName || user.email || '', email: profile.email || user.email || '' };
+            const teacherProfile = findLinkedTeacherProfileForUserProfile(profile, uid) || { id: uid, authUid: uid, name: profile.name || profile.displayName || user.email || '', email: profile.email || user.email || '' };
             const teacher = Object.assign({}, teacherProfile, {
               linkedTeacherId: profile.linkedTeacherId || teacherProfile.linkedTeacherId || teacherProfile.firebaseDocId || teacherProfile.id || '',
               teacherDocId: profile.teacherDocId || teacherProfile.teacherDocId || teacherProfile.firebaseDocId || teacherProfile.id || profile.linkedTeacherId || '',
@@ -12225,6 +12230,18 @@
       return buildTeacherSessionFromProfile(source, userProfile || {}, fallbackEmail, displayLoginId);
     }
 
+    function findLinkedTeacherProfileForUserProfile(userProfile, uid) {
+      const profile = userProfile || {};
+      const authUid = String(uid || profile.authUid || profile.uid || '').trim();
+      const linkedTeacherId = String(profile.linkedTeacherId || profile.teacherDocId || profile.teacherId || '').trim();
+      const profileTeacherId = String(profile.teacherId || '').trim();
+      return (Array.isArray(teachers) ? teachers : []).find(function(t) {
+        return (linkedTeacherId && (String(t.firebaseDocId || t.id || '') === linkedTeacherId || String(t.teacherId || '') === linkedTeacherId)) ||
+          (profileTeacherId && String(t.teacherId || '') === profileTeacherId) ||
+          (authUid && String(t.authUid || '') === authUid);
+      }) || null;
+    }
+
     function refreshTeacherPanelAfterCoreLoad(teacherProfile, userProfile, fallbackEmail, displayLoginId) {
       if (!teacherProfile || isCurrentStudentSession()) return;
       currentTeacher = buildTeacherSessionFromProfile(teacherProfile, userProfile || firebaseUserProfile || {}, fallbackEmail, displayLoginId);
@@ -12665,15 +12682,25 @@
               appRole: activeAppRole,
               primaryStaffRole: primaryStaffRole
             });
-            const linkedTeacherId = String(firebaseUserProfile.linkedTeacherId || firebaseUserProfile.teacherDocId || firebaseUserProfile.teacherId || '').trim();
-            currentTeacher = teachers.find(function(t) {
-              return (linkedTeacherId && (String(t.firebaseDocId || t.id || '') === linkedTeacherId || String(t.teacherId || '') === linkedTeacherId)) ||
-                t.authUid === firebaseUser.uid;
-            }) || null;
+            const linkedTeacherProfile = findLinkedTeacherProfileForUserProfile(firebaseUserProfile, firebaseUser.uid);
+            const staffTeacher = linkedTeacherProfile
+              ? buildTeacherSessionFromProfile(linkedTeacherProfile, firebaseUserProfile, firebaseEmail, displayLoginId)
+              : null;
             currentAdmin = firebaseUserProfile;
             currentStudent = null;
             setSuperAdminMode(getEffectivePermissions(firebaseUserProfile).includes('admin.full') || activeAppRole === 'SuperAdmin' || activeAppRole === 'Admin');
             setSessionExpiry();
+            if (staffTeacher) {
+              currentTeacher = staffTeacher;
+              console.log('admin-teacher-route-teacher-first', {
+                uid: firebaseUser.uid,
+                teacherId: staffTeacher.teacherId || staffTeacher.id || '',
+                appRole: activeAppRole
+              });
+              showTeacherPanel(staffTeacher);
+              return;
+            }
+            currentTeacher = null;
             showAdminPanel(true);
             return;
           }
@@ -12685,13 +12712,7 @@
               appRole: activeAppRole,
               primaryStaffRole: primaryStaffRole
             });
-            const linkedTeacherId = String(firebaseUserProfile.linkedTeacherId || firebaseUserProfile.teacherDocId || firebaseUserProfile.teacherId || '').trim();
-            const profileTeacherId = String(firebaseUserProfile.teacherId || '').trim();
-            const teacherProfile = teachers.find(function(t) {
-              return (linkedTeacherId && (String(t.firebaseDocId || t.id || '') === linkedTeacherId || String(t.teacherId || '') === linkedTeacherId)) ||
-                (profileTeacherId && String(t.teacherId || '') === profileTeacherId) ||
-                t.authUid === firebaseUser.uid;
-            }) || {
+            const teacherProfile = findLinkedTeacherProfileForUserProfile(firebaseUserProfile, firebaseUser.uid) || {
               id: firebaseUser.uid,
               authUid: firebaseUser.uid,
               name: firebaseUserProfile.name || firebaseEmail || 'Teacher',
@@ -13539,7 +13560,11 @@
         alert('บัญชีนักเรียนไม่มีสิทธิ์เข้าหน้านี้');
         return;
       }
-      showTeacherPanel({ name: getAdminDisplayNameFallback(), username: firebaseUser && firebaseUser.email ? firebaseUser.email : 'admin', status: 'Active', role: 'SuperAdmin', appRole: 'SuperAdmin', permissions: getDefaultPermissionsForRole('SuperAdmin'), permissionMode: 'custom' });
+      const linkedTeacherProfile = findLinkedTeacherProfileForUserProfile(firebaseUserProfile, firebaseUser && firebaseUser.uid);
+      const teacher = linkedTeacherProfile
+        ? buildTeacherSessionFromProfile(linkedTeacherProfile, firebaseUserProfile || {}, firebaseUser && firebaseUser.email ? firebaseUser.email : '', firebaseUserProfile && (firebaseUserProfile.loginId || firebaseUserProfile.username) || '')
+        : { name: getAdminDisplayNameFallback(), username: firebaseUser && firebaseUser.email ? firebaseUser.email : 'admin', status: 'Active', role: 'SuperAdmin', appRole: 'SuperAdmin', permissions: getDefaultPermissionsForRole('SuperAdmin'), permissionMode: 'custom' };
+      showTeacherPanel(teacher);
       setSuperAdminMode(true);
       refreshProfileBox();
     }
@@ -24328,6 +24353,15 @@
       var r = getElement('shopRewardSaveResult'); if (r) r.textContent = '';
     }
 
+    function updateBubbleRewardTypeRows(type) {
+      const stampRow = getElement('bGR_stampRow');
+      const ticketsRow = getElement('bGR_ticketsRow');
+      const avatarRow = getElement('bGR_avatarRow');
+      if (stampRow) stampRow.style.display = type === 'stampCard' ? '' : 'none';
+      if (ticketsRow) ticketsRow.style.display = type === 'wheelTickets' ? '' : 'none';
+      if (avatarRow) avatarRow.style.display = type === 'avatarCosmetic' ? '' : 'none';
+    }
+
     function adminEditGamificationReward(rewardId) {
       const r = gamificationRewards.find(function(x) { return String(x.firebaseDocId || x.id || '') === rewardId && !x.deleted; });
       if (!r) return;
@@ -24344,7 +24378,7 @@
             '<div style="flex:1;min-width:130px;"><label style="font-size:13px;font-weight:700;display:block;margin-bottom:4px;">หมวดหมู่</label>' +
               '<input type="text" id="bGR_category" value="' + escapeHtml(r.category || '') + '" style="width:100%;" /></div>' +
             '<div><label style="font-size:13px;font-weight:700;display:block;margin-bottom:4px;">ประเภท</label>' +
-              '<select id="bGR_type" onchange="var s=document.getElementById(\'bGR_stampRow\'),t=document.getElementById(\'bGR_ticketsRow\'),a=document.getElementById(\'bGR_avatarRow\');if(s)s.style.display=this.value===\'stampCard\'?\'\':\'none\';if(t)t.style.display=this.value===\'wheelTickets\'?\'\':\'none\';if(a)a.style.display=this.value===\'avatarCosmetic\'?\'\':\'none\';">' +
+              '<select id="bGR_type" onchange="updateBubbleRewardTypeRows(this.value)">' +
                 '<option value="standard"' + (!isStamp && !isTickets && !isAvatar && !isSpecialVoucher ? ' selected' : '') + '>รางวัลมาตรฐาน</option>' +
                 '<option value="specialVoucher"' + (isSpecialVoucher ? ' selected' : '') + '>🎫 บัตรรางวัลพิเศษ</option>' +
                 '<option value="stampCard"' + (isStamp ? ' selected' : '') + '>บัตรสะสม</option>' +
@@ -32919,6 +32953,11 @@ function receiptStatusText(status) {
         repairPaymentStatusFromReceipts.running = false;
       }
       return repaired;
+    }
+
+    async function runRepairPaymentStatusFromReceipts() {
+      const repaired = await repairPaymentStatusFromReceipts();
+      alert(repaired ? 'ซ่อมแล้ว ' + repaired + ' รายการ' : 'ไม่พบรายการที่ต้องซ่อม');
     }
 
     function renderStudentReceipts() {
@@ -48261,6 +48300,11 @@ function receiptStatusText(status) {
       if (course) updateOnlineExamNavigator(course);
     }
 
+    function scrollToOnlineExamQuestion(index) {
+      const node = getElement('onlineExamQNode_' + index);
+      if (node) node.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+
     function updateOnlineExamNavigator(course) {
       const nav = getElement('onlineExamNavigator');
       const answeredEl = getElement('onlineExamAnsweredCount');
@@ -48284,7 +48328,7 @@ function receiptStatusText(status) {
 
       nav.innerHTML = displayQuestions.map(function(q, idx) {
         const isAnswered = onlineExamStudentAnswers[q.questionId] !== undefined;
-        return '<button onclick="document.getElementById(\'onlineExamQNode_' + idx + '\')&&document.getElementById(\'onlineExamQNode_' + idx + '\').scrollIntoView({behavior:\'smooth\',block:\'start\'})" ' +
+        return '<button onclick="scrollToOnlineExamQuestion(' + idx + ')" ' +
           'style="padding:0;width:100%;aspect-ratio:1;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer;border:' +
           (isAnswered ? '2px solid #34d399;background:#d1fae5;color:#065f46;' : '1.5px solid #cbd5e1;background:#f8fafc;color:#64748b;') +
           '">' + (idx+1) + '</button>';
