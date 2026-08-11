@@ -8403,7 +8403,7 @@
 
             <div class="form-box">
               <h3>รายการคลิป</h3>
-              <p style="margin-bottom:18px; color:#6b7280;">เลือกดูคลิปตามวิชา และจัดเรียงรายการจากน้อยไปมาก หรือมากไปน้อยได้</p>
+              <p style="margin-bottom:18px; color:#6b7280;">เลือกดูคลิปตามวิชาและระดับชั้น โดยรายการจะแสดงวันที่ล่าสุดก่อน</p>
               <div class="form-row">
                 <div>
                   <label>เลือกวิชาที่ต้องการดู</label>
@@ -8439,14 +8439,7 @@
                     <option value="grade">ระดับชั้น</option>
                     <option value="playlistName">ชุดคลิป</option>
                     <option value="clipTitle">ชื่อคลิป</option>
-                    <option value="clipDate">วันที่คลิป</option>
-                  </select>
-                </div>
-                <div>
-                  <label>รูปแบบการเรียงลำดับ</label>
-                  <select id="adminOnDemandSortDirection" onchange="renderOnDemandTable()">
-                    <option value="asc">น้อยไปมาก</option>
-                    <option value="desc">มากไปน้อย</option>
+                    <option value="clipDate" selected>วันที่คลิป</option>
                   </select>
                 </div>
               </div>
@@ -19194,11 +19187,18 @@
       updateStudentCourseDisplay();
     }
 
+    let adminOnDemandSortDirection = 'desc';
+
+    function getAdminOnDemandSortValue(item, sortKey) {
+      if (sortKey === 'clipDate' || sortKey === 'id') return getOnDemandClipTimestamp(item);
+      return item ? item[sortKey] : '';
+    }
+
     function getFilteredSortedOnDemandClips() {
       const subjectFilter = getElement('adminOnDemandSubjectViewFilter') ? getElement('adminOnDemandSubjectViewFilter').value : 'ทั้งหมด';
       const gradeFilter = getElement('adminOnDemandGradeViewFilter') ? getElement('adminOnDemandGradeViewFilter').value : 'ทั้งหมด';
-      const sortKey = getElement('adminOnDemandSortKey') ? getElement('adminOnDemandSortKey').value : 'id';
-      const direction = getElement('adminOnDemandSortDirection') ? getElement('adminOnDemandSortDirection').value : 'asc';
+      const sortKey = getElement('adminOnDemandSortKey') ? getElement('adminOnDemandSortKey').value : 'clipDate';
+      const direction = adminOnDemandSortDirection || 'desc';
 
       return onDemandClips
         .filter(function(item) {
@@ -19208,19 +19208,20 @@
         })
         .slice()
         .sort(function(a, b) {
-          return compareValues(a[sortKey], b[sortKey], direction);
+          const compared = compareValues(getAdminOnDemandSortValue(a, sortKey), getAdminOnDemandSortValue(b, sortKey), direction);
+          if (compared) return compared;
+          return compareOnDemandClipsLatestFirst(a, b);
         });
     }
 
     function setOnDemandSort(key) {
       const sortKeySelect = getElement('adminOnDemandSortKey');
-      const directionSelect = getElement('adminOnDemandSortDirection');
-      if (!sortKeySelect || !directionSelect) return;
+      if (!sortKeySelect) return;
       if (sortKeySelect.value === key) {
-        directionSelect.value = directionSelect.value === 'asc' ? 'desc' : 'asc';
+        adminOnDemandSortDirection = adminOnDemandSortDirection === 'asc' ? 'desc' : 'asc';
       } else {
         sortKeySelect.value = key;
-        directionSelect.value = 'asc';
+        adminOnDemandSortDirection = key === 'clipDate' || key === 'id' ? 'desc' : 'asc';
       }
       renderOnDemandTable();
     }
