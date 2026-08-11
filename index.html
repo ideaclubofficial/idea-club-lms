@@ -19232,11 +19232,6 @@
       }).join('\n');
     }
 
-    function getPdfFileCountText(item) {
-      const count = Array.isArray(item && item.pdfFiles) ? item.pdfFiles.filter(function(file) { return file && file.url; }).length : 0;
-      return count ? 'มี ' + count + ' ไฟล์' : 'ยังไม่มีไฟล์';
-    }
-
     function getLinkedOnDemandPdfFiles(item) {
       return Array.isArray(item && item.pdfFiles)
         ? item.pdfFiles.filter(function(file) { return file && file.url; })
@@ -19512,6 +19507,27 @@
       return '<button class="btn btn-blue" type="button" onclick="openExternalLink(\'' + jsArg(link) + '\')">ดูคลิป</button>';
     }
 
+    function renderAdminOnDemandPdfLinkCell(item) {
+      const files = getLinkedOnDemandPdfFiles(item);
+      if (!files.length) return 'ยังไม่มีไฟล์';
+      const countText = files.length > 1 ? '<br><span class="mini-muted">มี ' + files.length + ' ไฟล์</span>' : '';
+      return '<button class="btn btn-blue" type="button" onclick="' + actionCall('openOnDemandDocLinks', item.id) + '">ดูเอกสาร</button>' + countText;
+    }
+
+    function openOnDemandDocLinks(id) {
+      const item = onDemandClips.find(function(p) { return String(p.id) === String(id); });
+      const files = getLinkedOnDemandPdfFiles(item);
+      if (!files.length) {
+        alert('ยังไม่มีลิงก์เอกสาร');
+        return;
+      }
+      openViewBubble('ลิงก์เอกสาร On-demand',
+        '<div class="online-doc-buttons">' + files.map(function(file) {
+          return '<button class="btn btn-blue" type="button" onclick="openExternalLink(\'' + jsArg(file.url) + '\')">📄 ' + escapeHtml(file.title || 'เอกสารประกอบการสอน') + '</button>';
+        }).join('') + '</div>'
+      );
+    }
+
     function renderOnDemandTable() {
       const tbody = getElement('adminOnDemandTableBody');
       if (!tbody) return;
@@ -19522,7 +19538,7 @@
       const start = (adminOnDemandCurrentPage - 1) * LIST_PAGE_SIZE;
       const pageItems = filtered.slice(start, start + LIST_PAGE_SIZE);
       tbody.innerHTML = pageItems.length ? pageItems.map(function(item) {
-        return '<tr><td>' + escapeHtml(item.subject || '-') + '</td><td>' + escapeHtml(item.grade || '-') + '</td><td>' + escapeHtml(item.playlistName || '-') + '</td><td>' + escapeHtml(item.clipTitle || '-') + '</td><td>' + escapeHtml(formatOnDemandClipDate(item)) + '</td><td>' + renderAdminOnDemandVideoLinkCell(item) + '</td><td>' + getPdfFileCountText(item) + '</td><td><button class="btn btn-blue" type="button" onclick="' + actionCall('editOnDemand', item.id) + '">แก้ไข</button><button class="btn btn-red" type="button" onclick="' + actionCall('deleteOnDemandClip', item.id) + '">ลบ</button></td></tr>';
+        return '<tr><td>' + escapeHtml(item.subject || '-') + '</td><td>' + escapeHtml(item.grade || '-') + '</td><td>' + escapeHtml(item.playlistName || '-') + '</td><td>' + escapeHtml(item.clipTitle || '-') + '</td><td>' + escapeHtml(formatOnDemandClipDate(item)) + '</td><td>' + renderAdminOnDemandVideoLinkCell(item) + '</td><td>' + renderAdminOnDemandPdfLinkCell(item) + '</td><td><button class="btn btn-blue" type="button" onclick="' + actionCall('editOnDemand', item.id) + '">แก้ไข</button><button class="btn btn-red" type="button" onclick="' + actionCall('deleteOnDemandClip', item.id) + '">ลบ</button></td></tr>';
       }).join('') : '<tr><td colspan="8">ไม่พบคลิป On-demand ตามวิชาและระดับชั้นที่เลือก</td></tr>';
       renderTablePagination('adminOnDemandPagination', adminOnDemandCurrentPage, totalPages, filtered.length, 'changeAdminOnDemandPage');
     }
