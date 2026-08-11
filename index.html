@@ -8457,7 +8457,7 @@
               <div class="form-row">
                 <div>
                   <label>เลือกวิชาที่ต้องการดู</label>
-                  <select id="adminOnDemandSubjectViewFilter" onchange="renderOnDemandTable()">
+                  <select id="adminOnDemandSubjectViewFilter" onchange="adminOnDemandCurrentPage=1; renderOnDemandTable()">
                     <option value="ทั้งหมด">ทั้งหมด</option>
                     <option value="คณิตศาสตร์">คณิตศาสตร์</option>
                     <option value="วิทยาศาสตร์">วิทยาศาสตร์</option>
@@ -8468,7 +8468,7 @@
                 </div>
                 <div>
                   <label>เลือกระดับชั้นที่ต้องการดู</label>
-                  <select id="adminOnDemandGradeViewFilter" onchange="renderOnDemandTable()">
+                  <select id="adminOnDemandGradeViewFilter" onchange="adminOnDemandCurrentPage=1; renderOnDemandTable()">
                     <option value="ทั้งหมด">ทั้งหมด</option>
                     <option value="ป.4">ป.4</option>
                     <option value="ป.5">ป.5</option>
@@ -8483,7 +8483,7 @@
                 </div>
                 <div>
                   <label>เรียงตาม</label>
-                  <select id="adminOnDemandSortKey" onchange="renderOnDemandTable()">
+                  <select id="adminOnDemandSortKey" onchange="adminOnDemandCurrentPage=1; renderOnDemandTable()">
                     <option value="id">ลำดับที่เพิ่ม</option>
                     <option value="subject">วิชา</option>
                     <option value="grade">ระดับชั้น</option>
@@ -8514,6 +8514,7 @@
                 <tbody id="adminOnDemandTableBody"></tbody>
               </table>
             </div>
+            <div id="adminOnDemandPagination" class="pagination"></div>
           </section>
 
           <section id="admin-gamification-shop" class="admin-tab hidden">
@@ -16099,6 +16100,7 @@
     let examBankCurrentPage = 1;
     let reportsCurrentPage = 1;
     let adminQuestionsCurrentPage = 1;
+    let adminOnDemandCurrentPage = 1;
     const LIST_PAGE_SIZE = 20;
 
     function renderTablePagination(containerId, currentPage, totalPages, totalItems, changeFnName) {
@@ -19460,6 +19462,7 @@
         sortKeySelect.value = key;
         adminOnDemandSortDirection = key === 'clipDate' || key === 'id' ? 'desc' : 'asc';
       }
+      adminOnDemandCurrentPage = 1;
       renderOnDemandTable();
     }
 
@@ -19488,9 +19491,22 @@
       const tbody = getElement('adminOnDemandTableBody');
       if (!tbody) return;
       const filtered = getFilteredSortedOnDemandClips();
-      tbody.innerHTML = filtered.length ? filtered.map(function(item) {
+      const totalPages = Math.max(1, Math.ceil(filtered.length / LIST_PAGE_SIZE));
+      if (adminOnDemandCurrentPage > totalPages) adminOnDemandCurrentPage = totalPages;
+      if (adminOnDemandCurrentPage < 1) adminOnDemandCurrentPage = 1;
+      const start = (adminOnDemandCurrentPage - 1) * LIST_PAGE_SIZE;
+      const pageItems = filtered.slice(start, start + LIST_PAGE_SIZE);
+      tbody.innerHTML = pageItems.length ? pageItems.map(function(item) {
         return '<tr><td>' + escapeHtml(item.subject || '-') + '</td><td>' + escapeHtml(item.grade || '-') + '</td><td>' + escapeHtml(item.playlistName || '-') + '</td><td>' + escapeHtml(item.clipTitle || '-') + '</td><td>' + escapeHtml(formatOnDemandClipDate(item)) + '</td><td>' + renderAdminOnDemandVideoLinkCell(item) + '</td><td>' + getPdfFileCountText(item) + '</td><td><button class="btn btn-blue" type="button" onclick="' + actionCall('editOnDemand', item.id) + '">แก้ไข</button><button class="btn btn-red" type="button" onclick="' + actionCall('deleteOnDemandClip', item.id) + '">ลบ</button></td></tr>';
       }).join('') : '<tr><td colspan="8">ไม่พบคลิป On-demand ตามวิชาและระดับชั้นที่เลือก</td></tr>';
+      renderTablePagination('adminOnDemandPagination', adminOnDemandCurrentPage, totalPages, filtered.length, 'changeAdminOnDemandPage');
+    }
+
+    function changeAdminOnDemandPage(direction) {
+      const filtered = getFilteredSortedOnDemandClips();
+      const totalPages = Math.max(1, Math.ceil(filtered.length / LIST_PAGE_SIZE));
+      adminOnDemandCurrentPage = Math.min(Math.max(1, adminOnDemandCurrentPage + direction), totalPages);
+      renderOnDemandTable();
     }
 
     function editOnDemand(id) {
