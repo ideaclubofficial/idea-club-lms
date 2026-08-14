@@ -7785,6 +7785,18 @@
                     </button>
                   </div>
 
+                  <div class="bg-white p-5 rounded-2xl border border-amber-200 shadow-sm space-y-3">
+                    <h2 class="font-bold text-slate-900 text-sm flex items-center gap-2">
+                      <i data-lucide="user-plus" class="w-4 h-4 text-amber-600"></i> ใส่ครูให้คาบรอ
+                    </h2>
+                    <p id="tf-quick-assign-summary" class="text-xs text-slate-500 leading-relaxed">เลือกครูแล้วใส่ให้คาบรอครูในเดือนนี้ตามตัวกรองศูนย์ / รูปแบบ / คอร์ส</p>
+                    <select id="tf-quick-assign-tutor" class="w-full bg-slate-50 border border-slate-200 text-slate-700 text-xs rounded-xl p-2.5 font-medium"></select>
+                    <button onclick="tfAssignTeacherToPendingSchedules()" class="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-amber-500 hover:bg-amber-600 text-white font-semibold rounded-xl transition-all shadow-md text-sm border-0 cursor-pointer">
+                      <i data-lucide="check-circle" class="w-4 h-4"></i> ใส่ครูตามตัวกรอง
+                    </button>
+                    <p id="tf-quick-assign-result" class="text-xs font-medium"></p>
+                  </div>
+
                   <!-- Course List -->
                   <div class="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
                     <h2 class="font-bold text-slate-900 text-sm flex items-center gap-2 mb-3">
@@ -50029,6 +50041,121 @@ function receiptStatusText(status) {
       }).join('');
     }
 
+    function tfPopulateQuickAssignTeachers() {
+      const sel = tfEl('tf-quick-assign-tutor');
+      if (!sel) return;
+      const prev = sel.value;
+      const tutorsArr = tfGetTutors();
+      sel.innerHTML = '<option value="">เลือกครูผู้สอน</option>' + tutorsArr.map(function(t) {
+        const id = t.id || t.firebaseDocId || '';
+        const subject = t.subject || t.mainSubject || '';
+        return '<option value="' + escapeHtml(id) + '">' + escapeHtml((t.name || t.displayName || t.email || id) + (subject ? ' · ' + subject : '')) + '</option>';
+      }).join('');
+      if (prev && tutorsArr.some(function(t) { return String(t.id || t.firebaseDocId || '') === String(prev); })) sel.value = prev;
+    }
+
+    function tfGetCurrentCalendarMonthKey() {
+      return tfCalDate.getFullYear() + '-' + String(tfCalDate.getMonth() + 1).padStart(2, '0');
+    }
+
+    function tfGetPendingSchedulesForQuickAssign() {
+      const monthKey = tfGetCurrentCalendarMonthKey();
+      const fmt = tfEl('tf-filter-format') ? tfEl('tf-filter-format').value : 'all';
+      const courseId = tfEl('tf-filter-course') ? tfEl('tf-filter-course').value : 'all';
+      return (monthlyPlanSessions || []).filter(function(session) {
+        if (!isMonthlySessionAwaitingTeacher(session)) return false;
+        if (session.deleted === true || session.status === 'cancelled' || session.status === 'holiday') return false;
+        if (getMonthlySessionMonthKey(session) !== monthKey) return false;
+        const centerOk = tfCenterFilter === 'all' ||
+          tfCenterTextMatches(session.center || session.courseLocation || '', tfCenterFilter) ||
+          (tfCenterFilter === 'nongchang' && session.center && session.center.includes('หนองฉาง')) ||
+          (tfCenterFilter === 'nakhonsawan' && session.center && (session.center.includes('นครสวรรค์') || session.center.includes('นครสวรรค')));
+        const fmtOk = fmt === 'all' || (session.type || session.format) === fmt;
+        const courseOk = courseId === 'all' || String(session.courseId || '') === String(courseId);
+        return centerOk && fmtOk && courseOk;
+      }).sort(compareMonthlySessionsForDisplay);
+    }
+
+    function tfRenderQuickAssignPanel() {
+      tfPopulateQuickAssignTeachers();
+      const summary = tfEl('tf-quick-assign-summary');
+      if (!summary) return;
+      const count = tfGetPendingSchedulesForQuickAssign().length;
+      const monthText = getThaiMonthLabel(tfGetCurrentCalendarMonthKey(), false) || tfGetCurrentCalendarMonthKey();
+      summary.textContent = count
+        ? 'พบคาบรอครู ' + count + ' คาบใน ' + monthText + ' ตามตัวกรองศูนย์ / รูปแบบ / คอร์ส'
+        : 'ยังไม่มีคาบรอครูใน ' + monthText + ' ตามตัวกรองนี้';
+    }
+
+    async function tfAssignTeacherToPendingSchedules() {
+      const result = tfEl('tf-quick-assign-result');
+      const teacherId = tfEl('tf-quick-assign-tutor') ? tfEl('tf-quick-assign-tutor').value : '';
+      if (result) {
+        result.textContent = '';
+        result.className = 'text-xs font-medium';
+      }
+      if (!teacherId) {
+        if (result) {
+          result.textContent = 'กรุณาเลือกครูก่อน';
+          result.className = 'text-xs font-medium text-rose-600';
+        }
+        return;
+      }
+      const teacher = tfGetTutors().find(function(t) { return String(t.id || t.firebaseDocId || '') === String(teacherId); });
+      if (!teacher) return;
+      const targets = tfGetPendingSchedulesForQuickAssign();
+      if (!targets.length) {
+        if (result) {
+          result.textContent = 'ไม่มีคาบรอครูตามตัวกรองนี้';
+          result.className = 'text-xs font-medium text-slate-500';
+        }
+        return;
+      }
+      if (!confirm('ต้องการใส่ ' + (teacher.name || teacher.displayName || teacher.email || 'ครูที่เลือก') + ' ให้คาบรอครู ' + targets.length + ' คาบตามตัวกรองนี้ใช่หรือไม่?')) return;
+      const nowText = new Date().toLocaleString('th-TH');
+      let saved = 0;
+      let skippedMode = 0;
+      let skippedConflict = 0;
+      for (const session of targets) {
+        const subjectSetting = getMonthlySubjectSetting(session, session.subject || '');
+        if (!canTeacherTeachMode(teacher, session.type || session.format || 'onsite', subjectSetting)) {
+          skippedMode += 1;
+          continue;
+        }
+        const draft = Object.assign({}, session, {
+          teacherId: teacherId,
+          tutorId: teacherId,
+          teacherUid: teacher.teacherUid || teacher.authUid || '',
+          teacherAuthUid: teacher.authUid || teacher.teacherUid || '',
+          teacherName: teacher.name || teacher.displayName || teacher.email || '',
+          tutorName: teacher.name || teacher.displayName || teacher.email || '',
+          updatedAtText: nowText
+        });
+        applyMonthlySessionTeacherPublishState(draft);
+        if (findTeacherConflicts(draft).length) {
+          skippedConflict += 1;
+          continue;
+        }
+        Object.assign(session, draft);
+        appendMonthlyPlanChangeLog(session, 'quick_teacher_assigned', 'ใส่ครูด่วนจาก TutorFlow');
+        await setFirebaseDocument('monthlyPlanSessions', session);
+        saved += 1;
+      }
+      tfRenderSchedule();
+      safeRun(renderMonthlyPlanSessions, 'tf-quick-assign-monthly-render');
+      safeRun(renderStudentMonthlyPlanSummary, 'tf-quick-assign-student-refresh');
+      safeRun(renderTeacherMonthlyPlanSummary, 'tf-quick-assign-teacher-refresh');
+      safeRun(renderTodayTeachingList, 'tf-quick-assign-today');
+      if (result) {
+        const parts = ['ใส่ครูแล้ว ' + saved + ' คาบ'];
+        if (skippedMode) parts.push('ข้ามรูปแบบไม่ตรง ' + skippedMode);
+        if (skippedConflict) parts.push('ข้ามครูชนเวลา ' + skippedConflict);
+        result.textContent = parts.join(' · ');
+        result.className = saved ? 'text-xs font-medium text-emerald-600' : 'text-xs font-medium text-rose-600';
+      }
+      tfToast('ใส่ครูแล้ว ' + saved + ' คาบ', saved ? 'success' : 'error');
+    }
+
     // --- Populate filter dropdowns ---
     function tfPopulateFilters() {
       const tutorSel = tfEl('tf-filter-tutor');
@@ -50052,9 +50179,10 @@ function receiptStatusText(status) {
           filteredCourses.map(function(c) {
             const id = tfGetCourseId(c);
             return '<option value="' + escapeHtml(id) + '">' + escapeHtml(tfCourseOptionLabel(c)) + '</option>';
-          }).join('');
+        }).join('');
         courseSel.value = Array.prototype.some.call(courseSel.options || [], function(opt) { return opt.value === prevCourse; }) ? prevCourse : 'all';
       }
+      tfRenderQuickAssignPanel();
     }
 
     // --- Filter by center ---
@@ -50181,6 +50309,7 @@ function receiptStatusText(status) {
       if (tfCurrentView === 'grid') tfRenderGrid();
       else tfRenderList();
       tfUpdateStats();
+      tfRenderQuickAssignPanel();
     }
 
     // --- Render monthly grid calendar ---
