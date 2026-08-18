@@ -7188,12 +7188,13 @@
                     <label>ศูนย์</label>
                     <div style="display:flex;gap:8px;flex-wrap:wrap;">
                       <label style="display:flex;align-items:center;gap:6px;font-size:12px;padding:7px 10px;border:1px solid #cbd5e1;border-radius:8px;background:#f8fafc;">
-                        <input type="radio" name="onlineExamAutoCenterMode" value="shared" checked> รวมศูนย์
+                        <input type="radio" name="onlineExamAutoCenterMode" value="shared" checked onchange="onOnlineExamAutoCenterModeChange()"> รวมศูนย์
                       </label>
                       <label style="display:flex;align-items:center;gap:6px;font-size:12px;padding:7px 10px;border:1px solid #cbd5e1;border-radius:8px;background:#f8fafc;">
-                        <input type="radio" name="onlineExamAutoCenterMode" value="separate"> แยกศูนย์
+                        <input type="radio" name="onlineExamAutoCenterMode" value="separate" onchange="onOnlineExamAutoCenterModeChange()"> แยกศูนย์
                       </label>
                     </div>
+                    <div id="onlineExamAutoCenterOptions" style="display:none;margin-top:8px;padding:9px 10px;border:1px solid #e2e8f0;border-radius:8px;background:#fff;"></div>
                     <p id="onlineExamAutoCenterSummary" style="font-size:10px;color:#64748b;margin:6px 0 0;"></p>
                   </div>
                   <div>
@@ -44475,6 +44476,35 @@ function receiptStatusText(status) {
         .filter(function(location, index, arr) { return location && arr.indexOf(location) === index; });
     }
 
+    function renderOnlineExamAutoCenterOptions(preserveSelection) {
+      const box = getElement('onlineExamAutoCenterOptions');
+      if (!box) return;
+      const mode = getOnlineExamAutoCenterMode();
+      const centers = getOnlineExamAutoLocationValues();
+      const current = preserveSelection ? getOnlineExamCheckedValues('.online-exam-auto-location') : [];
+      const selected = current.length ? current : centers;
+      box.style.display = mode === 'separate' ? '' : 'none';
+      box.innerHTML =
+        '<label style="display:block;font-size:11px;font-weight:800;color:#334155;margin-bottom:6px;">สำหรับศูนย์ไหน</label>' +
+        '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:6px;">' +
+          centers.map(function(center) {
+            const checked = selected.includes(center) ? ' checked' : '';
+            return '<label style="display:flex;align-items:center;gap:6px;font-size:12px;color:#334155;">' +
+              '<input type="checkbox" class="online-exam-auto-location" value="' + escapeHtml(center) + '"' + checked + ' onchange="populateOnlineExamAutoCenterSummary()"> ' + escapeHtml(center.replace('IDEA CLUB ศูนย์ ', '')) +
+            '</label>';
+          }).join('') +
+        '</div>';
+    }
+
+    function getSelectedOnlineExamAutoLocationValues() {
+      return getOnlineExamCheckedValues('.online-exam-auto-location');
+    }
+
+    function onOnlineExamAutoCenterModeChange() {
+      renderOnlineExamAutoCenterOptions(true);
+      populateOnlineExamAutoCenterSummary();
+    }
+
     function getOnlineExamAutoCourseTitle(subject, grade, examMonth, location) {
       const shortLocation = String(location || '').replace('IDEA CLUB ศูนย์ ', '').trim();
       return [subject, grade, examMonth, shortLocation].filter(Boolean).join(' ');
@@ -44487,12 +44517,16 @@ function receiptStatusText(status) {
     function populateOnlineExamAutoCenterSummary() {
       const el = getElement('onlineExamAutoCenterSummary');
       if (!el) return;
-      const centers = getOnlineExamAutoLocationValues();
-      el.textContent = 'แยกศูนย์: ' + (centers.length ? centers.join(' · ') : '-');
+      if (getOnlineExamAutoCenterMode() !== 'separate') {
+        el.textContent = 'รวมศูนย์: สร้างชุดเดียวสำหรับทุกศูนย์';
+        return;
+      }
+      const centers = getSelectedOnlineExamAutoLocationValues();
+      el.textContent = 'แยกศูนย์สำหรับ: ' + (centers.length ? centers.join(' · ') : 'กรุณาเลือกศูนย์');
     }
 
     function resetOnlineExamAutoCourseForm(keepResult) {
-      document.querySelectorAll('.online-exam-auto-grade, .online-exam-auto-subject').forEach(function(input) {
+      document.querySelectorAll('.online-exam-auto-grade, .online-exam-auto-subject, .online-exam-auto-location').forEach(function(input) {
         input.checked = false;
       });
       const sharedMode = document.querySelector('input[name="onlineExamAutoCenterMode"][value="shared"]');
@@ -44507,6 +44541,7 @@ function receiptStatusText(status) {
         const resultEl = getElement('onlineExamAutoCourseResult');
         if (resultEl) resultEl.textContent = '';
       }
+      renderOnlineExamAutoCenterOptions(false);
       populateOnlineExamAutoCenterSummary();
     }
 
@@ -44518,7 +44553,7 @@ function receiptStatusText(status) {
       const examMonth = getSelectedOnlineExamManageMonth();
       const grades = getOnlineExamCheckedValues('.online-exam-auto-grade');
       const subjects = getOnlineExamCheckedValues('.online-exam-auto-subject');
-      const locations = getOnlineExamAutoCenterMode() === 'separate' ? getOnlineExamAutoLocationValues() : [''];
+      const locations = getOnlineExamAutoCenterMode() === 'separate' ? getSelectedOnlineExamAutoLocationValues() : [''];
       const duration = parseInt((getElement('onlineExamAutoDuration') || {}).value || '15', 10) || 15;
       const status = (getElement('onlineExamAutoStatus') || {}).value || 'active';
       const shuffleQuestions = (getElement('onlineExamAutoShuffleQ') || {}).value === '1';
@@ -45177,6 +45212,7 @@ function receiptStatusText(status) {
 
     function renderOnlineExamAdminManage() {
       populateOnlineExamGradeSelect();
+      renderOnlineExamAutoCenterOptions(true);
       populateOnlineExamAutoCenterSummary();
       populateOnlineExamMonthSelect();
       populateOnlineExamCourseListFilters();
@@ -45199,6 +45235,7 @@ function receiptStatusText(status) {
         locSel.innerHTML = '<option value="">-- ทุกศูนย์ (ค่าเริ่มต้น) --</option>' + locationOptionsHtml(currentLoc);
         if (currentLoc) locSel.value = currentLoc;
       }
+      renderOnlineExamAutoCenterOptions(true);
       populateOnlineExamAutoCenterSummary();
     }
 
