@@ -7300,10 +7300,20 @@
                 </div>
                 <div class="form-row">
                   <div>
-                    <label>เลือกไฟล์ Excel (.xlsx / .xls)</label>
-                    <input type="file" id="onlineExamXlsxInput" accept=".xlsx,.xls"
-                      onchange="importExamFromExcel(this)"
-                      style="display:block;margin-top:4px;font-size:13px;">
+                    <label>เลือกไฟล์ Excel (.xlsx / .xls / .csv)</label>
+                    <div id="onlineExamXlsxDropZone"
+                      ondragover="handleOnlineExamXlsxDragOver(event)"
+                      ondragleave="handleOnlineExamXlsxDragLeave(event)"
+                      ondrop="handleOnlineExamXlsxDrop(event)"
+                      style="margin-top:4px;padding:16px;border:2px dashed #cbd5e1;border-radius:10px;background:#f8fafc;text-align:center;cursor:pointer;"
+                      onclick="chooseOnlineExamXlsxFile(event)">
+                      <div style="font-size:13px;font-weight:800;color:#0f4cbd;">ลากไฟล์มาวางที่นี่</div>
+                      <div style="font-size:11px;color:#64748b;margin-top:3px;">หรือกดเพื่อเลือกไฟล์จากเครื่อง</div>
+                      <p id="onlineExamXlsxFileName" style="font-size:12px;color:#334155;margin:8px 0 0;">ยังไม่ได้เลือกไฟล์</p>
+                    </div>
+                    <input type="file" id="onlineExamXlsxInput" accept=".xlsx,.xls,.csv"
+                      onchange="handleOnlineExamXlsxInputChange(this)"
+                      style="display:none;">
                   </div>
                 </div>
                 <p id="onlineExamXlsxResult" style="font-size:12px;margin-top:8px;font-weight:bold;"></p>
@@ -47821,12 +47831,83 @@ function receiptStatusText(status) {
       }
     }
 
+    function setOnlineExamXlsxDropZoneActive(isActive) {
+      const zone = getElement('onlineExamXlsxDropZone');
+      if (!zone) return;
+      zone.style.borderColor = isActive ? '#2563eb' : '#cbd5e1';
+      zone.style.background = isActive ? '#eff6ff' : '#f8fafc';
+    }
+
+    function setOnlineExamXlsxFileName(file) {
+      const el = getElement('onlineExamXlsxFileName');
+      if (!el) return;
+      el.textContent = file ? ('เลือกไฟล์แล้ว: ' + (file.name || 'ไฟล์ข้อสอบ')) : 'ยังไม่ได้เลือกไฟล์';
+    }
+
+    function isValidOnlineExamImportFile(file) {
+      if (!file || !file.name) return false;
+      return /\.(xlsx|xls|csv)$/i.test(file.name);
+    }
+
+    function chooseOnlineExamXlsxFile(event) {
+      if (event) {
+        event.preventDefault();
+        event.stopPropagation();
+      }
+      const input = getElement('onlineExamXlsxInput');
+      if (input) input.click();
+    }
+
+    function handleOnlineExamXlsxDragOver(event) {
+      if (event) {
+        event.preventDefault();
+        event.stopPropagation();
+        if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy';
+      }
+      setOnlineExamXlsxDropZoneActive(true);
+    }
+
+    function handleOnlineExamXlsxDragLeave(event) {
+      if (event) {
+        event.preventDefault();
+        event.stopPropagation();
+      }
+      setOnlineExamXlsxDropZoneActive(false);
+    }
+
+    function handleOnlineExamXlsxDrop(event) {
+      if (event) {
+        event.preventDefault();
+        event.stopPropagation();
+      }
+      setOnlineExamXlsxDropZoneActive(false);
+      const file = event && event.dataTransfer && event.dataTransfer.files ? event.dataTransfer.files[0] : null;
+      importExamFromExcelFile(file);
+    }
+
+    function handleOnlineExamXlsxInputChange(input) {
+      const file = input && input.files && input.files[0] ? input.files[0] : null;
+      if (input) input.value = '';
+      importExamFromExcelFile(file);
+    }
+
     async function importExamFromExcel(input) {
+      const file = input && input.files && input.files[0] ? input.files[0] : null;
+      if (input) input.value = '';
+      return importExamFromExcelFile(file);
+    }
+
+    async function importExamFromExcelFile(file) {
       const resultEl = getElement('onlineExamXlsxResult');
-      const file = input && input.files && input.files[0];
       if (!file) return;
-      // reset file input เพื่อให้ upload ไฟล์เดิมซ้ำได้
-      input.value = '';
+      setOnlineExamXlsxFileName(file);
+      if (!isValidOnlineExamImportFile(file)) {
+        if (resultEl) {
+          resultEl.style.color = '#dc2626';
+          resultEl.textContent = '❌ รองรับเฉพาะไฟล์ .xlsx / .xls / .csv';
+        }
+        return;
+      }
 
       const courseId = (getElement('onlineExamQuestionCourseSelect') || {}).value || '';
       const targetCourse = courseId
