@@ -9539,6 +9539,7 @@
       if (pwMainStu) prizeWheelSettings = Object.assign({ spinCost: 30, enabled: true }, pwMainStu);
       replaceArray(prizeWheelSpins, results[21] || []);
       onlineExamCourseCache = results[22] || [];
+      onlineExamCoursesLoaded = true;
       replaceArray(avatarBattleQuestions, results[23] || []);
 
       console.log('student-data-load-success', {
@@ -9553,7 +9554,7 @@
         monthlyPlanSessionsLoaded: results[11].length,
         gamificationProfilesLoaded: results[12].length,
         gamificationEventsLoaded: results[13].length,
-        onlineExamCoursesLoaded: (results[21] || []).length,
+        onlineExamCoursesLoaded: (results[22] || []).length,
         collections: ['students:own', 'courses', 'onDemandClips', 'announcements', 'scoreReports', 'adminScoreRecords', 'paymentMonths', 'lineGroups', 'payments:own', 'receipts:own', 'paymentBundles:own', 'monthlyExamLinks', 'monthlyPlanSessions', 'studentGamificationProfiles:own', 'studentGamificationEvents:own', 'studentPersonalQuests:own', 'onlineExamCourses:battle']
       });
       startStudentPaymentListeners(studentDocIds, firebaseUser.uid);
@@ -11296,6 +11297,9 @@
 
     // Online Exam state
     let onlineExamCourseCache = [];
+    let onlineExamCoursesLoaded = false;
+    let onlineExamCoursesLoadPromise = null;
+    let onlineExamCoursesLoadSeq = 0;
     let onlineExamActiveCourseId = '';
     let onlineExamStudentAnswers = {};
     let onlineExamTimerHandle = null;
@@ -15923,9 +15927,12 @@
         safeRun(renderStudentExamFilters, 'student-exam-filters');
       }
       if (tabId === 'admin-online-exam') {
-        safeRun(loadOnlineExamCourses, 'online-exam-courses-load');
-        safeRun(function() { switchOnlineExamAdminTab('manage'); }, 'online-exam-admin-manage-default');
-        safeRun(renderAdminScoreFilters, 'admin-score-filters');
+        safeRun(function() {
+          return loadOnlineExamCourses().then(function() {
+            switchOnlineExamAdminTab('manage');
+            renderAdminScoreFilters();
+          });
+        }, 'online-exam-admin-manage-default');
       }
       if (tabId === 'student-monthly-test' && currentStudent) {
         safeRun(function() { loadOnlineExamCourses().then(renderOnlineExamCourseGrid); }, 'online-exam-student-load-monthly');
@@ -26579,7 +26586,7 @@
       }
       if (container) container.innerHTML = '<p style="color:#64748b;font-size:13px;">กำลังโหลดข้อสอบออนไลน์...</p>';
       try {
-        await loadOnlineExamCourses();
+        await loadOnlineExamCourses(true);
         renderAdminAvatarBattleOnlineExamSources();
       } catch (e) {
         if (container) container.innerHTML = '<p style="color:#dc2626;font-size:13px;">โหลดข้อสอบออนไลน์ไม่สำเร็จ: ' + escapeHtml(e.message || e.code || '') + '</p>';
@@ -44296,50 +44303,68 @@ function receiptStatusText(status) {
       }
     }
 
-    async function loadOnlineExamCourses() {
+    async function loadOnlineExamCourses(forceRefresh) {
       if (!firebaseReady || !db) return;
-      try {
-        const buildCourses = function(snap) {
-          return snap.docs
-            .map(function(d) { return Object.assign({ firebaseDocId: d.id }, d.data()); })
-            .filter(function(c) { return !c.deleted; });
-        };
-        if (isCurrentStudentSession()) {
-          const byId = {};
-          const addSnap = function(snap) {
-            buildCourses(snap).forEach(function(c) {
-              if (!c.firebaseDocId) return;
-              if (c.isActive === false || c.status === 'inactive') return;
-              byId[c.firebaseDocId] = c;
-            });
+      if (onlineExamCoursesLoadPromise && !forceRefresh) return onlineExamCoursesLoadPromise;
+      const loadSeq = ++onlineExamCoursesLoadSeq;
+      const loadPromise = (async function() {
+        try {
+          const buildCourses = function(snap) {
+            return snap.docs
+              .map(function(d) { return Object.assign({ firebaseDocId: d.id }, d.data()); })
+              .filter(function(c) { return !c.deleted; });
           };
-          const activeSnap = await db.collection('onlineExamCourses')
-            .where('status', '==', 'active')
-            .get();
-          addSnap(activeSnap);
-          const publishedSnap = await db.collection('onlineExamCourses')
-            .where('publishStatus', '==', 'published')
-            .get()
-            .catch(function(e) {
-              console.warn('loadOnlineExamCourses published query skipped', e);
-              return { docs: [] };
-            });
-          addSnap(publishedSnap);
-          onlineExamCourseCache = Object.keys(byId).map(function(id) { return byId[id]; });
-        } else {
-          const snap = await db.collection('onlineExamCourses')
-            .where('deleted', '!=', true)
-            .get()
-            .catch(function() {
-              return db.collection('onlineExamCourses').get();
-            });
-          onlineExamCourseCache = buildCourses(snap);
+          if (isCurrentStudentSession()) {
+            const byId = {};
+            const addSnap = function(snap) {
+              buildCourses(snap).forEach(function(c) {
+                if (!c.firebaseDocId) return;
+                if (c.isActive === false || c.status === 'inactive') return;
+                byId[c.firebaseDocId] = c;
+              });
+            };
+            const activeSnap = await db.collection('onlineExamCourses')
+              .where('status', '==', 'active')
+              .get();
+            addSnap(activeSnap);
+            const publishedSnap = await db.collection('onlineExamCourses')
+              .where('publishStatus', '==', 'published')
+              .get()
+              .catch(function(e) {
+                console.warn('loadOnlineExamCourses published query skipped', e);
+                return { docs: [] };
+              });
+            addSnap(publishedSnap);
+            if (loadSeq === onlineExamCoursesLoadSeq) {
+              onlineExamCourseCache = Object.keys(byId).map(function(id) { return byId[id]; });
+            }
+          } else {
+            const snap = await db.collection('onlineExamCourses')
+              .where('deleted', '!=', true)
+              .get()
+              .catch(function() {
+                return db.collection('onlineExamCourses').get();
+              });
+            if (loadSeq === onlineExamCoursesLoadSeq) {
+              onlineExamCourseCache = buildCourses(snap);
+            }
+          }
+        } catch (e) {
+          console.error('loadOnlineExamCourses error', e);
+          if (loadSeq === onlineExamCoursesLoadSeq) onlineExamCourseCache = [];
+        } finally {
+          if (loadSeq === onlineExamCoursesLoadSeq) {
+            onlineExamCoursesLoaded = true;
+            safeRun(updateStudentInWebExamUx, 'student-in-web-exam-ux');
+          }
         }
-      } catch (e) {
-        console.error('loadOnlineExamCourses error', e);
-        onlineExamCourseCache = [];
+      })();
+      onlineExamCoursesLoadPromise = loadPromise;
+      try {
+        return await loadPromise;
+      } finally {
+        if (onlineExamCoursesLoadPromise === loadPromise) onlineExamCoursesLoadPromise = null;
       }
-      safeRun(updateStudentInWebExamUx, 'student-in-web-exam-ux');
     }
 
     function getOnlineExamCourseGrade(course) {
@@ -44639,7 +44664,7 @@ function receiptStatusText(status) {
       try {
         await batch.commit();
         addActivityLog('Auto สร้างชุดข้อสอบ Interactive', createdIds.length + ' ชุด / ข้าม ' + skipped.length + ' ชุด');
-        await loadOnlineExamCourses();
+        await loadOnlineExamCourses(true);
         renderOnlineExamCourseList();
         populateOnlineExamCourseSelects();
         openOnlineExamCourseForQuestions(createdIds[0]);
@@ -44751,7 +44776,7 @@ function receiptStatusText(status) {
           addActivityLog('สร้างชุดข้อสอบ Interactive', title);
         }
 
-        await loadOnlineExamCourses();
+        await loadOnlineExamCourses(true);
         resetOnlineExamCourseForm();
         renderOnlineExamCourseList();
         populateOnlineExamCourseSelects();
@@ -44772,7 +44797,7 @@ function receiptStatusText(status) {
           { merge: true }
         );
         addActivityLog('ลบชุดข้อสอบ Interactive', courseId);
-        await loadOnlineExamCourses();
+        await loadOnlineExamCourses(true);
         renderOnlineExamCourseList();
         renderOnlineExamQuestionList();
         populateOnlineExamCourseSelects();
@@ -44857,7 +44882,7 @@ function receiptStatusText(status) {
               updatedBy: firebaseUser ? firebaseUser.uid : ''
             }, { merge: true });
             addActivityLog('แก้ไขชุดข้อสอบ Interactive', title);
-            await loadOnlineExamCourses();
+            await loadOnlineExamCourses(true);
             populateOnlineExamMonthSelect();
             populateOnlineExamCourseListFilters();
             renderOnlineExamCourseList();
@@ -45220,7 +45245,10 @@ function receiptStatusText(status) {
       if (resultEl) resultEl.textContent = '';
     }
 
-    function renderOnlineExamAdminManage() {
+    async function renderOnlineExamAdminManage() {
+      if (!onlineExamCoursesLoaded && firebaseReady && db) {
+        await loadOnlineExamCourses(true);
+      }
       populateOnlineExamGradeSelect();
       renderOnlineExamAutoCenterOptions(true);
       populateOnlineExamAutoCenterSummary();
@@ -47799,7 +47827,7 @@ function receiptStatusText(status) {
           );
           count++;
         }
-        await loadOnlineExamCourses();
+        await loadOnlineExamCourses(true);
         renderOnlineExamAdminManage();
         if (resultEl) { resultEl.style.color = '#16a34a'; resultEl.textContent = '✅ นำเข้า ' + count + ' คอร์สสำเร็จ'; }
         addActivityLog('นำเข้า JSON คอร์สข้อสอบ Interactive', count + ' คอร์ส');
@@ -48085,6 +48113,11 @@ function receiptStatusText(status) {
 
       if (locked) locked.style.display = 'none';
       if (content) content.style.display = '';
+
+      if (!onlineExamCoursesLoaded && firebaseReady && db) {
+        container.innerHTML = '<p style="color:#64748b;font-size:13px;text-align:center;padding:24px;">กำลังโหลดชุดข้อสอบ...</p>';
+        await loadOnlineExamCourses();
+      }
 
       const grade = currentStudent ? (currentStudent.grade || '') : '';
       const studentLocation = getStudentOnlineExamLocation(currentStudent);
