@@ -50840,10 +50840,15 @@ function receiptStatusText(status) {
         content.innerHTML = holidayBanner + all.sort(compareMonthlySessionsForDisplay).map(function(s) {
           const colorCls = TF_FORMAT_COLORS[s.format] || 'bg-slate-600';
           const sessionId = s.id;
+          const originalSession = monthlyPlanSessions.find(function(session) {
+            return String(session.id || session.firebaseDocId || '') === String(sessionId || '');
+          });
+          const awaitingTeacher = originalSession ? isMonthlySessionAwaitingTeacher(originalSession) : !s.tutorId;
           return '<div class="bg-slate-800 rounded-xl p-3 space-y-1.5">' +
             '<div class="flex items-start justify-between gap-2">' +
             '<div><span class="' + colorCls + ' text-xs font-bold px-2 py-0.5 rounded-md">' + escapeHtml(TF_FORMAT_LABELS[s.format] || s.format) + '</span></div>' +
             '<div class="flex gap-2">' +
+            (awaitingTeacher ? '<button onclick="tfOpenAssignTeacherModal(\'' + sessionId + '\')" class="text-amber-300 hover:text-amber-200 text-xs font-bold cursor-pointer bg-transparent border-0">ใส่ครู</button>' : '') +
             '<button onclick="tfEditSession(\'' + sessionId + '\')" class="text-indigo-300 hover:text-indigo-100 text-xs font-bold cursor-pointer bg-transparent border-0">แก้ไข</button>' +
             '<button onclick="tfDeleteSession(\'' + sessionId + '\')" class="text-slate-400 hover:text-rose-400 text-xs cursor-pointer bg-transparent border-0">ลบ</button>' +
             '</div></div>' +
@@ -50868,6 +50873,120 @@ function receiptStatusText(status) {
     function tfCloseDayDetail() {
       const panel = tfEl('tf-day-detail');
       if (panel) panel.classList.add('hidden');
+    }
+
+    function tfGetAssignTeacherCandidates(session) {
+      const mode = session ? (session.type || session.format || 'onsite') : 'onsite';
+      const subjectSetting = getMonthlySubjectSetting(session, session ? (session.subject || '') : '');
+      return tfGetTutors().filter(function(teacher) {
+        return canTeacherTeachMode(teacher, mode, subjectSetting);
+      });
+    }
+
+    function tfOpenAssignTeacherModal(sessionId) {
+      const session = monthlyPlanSessions.find(function(s) { return String(s.id || s.firebaseDocId || '') === String(sessionId || ''); });
+      const modal = tfEl('tf-assign-teacher-modal');
+      const select = tfEl('tf-assign-teacher-select');
+      const hidden = tfEl('tf-assign-teacher-session-id');
+      const label = tfEl('tf-assign-teacher-session-label');
+      const errEl = tfEl('tf-assign-teacher-error');
+      if (!session || !modal || !select || !hidden) return;
+      if (!isMonthlySessionAwaitingTeacher(session)) {
+        tfToast('คาบนี้มีครูแล้ว', 'info');
+        return;
+      }
+      const teachersArr = tfGetAssignTeacherCandidates(session);
+      hidden.value = String(session.id || session.firebaseDocId || '');
+      if (label) {
+        label.textContent = [
+          getMonthlyPlanCourseName(session) || tfGetCourseName(session.courseId),
+          formatMonthlySessionTimeRange(session),
+          session.center || session.courseLocation || ''
+        ].filter(Boolean).join(' · ');
+      }
+      select.innerHTML = '<option value="">เลือกครูผู้สอน</option>' + teachersArr.map(function(teacher) {
+        const id = getTeacherPlannerId(teacher);
+        const name = teacher.name || teacher.displayName || teacher.email || id;
+        const subject = teacher.subject || teacher.mainSubject || teacher.teachingSubject || '';
+        return '<option value="' + escapeHtml(id) + '">' + escapeHtml(name + (subject ? ' · ' + subject : '')) + '</option>';
+      }).join('');
+      select.disabled = teachersArr.length === 0;
+      if (errEl) {
+        errEl.textContent = teachersArr.length ? '' : 'ยังไม่มีครูที่สอนรูปแบบ/วิชานี้ได้';
+        errEl.classList.toggle('hidden', teachersArr.length > 0);
+      }
+      modal.classList.remove('hidden');
+      if (teachersArr.length) setTimeout(function() { select.focus(); }, 50);
+      if (typeof lucide !== 'undefined') lucide.createIcons();
+    }
+
+    function tfCloseAssignTeacherModal() {
+      const modal = tfEl('tf-assign-teacher-modal');
+      if (modal) modal.classList.add('hidden');
+      const errEl = tfEl('tf-assign-teacher-error');
+      if (errEl) errEl.classList.add('hidden');
+    }
+
+    async function tfSaveAssignedTeacherForSession() {
+      const sessionId = tfEl('tf-assign-teacher-session-id') ? tfEl('tf-assign-teacher-session-id').value : '';
+      const teacherId = tfEl('tf-assign-teacher-select') ? tfEl('tf-assign-teacher-select').value : '';
+      const errEl = tfEl('tf-assign-teacher-error');
+      if (errEl) errEl.classList.add('hidden');
+      if (!teacherId) {
+        if (errEl) { errEl.textContent = 'กรุณาเลือกครูก่อน'; errEl.classList.remove('hidden'); }
+        return;
+      }
+      const session = monthlyPlanSessions.find(function(s) { return String(s.id || s.firebaseDocId || '') === String(sessionId || ''); });
+      const teacher = findTeacherByPlannerId(teacherId) || tfGetTutors().find(function(t) { return String(t.id || t.firebaseDocId || '') === String(teacherId); });
+      if (!session || !teacher) return;
+      const subjectSetting = getMonthlySubjectSetting(session, session.subject || '');
+      if (!canTeacherTeachMode(teacher, session.type || session.format || 'onsite', subjectSetting)) {
+        if (errEl) { errEl.textContent = 'ครูคนนี้ยังไม่รองรับรูปแบบ/วิชาของคาบนี้'; errEl.classList.remove('hidden'); }
+        return;
+      }
+      const dateText = getMonthlySessionDate(session);
+      const teacherPlannerId = getTeacherPlannerId(teacher);
+      const teacherName = teacher.name || teacher.displayName || teacher.email || teacherPlannerId;
+      const draft = Object.assign({}, session, {
+        teacherId: teacherPlannerId,
+        tutorId: teacherPlannerId,
+        teacherUid: teacher.teacherUid || teacher.authUid || '',
+        teacherAuthUid: teacher.authUid || teacher.teacherUid || '',
+        teacherName: teacherName,
+        tutorName: teacherName,
+        updatedAtText: new Date().toLocaleString('th-TH')
+      });
+      applyMonthlySessionTeacherPublishState(draft);
+      const conflicts = findTeacherConflicts(draft);
+      if (conflicts.length) {
+        if (errEl) {
+          errEl.textContent = 'ครูคนนี้มีตารางชนเวลา: ' + tfFormatConflictSummary(conflicts);
+          errEl.classList.remove('hidden');
+        }
+        tfToast('พบตารางครูชนเวลา ยังไม่ได้บันทึก', 'error');
+        return;
+      }
+      try {
+        Object.assign(session, draft);
+        appendMonthlyPlanChangeLog(session, 'teacher_assigned_from_day_detail', 'ใส่ครูจาก popup ตารางรายวัน');
+        await setFirebaseDocument('monthlyPlanSessions', session);
+        tfCloseAssignTeacherModal();
+        tfRenderSchedule();
+        if (dateText) tfShowDayDetail(dateText);
+        tfToast('ใส่ครูให้คาบนี้แล้ว', 'success');
+        safeRun(renderMonthlyPlanSessions, 'tf-day-assign-monthly-render');
+        safeRun(renderStudentMonthlyPlanSummary, 'tf-day-assign-student-refresh');
+        safeRun(renderTeacherMonthlyPlanSummary, 'tf-day-assign-teacher-refresh');
+        safeRun(renderTodayTeachingList, 'tf-day-assign-today');
+        safeRun(renderTeacherDashboardSummary, 'tf-day-assign-teacher-dash');
+        safeRun(renderTeacherMobileHome, 'tf-day-assign-teacher-mobile');
+        safeRun(updateStudentCourseDisplay, 'tf-day-assign-student-display');
+      } catch (error) {
+        if (errEl) {
+          errEl.textContent = 'บันทึกครูไม่สำเร็จ: ' + (error.message || error);
+          errEl.classList.remove('hidden');
+        }
+      }
     }
 
     // --- Helper: get course name ---
@@ -52112,6 +52231,36 @@ function receiptStatusText(status) {
           <button type="submit" class="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold rounded-xl text-sm shadow-md border-0 cursor-pointer">ยืนยันจัดตาราง</button>
         </div>
       </form>
+    </div>
+  </div>
+
+  <!-- Assign Teacher Modal -->
+  <div id="tf-assign-teacher-modal" class="hidden fixed inset-0 z-50 overflow-y-auto p-4" style="background:rgba(15,23,42,.6);">
+    <div class="bg-white rounded-2xl shadow-xl max-w-md w-full mx-auto overflow-hidden border border-slate-200" style="margin-top:max(16px,12vh); margin-bottom:max(16px,5vh);">
+      <div class="bg-amber-500 text-white px-6 py-4 flex justify-between items-center">
+        <h3 class="font-bold text-lg flex items-center gap-2">
+          <i data-lucide="user-plus" class="w-5 h-5"></i> ใส่ครูผู้สอน
+        </h3>
+        <button onclick="tfCloseAssignTeacherModal()" class="text-white/80 hover:text-white bg-transparent border-0 cursor-pointer">
+          <i data-lucide="x" class="w-6 h-6"></i>
+        </button>
+      </div>
+      <div class="p-6 space-y-4">
+        <input type="hidden" id="tf-assign-teacher-session-id" value="" />
+        <div class="rounded-xl border border-amber-100 bg-amber-50 px-3 py-2">
+          <p class="text-xs font-bold text-amber-700 mb-1">คาบที่เลือก</p>
+          <p id="tf-assign-teacher-session-label" class="text-sm font-semibold text-slate-800">-</p>
+        </div>
+        <div>
+          <label class="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">ครูผู้สอน *</label>
+          <select id="tf-assign-teacher-select" class="w-full bg-slate-50 border border-slate-300 text-slate-900 rounded-xl p-2.5 font-medium text-sm"></select>
+        </div>
+        <p id="tf-assign-teacher-error" class="text-xs text-red-600 font-medium hidden"></p>
+        <div class="flex justify-end space-x-3 pt-3 border-t border-slate-100">
+          <button type="button" onclick="tfCloseAssignTeacherModal()" class="px-5 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold rounded-xl text-sm border-0 cursor-pointer">ยกเลิก</button>
+          <button type="button" onclick="tfSaveAssignedTeacherForSession()" class="px-5 py-2.5 bg-amber-500 hover:bg-amber-600 text-white font-semibold rounded-xl text-sm shadow-md border-0 cursor-pointer">บันทึกครู</button>
+        </div>
+      </div>
     </div>
   </div>
 
