@@ -44954,6 +44954,16 @@ function receiptStatusText(status) {
       return '<option value="">-- ไม่ใช้รูปประกอบร่วม --</option>' + options;
     }
 
+    function findOnlineExamSharedImage(course, title, imageUrl) {
+      const normalizedTitle = String(title || '').trim().toLowerCase();
+      const normalizedUrl = parseDriveImageUrl(imageUrl || '');
+      return getOnlineExamSharedImages(course).find(function(item) {
+        const itemTitle = String(item.title || '').trim().toLowerCase();
+        const itemUrl = parseDriveImageUrl(item.imageUrl || '');
+        return (normalizedTitle && itemTitle === normalizedTitle) || (normalizedUrl && itemUrl === normalizedUrl);
+      }) || null;
+    }
+
     function renderOnlineExamSharedImagePanel(course, courseId) {
       const sharedImages = getOnlineExamSharedImages(course);
       const rows = sharedImages.length
@@ -47938,7 +47948,7 @@ function receiptStatusText(status) {
       courses.forEach(function(c, ci) {
         (c.questions || []).forEach(function(q, qi) {
           const label = 'คอร์ส ' + (ci+1) + ' ข้อ ' + (qi+1) + ':';
-          if (!q.text && !q.questionText) errors.push(label + ' ไม่มีคำถาม (text)');
+          if (!q.text && !q.questionText && !q.imageUrl && !q.sharedImageId) errors.push(label + ' ไม่มีคำถามหรือรูปโจทย์');
           const choices = q.choices || [];
           if (choices.length < 4) errors.push(label + ' ตัวเลือกต้องมีครบ 4 ข้อ');
           const correctValue = q.correctIndex !== undefined ? q.correctIndex : q.correctAnswer;
@@ -47991,10 +48001,10 @@ function receiptStatusText(status) {
       const resultEl = getElement('onlineExamXlsxResult');
       try {
         const XLSX = await loadSheetJs();
-        const headers = ['ข้อที่', 'โจทย์ / คำถาม *', 'ตัวเลือก 1 *', 'ตัวเลือก 2 *', 'ตัวเลือก 3 *', 'ตัวเลือก 4 *', 'เฉลย (1/2/3/4) *', 'คะแนน', 'URL รูปโจทย์', 'URL รูป 1', 'URL รูป 2', 'URL รูป 3', 'URL รูป 4'];
+        const headers = ['ข้อที่', 'โจทย์ / คำถาม', 'ตัวเลือก 1 *', 'ตัวเลือก 2 *', 'ตัวเลือก 3 *', 'ตัวเลือก 4 *', 'เฉลย (1/2/3/4) *', 'คะแนน', 'URL รูปโจทย์', 'URL รูป 1', 'URL รูป 2', 'URL รูป 3', 'URL รูป 4', 'ชื่อรูปประกอบร่วม', 'URL รูปประกอบร่วม'];
         const rows = [headers];
         const ws = XLSX.utils.aoa_to_sheet(rows);
-        ws['!cols'] = [{ wch: 6 }, { wch: 40 }, { wch: 18 }, { wch: 18 }, { wch: 18 }, { wch: 18 }, { wch: 12 }, { wch: 8 }, { wch: 36 }, { wch: 36 }, { wch: 36 }, { wch: 36 }, { wch: 36 }];
+        ws['!cols'] = [{ wch: 6 }, { wch: 52 }, { wch: 18 }, { wch: 18 }, { wch: 18 }, { wch: 18 }, { wch: 12 }, { wch: 8 }, { wch: 36 }, { wch: 36 }, { wch: 36 }, { wch: 36 }, { wch: 36 }, { wch: 24 }, { wch: 44 }];
         // ล็อก header row ให้ freeze
         ws['!freeze'] = { xSplit: 0, ySplit: 1 };
         const wb = XLSX.utils.book_new();
@@ -48116,6 +48126,38 @@ function receiptStatusText(status) {
 
         const errors = [];
         const newQuestions = [];
+        const sharedImages = getOnlineExamSharedImages(targetCourse).slice();
+        const tempSharedImageMap = {};
+        sharedImages.forEach(function(item) {
+          const titleKey = String(item.title || '').trim().toLowerCase();
+          const urlKey = parseDriveImageUrl(item.imageUrl || '');
+          if (titleKey) tempSharedImageMap['title:' + titleKey] = item.id;
+          if (urlKey) tempSharedImageMap['url:' + urlKey] = item.id;
+        });
+
+        function resolveImportedSharedImage(sharedTitle, sharedUrl, rowNum) {
+          const title = String(sharedTitle || '').trim();
+          const imageUrl = parseDriveImageUrl(sharedUrl || '');
+          const titleKey = title.toLowerCase();
+          if (!title && !imageUrl) return null;
+          if (titleKey && tempSharedImageMap['title:' + titleKey]) return tempSharedImageMap['title:' + titleKey];
+          if (imageUrl && tempSharedImageMap['url:' + imageUrl]) return tempSharedImageMap['url:' + imageUrl];
+          const existingSharedImage = findOnlineExamSharedImage({ sharedImages: sharedImages }, title, imageUrl);
+          if (existingSharedImage) return existingSharedImage.id;
+          if (!imageUrl) {
+            errors.push('แถว ' + rowNum + ': ระบุชื่อรูปประกอบร่วม "' + title + '" แต่ยังไม่มี URL รูปนี้ในชุดหรือในแถวก่อนหน้า');
+            return null;
+          }
+          const newSharedImage = {
+            id: 'shared_img_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7) + '_' + rowNum,
+            title: title || ('รูปประกอบร่วม ' + (sharedImages.length + 1)),
+            imageUrl: imageUrl
+          };
+          sharedImages.push(newSharedImage);
+          if (titleKey) tempSharedImageMap['title:' + titleKey] = newSharedImage.id;
+          tempSharedImageMap['url:' + imageUrl] = newSharedImage.id;
+          return newSharedImage.id;
+        }
 
         // เริ่มจาก row index 1 (ข้ามบรรทัด header)
         rows.slice(1).forEach(function(row, i) {
@@ -48140,9 +48182,12 @@ function receiptStatusText(status) {
           const imgChoB   = String(row[10] || '').trim();
           const imgChoC   = String(row[11] || '').trim();
           const imgChoD   = String(row[12] || '').trim();
+          const sharedTitle = String(row[13] || '').trim();
+          const sharedUrl   = String(row[14] || '').trim();
+          const sharedImageId = resolveImportedSharedImage(sharedTitle, sharedUrl, rowNum);
           const correctIndex = normalizeOnlineExamCorrectIndex(ansRaw);
 
-          if (!text)               { errors.push('แถว ' + rowNum + ': ไม่มีคำถาม'); return; }
+          if (!text && !imgUrl && !sharedImageId) { errors.push('แถว ' + rowNum + ': ไม่มีคำถามหรือรูปโจทย์'); return; }
           if (!choA||!choB||!choC||!choD) { errors.push('แถว ' + rowNum + ': ตัวเลือกไม่ครบ 4 ข้อ'); return; }
           if (correctIndex === null) { errors.push('แถว ' + rowNum + ': เฉลย "' + row[6] + '" ไม่ถูกต้อง — ต้องเป็น 1/2/3/4 (ไฟล์เก่า A/B/C/D หรือ ก/ข/ค/ง ยังใช้ได้)'); return; }
 
@@ -48160,6 +48205,7 @@ function receiptStatusText(status) {
             ],
             correctIndex: correctIndex,
             score: score,
+            sharedImageId: sharedImageId || null,
             imageUrl: imgUrl ? parseDriveImageUrl(imgUrl) : null
           });
         });
@@ -48182,10 +48228,10 @@ function receiptStatusText(status) {
 
         if (resultEl) { resultEl.style.color = '#d97706'; resultEl.textContent = '⏳ กำลังบันทึกเข้า Firestore...'; }
         await db.collection('onlineExamCourses').doc(courseId).set(
-          { questions: merged, totalScore: totalScore, updatedAt: firebase.firestore.FieldValue.serverTimestamp() },
+          { questions: merged, sharedImages: sharedImages, totalScore: totalScore, updatedAt: firebase.firestore.FieldValue.serverTimestamp() },
           { merge: true }
         );
-        if (course) { course.questions = merged; course.totalScore = totalScore; }
+        if (course) { course.questions = merged; course.sharedImages = sharedImages; course.totalScore = totalScore; }
 
         if (resultEl) { resultEl.style.color = '#16a34a'; resultEl.textContent = '✅ นำเข้าสำเร็จ ' + newQuestions.length + ' ข้อ (รวมทั้งหมด ' + merged.length + ' ข้อ)'; }
         addActivityLog('Import Excel ข้อสอบ', (course ? course.title : courseId) + ' +' + newQuestions.length + ' ข้อ');
