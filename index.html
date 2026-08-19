@@ -7350,6 +7350,7 @@
                       <option>อื่นๆ</option>
                     </select>
                     <input type="hidden" id="onlineExamQuestionCourseSelect" value="">
+                    <input type="hidden" id="onlineExamQuestionSharedImageId" value="">
                   </div>
                 </div>
                 <div id="onlineExamSelectedCourseSummary" style="margin-top:12px;"></div>
@@ -22583,7 +22584,7 @@
         choices: choices,
         choiceHtmls: choiceHtmls,
         choiceImages: choiceImages,
-        imageUrl: parseDriveImageUrl(question.imageUrl || '') || '',
+        imageUrl: getOnlineExamQuestionImageUrl(course, question) || '',
         questionId: ['onlineExam', courseId, questionId].filter(Boolean).join(':'),
         sourceQuestionId: questionId,
         courseId: courseId,
@@ -44920,6 +44921,135 @@ function receiptStatusText(status) {
       if (resultEl) resultEl.textContent = '';
     }
 
+    function getOnlineExamSharedImages(course) {
+      return Array.isArray(course && course.sharedImages)
+        ? course.sharedImages.filter(function(item) { return item && item.id && item.imageUrl; })
+        : [];
+    }
+
+    function getOnlineExamSharedImageById(course, sharedImageId) {
+      if (!sharedImageId) return null;
+      return getOnlineExamSharedImages(course).find(function(item) {
+        return String(item.id || '') === String(sharedImageId || '');
+      }) || null;
+    }
+
+    function getOnlineExamQuestionImageUrl(course, question) {
+      const sharedImage = getOnlineExamSharedImageById(course, question && question.sharedImageId);
+      return parseDriveImageUrl((sharedImage && sharedImage.imageUrl) || (question && question.imageUrl) || '');
+    }
+
+    function getOnlineExamSharedImageLabel(course, sharedImageId) {
+      const sharedImage = getOnlineExamSharedImageById(course, sharedImageId);
+      return sharedImage ? (sharedImage.title || 'รูปประกอบร่วม') : '';
+    }
+
+    function getOnlineExamSharedImageOptionsHtml(course, selectedId) {
+      const selected = String(selectedId || '');
+      const options = getOnlineExamSharedImages(course).map(function(item) {
+        const itemId = String(item.id || '');
+        const label = item.title || 'รูปประกอบร่วม';
+        return '<option value="' + escapeHtml(itemId) + '"' + (itemId === selected ? ' selected' : '') + '>' + escapeHtml(label) + '</option>';
+      }).join('');
+      return '<option value="">-- ไม่ใช้รูปประกอบร่วม --</option>' + options;
+    }
+
+    function renderOnlineExamSharedImagePanel(course, courseId) {
+      const sharedImages = getOnlineExamSharedImages(course);
+      const rows = sharedImages.length
+        ? sharedImages.map(function(item) {
+            const imageUrl = parseDriveImageUrl(item.imageUrl || '');
+            return '<div style="display:grid;grid-template-columns:56px minmax(0,1fr) auto;gap:10px;align-items:center;padding:8px 0;border-top:1px solid #e2e8f0;">' +
+              '<img src="' + escapeHtml(imageUrl) + '" onerror="this.style.display=\'none\'" style="width:56px;height:42px;object-fit:contain;border:1px solid #e2e8f0;border-radius:6px;background:#fff;" alt="' + escapeHtml(item.title || 'รูปประกอบร่วม') + '">' +
+              '<div style="min-width:0;">' +
+                '<div style="font-size:12px;font-weight:800;color:#0f172a;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escapeHtml(item.title || 'รูปประกอบร่วม') + '</div>' +
+                '<div style="font-size:11px;color:#64748b;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">ใช้เลือกได้ในหลายข้อของชุดนี้</div>' +
+              '</div>' +
+              '<button class="btn btn-red" type="button" onclick="deleteOnlineExamSharedImage(\'' + jsArg(courseId) + '\',\'' + jsArg(item.id || '') + '\')" style="font-size:11px;padding:4px 8px;">ลบ</button>' +
+            '</div>';
+          }).join('')
+        : '<div style="font-size:12px;color:#94a3b8;padding-top:8px;border-top:1px solid #e2e8f0;">ยังไม่มีรูปประกอบร่วมในชุดนี้</div>';
+      return '<div style="padding:10px 12px;background:#f8fafc;border:1px solid #dbeafe;border-radius:8px;margin-bottom:10px;">' +
+        '<div style="display:flex;justify-content:space-between;gap:10px;align-items:flex-end;flex-wrap:wrap;margin-bottom:8px;">' +
+          '<div>' +
+            '<div style="font-size:13px;font-weight:800;color:#1d4ed8;">รูปประกอบร่วมของชุดข้อสอบ</div>' +
+            '<div style="font-size:11px;color:#64748b;margin-top:2px;">เช่น บทความ 1 หรือรูปเดียวที่ใช้ตอบหลายข้อ</div>' +
+          '</div>' +
+        '</div>' +
+        '<div class="form-row" style="grid-template-columns:minmax(130px,.8fr) minmax(220px,1.6fr) auto;gap:8px;align-items:end;margin-bottom:8px;">' +
+          '<div><label style="font-size:11px;margin-bottom:3px;">ชื่อรูป</label><input id="onlineExamSharedImageTitle" type="text" placeholder="เช่น บทความ 1"></div>' +
+          '<div><label style="font-size:11px;margin-bottom:3px;">URL รูป</label><input id="onlineExamSharedImageUrl" type="url" placeholder="วางลิงก์ Google Drive หรือ URL รูปภาพ" onblur="this.value=parseDriveImageUrl(this.value)" onpaste="setTimeout(()=>{this.value=parseDriveImageUrl(this.value)},50)"></div>' +
+          '<button class="btn btn-blue" type="button" onclick="addOnlineExamSharedImage(\'' + jsArg(courseId) + '\')" style="white-space:nowrap;">เพิ่มรูป</button>' +
+        '</div>' +
+        rows +
+      '</div>';
+    }
+
+    async function addOnlineExamSharedImage(courseId) {
+      if (!hasPermission('admin.onlineExams')) { alert('ไม่มีสิทธิ์'); return; }
+      if (!firebaseReady || !db) { alert('Firebase ยังไม่พร้อม'); return; }
+      const course = onlineExamCourseCache.find(function(c) { return c.firebaseDocId === courseId; });
+      if (!course) { alert('ไม่พบชุดข้อสอบ'); return; }
+      const title = (((getElement('onlineExamSharedImageTitle') || {}).value) || '').trim() || 'รูปประกอบร่วม ' + (getOnlineExamSharedImages(course).length + 1);
+      const imageUrl = parseDriveImageUrl((((getElement('onlineExamSharedImageUrl') || {}).value) || '').trim());
+      if (!imageUrl) { alert('กรุณาใส่ URL รูปประกอบร่วม'); return; }
+      const sharedImages = getOnlineExamSharedImages(course).slice();
+      const duplicate = sharedImages.some(function(item) { return parseDriveImageUrl(item.imageUrl || '') === imageUrl; });
+      if (duplicate && !confirm('มีรูป URL นี้อยู่แล้ว ต้องการเพิ่มซ้ำหรือไม่?')) return;
+      const newItem = {
+        id: 'shared_img_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7),
+        title: title,
+        imageUrl: imageUrl
+      };
+      sharedImages.push(newItem);
+      try {
+        await db.collection('onlineExamCourses').doc(courseId).set({
+          sharedImages: sharedImages,
+          updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
+          updatedBy: firebaseUser ? firebaseUser.uid : ''
+        }, { merge: true });
+        course.sharedImages = sharedImages;
+        setValue('onlineExamSharedImageTitle', '');
+        setValue('onlineExamSharedImageUrl', '');
+        addActivityLog('เพิ่มรูปประกอบร่วมข้อสอบ Interactive', (course.title || courseId) + ' · ' + title);
+        renderOnlineExamQuestionList();
+        renderOnlineExamSelectedCourseSummary();
+        exportOnlineExamJson();
+      } catch (e) {
+        alert('เพิ่มรูปประกอบร่วมไม่สำเร็จ: ' + (e.message || e));
+      }
+    }
+
+    async function deleteOnlineExamSharedImage(courseId, sharedImageId) {
+      if (!hasPermission('admin.onlineExams')) { alert('ไม่มีสิทธิ์'); return; }
+      if (!confirm('ลบรูปประกอบร่วมนี้? ข้อสอบที่เลือกใช้รูปนี้จะถูกเปลี่ยนเป็นไม่ใช้รูปประกอบร่วม')) return;
+      const course = onlineExamCourseCache.find(function(c) { return c.firebaseDocId === courseId; });
+      if (!course) return;
+      const sharedImages = getOnlineExamSharedImages(course).filter(function(item) {
+        return String(item.id || '') !== String(sharedImageId || '');
+      });
+      const questions = (course.questions || []).map(function(q) {
+        if (String(q.sharedImageId || '') !== String(sharedImageId || '')) return q;
+        return Object.assign({}, q, { sharedImageId: null });
+      });
+      try {
+        await db.collection('onlineExamCourses').doc(courseId).set({
+          sharedImages: sharedImages,
+          questions: questions,
+          updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
+          updatedBy: firebaseUser ? firebaseUser.uid : ''
+        }, { merge: true });
+        course.sharedImages = sharedImages;
+        course.questions = questions;
+        addActivityLog('ลบรูปประกอบร่วมข้อสอบ Interactive', course.title || courseId);
+        renderOnlineExamQuestionList();
+        renderOnlineExamSelectedCourseSummary();
+        exportOnlineExamJson();
+      } catch (e) {
+        alert('ลบรูปประกอบร่วมไม่สำเร็จ: ' + (e.message || e));
+      }
+    }
+
     async function saveOnlineExamQuestion() {
       if (!hasPermission('admin.onlineExams')) { alert('ไม่มีสิทธิ์'); return; }
       if (!firebaseReady || !db) { alert('Firebase ยังไม่พร้อม'); return; }
@@ -44944,6 +45074,8 @@ function receiptStatusText(status) {
       const correctIndex = parseInt((getElement('onlineExamCorrectIndex') || {}).value || '0', 10);
       const score = parseInt((getElement('onlineExamQuestionScore') || {}).value || '1', 10) || 1;
       const imageUrl = parseDriveImageUrl(((getElement('onlineExamQuestionImageUrl') || {}).value || '').trim());
+      const sharedImageEl = getElement('onlineExamQuestionSharedImageId');
+      const sharedImageId = sharedImageEl ? ((sharedImageEl.value || '').trim() || null) : undefined;
       const choiceImages = [
         parseDriveImageUrl(((getElement('onlineExamChoiceImage0') || {}).value || '').trim()) || null,
         parseDriveImageUrl(((getElement('onlineExamChoiceImage1') || {}).value || '').trim()) || null,
@@ -44976,12 +45108,13 @@ function receiptStatusText(status) {
               choiceImages,
               correctIndex,
               score,
+              sharedImageId: sharedImageId === undefined ? (existingQuestion.sharedImageId || null) : sharedImageId,
               imageUrl: imageUrl || null
             });
           }
         } else {
           const newQId = 'q_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7);
-          questions.push({ questionId: newQId, text, textHtml: textRich.html || null, choices, choiceHtmls, choiceImages, correctIndex, score, imageUrl: imageUrl || null });
+          questions.push({ questionId: newQId, text, textHtml: textRich.html || null, choices, choiceHtmls, choiceImages, correctIndex, score, sharedImageId: sharedImageId || null, imageUrl: imageUrl || null });
         }
 
         const totalScore = questions.reduce(function(sum, q) { return sum + (q.score || 1); }, 0);
@@ -45111,6 +45244,7 @@ function receiptStatusText(status) {
       const choiceHtmls = q.choiceHtmls || [];
       const choiceImages = q.choiceImages || [];
       const correctIndex = Number(q.correctIndex || 0);
+      const sharedImageOptions = getOnlineExamSharedImageOptionsHtml(course, q.sharedImageId || '');
       openEditBubble(isEditing ? 'แก้ไขข้อสอบ' : 'เพิ่มข้อสอบ',
         '<div class="edit-bubble-note" style="margin-bottom:12px;">ชุดข้อสอบ: ' + escapeHtml(course.title || courseId) + '</div>' +
         '<label>คำถาม / โจทย์</label>' +
@@ -45121,6 +45255,9 @@ function receiptStatusText(status) {
           '<button class="btn" type="button" onclick="insertOnlineExamRoot(\'bubbleOnlineExamQuestionText\')" style="font-size:11px;padding:3px 8px;">√</button>' +
         '</div>' +
         '<textarea id="bubbleOnlineExamQuestionText" rows="3" placeholder="ระบุเนื้อหาโจทย์...">' + escapeHtml(q.textHtml || q.text || '') + '</textarea>' +
+        '<label style="margin-top:10px;">ใช้รูปประกอบร่วม</label>' +
+        '<select id="bubbleOnlineExamSharedImageId">' + sharedImageOptions + '</select>' +
+        '<div style="font-size:11px;color:#64748b;margin-top:3px;">ถ้าเลือกไว้ ระบบจะแสดงรูปประกอบร่วมแทน URL รูปรายข้อนี้</div>' +
         '<label style="margin-top:10px;">URL รูปภาพประกอบ (ถ้ามี)</label>' +
         '<input id="bubbleOnlineExamQuestionImageUrl" type="url" value="' + escapeHtml(q.imageUrl || '') + '" placeholder="วางลิงก์ Google Drive หรือ URL รูปภาพโดยตรง" onblur="this.value=parseDriveImageUrl(this.value)" onpaste="setTimeout(()=>{this.value=parseDriveImageUrl(this.value)},50)">' +
         '<div class="form-row" style="margin-top:10px;">' +
@@ -45190,6 +45327,7 @@ function receiptStatusText(status) {
             choiceImages: updatedChoiceImages,
             correctIndex: parseInt(bubbleSelectValue('bubbleOnlineExamCorrectIndex') || '0', 10) || 0,
             score: parseInt(bubbleValue('bubbleOnlineExamQuestionScore') || '1', 10) || 1,
+            sharedImageId: bubbleSelectValue('bubbleOnlineExamSharedImageId') || null,
             imageUrl: parseDriveImageUrl(bubbleValue('bubbleOnlineExamQuestionImageUrl')) || null
           });
           if (isEditing) {
@@ -45226,6 +45364,7 @@ function receiptStatusText(status) {
     function resetOnlineExamQuestionForm() {
       setValue('onlineExamEditingQuestionId', '');
       setValue('onlineExamQuestionText', '');
+      setValue('onlineExamQuestionSharedImageId', '');
       setValue('onlineExamQuestionImageUrl', '');
       setValue('onlineExamChoice0', '');
       setValue('onlineExamChoice1', '');
@@ -45633,8 +45772,9 @@ function receiptStatusText(status) {
       }
       const course = onlineExamCourseCache.find(function(c) { return c.firebaseDocId === courseId; });
       const questions = (course && course.questions) ? course.questions : [];
+      const sharedImagePanel = course ? renderOnlineExamSharedImagePanel(course, courseId) : '';
       if (!questions.length) {
-        container.innerHTML = '<p style="color:#9ca3af;font-size:13px;">ยังไม่มีข้อสอบในชุดนี้</p>';
+        container.innerHTML = sharedImagePanel + '<p style="color:#9ca3af;font-size:13px;">ยังไม่มีข้อสอบในชุดนี้</p>';
         return;
       }
       const bulkToolbar =
@@ -45647,7 +45787,7 @@ function receiptStatusText(status) {
             '<button id="onlineExamQuestionBulkDeleteBtn" class="btn btn-red" type="button" onclick="deleteSelectedOnlineExamQuestions(\'' + jsArg(courseId) + '\')" disabled style="font-size:11px;padding:4px 10px;opacity:.55;">ลบข้อที่เลือก</button>' +
           '</div>' +
         '</div>';
-      container.innerHTML = bulkToolbar + questions.map(function(q, idx) {
+      container.innerHTML = sharedImagePanel + bulkToolbar + questions.map(function(q, idx) {
         const choicesList = (q.choices || []).map(function(ch, ci) {
           const choiceImage = (q.choiceImages || [])[ci];
           const choiceImageHtml = choiceImage
@@ -45657,8 +45797,13 @@ function receiptStatusText(status) {
             onlineExamChoiceLabel(ci) + ' ' + onlineExamRichTextHtml(ch, (q.choiceHtmls || [])[ci]) +
           '</span>' + choiceImageHtml;
         }).join('<br>');
-        const questionImageHtml = q.imageUrl
-          ? '<img src="' + escapeHtml(parseDriveImageUrl(q.imageUrl)) + '" onerror="this.style.display=\'none\'" style="display:block;max-height:160px;max-width:100%;border:1px solid #e2e8f0;border-radius:8px;margin:8px 0;object-fit:contain;background:#fff;" alt="รูปประกอบข้อ ' + (idx+1) + '">'
+        const questionImageUrl = getOnlineExamQuestionImageUrl(course, q);
+        const sharedImageLabel = getOnlineExamSharedImageLabel(course, q.sharedImageId);
+        const sharedImageBadge = sharedImageLabel
+          ? '<div style="display:inline-block;font-size:11px;font-weight:700;color:#1d4ed8;background:#dbeafe;border:1px solid #bfdbfe;border-radius:999px;padding:2px 8px;margin:2px 0 6px;">รูปประกอบร่วม: ' + escapeHtml(sharedImageLabel) + '</div>'
+          : '';
+        const questionImageHtml = questionImageUrl
+          ? '<img src="' + escapeHtml(questionImageUrl) + '" onerror="this.style.display=\'none\'" style="display:block;max-height:160px;max-width:100%;border:1px solid #e2e8f0;border-radius:8px;margin:8px 0;object-fit:contain;background:#fff;" alt="รูปประกอบข้อ ' + (idx+1) + '">'
           : '';
         return '<div style="padding:10px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;margin-bottom:8px;">' +
           '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;flex-wrap:wrap;">' +
@@ -45671,6 +45816,7 @@ function receiptStatusText(status) {
             '</div>' +
           '</div>' +
           '<p style="font-size:13px;margin:4px 0 6px;white-space:pre-wrap;">' + onlineExamRichTextHtml(q.text || '', q.textHtml) + '</p>' +
+          sharedImageBadge +
           questionImageHtml +
           choicesList +
         '</div>';
@@ -45689,8 +45835,9 @@ function receiptStatusText(status) {
       const generatedText = new Date().toLocaleDateString('th-TH', { year: 'numeric', month: 'long', day: 'numeric' });
 
       const questionHtml = questions.map(function(q, idx) {
-        const questionImageHtml = q.imageUrl
-          ? '<img class="exam-print-question-image" src="' + escapeHtml(parseDriveImageUrl(q.imageUrl)) + '" crossorigin="anonymous" onerror="this.style.display=\'none\'" alt="รูปประกอบข้อ ' + (idx + 1) + '">'
+        const questionImageUrl = getOnlineExamQuestionImageUrl(course, q);
+        const questionImageHtml = questionImageUrl
+          ? '<img class="exam-print-question-image" src="' + escapeHtml(questionImageUrl) + '" crossorigin="anonymous" onerror="this.style.display=\'none\'" alt="รูปประกอบข้อ ' + (idx + 1) + '">'
           : '';
         const choiceHtml = (q.choices || []).map(function(ch, ci) {
           const choiceImage = (q.choiceImages || [])[ci];
@@ -47553,8 +47700,9 @@ function receiptStatusText(status) {
         const sc = answers[q.questionId];
         const isCorrect = sc === q.correctIndex;
         if (isCorrect) correct++;
-        const qImgHtml = q.imageUrl
-          ? '<br><img src="' + escapeHtml(parseDriveImageUrl(q.imageUrl)) + '" onerror="this.style.display=\'none\'" style="max-height:70px;max-width:160px;border-radius:6px;margin-top:4px;object-fit:contain;">'
+        const questionImageUrl = getOnlineExamQuestionImageUrl(course, q);
+        const qImgHtml = questionImageUrl
+          ? '<br><img src="' + escapeHtml(questionImageUrl) + '" onerror="this.style.display=\'none\'" style="max-height:70px;max-width:160px;border-radius:6px;margin-top:4px;object-fit:contain;">'
           : '';
         return '<tr style="font-size:12px;">' +
           '<td style="padding:6px 10px;border-bottom:1px solid #f1f5f9;">' + (i+1) + '</td>' +
@@ -48437,7 +48585,8 @@ function receiptStatusText(status) {
           '</label>';
         }).join('');
 
-        const imageAttrs = q.imageUrl ? imageFallbackAttrs(q.imageUrl) : '';
+        const questionImageUrl = getOnlineExamQuestionImageUrl(course, q);
+        const imageAttrs = questionImageUrl ? imageFallbackAttrs(questionImageUrl) : '';
         const imageHtml = imageAttrs
           ? '<div style="margin-bottom:10px;">' +
               '<img ' + imageAttrs + ' style="max-height:min(360px,50vw);max-width:100%;border-radius:10px;border:1px solid #e2e8f0;display:block;" alt="รูปประกอบข้อ ' + (idx+1) + '">' +
@@ -48925,7 +49074,7 @@ function receiptStatusText(status) {
           });
           const correct = counts[q.correctIndex] || 0;
           const unanswered = results.filter(function(r) { return (r.answers || {})[q.questionId] === undefined; }).length;
-          return { questionIndex: i, question: q, counts: counts, correct: correct, unanswered: unanswered, total: totalResults };
+          return { questionIndex: i, course: course, question: q, counts: counts, correct: correct, unanswered: unanswered, total: totalResults };
         });
 
         const rows = onlineExamAnalysisData.map(function(item) {
@@ -48994,8 +49143,9 @@ function receiptStatusText(status) {
         '</tr>';
       }).join('');
 
-      const qImgHtml = item.question.imageUrl
-        ? '<img src="' + escapeHtml(parseDriveImageUrl(item.question.imageUrl)) + '" onerror="this.style.display=\'none\'" style="max-height:100px;max-width:100%;border-radius:8px;margin:6px 0;object-fit:contain;">'
+      const questionImageUrl = getOnlineExamQuestionImageUrl(item.course, item.question);
+      const qImgHtml = questionImageUrl
+        ? '<img src="' + escapeHtml(questionImageUrl) + '" onerror="this.style.display=\'none\'" style="max-height:100px;max-width:100%;border-radius:8px;margin:6px 0;object-fit:contain;">'
         : '';
 
       content.innerHTML =
