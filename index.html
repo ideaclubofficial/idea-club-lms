@@ -50875,12 +50875,80 @@ function receiptStatusText(status) {
       if (panel) panel.classList.add('hidden');
     }
 
-    function tfGetAssignTeacherCandidates(session) {
+    function tfGetAssignSessionDefaultSubject(session) {
+      const course = tfFindCourseById(session ? session.courseId : '');
+      return String(
+        (session && session.subject) ||
+        getMonthlyCourseSubjectSnapshot(course, course ? (course.name || course.title || '') : '') ||
+        ''
+      ).trim();
+    }
+
+    function tfGetAssignSubjectOptions(session) {
+      const subjects = ['คณิตศาสตร์', 'วิทยาศาสตร์', 'ภาษาอังกฤษ', 'ภาษาไทย', 'สังคมศึกษา'];
+      const pushSubject = function(value) {
+        const subject = String(value || '').trim();
+        if (subject && !subjects.includes(subject)) subjects.push(subject);
+      };
+      pushSubject(tfGetAssignSessionDefaultSubject(session));
+      const setting = courseTeachingSettings.find(function(item) {
+        return String(item.courseId || '') === String((session && session.courseId) || '');
+      });
+      if (setting && Array.isArray(setting.subjects)) {
+        setting.subjects.forEach(function(item) { pushSubject(item && item.subject); });
+      }
+      return subjects;
+    }
+
+    function tfPopulateAssignSubjectOptions(session) {
+      const subjectSel = tfEl('tf-assign-subject-select');
+      if (!subjectSel || !session) return;
+      const selected = tfGetAssignSessionDefaultSubject(session);
+      const options = tfGetAssignSubjectOptions(session);
+      subjectSel.innerHTML = options.map(function(subject) {
+        return '<option value="' + escapeHtml(subject) + '"' + (subject === selected ? ' selected' : '') + '>' + escapeHtml(subject) + '</option>';
+      }).join('');
+      if (selected && options.includes(selected)) subjectSel.value = selected;
+    }
+
+    function tfGetAssignSelectedSubject(session) {
+      const subjectSel = tfEl('tf-assign-subject-select');
+      return String((subjectSel && subjectSel.value) || tfGetAssignSessionDefaultSubject(session) || '').trim();
+    }
+
+    function tfGetAssignTeacherCandidates(session, subject) {
       const mode = session ? (session.type || session.format || 'onsite') : 'onsite';
-      const subjectSetting = getMonthlySubjectSetting(session, session ? (session.subject || '') : '');
+      const subjectSetting = getMonthlySubjectSetting(session, subject || (session ? session.subject || '' : ''));
       return tfGetTutors().filter(function(teacher) {
         return canTeacherTeachMode(teacher, mode, subjectSetting);
       });
+    }
+
+    function tfPopulateAssignTeacherOptions(session, subject) {
+      const select = tfEl('tf-assign-teacher-select');
+      const errEl = tfEl('tf-assign-teacher-error');
+      if (!select || !session) return;
+      const prev = select.value;
+      const teachersArr = tfGetAssignTeacherCandidates(session, subject);
+      select.innerHTML = '<option value="">เลือกครูผู้สอน</option>' + teachersArr.map(function(teacher) {
+        const id = getTeacherPlannerId(teacher);
+        const name = teacher.name || teacher.displayName || teacher.email || id;
+        const teacherSubject = teacher.subject || teacher.mainSubject || teacher.teachingSubject || '';
+        return '<option value="' + escapeHtml(id) + '">' + escapeHtml(name + (teacherSubject ? ' · ' + teacherSubject : '')) + '</option>';
+      }).join('');
+      if (prev && teachersArr.some(function(teacher) { return String(getTeacherPlannerId(teacher)) === String(prev); })) select.value = prev;
+      select.disabled = teachersArr.length === 0;
+      if (errEl) {
+        errEl.textContent = teachersArr.length ? '' : 'ยังไม่มีครูที่สอนรูปแบบ/วิชานี้ได้';
+        errEl.classList.toggle('hidden', teachersArr.length > 0);
+      }
+    }
+
+    function tfOnAssignSubjectChange() {
+      const sessionId = tfEl('tf-assign-teacher-session-id') ? tfEl('tf-assign-teacher-session-id').value : '';
+      const session = monthlyPlanSessions.find(function(s) { return String(s.id || s.firebaseDocId || '') === String(sessionId || ''); });
+      if (!session) return;
+      tfPopulateAssignTeacherOptions(session, tfGetAssignSelectedSubject(session));
     }
 
     function tfOpenAssignTeacherModal(sessionId) {
@@ -50895,7 +50963,6 @@ function receiptStatusText(status) {
         tfToast('คาบนี้มีครูแล้ว', 'info');
         return;
       }
-      const teachersArr = tfGetAssignTeacherCandidates(session);
       hidden.value = String(session.id || session.firebaseDocId || '');
       if (label) {
         label.textContent = [
@@ -50904,19 +50971,10 @@ function receiptStatusText(status) {
           session.center || session.courseLocation || ''
         ].filter(Boolean).join(' · ');
       }
-      select.innerHTML = '<option value="">เลือกครูผู้สอน</option>' + teachersArr.map(function(teacher) {
-        const id = getTeacherPlannerId(teacher);
-        const name = teacher.name || teacher.displayName || teacher.email || id;
-        const subject = teacher.subject || teacher.mainSubject || teacher.teachingSubject || '';
-        return '<option value="' + escapeHtml(id) + '">' + escapeHtml(name + (subject ? ' · ' + subject : '')) + '</option>';
-      }).join('');
-      select.disabled = teachersArr.length === 0;
-      if (errEl) {
-        errEl.textContent = teachersArr.length ? '' : 'ยังไม่มีครูที่สอนรูปแบบ/วิชานี้ได้';
-        errEl.classList.toggle('hidden', teachersArr.length > 0);
-      }
+      tfPopulateAssignSubjectOptions(session);
+      tfPopulateAssignTeacherOptions(session, tfGetAssignSelectedSubject(session));
       modal.classList.remove('hidden');
-      if (teachersArr.length) setTimeout(function() { select.focus(); }, 50);
+      if (!select.disabled) setTimeout(function() { select.focus(); }, 50);
       if (typeof lucide !== 'undefined') lucide.createIcons();
     }
 
@@ -50939,7 +50997,8 @@ function receiptStatusText(status) {
       const session = monthlyPlanSessions.find(function(s) { return String(s.id || s.firebaseDocId || '') === String(sessionId || ''); });
       const teacher = findTeacherByPlannerId(teacherId) || tfGetTutors().find(function(t) { return String(t.id || t.firebaseDocId || '') === String(teacherId); });
       if (!session || !teacher) return;
-      const subjectSetting = getMonthlySubjectSetting(session, session.subject || '');
+      const selectedSubject = tfGetAssignSelectedSubject(session);
+      const subjectSetting = getMonthlySubjectSetting(session, selectedSubject);
       if (!canTeacherTeachMode(teacher, session.type || session.format || 'onsite', subjectSetting)) {
         if (errEl) { errEl.textContent = 'ครูคนนี้ยังไม่รองรับรูปแบบ/วิชาของคาบนี้'; errEl.classList.remove('hidden'); }
         return;
@@ -50954,6 +51013,7 @@ function receiptStatusText(status) {
         teacherAuthUid: teacher.authUid || teacher.teacherUid || '',
         teacherName: teacherName,
         tutorName: teacherName,
+        subject: selectedSubject || session.subject || '',
         updatedAtText: new Date().toLocaleString('th-TH')
       });
       applyMonthlySessionTeacherPublishState(draft);
@@ -52250,6 +52310,10 @@ function receiptStatusText(status) {
         <div class="rounded-xl border border-amber-100 bg-amber-50 px-3 py-2">
           <p class="text-xs font-bold text-amber-700 mb-1">คาบที่เลือก</p>
           <p id="tf-assign-teacher-session-label" class="text-sm font-semibold text-slate-800">-</p>
+        </div>
+        <div>
+          <label class="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">วิชาที่สอน *</label>
+          <select id="tf-assign-subject-select" onchange="tfOnAssignSubjectChange()" class="w-full bg-slate-50 border border-slate-300 text-slate-900 rounded-xl p-2.5 font-medium text-sm"></select>
         </div>
         <div>
           <label class="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">ครูผู้สอน *</label>
