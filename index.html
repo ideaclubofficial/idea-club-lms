@@ -7831,6 +7831,44 @@
                     <p id="tf-quick-assign-result" class="text-xs font-medium leading-relaxed"></p>
                   </div>
 
+                  <div class="bg-white p-5 rounded-2xl border border-rose-200 shadow-sm space-y-4">
+                    <div>
+                      <h2 class="font-bold text-slate-900 text-sm flex items-center gap-2">
+                        <i data-lucide="trash-2" class="w-4 h-4 text-rose-600"></i> ลบตารางหลายรายการ
+                      </h2>
+                      <p id="tf-bulk-delete-summary" class="text-xs text-slate-500 leading-relaxed mt-1">เลือกเงื่อนไข แล้วตรวจรายการก่อนลบ</p>
+                    </div>
+                    <div id="tf-bulk-delete-stats" class="grid grid-cols-3 gap-2 text-center"></div>
+                    <div class="space-y-2">
+                      <label class="block text-[10px] font-bold text-slate-400 uppercase tracking-wider">คอร์ส</label>
+                      <select id="tf-bulk-delete-course" onchange="tfRenderBulkDeletePanel()" class="w-full bg-slate-50 border border-slate-200 text-slate-700 text-xs rounded-xl p-2.5 font-medium"></select>
+                    </div>
+                    <div class="grid grid-cols-2 gap-2">
+                      <div class="space-y-2">
+                        <label class="block text-[10px] font-bold text-slate-400 uppercase tracking-wider">วันเรียน</label>
+                        <select id="tf-bulk-delete-day" onchange="tfRenderBulkDeletePanel()" class="w-full bg-slate-50 border border-slate-200 text-slate-700 text-xs rounded-xl p-2.5 font-medium"></select>
+                      </div>
+                      <div class="space-y-2">
+                        <label class="block text-[10px] font-bold text-slate-400 uppercase tracking-wider">สถานะ</label>
+                        <select id="tf-bulk-delete-status" onchange="tfRenderBulkDeletePanel()" class="w-full bg-slate-50 border border-slate-200 text-slate-700 text-xs rounded-xl p-2.5 font-medium">
+                          <option value="all">ทุกสถานะ</option>
+                          <option value="draft">รอเลือกครู</option>
+                          <option value="confirmed">ยืนยันแล้ว</option>
+                          <option value="done">สอนแล้ว</option>
+                        </select>
+                      </div>
+                    </div>
+                    <label class="flex items-start gap-2 rounded-xl bg-rose-50 border border-rose-100 p-2.5 text-xs text-rose-700 font-semibold">
+                      <input id="tf-bulk-delete-include-linked" type="checkbox" onchange="tfRenderBulkDeletePanel()" class="mt-0.5 w-4 h-4 accent-rose-600" />
+                      <span>ลบคาบรวมคลาส / รวมศูนย์ที่เกี่ยวข้องด้วย</span>
+                    </label>
+                    <div id="tf-bulk-delete-preview" class="space-y-2 max-h-44 overflow-y-auto tf-no-scroll"></div>
+                    <button onclick="tfDeleteBulkSchedules()" class="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-rose-600 hover:bg-rose-700 text-white font-semibold rounded-xl transition-all shadow-md text-sm border-0 cursor-pointer">
+                      <i data-lucide="trash-2" class="w-4 h-4"></i> ลบรายการที่เลือก
+                    </button>
+                    <p id="tf-bulk-delete-result" class="text-xs font-medium leading-relaxed"></p>
+                  </div>
+
                   <!-- Course List -->
                   <div class="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
                     <h2 class="font-bold text-slate-900 text-sm flex items-center gap-2 mb-3">
@@ -50611,7 +50649,9 @@ function receiptStatusText(status) {
         ? 'bg-amber-50 text-amber-700 border-amber-100'
         : tone === 'indigo'
           ? 'bg-indigo-50 text-indigo-700 border-indigo-100'
-          : 'bg-slate-50 text-slate-600 border-slate-100';
+          : tone === 'rose'
+            ? 'bg-rose-50 text-rose-700 border-rose-100'
+            : 'bg-slate-50 text-slate-600 border-slate-100';
       return '<div class="rounded-xl border ' + toneClass + ' px-2 py-2">' +
         '<div class="text-sm font-black leading-none">' + escapeHtml(String(value)) + '</div>' +
         '<div class="text-[10px] font-bold mt-1">' + escapeHtml(label) + '</div>' +
@@ -50781,6 +50821,241 @@ function receiptStatusText(status) {
       tfToast('ใส่ครูแล้ว ' + saved + ' คาบ', saved ? 'success' : 'error');
     }
 
+    function tfGetBulkDeleteSelectedCourse() {
+      const sel = tfEl('tf-bulk-delete-course');
+      return sel ? (sel.value || 'all') : 'all';
+    }
+
+    function tfGetBulkDeleteSelectedDay() {
+      const sel = tfEl('tf-bulk-delete-day');
+      return sel ? (sel.value || 'all') : 'all';
+    }
+
+    function tfGetBulkDeleteSelectedStatus() {
+      const sel = tfEl('tf-bulk-delete-status');
+      return sel ? (sel.value || 'all') : 'all';
+    }
+
+    function tfBulkDeleteIncludeLinked() {
+      const input = tfEl('tf-bulk-delete-include-linked');
+      return !!(input && input.checked);
+    }
+
+    function tfGetBulkDeleteBaseTargets(options) {
+      options = options || {};
+      const monthKey = tfGetCurrentCalendarMonthKey();
+      const fmt = tfEl('tf-filter-format') ? tfEl('tf-filter-format').value : 'all';
+      const tutorId = tfEl('tf-filter-tutor') ? tfEl('tf-filter-tutor').value : 'all';
+      const calendarCourseId = tfEl('tf-filter-course') ? tfEl('tf-filter-course').value : 'all';
+      const bulkCourseId = options.ignoreCourse ? 'all' : tfGetBulkDeleteSelectedCourse();
+      const dayKey = options.ignoreDay ? 'all' : tfGetBulkDeleteSelectedDay();
+      const statusScope = options.ignoreStatus ? 'all' : tfGetBulkDeleteSelectedStatus();
+      return (monthlyPlanSessions || []).filter(function(session) {
+        if (!session || session.deleted === true || session.status === 'cancelled' || session.status === 'holiday') return false;
+        if (getMonthlySessionMonthKey(session) !== monthKey) return false;
+        const teacherId = getSessionTeacherPlannerId(session);
+        const centerOk = tfCenterFilter === 'all' ||
+          tfCenterTextMatches(session.center || session.courseLocation || '', tfCenterFilter) ||
+          tfCenterTextMatches(session.center2 || '', tfCenterFilter) ||
+          (Array.isArray(session.centers) && session.centers.some(function(center) { return tfCenterTextMatches(center, tfCenterFilter); }));
+        const fmtOk = fmt === 'all' || (session.type || session.format) === fmt;
+        const tutorOk = tutorId === 'all' || teacherId === tutorId;
+        const calendarCourseOk = calendarCourseId === 'all' || String(session.courseId || '') === String(calendarCourseId);
+        const bulkCourseOk = bulkCourseId === 'all' || String(session.courseId || '') === String(bulkCourseId);
+        const dayOk = dayKey === 'all' || tfGetQuickAssignSessionDayKey(session) === dayKey;
+        const sessionStatus = isMonthlySessionAwaitingTeacher(session) ? 'draft' : (session.status || 'draft');
+        const statusOk = statusScope === 'all' || sessionStatus === statusScope || (statusScope === 'done' && sessionStatus === 'completed');
+        return centerOk && fmtOk && tutorOk && calendarCourseOk && bulkCourseOk && dayOk && statusOk;
+      }).sort(compareMonthlySessionsForDisplay);
+    }
+
+    function tfGetLinkedBulkDeleteTargets(session) {
+      if (!session) return [];
+      const sessionId = String(session.id || session.firebaseDocId || '').trim();
+      const groupId = String(session.sharedClassGroupId || session.sharedGroupId || '').trim();
+      const baseCenters = tfGetAssignCenterKeys(session);
+      const shouldSearch = (groupId && session.isSharedClass) || session.isCrossCenterClass || session.center2 || baseCenters.length > 1;
+      if (!shouldSearch) return [session];
+      const targets = (monthlyPlanSessions || []).filter(function(item) {
+        const itemId = String(item && (item.id || item.firebaseDocId) || '').trim();
+        const itemGroupId = String(item && (item.sharedClassGroupId || item.sharedGroupId) || '').trim();
+        const sameSharedGroup = groupId && (itemId === sessionId || itemGroupId === groupId);
+        const sameCrossCenterSlot = tfIsCrossCenterAssignMatch(session, item, baseCenters);
+        return item &&
+          item.deleted !== true &&
+          item.status !== 'cancelled' &&
+          item.status !== 'holiday' &&
+          (sameSharedGroup || sameCrossCenterSlot);
+      });
+      return targets.length ? targets : [session];
+    }
+
+    function tfGetBulkDeleteTargets(options) {
+      const baseTargets = tfGetBulkDeleteBaseTargets(options);
+      if (!tfBulkDeleteIncludeLinked()) return baseTargets;
+      const expanded = [];
+      const seen = {};
+      baseTargets.forEach(function(session) {
+        tfGetLinkedBulkDeleteTargets(session).forEach(function(target) {
+          const id = String(target.id || target.firebaseDocId || '');
+          if (!id || seen[id]) return;
+          seen[id] = true;
+          expanded.push(target);
+        });
+      });
+      return expanded.sort(compareMonthlySessionsForDisplay);
+    }
+
+    function tfPopulateBulkDeleteCourses() {
+      const sel = tfEl('tf-bulk-delete-course');
+      if (!sel) return;
+      const prev = sel.value || 'all';
+      const sessions = tfGetBulkDeleteBaseTargets({ ignoreCourse: true });
+      const seen = {};
+      const courseOptions = sessions.map(function(session) {
+        const id = String(session.courseId || '').trim();
+        if (!id || seen[id]) return null;
+        seen[id] = true;
+        return { id: id, label: tfCourseOptionLabel(tfFindCourseById(id)) || tfGetCourseName(id) || id };
+      }).filter(Boolean).sort(function(a, b) {
+        return String(a.label || '').localeCompare(String(b.label || ''), 'th');
+      });
+      sel.innerHTML = '<option value="all">ทุกคอร์ส</option>' + courseOptions.map(function(item) {
+        return '<option value="' + escapeHtml(item.id) + '">' + escapeHtml(item.label) + '</option>';
+      }).join('');
+      sel.value = prev === 'all' || courseOptions.some(function(item) { return item.id === prev; }) ? prev : 'all';
+    }
+
+    function tfPopulateBulkDeleteDays() {
+      const sel = tfEl('tf-bulk-delete-day');
+      if (!sel) return;
+      const prev = sel.value || 'all';
+      const sessions = tfGetBulkDeleteBaseTargets({ ignoreDay: true });
+      const order = MONTHLY_PLAN_DAYS.map(function(day) { return day.key; });
+      const days = Array.from(new Set(sessions.map(tfGetQuickAssignSessionDayKey).filter(Boolean))).sort(function(a, b) {
+        return order.indexOf(a) - order.indexOf(b);
+      });
+      sel.innerHTML = '<option value="all">ทุกวันเรียน</option>' + days.map(function(dayKey) {
+        return '<option value="' + escapeHtml(dayKey) + '">' + escapeHtml(getMonthlyPlanDayText(dayKey) || dayKey) + '</option>';
+      }).join('');
+      sel.value = prev === 'all' || days.includes(prev) ? prev : 'all';
+    }
+
+    function tfRenderBulkDeletePreview(targets) {
+      const preview = tfEl('tf-bulk-delete-preview');
+      if (!preview) return;
+      if (!targets.length) {
+        preview.innerHTML = '<div class="rounded-xl border border-dashed border-slate-200 bg-slate-50 p-3 text-xs text-slate-400 text-center">ไม่มีตารางที่ตรงกับเงื่อนไขนี้</div>';
+        return;
+      }
+      const visible = targets.slice(0, 5).map(function(session) {
+        const badges = [];
+        if (isMonthlySessionAwaitingTeacher(session)) badges.push('รอครู');
+        if (session.isSharedClass) badges.push('รวมคลาส');
+        if (session.isCrossCenterClass || session.center2) badges.push('รวมศูนย์');
+        return '<div class="rounded-xl border border-rose-100 bg-rose-50/60 p-2.5">' +
+          '<div class="flex items-start justify-between gap-2">' +
+            '<p class="text-xs font-bold text-slate-800 leading-snug">' + escapeHtml(getMonthlyPlanCourseName(session) || tfGetCourseName(session.courseId)) + '</p>' +
+            '<span class="text-[10px] font-bold text-rose-700 bg-white rounded-md px-1.5 py-0.5 flex-shrink-0">' + escapeHtml(getMonthlyPlanStatusText(session.status || 'draft')) + '</span>' +
+          '</div>' +
+          '<p class="text-[11px] text-slate-600 mt-1">' + escapeHtml([getMonthlySessionDate(session), formatMonthlySessionTimeRange(session), getMonthlyPlanDayText(tfGetQuickAssignSessionDayKey(session))].filter(Boolean).join(' · ')) + '</p>' +
+          '<p class="text-[11px] text-slate-500 mt-0.5">' + escapeHtml([session.center || session.courseLocation || '', session.center2 || '', getMonthlyPlanTeacherName(session)].filter(Boolean).join(' · ') || '-') + '</p>' +
+          (badges.length ? '<p class="text-[10px] text-rose-700 font-bold mt-1">' + escapeHtml(badges.join(' · ')) + '</p>' : '') +
+        '</div>';
+      }).join('');
+      const more = targets.length > 5 ? '<p class="text-[11px] text-slate-400 text-center">และอีก ' + (targets.length - 5) + ' รายการ</p>' : '';
+      preview.innerHTML = visible + more;
+    }
+
+    function tfRenderBulkDeletePanel() {
+      tfPopulateBulkDeleteCourses();
+      tfPopulateBulkDeleteDays();
+      const summary = tfEl('tf-bulk-delete-summary');
+      const stats = tfEl('tf-bulk-delete-stats');
+      const baseCount = tfGetBulkDeleteBaseTargets().length;
+      const targets = tfGetBulkDeleteTargets();
+      const linkedExtra = Math.max(0, targets.length - baseCount);
+      const monthText = getThaiMonthLabel(tfGetCurrentCalendarMonthKey(), false) || tfGetCurrentCalendarMonthKey();
+      const selectedCourse = tfGetBulkDeleteSelectedCourse();
+      const selectedDay = tfGetBulkDeleteSelectedDay();
+      const selectedStatus = tfGetBulkDeleteSelectedStatus();
+      const courseLabel = selectedCourse !== 'all' ? (tfCourseOptionLabel(tfFindCourseById(selectedCourse)) || tfGetCourseName(selectedCourse)) : '';
+      const dayLabel = selectedDay !== 'all' ? getMonthlyPlanDayText(selectedDay) : '';
+      if (summary) {
+        summary.textContent = targets.length
+          ? 'จะลบตารางใน ' + monthText +
+            (courseLabel ? ' · ' + courseLabel : '') +
+            (dayLabel ? ' · ทุกวัน' + dayLabel : '') +
+            (selectedStatus !== 'all' ? ' · ' + getMonthlyPlanStatusText(selectedStatus) : '')
+          : 'ไม่มีตารางให้ลบใน ' + monthText + ' ตามเงื่อนไขนี้';
+      }
+      if (stats) {
+        stats.innerHTML = [
+          tfQuickAssignStatHtml('จะลบ', targets.length, 'rose'),
+          tfQuickAssignStatHtml('ตามตัวกรอง', baseCount, 'amber'),
+          tfQuickAssignStatHtml('พ่วงเพิ่ม', linkedExtra, 'slate')
+        ].join('');
+      }
+      tfRenderBulkDeletePreview(targets);
+    }
+
+    async function tfDeleteBulkSchedules() {
+      const result = tfEl('tf-bulk-delete-result');
+      if (result) {
+        result.textContent = '';
+        result.className = 'text-xs font-medium leading-relaxed';
+      }
+      const targets = tfGetBulkDeleteTargets();
+      if (!targets.length) {
+        if (result) {
+          result.textContent = 'ไม่มีรายการให้ลบ';
+          result.className = 'text-xs font-medium leading-relaxed text-slate-500';
+        }
+        return;
+      }
+      const selectedCourse = tfGetBulkDeleteSelectedCourse();
+      const selectedDay = tfGetBulkDeleteSelectedDay();
+      const selectedStatus = tfGetBulkDeleteSelectedStatus();
+      const scopeParts = [];
+      if (selectedCourse !== 'all') scopeParts.push(tfCourseOptionLabel(tfFindCourseById(selectedCourse)) || tfGetCourseName(selectedCourse) || selectedCourse);
+      if (selectedDay !== 'all') scopeParts.push('ทุกวัน' + (getMonthlyPlanDayText(selectedDay) || selectedDay));
+      if (selectedStatus !== 'all') scopeParts.push(getMonthlyPlanStatusText(selectedStatus));
+      if (tfBulkDeleteIncludeLinked()) scopeParts.push('รวมคาบเรียนร่วม');
+      const scopeText = scopeParts.length ? ' (' + scopeParts.join(' · ') + ')' : '';
+      if (!confirm('ต้องการลบตารางสอน ' + targets.length + ' รายการ' + scopeText + ' ใช่หรือไม่?')) return;
+      if (targets.length >= 10 && !confirm('ยืนยันอีกครั้ง: ลบ ' + targets.length + ' รายการออกจากระบบถาวร?')) return;
+      let deleted = 0;
+      let failed = 0;
+      for (const session of targets) {
+        try {
+          await deleteFirebaseDocument('monthlyPlanSessions', session);
+          const idx = monthlyPlanSessions.indexOf(session);
+          if (idx > -1) monthlyPlanSessions.splice(idx, 1);
+          deleted += 1;
+        } catch (error) {
+          console.error('tf bulk delete schedule error:', error, session);
+          failed += 1;
+        }
+      }
+      tfCloseDayDetail();
+      tfRenderSchedule();
+      safeRun(renderMonthlyPlanSessions, 'tf-bulk-delete-monthly-render');
+      safeRun(renderStudentMonthlyPlanSummary, 'tf-bulk-delete-student-refresh');
+      safeRun(renderTeacherMonthlyPlanSummary, 'tf-bulk-delete-teacher-refresh');
+      safeRun(renderTodayTeachingList, 'tf-bulk-delete-today');
+      safeRun(renderTeacherDashboardSummary, 'tf-bulk-delete-teacher-dash');
+      safeRun(renderTeacherMobileHome, 'tf-bulk-delete-teacher-mobile');
+      safeRun(updateStudentCourseDisplay, 'tf-bulk-delete-student-display');
+      if (result) {
+        const parts = ['ลบแล้ว ' + deleted + ' รายการ'];
+        if (scopeParts.length) parts.push(scopeParts.join(' · '));
+        if (failed) parts.push('ลบไม่สำเร็จ ' + failed);
+        result.textContent = parts.join(' · ');
+        result.className = failed ? 'text-xs font-medium leading-relaxed text-rose-600' : 'text-xs font-medium leading-relaxed text-emerald-600';
+      }
+      tfToast('ลบตารางแล้ว ' + deleted + ' รายการ', failed ? 'error' : 'success');
+    }
+
     // --- Populate filter dropdowns ---
     function tfPopulateFilters() {
       const tutorSel = tfEl('tf-filter-tutor');
@@ -50935,6 +51210,7 @@ function receiptStatusText(status) {
       else tfRenderList();
       tfUpdateStats();
       tfRenderQuickAssignPanel();
+      tfRenderBulkDeletePanel();
     }
 
     // --- Render monthly grid calendar ---
