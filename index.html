@@ -30810,6 +30810,45 @@
       }) || null;
     }
 
+    function getUniqueStudentRecordByPaymentName(payment) {
+      if (!payment || !Array.isArray(students)) return null;
+      const names = [
+        payment.student,
+        payment.studentName,
+        payment.name
+      ].map(function(value) { return String(value || '').trim(); }).filter(Boolean);
+      if (!names.length) return null;
+      const matches = students.filter(function(student) {
+        return names.includes(String(student.name || '').trim());
+      });
+      return matches.length === 1 ? matches[0] : null;
+    }
+
+    function getCourseByPaymentStudentOrName(payment, student, courseName) {
+      const paymentRecord = payment || {};
+      const studentRecord = student || {};
+      const courseIds = [
+        paymentRecord.courseId,
+        paymentRecord.courseDocId,
+        paymentRecord.courseFirebaseDocId,
+        paymentRecord.registeredCourseId,
+        studentRecord.courseId,
+        studentRecord.courseDocId,
+        studentRecord.registeredCourseId,
+        studentRecord.enrolledCourseId
+      ].map(function(value) { return String(value || '').trim(); }).filter(Boolean);
+      if (courseIds.length) {
+        const byId = courses.find(function(course) {
+          const ids = [course.id, course.firebaseDocId, course.courseId].map(function(value) {
+            return String(value || '').trim();
+          }).filter(Boolean);
+          return ids.some(function(id) { return courseIds.includes(id); });
+        });
+        if (byId) return byId;
+      }
+      return getCourseByStudentOrName(studentRecord, courseName || paymentRecord.course || paymentRecord.courseName || studentRecord.course || studentRecord.courseName || '');
+    }
+
     function filterPaymentStatusByMonth() {
       paymentCurrentPage = 1;
       renderPaymentTable();
@@ -31794,7 +31833,7 @@
         return String(p.id || p.firebaseDocId || '') === String(paymentId);
       });
       if (!payment) { alert('ไม่พบรายการชำระเงิน'); return; }
-      const student = getPaymentStudentRecord(payment) || {};
+      const student = getPaymentStudentRecord(payment) || getUniqueStudentRecordByPaymentName(payment) || {};
 
       openEditBubble(
         'อัพโหลดสลิปแทนผู้ปกครอง — ' + escapeHtml(payment.student || student.name || '-') + ' · ' + escapeHtml(payment.month || '-'),
@@ -31837,7 +31876,7 @@
           let uploadCenter = '';
           try {
             const fileBase64 = await fileToBase64(file);
-            const uploadCourse = getCourseByStudentOrName(student, payment.course || payment.courseName || '');
+            const uploadCourse = getCourseByPaymentStudentOrName(payment, student, payment.course || payment.courseName || '');
             uploadCenter = getPaymentUploadCenterText(payment, student, uploadCourse);
             driveData = await uploadFileToDriveViaAppsScript({
               file: file,
@@ -32483,8 +32522,9 @@
     }
 
     function getPaymentUploadCenterText(payment, student, course) {
-      const resolvedCourse = course || getCourseByStudentOrName(student || {}, payment && (payment.course || payment.courseName || ''));
-      const rawCenter = getPaymentCenterTextForQr(payment, student, resolvedCourse);
+      const resolvedStudent = student || getPaymentStudentRecord(payment) || getUniqueStudentRecordByPaymentName(payment) || {};
+      const resolvedCourse = course || getCourseByPaymentStudentOrName(payment || {}, resolvedStudent, payment && (payment.course || payment.courseName || ''));
+      const rawCenter = getPaymentCenterTextForQr(payment, resolvedStudent, resolvedCourse);
       const text = String(rawCenter || '').trim();
       if (!text) return '';
       if (text.indexOf('หนองฉาง') !== -1) return 'หนองฉาง';
@@ -33790,7 +33830,7 @@ function receiptStatusText(status) {
       try {
         result.textContent = 'กำลังอัปโหลดสลิปไปยัง Google Drive...';
         const fileBase64 = await fileToBase64(file);
-        const uploadCourse = getCourseByStudentOrName(currentStudent, payment.course || payment.courseName || currentStudent.course || '');
+        const uploadCourse = getCourseByPaymentStudentOrName(payment, currentStudent, payment.course || payment.courseName || currentStudent.course || '');
         uploadCenter = getPaymentUploadCenterText(payment, currentStudent, uploadCourse);
         driveData = await uploadFileToDriveViaAppsScript({
           file: file,
