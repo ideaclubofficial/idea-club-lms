@@ -110,6 +110,7 @@ function buildPaymentSlipFileName(fileName, data) {
   const parts = [
     sanitizeName(data.studentId || "ไม่ระบุรหัส"),
     sanitizeName(data.studentName || "ไม่ระบุชื่อนักเรียน"),
+    sanitizeName(data.center || data.paymentCenter || data.location || data.preferredLocation || "ไม่ระบุศูนย์"),
     sanitizeName(data.month || "ไม่ระบุเดือน"),
     timestamp
   ];
