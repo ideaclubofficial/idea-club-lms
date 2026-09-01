@@ -110,11 +110,26 @@ function buildPaymentSlipFileName(fileName, data) {
   const parts = [
     sanitizeName(data.studentId || "ไม่ระบุรหัส"),
     sanitizeName(data.studentName || "ไม่ระบุชื่อนักเรียน"),
-    sanitizeName(data.center || data.paymentCenter || data.location || data.preferredLocation || "ไม่ระบุศูนย์"),
+    getPaymentCenterFileNamePart(data),
     sanitizeName(data.month || "ไม่ระบุเดือน"),
     timestamp
   ];
   return parts.filter(Boolean).join("-") + extension;
+}
+
+function getPaymentCenterFileNamePart(data) {
+  const rawCenter = String(
+    data.center ||
+    data.paymentCenter ||
+    data.location ||
+    data.preferredLocation ||
+    data.courseLocation ||
+    ""
+  ).trim();
+  if (!rawCenter) return "ไม่ระบุศูนย์";
+  if (rawCenter.indexOf("หนองฉาง") !== -1) return "หนองฉาง";
+  if (rawCenter.indexOf("นครสวรรค์") !== -1 || rawCenter.indexOf("นครสวรรค") !== -1) return "นครสวรรค์";
+  return sanitizeName(rawCenter.replace(/^IDEA CLUB\s*ศูนย์\s*/i, "")) || "ไม่ระบุศูนย์";
 }
 
 function getFileExtension(fileName) {

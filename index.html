@@ -9912,8 +9912,10 @@
         studentName: options.studentName || '',
         paymentId: options.paymentId || '',
         month: options.month || '',
-        center: options.center || options.paymentCenter || options.location || options.preferredLocation || '',
-        paymentCenter: options.paymentCenter || options.center || options.location || options.preferredLocation || '',
+        center: options.center || options.paymentCenter || options.location || options.preferredLocation || options.courseLocation || '',
+        paymentCenter: options.paymentCenter || options.center || options.location || options.preferredLocation || options.courseLocation || '',
+        courseLocation: options.courseLocation || options.center || options.paymentCenter || options.location || options.preferredLocation || '',
+        preferredLocation: options.preferredLocation || options.center || options.paymentCenter || options.location || options.courseLocation || '',
         grade: options.grade || '',
         courseId: options.courseId || '',
         courseName: options.courseName || '',
@@ -20821,9 +20823,11 @@
       bundleUploadBtns.forEach(function(btn) { btn.disabled = true; });
 
       let bundleDriveData = null;
+      let bundleUploadCenter = '';
       try {
         result.textContent = 'กำลังอัปโหลดสลิปยอดรวมไปยัง Google Drive...';
         const fileBase64 = await fileToBase64(file);
+        bundleUploadCenter = getPaymentUploadCenterText(bundle, currentStudent, null);
         bundleDriveData = await uploadFileToDriveViaAppsScript({
           file: file,
           fileBase64: fileBase64,
@@ -20834,8 +20838,10 @@
           studentName: getBundleSlipUploadStudentName(bundle),
           paymentId: bundle.id || bundle.firebaseDocId || '',
           month: (bundle.months || []).join(', '),
-          center: getPaymentCenterTextForQr(bundle, currentStudent, null),
-          paymentCenter: getPaymentCenterTextForQr(bundle, currentStudent, null),
+          center: bundleUploadCenter,
+          paymentCenter: bundleUploadCenter,
+          courseLocation: bundleUploadCenter,
+          preferredLocation: currentStudent.preferredLocation || bundleUploadCenter,
           courseId: currentStudent.courseId || '',
           courseName: 'ยอดรวมหลายรายการ',
           grade: currentStudent.grade || ''
@@ -20856,6 +20862,7 @@
         driveViewUrl: bundleDriveData.viewUrl || bundleDriveData.driveViewUrl || bundleDriveData.fileUrl || '',
         driveFolderId: bundleDriveData.folderId || '',
         driveFolderName: bundleDriveData.folderName || '',
+        paymentCenter: bundleUploadCenter || bundle.paymentCenter || bundle.center || '',
         slipUploadedByUid: firebaseUser ? firebaseUser.uid : (currentStudent.authUid || ''),
         slipUploadedByName: getActiveProfileDisplayInfo().displayName || currentStudent.name || '',
         slipUploadedAt: firebase.firestore.FieldValue.serverTimestamp(),
@@ -31827,8 +31834,11 @@
           if (resultEl) { resultEl.textContent = 'กำลังอัปโหลดสลิปไปยัง Google Drive...'; resultEl.style.color = '#0f4cbd'; }
 
           let driveData = null;
+          let uploadCenter = '';
           try {
             const fileBase64 = await fileToBase64(file);
+            const uploadCourse = getCourseByStudentOrName(student, payment.course || payment.courseName || '');
+            uploadCenter = getPaymentUploadCenterText(payment, student, uploadCourse);
             driveData = await uploadFileToDriveViaAppsScript({
               file: file,
               fileBase64: fileBase64,
@@ -31839,8 +31849,10 @@
               studentName: getPaymentSlipUploadStudentName(student, payment),
               paymentId: String(paymentId),
               month: payment.month || '',
-              center: getPaymentCenterTextForQr(payment, student, getCourseByStudentOrName(student, payment.course || payment.courseName || '')),
-              paymentCenter: getPaymentCenterTextForQr(payment, student, getCourseByStudentOrName(student, payment.course || payment.courseName || '')),
+              center: uploadCenter,
+              paymentCenter: uploadCenter,
+              courseLocation: uploadCenter || (uploadCourse && (uploadCourse.location || uploadCourse.center || uploadCourse.courseLocation)) || '',
+              preferredLocation: student.preferredLocation || uploadCenter,
               courseId: payment.courseId || student.courseId || '',
               courseName: payment.courseName || payment.course || student.course || '',
               grade: student.grade || payment.studentGrade || payment.grade || '',
@@ -31861,6 +31873,8 @@
             driveViewUrl: driveData.viewUrl || driveData.driveViewUrl || driveData.fileUrl || '',
             driveFolderId: driveData.folderId || '',
             driveFolderName: driveData.folderName || '',
+            paymentCenter: uploadCenter || payment.paymentCenter || payment.center || '',
+            courseLocation: payment.courseLocation || uploadCenter || '',
             slipUploadedByUid: firebaseUser ? firebaseUser.uid : '',
             slipUploadedByName: uploaderName + ' (แทนผู้ปกครอง)',
             slipUploadedAt: firebase.firestore.FieldValue.serverTimestamp(),
@@ -32466,6 +32480,16 @@
         courseRecord.courseLocation ||
         ''
       ).trim();
+    }
+
+    function getPaymentUploadCenterText(payment, student, course) {
+      const resolvedCourse = course || getCourseByStudentOrName(student || {}, payment && (payment.course || payment.courseName || ''));
+      const rawCenter = getPaymentCenterTextForQr(payment, student, resolvedCourse);
+      const text = String(rawCenter || '').trim();
+      if (!text) return '';
+      if (text.indexOf('หนองฉาง') !== -1) return 'หนองฉาง';
+      if (text.indexOf('นครสวรรค์') !== -1 || text.indexOf('นครสวรรค') !== -1) return 'นครสวรรค์';
+      return text.replace(/^IDEA CLUB\s*ศูนย์\s*/i, '').trim() || text;
     }
 
     function getPaymentQrImageSrcForContext(payment, student, course) {
@@ -33762,9 +33786,12 @@ function receiptStatusText(status) {
       const paymentId = String(payment.firebaseDocId || payment.id || '');
 
       let driveData = null;
+      let uploadCenter = '';
       try {
         result.textContent = 'กำลังอัปโหลดสลิปไปยัง Google Drive...';
         const fileBase64 = await fileToBase64(file);
+        const uploadCourse = getCourseByStudentOrName(currentStudent, payment.course || payment.courseName || currentStudent.course || '');
+        uploadCenter = getPaymentUploadCenterText(payment, currentStudent, uploadCourse);
         driveData = await uploadFileToDriveViaAppsScript({
           file: file,
           fileBase64: fileBase64,
@@ -33775,8 +33802,10 @@ function receiptStatusText(status) {
           studentName: getPaymentSlipUploadStudentName(currentStudent, payment),
           paymentId: paymentId,
           month: payment.month || month,
-          center: getPaymentCenterTextForQr(payment, currentStudent, getCourseByStudentOrName(currentStudent, payment.course || payment.courseName || currentStudent.course || '')),
-          paymentCenter: getPaymentCenterTextForQr(payment, currentStudent, getCourseByStudentOrName(currentStudent, payment.course || payment.courseName || currentStudent.course || '')),
+          center: uploadCenter,
+          paymentCenter: uploadCenter,
+          courseLocation: uploadCenter || (uploadCourse && (uploadCourse.location || uploadCourse.center || uploadCourse.courseLocation)) || '',
+          preferredLocation: currentStudent.preferredLocation || uploadCenter,
           courseId: payment.courseId || currentStudent.courseId || '',
           courseName: payment.courseName || payment.course || currentStudent.course || '',
           grade: currentStudent.grade || payment.studentGrade || payment.grade || '',
@@ -33797,6 +33826,8 @@ function receiptStatusText(status) {
         driveViewUrl: driveData.viewUrl || driveData.driveViewUrl || driveData.fileUrl || '',
         driveFolderId: driveData.folderId || '',
         driveFolderName: driveData.folderName || '',
+        paymentCenter: uploadCenter || payment.paymentCenter || payment.center || '',
+        courseLocation: payment.courseLocation || uploadCenter || '',
         slipUploadedByUid: firebaseUser ? firebaseUser.uid : (currentStudent.authUid || ''),
         slipUploadedByName: getActiveProfileDisplayInfo().displayName || currentStudent.name || '',
         slipUploadedAt: firebase.firestore.FieldValue.serverTimestamp(),
