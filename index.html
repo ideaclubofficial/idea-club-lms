@@ -20933,7 +20933,7 @@
         dropzone.classList.toggle('is-disabled', !canUpload);
         dropzone.setAttribute('aria-disabled', canUpload ? 'false' : 'true');
       });
-      const result = getElement('studentSlipResult') || getElement('studentSlipOcrResult');
+      const result = getElement('studentSlipResult') || getElement('studentMobileSlipResult') || getElement('studentSlipOcrResult');
       if (!canUpload) {
         if (result) {
           const selectedPayment = getStudentPaymentForSelectedMonth();
@@ -20954,16 +20954,16 @@
     }
 
     function setStudentSlipResultMessage(message, color) {
-      const result = getElement('studentSlipResult') || getElement('studentSlipOcrResult');
-      if (!result) return;
-      result.classList.remove('hidden');
-      result.textContent = message || '';
-      result.style.color = color || '#0f4cbd';
-      const mobileResult = getElement('studentMobileSlipResult');
-      if (mobileResult) {
-        mobileResult.textContent = result.textContent || '';
-        mobileResult.style.color = result.style.color || '';
-      }
+      const targets = [
+        getElement('studentSlipResult'),
+        getElement('studentSlipOcrResult'),
+        getElement('studentMobileSlipResult')
+      ].filter(Boolean);
+      targets.forEach(function(result) {
+        result.classList.remove('hidden');
+        result.textContent = message || '';
+        result.style.color = color || '#0f4cbd';
+      });
     }
 
     function syncStudentSlipDropzoneLabel() {
@@ -33879,23 +33879,32 @@ function receiptStatusText(status) {
       });
 
       try {
-        result.textContent = 'สลิปถึง Drive แล้ว กำลังบันทึกสถานะ...';
-        await setFirebaseDocument('payments', payment);
+        setStudentSlipResultMessage('สลิปถึง Drive แล้ว กำลังบันทึกสถานะ...', '#0f4cbd');
+        const paymentDocId = String(payment.firebaseDocId || payment.id || paymentId || createFirebaseDocId('payments'));
+        payment.id = payment.id || paymentDocId;
+        payment.firebaseDocId = paymentDocId;
         currentStudent.paymentStatus = 'รอตรวจสลิป';
-        result.textContent = 'อัปโหลดสลิปสำเร็จ รอเจ้าหน้าที่ตรวจสอบ';
-        result.style.color = '#16a34a';
+        currentStudent.overdueMonths = Array.isArray(currentStudent.overdueMonths)
+          ? currentStudent.overdueMonths.filter(function(item) { return item !== (payment.month || month); })
+          : [];
+        const studentDocId = String(currentStudent.firebaseDocId || currentStudent.id || currentStudent.authUid || '');
+        if (!studentDocId) throw new Error('ไม่พบรหัสเอกสารนักเรียนสำหรับบันทึกสถานะชำระเงิน');
+        const batch = db.batch();
+        batch.set(db.collection('payments').doc(paymentDocId), buildFirebasePayload(payment, paymentDocId, false), { merge: true });
+        batch.set(db.collection('students').doc(studentDocId), buildFirebasePayload(currentStudent, studentDocId, false), { merge: true });
+        await batch.commit();
+        setStudentSlipResultMessage('อัปโหลดสลิปสำเร็จ รอเจ้าหน้าที่ตรวจสอบ', '#16a34a');
         if (fileInput) fileInput.value = '';
         syncStudentSlipDropzoneLabel();
         updateStudentSlipUploadControls();
         updateStudentCourseDisplay();
         renderPaymentTable();
+        updatePaymentSummary();
         renderAdminDashboard();
+        scheduleAdminPaymentDataRefresh('student-slip-upload');
       } catch (saveError) {
         console.error('firestore save error after drive upload:', saveError);
-        result.innerHTML = 'สลิปอัปโหลดไปยัง Google Drive เรียบร้อยแล้ว แต่บันทึกสถานะในระบบไม่สำเร็จ<br>' +
-          '<strong>กรุณาแจ้งเจ้าหน้าที่</strong> พร้อมแจ้งชื่อไฟล์: <em>' + escapeHtml(file.name) + '</em><br>' +
-          '<small style="color:#6b7280;">(ไฟล์สลิปถึง Drive แล้ว เจ้าหน้าที่สามารถตรวจสอบได้)</small>';
-        result.style.color = '#d97706';
+        setStudentSlipResultMessage('สลิปอัปโหลดไปยัง Google Drive เรียบร้อยแล้ว แต่บันทึกสถานะในระบบไม่สำเร็จ กรุณาแจ้งเจ้าหน้าที่พร้อมชื่อไฟล์: ' + file.name, '#d97706');
       } finally {
         slipUploadInProgress = false;
         slipUploadBtns.forEach(function(btn) { btn.disabled = false; });
