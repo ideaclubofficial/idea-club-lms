@@ -4819,6 +4819,10 @@
         <div id="studentMobileSlipUploadCard" class="student-mobile-card">
           <h3>อัปโหลดสลิป</h3>
           <p id="studentMobileSlipFileName" class="student-mobile-muted">ยังไม่ได้เลือกไฟล์</p>
+          <div id="studentMobileSlipDropzone" class="student-slip-dropzone" role="button" tabindex="0" onclick="studentMobileChooseSlipFile()" onkeydown="handleStudentSlipDropzoneKey(event)" ondragover="handleStudentSlipDragOver(event)" ondragleave="handleStudentSlipDragLeave(event)" ondrop="handleStudentSlipDrop(event)">
+            <strong id="studentMobileSlipDropzoneTitle">ลากสลิปมาวาง หรือกดเพื่อเลือกไฟล์</strong>
+            <small id="studentMobileSlipDropzoneHint">รองรับ JPG, PNG และรูปภาพจากมือถือ ขนาดไม่เกิน 8MB</small>
+          </div>
           <div class="student-mobile-actions">
             <button class="btn btn-dark" type="button" onclick="studentMobileChooseSlipFile()">เลือกไฟล์สลิป</button>
             <button class="btn btn-blue" type="button" onclick="studentMobileUploadSlip()">อัปโหลดสลิป</button>
@@ -20814,14 +20818,14 @@
       const fileInput = getElement('studentSlipFile');
       const uploadButton = document.querySelector('#studentSlipWebUploadBox button[onclick="uploadStudentSlipToDrive()"]');
       const mobileUploadButton = document.querySelector('button[onclick="studentMobileUploadSlip()"]');
-      const dropzone = getElement('studentSlipDropzone');
+      const dropzones = [getElement('studentSlipDropzone'), getElement('studentMobileSlipDropzone')].filter(Boolean);
       if (fileInput) fileInput.disabled = !canUpload;
       if (uploadButton) uploadButton.disabled = !canUpload;
       if (mobileUploadButton) mobileUploadButton.disabled = !canUpload;
-      if (dropzone) {
+      dropzones.forEach(function(dropzone) {
         dropzone.classList.toggle('is-disabled', !canUpload);
         dropzone.setAttribute('aria-disabled', canUpload ? 'false' : 'true');
-      }
+      });
       const result = getElement('studentSlipResult') || getElement('studentSlipOcrResult');
       if (!canUpload) {
         if (result) {
@@ -20857,11 +20861,14 @@
 
     function syncStudentSlipDropzoneLabel() {
       const fileInput = getElement('studentSlipFile');
-      const title = getElement('studentSlipDropzoneTitle');
-      const hint = getElement('studentSlipDropzoneHint');
       const file = fileInput && fileInput.files && fileInput.files[0] ? fileInput.files[0] : null;
-      if (title) title.textContent = file ? file.name : 'ลากสลิปมาวาง หรือกดเพื่อเลือกไฟล์';
-      if (hint) hint.textContent = file ? 'พร้อมอัปโหลด กดปุ่ม “อัปโหลดสลิป” เพื่อส่งให้ Admin ตรวจ' : 'รองรับ JPG, PNG และรูปภาพจากมือถือ ขนาดไม่เกิน 8MB';
+      [
+        { title: getElement('studentSlipDropzoneTitle'), hint: getElement('studentSlipDropzoneHint') },
+        { title: getElement('studentMobileSlipDropzoneTitle'), hint: getElement('studentMobileSlipDropzoneHint') }
+      ].forEach(function(parts) {
+        if (parts.title) parts.title.textContent = file ? file.name : 'ลากสลิปมาวาง หรือกดเพื่อเลือกไฟล์';
+        if (parts.hint) parts.hint.textContent = file ? 'พร้อมอัปโหลด กดปุ่ม “อัปโหลดสลิป” เพื่อส่งให้ Admin ตรวจ' : 'รองรับ JPG, PNG และรูปภาพจากมือถือ ขนาดไม่เกิน 8MB';
+      });
       renderStudentMobilePayment();
     }
 
@@ -20881,20 +20888,20 @@
       if (!event) return;
       event.preventDefault();
       if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy';
-      const dropzone = getElement('studentSlipDropzone');
+      const dropzone = event.currentTarget || getElement('studentSlipDropzone');
       if (dropzone && !dropzone.classList.contains('is-disabled')) dropzone.classList.add('drag-over');
     }
 
     function handleStudentSlipDragLeave(event) {
       if (event) event.preventDefault();
-      const dropzone = getElement('studentSlipDropzone');
+      const dropzone = (event && event.currentTarget) || getElement('studentSlipDropzone');
       if (dropzone) dropzone.classList.remove('drag-over');
     }
 
     function handleStudentSlipDrop(event) {
       if (!event) return;
       event.preventDefault();
-      const dropzone = getElement('studentSlipDropzone');
+      const dropzone = event.currentTarget || getElement('studentSlipDropzone');
       if (dropzone) dropzone.classList.remove('drag-over');
       if (!canStudentUploadSlipForMonth()) {
         setStudentSlipResultMessage('เดือนนี้ยังไม่สามารถอัปโหลดสลิปได้', '#d97706');
