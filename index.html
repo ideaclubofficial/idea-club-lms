@@ -31590,6 +31590,87 @@
 
     var adminSlipUploadInProgress = false;
 
+    function setAdminSlipUploadResult(message, color) {
+      const resultEl = getElement('adminSlipUploadResult');
+      if (!resultEl) return;
+      resultEl.textContent = message || '';
+      resultEl.style.color = color || '#0f4cbd';
+    }
+
+    function syncAdminSlipDropzoneLabel() {
+      const input = getElement('adminSlipFileInput');
+      const title = getElement('adminSlipDropzoneTitle');
+      const hint = getElement('adminSlipDropzoneHint');
+      const file = input && input.files && input.files[0] ? input.files[0] : null;
+      if (title) title.textContent = file ? file.name : 'ลากสลิปมาวาง หรือกดเพื่อเลือกไฟล์';
+      if (hint) hint.textContent = file ? 'พร้อมอัปโหลด กด “บันทึกการแก้ไข” เพื่อส่งสลิปแทนผู้ปกครอง' : 'รองรับ JPG, PNG และรูปภาพจากมือถือ ขนาดไม่เกิน 8MB';
+    }
+
+    function chooseAdminSlipFile() {
+      const input = getElement('adminSlipFileInput');
+      if (!input || input.disabled || adminSlipUploadInProgress) return;
+      input.click();
+    }
+
+    function handleAdminSlipFileChange() {
+      syncAdminSlipDropzoneLabel();
+    }
+
+    function handleAdminSlipDropzoneKey(event) {
+      if (!event) return;
+      if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault();
+        chooseAdminSlipFile();
+      }
+    }
+
+    function handleAdminSlipDragOver(event) {
+      if (!event) return;
+      event.preventDefault();
+      if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy';
+      const dropzone = getElement('adminSlipDropzone');
+      if (dropzone && !adminSlipUploadInProgress) dropzone.classList.add('drag-over');
+    }
+
+    function handleAdminSlipDragLeave(event) {
+      if (event) event.preventDefault();
+      const dropzone = getElement('adminSlipDropzone');
+      if (dropzone) dropzone.classList.remove('drag-over');
+    }
+
+    function handleAdminSlipDrop(event) {
+      if (!event) return;
+      event.preventDefault();
+      const dropzone = getElement('adminSlipDropzone');
+      if (dropzone) dropzone.classList.remove('drag-over');
+      if (adminSlipUploadInProgress) return;
+      const file = event.dataTransfer && event.dataTransfer.files && event.dataTransfer.files[0] ? event.dataTransfer.files[0] : null;
+      if (!file) return;
+      if (!file.type || file.type.indexOf('image/') !== 0) {
+        setAdminSlipUploadResult('รองรับเฉพาะไฟล์รูปภาพเท่านั้น', '#dc2626');
+        return;
+      }
+      if (file.size > 8 * 1024 * 1024) {
+        setAdminSlipUploadResult('ไฟล์ต้องมีขนาดไม่เกิน 8MB', '#dc2626');
+        return;
+      }
+      const input = getElement('adminSlipFileInput');
+      if (!input || input.disabled) {
+        setAdminSlipUploadResult('ช่องเลือกไฟล์สลิปยังไม่พร้อมใช้งาน', '#d97706');
+        return;
+      }
+      try {
+        const transfer = new DataTransfer();
+        transfer.items.add(file);
+        input.files = transfer.files;
+        setAdminSlipUploadResult('เลือกไฟล์สลิปแล้ว: ' + file.name, '#0f4cbd');
+        syncAdminSlipDropzoneLabel();
+      } catch (error) {
+        console.error('admin slip drop error:', error);
+        setAdminSlipUploadResult('ไม่สามารถรับไฟล์จากการลากวางได้ กรุณากดเลือกไฟล์แทน', '#dc2626');
+      }
+    }
+
     async function adminUploadSlipForPayment(paymentId) {
       if (!hasPermission('admin.finance')) { alert('ไม่มีสิทธิ์'); return; }
       const payment = (payments || []).find(function(p) {
@@ -31601,7 +31682,11 @@
       openEditBubble(
         'อัพโหลดสลิปแทนผู้ปกครอง — ' + escapeHtml(payment.student || student.name || '-') + ' · ' + escapeHtml(payment.month || '-'),
         '<p style="color:#6b7280;margin-bottom:12px;">เลือกไฟล์รูปสลิปที่ผู้ปกครองส่งมา</p>' +
-        '<input id="adminSlipFileInput" type="file" accept="image/*" style="width:100%;margin-bottom:8px;" />' +
+        '<div id="adminSlipDropzone" class="student-slip-dropzone" role="button" tabindex="0" onclick="chooseAdminSlipFile()" onkeydown="handleAdminSlipDropzoneKey(event)" ondragover="handleAdminSlipDragOver(event)" ondragleave="handleAdminSlipDragLeave(event)" ondrop="handleAdminSlipDrop(event)" style="margin-bottom:10px;">' +
+          '<strong id="adminSlipDropzoneTitle">ลากสลิปมาวาง หรือกดเพื่อเลือกไฟล์</strong>' +
+          '<small id="adminSlipDropzoneHint">รองรับ JPG, PNG และรูปภาพจากมือถือ ขนาดไม่เกิน 8MB</small>' +
+        '</div>' +
+        '<input id="adminSlipFileInput" type="file" accept="image/*" onchange="handleAdminSlipFileChange()" style="width:100%;margin-bottom:8px;" />' +
         '<p id="adminSlipUploadResult" style="font-weight:600;margin-top:8px;min-height:20px;"></p>',
         async function() {
           if (adminSlipUploadInProgress) return;
@@ -31625,6 +31710,8 @@
           adminSlipUploadInProgress = true;
           const saveBtns = document.querySelectorAll('#editBubbleActions button');
           saveBtns.forEach(function(b) { b.disabled = true; });
+          const dropzone = getElement('adminSlipDropzone');
+          if (dropzone) dropzone.classList.add('is-disabled');
 
           if (resultEl) { resultEl.textContent = 'กำลังอัปโหลดสลิปไปยัง Google Drive...'; resultEl.style.color = '#0f4cbd'; }
 
@@ -31649,6 +31736,7 @@
             if (resultEl) { resultEl.textContent = 'อัปโหลดไปยัง Google Drive ไม่สำเร็จ: ' + (driveError.message || driveError.code || driveError); resultEl.style.color = '#dc2626'; }
             adminSlipUploadInProgress = false;
             saveBtns.forEach(function(b) { b.disabled = false; });
+            if (dropzone) dropzone.classList.remove('is-disabled');
             return;
           }
 
@@ -31686,6 +31774,7 @@
           } finally {
             adminSlipUploadInProgress = false;
             saveBtns.forEach(function(b) { b.disabled = false; });
+            if (dropzone) dropzone.classList.remove('is-disabled');
           }
         }
       );
