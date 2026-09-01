@@ -32011,9 +32011,15 @@
         return (studentId && (
           String(s.id || '') === studentId ||
           String(s.firebaseDocId || '') === studentId ||
-          String(s.studentId || '') === studentId
+          String(s.studentId || '') === studentId ||
+          String(s.memberId || '') === studentId
         )) ||
-        (memberId && String(s.memberId || s.studentId || '').trim() === memberId);
+        (memberId && (
+          String(s.memberId || '').trim() === memberId ||
+          String(s.studentId || '').trim() === memberId ||
+          String(s.id || '').trim() === memberId ||
+          String(s.firebaseDocId || '').trim() === memberId
+        ));
       });
       if (byStrongId) return byStrongId;
       const authMatches = students.filter(function(s) {
@@ -32033,19 +32039,29 @@
     }
 
     function getPaymentRecordCourseAndStudent(payment) {
-      const student = getPaymentStudentRecord(payment);
-      const course = getCourseByStudentOrName(student, payment.course || payment.courseName || '');
+      const student = getPaymentStudentRecord(payment) || getUniqueStudentRecordByPaymentName(payment);
+      const course = getCourseByPaymentStudentOrName(payment, student, payment && (payment.course || payment.courseName || ''));
       return { student: student, course: course };
+    }
+
+    function paymentScopeLocationMatches(scopeLocation, payment, student, course) {
+      if (scopeLocation === 'ทั้งหมด') return true;
+      const wanted = String(scopeLocation || '').trim();
+      const actual = getPaymentCenterTextForQr(payment, student, course);
+      if (!wanted) return true;
+      if (String(actual || '').trim() === wanted) return true;
+      const wantedKey = getPaymentCenterKey(wanted);
+      const actualKey = getPaymentCenterKey(actual);
+      return !!(wantedKey && actualKey && wantedKey === actualKey);
     }
 
     function paymentMatchesDashboardScope(payment, scope, includeStatus) {
       const data = getPaymentRecordCourseAndStudent(payment);
       const student = data.student;
       const course = data.course;
-      const monthText = String(payment.month || '');
+      const monthText = String(payment.month || payment.paymentMonth || payment.billingMonth || '');
       const statusText = getPaymentDisplayStatus(payment);
-      const locationText = course ? (course.location || '') : '';
-      const gradeText = student ? (student.grade || '') : (course ? (course.grade || '') : '');
+      const gradeText = (student && student.grade) || payment.studentGrade || payment.grade || (course ? (course.grade || '') : '');
       const rowText = [
         payment.student || '',
         payment.studentName || '',
@@ -32056,10 +32072,15 @@
         payment.month || '',
         payment.memberId || '',
         student ? (student.memberId || '') : '',
+        payment.slipUploadedByName || '',
+        payment.paymentCenter || '',
+        payment.courseLocation || '',
+        payment.preferredLocation || '',
+        course ? (course.location || course.center || course.courseLocation || '') : '',
         payment.adminNote || ''
       ].join(' ').toLowerCase();
       return (scope.month === 'ทั้งหมด' || monthText === scope.month) &&
-        (scope.location === 'ทั้งหมด' || locationText === scope.location) &&
+        paymentScopeLocationMatches(scope.location, payment, student, course) &&
         (scope.grade === 'ทั้งหมด' || gradeText === scope.grade) &&
         (!includeStatus || scope.status === 'ทั้งหมด' || statusText.includes(scope.status)) &&
         (!scope.keyword || rowText.includes(scope.keyword));
