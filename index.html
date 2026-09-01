@@ -9103,6 +9103,8 @@
     let studentReceiptsUnsubscribe = null;
     let studentPaymentBundlesUnsubscribe = null;
     let studentGamificationUnsubscribe = null;
+    let adminPaymentDataUnsubscribe = null;
+    let adminPaymentDataRefreshTimer = null;
     let authSessionRoutingDone = false;
     const SESSION_DURATION_MS = 24 * 60 * 60 * 1000; // 24 hours
 
@@ -9410,6 +9412,71 @@
       if (studentReceiptsUnsubscribe) { try { studentReceiptsUnsubscribe(); } catch(e) {} studentReceiptsUnsubscribe = null; }
       if (studentPaymentBundlesUnsubscribe) { try { studentPaymentBundlesUnsubscribe(); } catch(e) {} studentPaymentBundlesUnsubscribe = null; }
       if (studentGamificationUnsubscribe) { try { studentGamificationUnsubscribe(); } catch(e) {} studentGamificationUnsubscribe = null; }
+    }
+
+    function applyRealtimeDocChanges(targetArray, changes) {
+      let changed = false;
+      changes.forEach(function(change) {
+        const data = Object.assign({ firebaseDocId: change.doc.id }, change.doc.data());
+        const idx = targetArray.findIndex(function(x) { return String(x.firebaseDocId || x.id || '') === String(change.doc.id); });
+        if (change.type === 'removed' || data.deleted === true) {
+          if (idx !== -1) { targetArray.splice(idx, 1); changed = true; }
+        } else if (idx !== -1) {
+          Object.assign(targetArray[idx], data);
+          changed = true;
+        } else {
+          targetArray.push(data);
+          changed = true;
+        }
+      });
+      return changed;
+    }
+
+    function stopAdminPaymentDataListeners() {
+      if (adminPaymentDataUnsubscribe) { try { adminPaymentDataUnsubscribe(); } catch(e) {} adminPaymentDataUnsubscribe = null; }
+      if (adminPaymentDataRefreshTimer) { clearTimeout(adminPaymentDataRefreshTimer); adminPaymentDataRefreshTimer = null; }
+    }
+
+    function scheduleAdminPaymentDataRefresh(reason) {
+      if (adminPaymentDataRefreshTimer) clearTimeout(adminPaymentDataRefreshTimer);
+      adminPaymentDataRefreshTimer = window.setTimeout(function() {
+        adminPaymentDataRefreshTimer = null;
+        safeRun(applyPaymentRepairsSync, 'admin-payment-listener-repair');
+        safeRun(renderPaymentTable, 'admin-payment-listener-table');
+        safeRun(updatePaymentSummary, 'admin-payment-listener-summary');
+        safeRun(renderPaymentBundlePanel, 'admin-payment-listener-bundles');
+        safeRun(renderAdminDashboard, 'admin-payment-listener-dashboard');
+        safeRun(renderPaymentRecordPreview, 'admin-payment-listener-preview');
+        console.log('admin-payment-realtime-refresh', reason || 'payment-data-change');
+      }, 150);
+    }
+
+    function startAdminPaymentDataListeners() {
+      stopAdminPaymentDataListeners();
+      if (!firebaseReady || !db) return;
+      if (!hasPermission('admin.finance') && !hasPermission('admin.full')) return;
+      const specs = [
+        { collection: 'payments', target: payments },
+        { collection: 'paymentBundles', target: paymentBundles },
+        { collection: 'receipts', target: receipts }
+      ];
+      const unsubs = specs.map(function(spec) {
+        let query = db.collection(spec.collection);
+        const cap = COLLECTION_FETCH_LIMITS[spec.collection];
+        if (cap && cap.orderField) query = query.orderBy(cap.orderField, cap.orderDir || 'asc');
+        if (cap && cap.limit) query = query.limit(cap.limit);
+        return query.onSnapshot(function(snapshot) {
+          if (snapshot.metadata && snapshot.metadata.hasPendingWrites) return;
+          if (applyRealtimeDocChanges(spec.target, snapshot.docChanges())) {
+            scheduleAdminPaymentDataRefresh(spec.collection);
+          }
+        }, function(err) {
+          console.warn('admin ' + spec.collection + ' listener error:', err);
+        });
+      });
+      adminPaymentDataUnsubscribe = function() {
+        unsubs.forEach(function(unsub) { try { unsub(); } catch(e) {} });
+      };
     }
 
     function startStudentPaymentListeners(studentDocIds, authUid) {
@@ -12964,6 +13031,7 @@
     }
 
     function studentLogin(username) {
+      stopAdminPaymentDataListeners();
       const student = currentStudent || students.find(function(s) {
         return s.email === username ||
           s.authEmail === username ||
@@ -13231,6 +13299,7 @@
 
     async function logoutSystem() {
       stopStudentPaymentListeners();
+      stopAdminPaymentDataListeners();
       clearSessionExpiry();
       if (PRODUCTION_MODE && auth) {
         try { await auth.signOut(); } catch (error) { console.error('Firebase sign out error:', error); }
@@ -13239,6 +13308,7 @@
       firebaseUserProfile = null;
       currentStudent = null;
       currentTeacher = null;
+      currentAdmin = null;
       setSuperAdminMode(false);
       getElement('profileMenu').classList.add('hidden');
       getElement('profilePanel').classList.add('hidden');
@@ -13719,6 +13789,7 @@
         alert('บัญชีนักเรียนไม่มีสิทธิ์เข้าหน้านี้');
         return;
       }
+      stopAdminPaymentDataListeners();
       currentStudent = null;
       currentTeacher = teacher || null;
       setTeacherAdminReturnVisible(false);
@@ -15923,6 +15994,7 @@
       applyRoleAccessToUI();
 
       showAdminTab(findFirstAllowedAdminTab());
+      startAdminPaymentDataListeners();
       window.scrollTo({ top: 0, behavior: 'smooth' });
     }
 
