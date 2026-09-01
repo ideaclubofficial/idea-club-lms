@@ -288,6 +288,35 @@ service cloud.firestore {
           || resource.data.studentAuthUid == request.auth.uid
           || resource.data.slipUploadedByUid == request.auth.uid
           || resource.data.uploadedByUid == request.auth.uid
+          || isLinkedStudentDocId(resource.data.studentId)
+          || (
+            userProfileExists()
+            && (
+              resource.data.memberId == userProfile(request.auth.uid).memberId
+              || resource.data.memberId == userProfile(request.auth.uid).studentId
+              || resource.data.studentId == userProfile(request.auth.uid).memberId
+              || resource.data.studentId == userProfile(request.auth.uid).studentId
+            )
+          )
+        );
+    }
+
+    function isIncomingPaymentOwner() {
+      return signedIn()
+        && (
+          request.resource.data.authUid == request.auth.uid
+          || request.resource.data.studentAuthUid == request.auth.uid
+          || request.resource.data.slipUploadedByUid == request.auth.uid
+          || isLinkedStudentDocId(request.resource.data.studentId)
+          || (
+            userProfileExists()
+            && (
+              request.resource.data.memberId == userProfile(request.auth.uid).memberId
+              || request.resource.data.memberId == userProfile(request.auth.uid).studentId
+              || request.resource.data.studentId == userProfile(request.auth.uid).memberId
+              || request.resource.data.studentId == userProfile(request.auth.uid).studentId
+            )
+          )
         );
     }
 
@@ -297,6 +326,15 @@ service cloud.firestore {
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
           'firebaseDocId',
           'deleted',
+          'studentId',
+          'memberId',
+          'authUid',
+          'studentAuthUid',
+          'studentName',
+          'student',
+          'paymentCenter',
+          'courseLocation',
+          'preferredLocation',
           'slipStorageType',
           'driveFileId',
           'driveFileUrl',
@@ -318,6 +356,7 @@ service cloud.firestore {
         ])
         && request.resource.data.firebaseDocId == docId
         && request.resource.data.deleted == false
+        && isIncomingPaymentOwner()
         && request.resource.data.slipUploadedByUid == request.auth.uid
         && request.resource.data.slipStatus == 'waiting_admin_review'
         && request.resource.data.adminReviewStatus == 'pending'

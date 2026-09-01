@@ -9376,12 +9376,24 @@
               label: collectionName + ':studentId:' + studentDocId,
               promise: db.collection(collectionName).where('studentId', '==', studentDocId).get()
             });
+            if (collectionName === 'payments') {
+              queries.push({
+                label: collectionName + ':memberId:' + studentDocId,
+                promise: db.collection(collectionName).where('memberId', '==', studentDocId).get()
+              });
+            }
           });
         if (authUid) {
           queries.push({
             label: collectionName + ':authUid:' + authUid,
             promise: db.collection(collectionName).where('authUid', '==', String(authUid)).get()
           });
+          if (collectionName === 'payments') {
+            queries.push({
+              label: collectionName + ':studentAuthUid:' + authUid,
+              promise: db.collection(collectionName).where('studentAuthUid', '==', String(authUid)).get()
+            });
+          }
         }
         const snapshots = await Promise.all(queries.map(function(item) {
           return item.promise.catch(function(error) {
@@ -9522,8 +9534,12 @@
           .filter(function(id, index, list) { return id && list.indexOf(id) === index; })
           .forEach(function(studentDocId) {
             queries.push(db.collection(collectionName).where('studentId', '==', studentDocId));
+            if (collectionName === 'payments') queries.push(db.collection(collectionName).where('memberId', '==', studentDocId));
           });
-        if (authUid) queries.push(db.collection(collectionName).where('authUid', '==', String(authUid)));
+        if (authUid) {
+          queries.push(db.collection(collectionName).where('authUid', '==', String(authUid)));
+          if (collectionName === 'payments') queries.push(db.collection(collectionName).where('studentAuthUid', '==', String(authUid)));
+        }
         return queries;
       }
 
@@ -9621,9 +9637,12 @@
       const studentRecords = await getOwnedStudentRecords(userProfile);
       const normalizedStudents = studentRecords.map(normalizeStudentRecordForSession).filter(Boolean);
       const studentRecord = normalizedStudents[0] || null;
-      const studentDocIds = normalizedStudents.map(getStudentRecordDocId).filter(function(id, index, list) {
-        return id && list.indexOf(id) === index;
-      });
+      const studentDocIds = normalizedStudents.reduce(function(keys, student) {
+        getStudentIdentityKeys(student).forEach(function(key) {
+          if (key && !keys.includes(key)) keys.push(key);
+        });
+        return keys;
+      }, []);
       if (studentRecord) {
         replaceArray(students, normalizedStudents);
         currentStudent = studentRecord;
@@ -33880,7 +33899,16 @@ function receiptStatusText(status) {
         return;
       }
 
+      const uploadStudentDocId = getStudentRecordDocId(currentStudent) || currentStudent.id || currentStudent.firebaseDocId || '';
+      const uploadMemberId = currentStudent.memberId || currentStudent.studentId || payment.memberId || '';
+      const uploadAuthUid = currentStudent.authUid || (firebaseUser ? firebaseUser.uid : '') || payment.studentAuthUid || payment.authUid || '';
       Object.assign(payment, {
+        studentId: uploadStudentDocId || payment.studentId || uploadMemberId,
+        memberId: uploadMemberId,
+        authUid: uploadAuthUid,
+        studentAuthUid: uploadAuthUid,
+        studentName: payment.studentName || currentStudent.name || '',
+        student: payment.student || currentStudent.name || '',
         slipStorageType: 'google_drive',
         driveFileId: driveData.fileId || '',
         driveFileUrl: driveData.fileUrl || driveData.viewUrl || driveData.driveViewUrl || '',
