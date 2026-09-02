@@ -34039,10 +34039,12 @@ function receiptStatusText(status) {
           : [];
         const studentDocId = String(currentStudent.firebaseDocId || currentStudent.id || currentStudent.authUid || '');
         if (!studentDocId) throw new Error('ไม่พบรหัสเอกสารนักเรียนสำหรับบันทึกสถานะชำระเงิน');
-        const batch = db.batch();
-        batch.set(db.collection('payments').doc(paymentDocId), buildFirebasePayload(payment, paymentDocId, createdPaymentForUpload), { merge: true });
-        batch.set(db.collection('students').doc(studentDocId), buildFirebasePayload(currentStudent, studentDocId, false), { merge: true });
-        await batch.commit();
+        await db.collection('payments').doc(paymentDocId).set(buildFirebasePayload(payment, paymentDocId, createdPaymentForUpload), { merge: true });
+        try {
+          await db.collection('students').doc(studentDocId).set(buildFirebasePayload(currentStudent, studentDocId, false), { merge: true });
+        } catch (studentSaveError) {
+          console.warn('student payment status sync skipped after slip upload:', studentSaveError);
+        }
         if (createdPaymentForUpload && !payments.some(function(item) {
           return String(item.firebaseDocId || item.id || '') === paymentDocId;
         })) {
