@@ -34003,30 +34003,35 @@ function receiptStatusText(status) {
       const uploadStudentDocId = getStudentRecordDocId(currentStudent) || currentStudent.id || currentStudent.firebaseDocId || '';
       const uploadMemberId = currentStudent.memberId || currentStudent.studentId || payment.memberId || '';
       const uploadAuthUid = currentStudent.authUid || (firebaseUser ? firebaseUser.uid : '') || payment.studentAuthUid || payment.authUid || '';
-      Object.assign(payment, {
-        studentId: uploadStudentDocId || payment.studentId || uploadMemberId,
-        memberId: uploadMemberId,
-        authUid: uploadAuthUid,
-        studentAuthUid: uploadAuthUid,
-        studentName: payment.studentName || currentStudent.name || '',
-        student: payment.student || currentStudent.name || '',
-        slipStorageType: 'google_drive',
-        driveFileId: driveData.fileId || '',
-        driveFileUrl: driveData.fileUrl || driveData.viewUrl || driveData.driveViewUrl || '',
-        driveViewUrl: driveData.viewUrl || driveData.driveViewUrl || driveData.fileUrl || '',
-        driveFolderId: driveData.folderId || '',
-        driveFolderName: driveData.folderName || '',
-        paymentCenter: uploadCenter || payment.paymentCenter || payment.center || '',
-        courseLocation: payment.courseLocation || uploadCenter || '',
-        slipUploadedByUid: firebaseUser ? firebaseUser.uid : (currentStudent.authUid || ''),
-        slipUploadedByName: getActiveProfileDisplayInfo().displayName || currentStudent.name || '',
-        slipUploadedAt: firebase.firestore.FieldValue.serverTimestamp(),
-        slipUploadedAtText: new Date().toLocaleString('th-TH'),
-        slipStatus: 'waiting_admin_review',
-        adminReviewStatus: 'pending',
-        paymentStatus: 'รอตรวจสลิป',
-        status: 'รอตรวจสลิป'
-      });
+      function applyStudentSlipUploadFields(targetPayment) {
+        Object.assign(targetPayment, {
+          studentId: uploadStudentDocId || payment.studentId || uploadMemberId,
+          memberId: uploadMemberId,
+          authUid: uploadAuthUid,
+          studentAuthUid: uploadAuthUid,
+          studentName: payment.studentName || currentStudent.name || '',
+          student: payment.student || currentStudent.name || '',
+          slipStorageType: 'google_drive',
+          driveFileId: driveData.fileId || '',
+          driveFileUrl: driveData.fileUrl || driveData.viewUrl || driveData.driveViewUrl || '',
+          driveViewUrl: driveData.viewUrl || driveData.driveViewUrl || driveData.fileUrl || '',
+          driveFolderId: driveData.folderId || '',
+          driveFolderName: driveData.folderName || '',
+          paymentCenter: uploadCenter || payment.paymentCenter || payment.center || '',
+          courseLocation: payment.courseLocation || uploadCenter || '',
+          slipUploadedByUid: firebaseUser ? firebaseUser.uid : (currentStudent.authUid || ''),
+          slipUploadedByName: getActiveProfileDisplayInfo().displayName || currentStudent.name || '',
+          slipUploadedAt: firebase.firestore.FieldValue.serverTimestamp(),
+          slipUploadedAtText: new Date().toLocaleString('th-TH'),
+          slipStatus: 'waiting_admin_review',
+          adminReviewStatus: 'pending',
+          paymentStatus: 'รอตรวจสลิป',
+          status: 'รอตรวจสลิป'
+        });
+        return targetPayment;
+      }
+
+      applyStudentSlipUploadFields(payment);
 
       try {
         setStudentSlipResultMessage('สลิปถึง Drive แล้ว กำลังบันทึกสถานะ...', '#0f4cbd');
@@ -34039,7 +34044,23 @@ function receiptStatusText(status) {
           : [];
         const studentDocId = String(currentStudent.firebaseDocId || currentStudent.id || currentStudent.authUid || '');
         if (!studentDocId) throw new Error('ไม่พบรหัสเอกสารนักเรียนสำหรับบันทึกสถานะชำระเงิน');
-        await db.collection('payments').doc(paymentDocId).set(buildFirebasePayload(payment, paymentDocId, createdPaymentForUpload), { merge: true });
+        try {
+          await db.collection('payments').doc(paymentDocId).set(buildFirebasePayload(payment, paymentDocId, createdPaymentForUpload), { merge: true });
+        } catch (paymentSaveError) {
+          if (!(paymentSaveError && paymentSaveError.code === 'permission-denied') || createdPaymentForUpload) throw paymentSaveError;
+          console.warn('student slip existing payment update denied; creating owner slip payment fallback:', paymentSaveError);
+          const fallbackCourse = getCourseByStudentOrName(currentStudent, currentStudent.course || '');
+          const fallbackPayment = buildStudentMonthlyPaymentRecord(currentStudent, fallbackCourse, month);
+          if (!fallbackPayment) throw paymentSaveError;
+          const fallbackPaymentDocId = createFirebaseDocId('payments');
+          fallbackPayment.id = fallbackPaymentDocId;
+          fallbackPayment.firebaseDocId = fallbackPaymentDocId;
+          applyStudentSlipUploadFields(fallbackPayment);
+          fallbackPayment.slipNote = 'นักเรียนอัปโหลดสลิปของเดือน ' + month + ' (สร้างรายการสำรอง เนื่องจากบิลเดิมอัปเดตไม่ได้)';
+          await db.collection('payments').doc(fallbackPaymentDocId).set(buildFirebasePayload(fallbackPayment, fallbackPaymentDocId, true), { merge: true });
+          payment = fallbackPayment;
+          createdPaymentForUpload = true;
+        }
         try {
           await db.collection('students').doc(studentDocId).set(buildFirebasePayload(currentStudent, studentDocId, false), { merge: true });
         } catch (studentSaveError) {
