@@ -2690,6 +2690,13 @@
       width: 1px;
     }
 
+    .student-slip-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-top: 12px;
+    }
+
     @media (max-width: 768px) {
       html,
       body {
@@ -4955,7 +4962,10 @@
               <span id="studentSlipDropzoneStatus" class="student-slip-file-status">ยังไม่ได้เลือกไฟล์</span>
             </div>
             <input id="studentSlipFile" class="slip-native-file-input" type="file" accept="image/*" onchange="handleStudentSlipFileChange()" />
-            <button class="btn btn-blue" type="button" onclick="uploadStudentSlipToDrive()">อัปโหลดสลิป</button>
+            <div class="student-slip-actions">
+              <button class="btn btn-dark" type="button" onclick="studentMobileChooseSlipFile()">เลือกไฟล์สลิป</button>
+              <button class="btn btn-blue" type="button" onclick="uploadStudentSlipToDrive()">อัปโหลดสลิป</button>
+            </div>
           </div>
           <p id="studentSlipResult" class="hidden" style="margin-top:14px; font-weight:bold;"></p>
         </div>
@@ -20725,6 +20735,7 @@
         return isStudentPaymentRecord(student, p) && String(p.month || '') === String(month);
       });
       if (existing) return existing;
+      if (isCurrentStudentSession() && !hasPermission('admin.finance') && !hasPermission('admin.full')) return null;
       const course = getCourseByStudentOrName(student, student.course || '');
       const payment = buildStudentMonthlyPaymentRecord(student, course, month);
       if (!payment) return null;
@@ -20733,6 +20744,11 @@
         await setFirebaseDocument('payments', payment);
       } catch (error) {
         console.error('ensure payment for student month firebase error:', error);
+        const idx = payments.findIndex(function(item) {
+          return item === payment || String(item.firebaseDocId || item.id || '') === String(payment.firebaseDocId || payment.id || '');
+        });
+        if (idx !== -1) payments.splice(idx, 1);
+        return null;
       }
       return payment;
     }
@@ -21006,7 +21022,7 @@
       if (isStudentLimitedAccess(currentStudent)) return false;
       if (!currentStudent || !selectedMonth) return true;
       const payment = getStudentPaymentForSelectedMonth();
-      if (!payment) return false;
+      if (!payment) return isPaymentMonthVisibleByName(selectedMonth);
       const bundle = getPaymentBundleForPayment(payment);
       if (bundle && bundle.status !== 'ยกเลิก' && bundle.status !== 'cancelled') return false;
       const slipStatus = String(payment.slipStatus || '').toLowerCase();
@@ -21020,10 +21036,12 @@
       const canUpload = canStudentUploadSlipForMonth();
       const fileInput = getElement('studentSlipFile');
       const uploadButton = document.querySelector('#studentSlipWebUploadBox button[onclick="uploadStudentSlipToDrive()"]');
+      const chooseButtons = document.querySelectorAll('#studentSlipWebUploadBox button[onclick="studentMobileChooseSlipFile()"]');
       const mobileUploadButton = document.querySelector('button[onclick="studentMobileUploadSlip()"]');
       const dropzones = [getElement('studentSlipDropzone'), getElement('studentMobileSlipDropzone')].filter(Boolean);
       if (fileInput) fileInput.disabled = !canUpload;
       if (uploadButton) uploadButton.disabled = !canUpload;
+      chooseButtons.forEach(function(button) { button.disabled = !canUpload; });
       if (mobileUploadButton) mobileUploadButton.disabled = !canUpload;
       dropzones.forEach(function(dropzone) {
         dropzone.classList.toggle('is-disabled', !canUpload);
@@ -33929,11 +33947,17 @@ function receiptStatusText(status) {
         return;
       }
 
-      const payment = getCurrentStudentPaymentForSelectedMonth();
+      let payment = getCurrentStudentPaymentForSelectedMonth();
+      let createdPaymentForUpload = false;
       if (!payment) {
-        result.textContent = 'ยังไม่มีรายการบิลสำหรับเดือนนี้ กรุณารอเจ้าหน้าที่เปิดบิลก่อนอัปโหลดสลิป';
-        result.style.color = '#d97706';
-        return;
+        const uploadCourse = getCourseByStudentOrName(currentStudent, currentStudent.course || '');
+        payment = buildStudentMonthlyPaymentRecord(currentStudent, uploadCourse, month);
+        if (!payment) {
+          result.textContent = 'ยังไม่มีรายการบิลสำหรับเดือนนี้ กรุณารอเจ้าหน้าที่เปิดบิลก่อนอัปโหลดสลิป';
+          result.style.color = '#d97706';
+          return;
+        }
+        createdPaymentForUpload = true;
       }
 
       slipUploadInProgress = true;
@@ -34016,9 +34040,14 @@ function receiptStatusText(status) {
         const studentDocId = String(currentStudent.firebaseDocId || currentStudent.id || currentStudent.authUid || '');
         if (!studentDocId) throw new Error('ไม่พบรหัสเอกสารนักเรียนสำหรับบันทึกสถานะชำระเงิน');
         const batch = db.batch();
-        batch.set(db.collection('payments').doc(paymentDocId), buildFirebasePayload(payment, paymentDocId, false), { merge: true });
+        batch.set(db.collection('payments').doc(paymentDocId), buildFirebasePayload(payment, paymentDocId, createdPaymentForUpload), { merge: true });
         batch.set(db.collection('students').doc(studentDocId), buildFirebasePayload(currentStudent, studentDocId, false), { merge: true });
         await batch.commit();
+        if (createdPaymentForUpload && !payments.some(function(item) {
+          return String(item.firebaseDocId || item.id || '') === paymentDocId;
+        })) {
+          payments.push(payment);
+        }
         setStudentSlipResultMessage('อัปโหลดสลิปสำเร็จ รอเจ้าหน้าที่ตรวจสอบ', '#16a34a');
         if (fileInput) fileInput.value = '';
         syncStudentSlipDropzoneLabel();

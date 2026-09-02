@@ -324,6 +324,7 @@ service cloud.firestore {
       return signedIn()
         && isPaymentOwner()
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'id',
           'firebaseDocId',
           'deleted',
           'studentId',
@@ -357,11 +358,96 @@ service cloud.firestore {
         && request.resource.data.firebaseDocId == docId
         && request.resource.data.deleted == false
         && isIncomingPaymentOwner()
+        && request.resource.data.month != ''
+        && (
+          request.resource.data.driveFileId != ''
+          || request.resource.data.driveFileUrl != ''
+          || request.resource.data.driveViewUrl != ''
+        )
         && request.resource.data.slipUploadedByUid == request.auth.uid
         && request.resource.data.slipStatus == 'waiting_admin_review'
         && request.resource.data.adminReviewStatus == 'pending'
         && request.resource.data.paymentStatus == 'รอตรวจสลิป'
         && request.resource.data.status == 'รอตรวจสลิป';
+    }
+
+    function studentSlipPaymentCreateFields() {
+      return [
+        'id',
+        'firebaseDocId',
+        'deleted',
+        'studentId',
+        'memberId',
+        'studentName',
+        'studentAuthUid',
+        'authUid',
+        'student',
+        'courseId',
+        'courseName',
+        'course',
+        'preferredLocation',
+        'courseLocation',
+        'paymentCenter',
+        'month',
+        'paymentMonth',
+        'studentSelectedMonth',
+        'baseAmount',
+        'expectedAmount',
+        'originalAmount',
+        'discount',
+        'finalAmount',
+        'amount',
+        'totalAmount',
+        'lineItems',
+        'discountType',
+        'discountReason',
+        'adjustedBy',
+        'adjustedAtText',
+        'slipUrl',
+        'slipStorageType',
+        'driveFileId',
+        'driveFileUrl',
+        'driveViewUrl',
+        'driveFolderId',
+        'driveFolderName',
+        'slipUploadedByUid',
+        'slipUploadedByName',
+        'slipUploadedAt',
+        'slipUploadedAtText',
+        'slipStatus',
+        'receiptStatus',
+        'adminReviewStatus',
+        'slipNote',
+        'paymentStatus',
+        'status',
+        'createdAt',
+        'createdAtText',
+        'createdBy',
+        'createdByEmail',
+        'createdByName',
+        'updatedAt',
+        'updatedAtText',
+        'updatedBy',
+        'updatedByEmail',
+        'updatedByName'
+      ];
+    }
+
+    function isStudentSlipPaymentCreate(docId) {
+      return signedIn()
+        && isStudentUser()
+        && request.resource.data.keys().hasOnly(studentSlipPaymentCreateFields())
+        && request.resource.data.firebaseDocId == docId
+        && request.resource.data.deleted == false
+        && isIncomingPaymentOwner()
+        && request.resource.data.slipUploadedByUid == request.auth.uid
+        && request.resource.data.slipStatus == 'waiting_admin_review'
+        && request.resource.data.adminReviewStatus == 'pending'
+        && request.resource.data.paymentStatus == 'รอตรวจสลิป'
+        && request.resource.data.status == 'รอตรวจสลิป'
+        && !('receiptId' in request.resource.data)
+        && !('receiptNo' in request.resource.data)
+        && !('receiptUrl' in request.resource.data);
     }
 
     function isStudentPaymentBundleOwner() {
@@ -445,9 +531,9 @@ service cloud.firestore {
 
     match /payments/{docId} {
       allow read: if hasStaffAccountType() || isPaymentOwner();
-      // Payment records must be created by Admin/Finance or backend workflows only.
-      // Students should not create payment documents directly.
-      allow create: if isAdmin() || hasAdminPermission('admin.finance');
+      // Admin/Finance normally create payment records; students may only create
+      // their own pending-review slip record when uploading for an open month.
+      allow create: if isAdmin() || hasAdminPermission('admin.finance') || isStudentSlipPaymentCreate(docId);
       // Apps Script uploads the file to Drive; the student client may update only slip review fields.
       // Students must not directly approve payment or change protected payment/course/receipt fields.
       allow update: if isAdmin() || hasAdminPermission('admin.finance') || isStudentSlipUploadUpdate(docId);
