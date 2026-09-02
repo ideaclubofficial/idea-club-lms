@@ -9129,6 +9129,32 @@
       localStorage.removeItem('ideaClubSessionExpiry');
     }
 
+    const STAFF_ROUTE_VIEW_KEY = 'ideaClubStaffRouteView';
+
+    function setStaffRouteView(view) {
+      try {
+        if (view) sessionStorage.setItem(STAFF_ROUTE_VIEW_KEY, view);
+      } catch (error) {
+        console.warn('staff route view save skipped:', error);
+      }
+    }
+
+    function getStaffRouteView() {
+      try {
+        return sessionStorage.getItem(STAFF_ROUTE_VIEW_KEY) || '';
+      } catch (error) {
+        return '';
+      }
+    }
+
+    function clearStaffRouteView() {
+      try {
+        sessionStorage.removeItem(STAFF_ROUTE_VIEW_KEY);
+      } catch (error) {
+        console.warn('staff route view clear skipped:', error);
+      }
+    }
+
     try {
       firebase.initializeApp(firebaseConfig);
       auth = firebase.auth();
@@ -9215,16 +9241,18 @@
             setSuperAdminMode(getEffectivePermissions(profile).includes('admin.full') || primaryRole === 'SuperAdmin' || primaryRole === 'Admin');
             setSessionExpiry();
             hideAuthLoadingOverlay();
-            if (linkedTeacherProfile) {
+            if (linkedTeacherProfile && getStaffRouteView() !== 'admin') {
               currentTeacher = buildTeacherSessionFromProfile(linkedTeacherProfile, profile, user.email || profile.email || '', profile.loginId || profile.username || user.email || '');
               console.log('admin-teacher-restore-teacher-first', {
                 uid: uid,
                 teacherId: currentTeacher.teacherId || currentTeacher.id || '',
                 appRole: profile.appRole || profile.role || ''
               });
+              setStaffRouteView('teacher');
               showTeacherPanel(currentTeacher);
               return;
             }
+            setStaffRouteView('admin');
             currentTeacher = null;
             showAdminPanel(true);
           } else if (isTeacherRole(primaryRole)) {
@@ -12644,6 +12672,7 @@
 
         try {
           authSessionRoutingDone = true;
+          clearStaffRouteView();
           result.textContent = 'กำลังเข้าสู่ระบบ...';
           result.style.color = '#0f4cbd';
 
@@ -12959,16 +12988,18 @@
             currentStudent = null;
             setSuperAdminMode(getEffectivePermissions(firebaseUserProfile).includes('admin.full') || activeAppRole === 'SuperAdmin' || activeAppRole === 'Admin');
             setSessionExpiry();
-            if (staffTeacher) {
+            if (staffTeacher && getStaffRouteView() !== 'admin') {
               currentTeacher = staffTeacher;
               console.log('admin-teacher-route-teacher-first', {
                 uid: firebaseUser.uid,
                 teacherId: staffTeacher.teacherId || staffTeacher.id || '',
                 appRole: activeAppRole
               });
+              setStaffRouteView('teacher');
               showTeacherPanel(staffTeacher);
               return;
             }
+            setStaffRouteView('admin');
             currentTeacher = null;
             showAdminPanel(true);
             return;
@@ -13382,6 +13413,7 @@
       stopStudentPaymentListeners();
       stopAdminPaymentDataListeners();
       clearSessionExpiry();
+      clearStaffRouteView();
       if (PRODUCTION_MODE && auth) {
         try { await auth.signOut(); } catch (error) { console.error('Firebase sign out error:', error); }
       }
@@ -13836,6 +13868,7 @@
       const teacher = linkedTeacherProfile
         ? buildTeacherSessionFromProfile(linkedTeacherProfile, firebaseUserProfile || {}, firebaseUser && firebaseUser.email ? firebaseUser.email : '', firebaseUserProfile && (firebaseUserProfile.loginId || firebaseUserProfile.username) || '')
         : { name: getAdminDisplayNameFallback(), username: firebaseUser && firebaseUser.email ? firebaseUser.email : 'admin', status: 'Active', role: 'SuperAdmin', appRole: 'SuperAdmin', permissions: getDefaultPermissionsForRole('SuperAdmin'), permissionMode: 'custom' };
+      setStaffRouteView('teacher');
       showTeacherPanel(teacher);
       setSuperAdminMode(true);
       refreshProfileBox();
@@ -13849,12 +13882,14 @@
       }
       currentStudent = null;
       currentTeacher = null;
+      setStaffRouteView('admin');
       showAdminPanel(true);
     }
 
     function showTeacherAdminPanel(teacher) {
       currentStudent = null;
       currentTeacher = teacher || currentTeacher;
+      setStaffRouteView('admin');
       showAdminPanel(true);
       setSuperAdminMode(hasPermission('admin.full'));
       refreshProfileBox();
@@ -13870,6 +13905,7 @@
         alert('บัญชีนักเรียนไม่มีสิทธิ์เข้าหน้านี้');
         return;
       }
+      setStaffRouteView('teacher');
       stopAdminPaymentDataListeners();
       currentStudent = null;
       currentTeacher = teacher || null;
@@ -16057,6 +16093,7 @@
         }
       }
 
+      setStaffRouteView('admin');
       restoreTeacherEmbeddedTool();
       hideAllMain();
       setTeacherAdminReturnVisible(false);
