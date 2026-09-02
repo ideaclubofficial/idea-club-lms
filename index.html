@@ -9286,6 +9286,34 @@
       });
     }
 
+    async function getFirebasePaymentCollection(includeDeleted) {
+      const baseItems = await getFirebaseCollection('payments', includeDeleted);
+      const byId = {};
+      baseItems.forEach(function(item) {
+        byId[String(item.firebaseDocId || item.id || '')] = item;
+      });
+      const pendingQueries = [
+        db.collection('payments').where('slipStatus', '==', 'waiting_admin_review'),
+        db.collection('payments').where('status', '==', 'รอตรวจสลิป'),
+        db.collection('payments').where('paymentStatus', '==', 'รอตรวจสลิป')
+      ];
+      const snapshots = await Promise.all(pendingQueries.map(function(query) {
+        return query.get().catch(function(error) {
+          console.warn('skip pending payment query:', error);
+          return null;
+        });
+      }));
+      snapshots.forEach(function(snapshot) {
+        if (!snapshot) return;
+        snapshot.docs.forEach(function(docSnap) {
+          const data = Object.assign({ firebaseDocId: docSnap.id }, docSnap.data());
+          if (!includeDeleted && data.deleted === true) return;
+          byId[String(data.firebaseDocId || data.id || docSnap.id)] = data;
+        });
+      });
+      return Object.keys(byId).map(function(id) { return byId[id]; });
+    }
+
     async function getFirebaseCollectionQuiet(collectionName, includeDeleted) {
       if (!firebaseReady || !db) return [];
       try {
@@ -9485,6 +9513,20 @@
         }, function(err) {
           console.warn('admin ' + spec.collection + ' listener error:', err);
         });
+      });
+      [
+        db.collection('payments').where('slipStatus', '==', 'waiting_admin_review'),
+        db.collection('payments').where('status', '==', 'รอตรวจสลิป'),
+        db.collection('payments').where('paymentStatus', '==', 'รอตรวจสลิป')
+      ].forEach(function(query, index) {
+        unsubs.push(query.onSnapshot(function(snapshot) {
+          if (snapshot.metadata && snapshot.metadata.hasPendingWrites) return;
+          if (applyRealtimeDocChanges(payments, snapshot.docChanges())) {
+            scheduleAdminPaymentDataRefresh('pending-payment-slip-' + index);
+          }
+        }, function(err) {
+          console.warn('admin pending payment listener error:', err);
+        }));
       });
       adminPaymentDataUnsubscribe = function() {
         unsubs.forEach(function(unsub) { try { unsub(); } catch(e) {} });
@@ -10362,7 +10404,7 @@
         getFirebaseCollection('onDemandClips'),
         getFirebaseCollection('paymentMonths'),
         getFirebaseCollection('lineGroups'),
-        getFirebaseCollection('payments'),
+        getFirebasePaymentCollection(),
         getFirebaseCollection('receipts'),
         getFirebaseCollection('paymentBundles'),
         getFirebaseCollection('monthlyQuestions'),
@@ -30193,7 +30235,7 @@
           return '<option value="' + escapeHtml(month) + '">' + escapeHtml(month) + '</option>';
         }).join('');
         var priorityMonth = currentValue && monthOptions.includes(currentValue) ? currentValue : (function() {
-          var urgentStatuses = ['สลิปไม่ผ่าน', 'ค้างชำระ', 'รอชำระเงิน', 'รอตรวจสลิป'];
+          var urgentStatuses = ['รอตรวจสลิป', 'สลิปไม่ผ่าน', 'ค้างชำระ', 'รอชำระเงิน'];
           var visiblePayments = getStudentVisiblePayments(currentStudent);
           for (var si = 0; si < urgentStatuses.length; si++) {
             var found = visiblePayments.find(function(p) { return getPaymentDisplayStatus(p) === urgentStatuses[si]; });
@@ -30913,7 +30955,7 @@
       if (btn) { btn.disabled = true; btn.textContent = 'กำลังโหลด...'; }
       try {
         const [freshPayments, freshBundles, freshReceipts] = await Promise.all([
-          getFirebaseCollection('payments'),
+          getFirebasePaymentCollection(),
           getFirebaseCollection('paymentBundles'),
           getFirebaseCollection('receipts')
         ]);
