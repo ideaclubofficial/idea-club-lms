@@ -8004,7 +8004,7 @@
                   </div>
 
                   <!-- Day Detail Panel -->
-                  <div id="tf-day-detail" class="bg-slate-900 text-white rounded-2xl p-5 shadow-lg hidden tf-fade">
+                  <div id="tf-day-detail" class="fixed z-40 w-[min(92vw,560px)] max-h-[78vh] bg-slate-900 text-white rounded-2xl p-5 shadow-2xl hidden tf-fade">
                     <div class="flex justify-between items-center mb-4 border-b border-slate-800 pb-3">
                       <div>
                         <h4 class="font-bold text-base flex items-center gap-2">
@@ -51608,7 +51608,7 @@ function receiptStatusText(status) {
         const dayClass = activeHoliday
           ? 'border-rose-400 bg-rose-100 hover:bg-rose-200 text-rose-900'
           : (isToday ? 'border-indigo-400 bg-indigo-50' : 'border-slate-200 bg-white hover:bg-slate-50');
-        html += '<div onclick="tfShowDayDetail(\'' + dateStr + '\')" class="min-h-28 p-1.5 rounded-lg border ' + dayClass + ' cursor-pointer transition-colors flex flex-col overflow-hidden">' +
+        html += '<div data-tf-date="' + dateStr + '" onclick="tfShowDayDetail(\'' + dateStr + '\', this)" class="tf-calendar-day min-h-28 p-1.5 rounded-lg border ' + dayClass + ' cursor-pointer transition-colors flex flex-col overflow-hidden">' +
           '<div class="flex items-start justify-between gap-1">' +
           (activeHoliday ? '<span class="text-[10px] font-extrabold bg-rose-600 text-white px-1.5 py-0.5 rounded-md truncate">วันหยุด</span>' : '<span></span>') +
           '<span class="text-xs font-bold p-0.5 ' + (activeHoliday ? 'text-rose-700 bg-white/70 rounded-full w-5 h-5 flex items-center justify-center' : (isToday ? 'text-indigo-600 bg-indigo-100 rounded-full w-5 h-5 flex items-center justify-center' : isSun ? 'text-rose-500' : isSat ? 'text-indigo-600' : 'text-slate-600')) + '">' + d + '</span>' +
@@ -51648,7 +51648,7 @@ function receiptStatusText(status) {
         const label = 'วัน' + dayNames[d.getDay()] + ' · ' + d.getDate() + ' ' + TF_MONTH_NAMES[d.getMonth()] + ' ' + (d.getFullYear() + 543);
         const cards = groups[date].map(function(s) {
           const colorCls = TF_FORMAT_COLORS[s.format] || 'bg-slate-100 text-slate-700';
-          return '<div class="flex items-start gap-3 p-3 bg-white border border-slate-200 rounded-xl hover:border-indigo-300 transition-colors cursor-pointer" onclick="tfShowDayDetail(\'' + date + '\')">' +
+          return '<div data-tf-date="' + date + '" class="flex items-start gap-3 p-3 bg-white border border-slate-200 rounded-xl hover:border-indigo-300 transition-colors cursor-pointer" onclick="tfShowDayDetail(\'' + date + '\', this)">' +
             '<span class="' + colorCls + ' text-xs font-bold px-2 py-1 rounded-lg flex-shrink-0 mt-0.5">' + escapeHtml(TF_FORMAT_LABELS[s.format] || s.format) + '</span>' +
             '<div class="min-w-0">' +
             '<p class="font-semibold text-sm text-slate-900">' + escapeHtml(tfGetCourseName(s.courseId)) + '</p>' +
@@ -51661,8 +51661,36 @@ function receiptStatusText(status) {
       if (typeof lucide !== 'undefined') lucide.createIcons();
     }
 
+    function tfFindDayDetailAnchor(dateStr) {
+      if (!dateStr) return null;
+      return document.querySelector('[data-tf-date="' + dateStr + '"]');
+    }
+
+    function tfPositionDayDetailBubble(panel, anchorEl, dateStr) {
+      if (!panel) return;
+      const margin = 12;
+      const anchor = anchorEl || tfFindDayDetailAnchor(dateStr);
+      panel.style.right = 'auto';
+      panel.style.bottom = 'auto';
+      if (!anchor || !anchor.getBoundingClientRect) {
+        panel.style.left = Math.max(margin, Math.round((window.innerWidth - panel.offsetWidth) / 2)) + 'px';
+        panel.style.top = Math.max(margin, Math.round((window.innerHeight - panel.offsetHeight) / 2)) + 'px';
+        return;
+      }
+      const rect = anchor.getBoundingClientRect();
+      const width = panel.offsetWidth || Math.min(window.innerWidth * 0.92, 560);
+      const height = panel.offsetHeight || 420;
+      let left = rect.left + (rect.width / 2) - (width / 2);
+      let top = rect.bottom + 10;
+      if (top + height > window.innerHeight - margin) top = rect.top - height - 10;
+      left = Math.min(Math.max(margin, left), Math.max(margin, window.innerWidth - width - margin));
+      top = Math.min(Math.max(margin, top), Math.max(margin, window.innerHeight - height - margin));
+      panel.style.left = Math.round(left) + 'px';
+      panel.style.top = Math.round(top) + 'px';
+    }
+
     // --- Show day detail panel ---
-    function tfShowDayDetail(dateStr) {
+    function tfShowDayDetail(dateStr, anchorEl) {
       const panel = tfEl('tf-day-detail');
       const label = tfEl('tf-day-date-label');
       const content = tfEl('tf-day-detail-content');
@@ -51725,6 +51753,8 @@ function receiptStatusText(status) {
       }
       panel.classList.remove('hidden');
       panel.classList.add('tf-fade');
+      tfPositionDayDetailBubble(panel, anchorEl, dateStr);
+      if (typeof lucide !== 'undefined') lucide.createIcons();
     }
 
     // --- Close day detail ---
