@@ -20124,6 +20124,21 @@
       } catch (error) { console.error(error); }
     }
 
+    function openOnlineClassDocumentLinks(courseId, docId) {
+      const course = courses.find(function(c) { return String(c.id) === String(courseId); });
+      const doc = course && (course.onlineDocs || []).find(function(item) { return String(item.id) === String(docId); });
+      const files = Array.isArray(doc && doc.files) ? doc.files.filter(function(file) { return file && file.url; }) : [];
+      if (!files.length) {
+        alert('ยังไม่มีลิงก์เอกสาร');
+        return;
+      }
+      openViewBubble('เอกสาร Online รายครั้ง',
+        '<div class="online-doc-buttons">' + files.map(function(file) {
+          return '<button class="btn btn-blue" type="button" onclick="openExternalLink(\'' + jsArg(file.url) + '\')">📄 ' + escapeHtml(getOnlineDocFileButtonTitle(file.title)) + '</button>';
+        }).join('') + '</div>'
+      );
+    }
+
     function renderOnlineDocTable() {
       const tbody = getElement('onlineDocTableBody');
       if (!tbody) return;
@@ -20143,8 +20158,11 @@
       });
       tbody.innerHTML = rows.length ? rows.map(function(row) {
         const fileCount = Array.isArray(row.doc.files) ? row.doc.files.filter(function(file) { return file && file.url; }).length : 0;
+        const fileCell = fileCount
+          ? '<button class="btn btn-blue" type="button" onclick="openOnlineClassDocumentLinks(\'' + jsArg(row.course.id) + '\', \'' + jsArg(row.doc.id) + '\')">ดูเอกสาร</button>' + (fileCount > 1 ? '<br><span class="mini-muted">มี ' + fileCount + ' ไฟล์</span>' : '')
+          : '-';
         const statusText = (row.doc.status || 'active') === 'active' ? '<span class="status-paid">เปิดแสดง</span>' : '<span class="status-waiting">ปิดไว้ก่อน</span>';
-        return '<tr><td>' + onlineDocDateText(row.doc.classDate) + '</td><td>' + escapeHtml(row.location || 'ศูนย์ทั้งหมด') + ' · ' + escapeHtml(row.grade || '-') + '</td><td>' + escapeHtml(row.doc.topic || '-') + '</td><td>' + (fileCount ? fileCount + ' ไฟล์' : '-') + '</td><td>' + statusText + '</td><td><button class="btn btn-blue" type="button" onclick="editOnlineClassDocument(\'' + jsArg(row.course.id) + '\', \'' + jsArg(row.doc.id) + '\')">แก้ไข</button><button class="btn btn-red" type="button" onclick="deleteOnlineClassDocument(\'' + jsArg(row.course.id) + '\', \'' + jsArg(row.doc.id) + '\')">ลบ</button></td></tr>';
+        return '<tr><td>' + onlineDocDateText(row.doc.classDate) + '</td><td>' + escapeHtml(row.location || 'ศูนย์ทั้งหมด') + ' · ' + escapeHtml(row.grade || '-') + '</td><td>' + escapeHtml(row.doc.topic || '-') + '</td><td>' + fileCell + '</td><td>' + statusText + '</td><td><button class="btn btn-blue" type="button" onclick="editOnlineClassDocument(\'' + jsArg(row.course.id) + '\', \'' + jsArg(row.doc.id) + '\')">แก้ไข</button><button class="btn btn-red" type="button" onclick="deleteOnlineClassDocument(\'' + jsArg(row.course.id) + '\', \'' + jsArg(row.doc.id) + '\')">ลบ</button></td></tr>';
       }).join('') : '<tr><td colspan="6">ยังไม่มีเอกสาร Online รายครั้ง</td></tr>';
     }
 
