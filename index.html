@@ -50780,6 +50780,14 @@ function receiptStatusText(status) {
         tutorId: getSessionTeacherPlannerId(s),
         format: s.type || s.format || 'onsite',
         center: s.center || s.courseLocation || '',
+        center2: s.center2 || '',
+        centers: Array.isArray(s.centers) ? s.centers : [],
+        isCrossCenterClass: !!s.isCrossCenterClass,
+        crossCenterGroupId: s.crossCenterGroupId || '',
+        isSharedClass: !!s.isSharedClass,
+        sharedClassGroupId: s.sharedClassGroupId || s.sharedGroupId || '',
+        combinedCourseIds: Array.isArray(s.combinedCourseIds) ? s.combinedCourseIds : [],
+        combinedGrades: Array.isArray(s.combinedGrades) ? s.combinedGrades : [],
         date: tfGetSessionDateText(s),
         start: tfGetSessionStartText(s),
         end: tfGetSessionEndText(s),
@@ -50845,6 +50853,7 @@ function receiptStatusText(status) {
       base.isCrossCenterClass = !!sch.isCrossCenterClass;
       base.center2 = sch.center2 || '';
       base.centers = sch.isCrossCenterClass && sch.center2 ? [sch.center, sch.center2] : [sch.center];
+      base.crossCenterGroupId = sch.crossCenterGroupId || (existing ? existing.crossCenterGroupId || '' : '');
       base.needsTeacherAssignment = !!sch.needsTeacherAssignment;
       applyMonthlySessionTeacherPublishState(base);
       return base;
@@ -51465,9 +51474,17 @@ function receiptStatusText(status) {
       const courseSel = tfEl('tf-filter-course');
       if (courseSel) {
         const prevCourse = courseSel.value;
+        const activeFormat = tfEl('tf-filter-format') ? tfEl('tf-filter-format').value : 'all';
         const filteredCourses = tfGetCourses().filter(function(c) {
           if (!tfCenterFilter || tfCenterFilter === 'all') return true;
-          return tfCourseMatchesCenter(c, tfCenterFilter);
+          if (tfCourseMatchesCenter(c, tfCenterFilter)) return true;
+          if (activeFormat === 'online' || activeFormat === 'all') {
+            if (tfCourseSupportsFormatForSchedule(c, 'online', tfCenterFilter)) return true;
+          }
+          if (activeFormat === 'ondemand' || activeFormat === 'all') {
+            if (tfCourseSupportsFormatForSchedule(c, 'ondemand', tfCenterFilter)) return true;
+          }
+          return false;
         });
         courseSel.innerHTML = '<option value="all">คอร์สทั้งหมด</option>' +
           filteredCourses.map(function(c) {
@@ -51565,6 +51582,8 @@ function receiptStatusText(status) {
       return scheds.filter(function(s) {
         const centerOk = tfCenterFilter === 'all' ||
           tfCenterTextMatches(s.center || s.courseLocation || '', tfCenterFilter) ||
+          tfCenterTextMatches(s.center2 || '', tfCenterFilter) ||
+          (Array.isArray(s.centers) && s.centers.some(function(center) { return tfCenterTextMatches(center, tfCenterFilter); })) ||
           (tfCenterFilter === 'nongchang' && s.center && s.center.includes('หนองฉาง')) ||
           (tfCenterFilter === 'nakhonsawan' && s.center && (s.center.includes('นครสวรรค์') || s.center.includes('นครสวรรค')));
         const fmtOk = fmt === 'all' || s.format === fmt;
@@ -51578,7 +51597,10 @@ function receiptStatusText(status) {
       const fmt = tfEl('tf-filter-format') ? tfEl('tf-filter-format').value : 'all';
       const tutId = tfEl('tf-filter-tutor') ? tfEl('tf-filter-tutor').value : 'all';
       const courseId = tfEl('tf-filter-course') ? tfEl('tf-filter-course').value : 'all';
-      const centerOk = tfCenterFilter === 'all' || tfCenterTextMatches(s.center || s.courseLocation || '', tfCenterFilter);
+      const centerOk = tfCenterFilter === 'all' ||
+        tfCenterTextMatches(s.center || s.courseLocation || '', tfCenterFilter) ||
+        tfCenterTextMatches(s.center2 || '', tfCenterFilter) ||
+        (Array.isArray(s.centers) && s.centers.some(function(center) { return tfCenterTextMatches(center, tfCenterFilter); }));
       const fmtOk = fmt === 'all' || s.format === fmt || s.type === fmt;
       const tutOk = tutId === 'all' || s.tutorId === tutId || s.teacherId === tutId;
       const courseOk = courseId === 'all' || String(s.courseId || '') === String(courseId);
@@ -52153,7 +52175,10 @@ function receiptStatusText(status) {
       const colorCls = TF_FORMAT_COLORS[s.format || s.type] || 'bg-slate-100 text-slate-700';
       const timeText = tfFormatSessionTimeRange(s, '-');
       const courseText = tfGetCourseGradeSubjectLabel(s.courseId, s.tutorId || s.teacherId);
-      const metaParts = [tfGetTutorShortName(s.tutorId || s.teacherId), tfGetCenterShortLabel(s.center || s.courseLocation)].filter(Boolean);
+      const centerText = (s.isCrossCenterClass || s.center2 || (Array.isArray(s.centers) && s.centers.length > 1))
+        ? [s.center || s.courseLocation || '', s.center2 || ''].filter(Boolean).map(tfGetCenterShortLabel).join('+')
+        : tfGetCenterShortLabel(s.center || s.courseLocation);
+      const metaParts = [tfGetTutorShortName(s.tutorId || s.teacherId), centerText].filter(Boolean);
       return '<div class="' + colorCls + ' rounded px-1 py-0.5 font-medium leading-tight whitespace-normal break-words ' + (compact ? 'text-[10px]' : 'text-[11px]') + '">' +
         '<div class="font-bold">' + escapeHtml(timeText || '-') + '</div>' +
         '<div>' + escapeHtml(courseText) + '</div>' +
@@ -52705,6 +52730,73 @@ function receiptStatusText(status) {
       });
     }
 
+    function tfFindExistingCrossCenterGroupSessions(groupId, baseSchedule, existing) {
+      const key = String(groupId || '').trim();
+      if (key) {
+        const grouped = (monthlyPlanSessions || []).filter(function(session) {
+          const sessionId = String(session.id || session.firebaseDocId || '').trim();
+          const sessionGroupId = String(session.crossCenterGroupId || '').trim();
+          return sessionId === key || sessionGroupId === key;
+        });
+        if (grouped.length) return grouped;
+      }
+      if (!baseSchedule) return existing ? [existing] : [];
+      const baseDate = String(baseSchedule.date || '').trim();
+      const baseType = tfNormalizeScheduleType(baseSchedule.format || baseSchedule.type);
+      const baseStart = tfNormalizeScheduleTime(baseSchedule.start || baseSchedule.timeStart || baseSchedule.sessionTime || '');
+      const baseEnd = tfNormalizeScheduleTime(baseSchedule.end || baseSchedule.timeEnd || '');
+      const baseCourseId = String(baseSchedule.courseId || '').trim();
+      const centerKeys = [baseSchedule.center, baseSchedule.center2].map(tfNormalizeCenterText).filter(Boolean);
+      const matches = (monthlyPlanSessions || []).filter(function(session) {
+        const sessionCenter = tfNormalizeCenterText(session.center || session.courseLocation || '');
+        return session &&
+          session.deleted !== true &&
+          session.status !== 'cancelled' &&
+          centerKeys.includes(sessionCenter) &&
+          String(session.courseId || '').trim() === baseCourseId &&
+          String(session.date || session.sessionDate || '').trim() === baseDate &&
+          tfNormalizeScheduleType(session.type || session.format) === baseType &&
+          tfNormalizeScheduleTime(session.timeStart || session.start || session.sessionTime || session.publishTime || '') === baseStart &&
+          tfNormalizeScheduleTime(session.timeEnd || session.end || '') === baseEnd;
+      });
+      if (matches.length) return matches;
+      return existing ? [existing] : [];
+    }
+
+    function tfBuildCrossCenterSessions(baseSchedule, existing) {
+      const centers = Array.from(new Set([baseSchedule.center, baseSchedule.center2].map(function(center) {
+        return String(center || '').trim();
+      }).filter(Boolean)));
+      if (centers.length < 2) return [{ session: tfSchedToSession(baseSchedule, existing), existing: existing || null }];
+      const groupId = String((existing && (existing.crossCenterGroupId || existing.id || existing.firebaseDocId)) || baseSchedule.crossCenterGroupId || baseSchedule.id || createFirebaseDocId('monthlyPlanSessions')).trim();
+      const existingGroup = tfFindExistingCrossCenterGroupSessions(groupId, baseSchedule, existing);
+      return centers.map(function(center, index) {
+        const normalizedCenter = tfNormalizeCenterText(center);
+        const existingForCenter = existingGroup.find(function(session) {
+          return tfNormalizeCenterText(session.center || session.courseLocation || '') === normalizedCenter;
+        }) || (index === 0 && existing ? existing : null);
+        const otherCenter = centers.find(function(item) { return tfNormalizeCenterText(item) !== normalizedCenter; }) || '';
+        const docId = existingForCenter
+          ? String(existingForCenter.id || existingForCenter.firebaseDocId || '').trim()
+          : (index === 0 && baseSchedule.id ? String(baseSchedule.id) : createFirebaseDocId('monthlyPlanSessions'));
+        const schedule = Object.assign({}, baseSchedule, {
+          id: docId,
+          center: center,
+          center2: otherCenter,
+          isCrossCenterClass: true,
+          crossCenterGroupId: groupId
+        });
+        const session = tfSchedToSession(schedule, existingForCenter || null);
+        session.isCrossCenterClass = true;
+        session.crossCenterGroupId = groupId;
+        session.center = center;
+        session.courseLocation = center;
+        session.center2 = otherCenter;
+        session.centers = centers;
+        return { session: session, existing: existingForCenter || null };
+      });
+    }
+
     function tfBuildSharedClassSessions(baseSchedule, existing, targetCourseIds, combinedGrades) {
       const groupId = String((existing && (existing.sharedClassGroupId || existing.sharedGroupId || existing.id || existing.firebaseDocId)) || baseSchedule.id || createFirebaseDocId('monthlyPlanSessions')).trim();
       const existingGroup = tfFindExistingSharedClassGroupSessions(groupId);
@@ -52950,9 +53042,34 @@ function receiptStatusText(status) {
       const existing = monthlyPlanSessions.find(function(s) { return (s.id || s.firebaseDocId || '') === docId; }) || null;
       const scheduleStatus = tutorId ? 'confirmed' : 'draft';
       const sch = { id: docId, courseId, tutorId, format, center, date, start, end, location, notes, completed: false, report: '', status: scheduleStatus, needsTeacherAssignment: !tutorId, isSharedClass: isSharedClass, isCrossCenterClass: isCrossCenterClass, center2: center2 || '', combinedCourseIds: combinedCourseIds, combinedGrades: combinedGrades };
-      const sessionTargets = isSharedClass
+      const baseTargets = isSharedClass
         ? tfBuildSharedClassSessions(sch, existing, combinedCourseIds, combinedGrades)
         : [{ session: tfSchedToSession(sch, existing), existing: existing }];
+      let sessionTargets = baseTargets;
+      if (isCrossCenterClass && tfSupportsCrossCenterClass(format)) {
+        sessionTargets = [];
+        baseTargets.forEach(function(baseTarget) {
+          const crossBase = Object.assign({}, sch, {
+            id: baseTarget.session.id || baseTarget.session.firebaseDocId || sch.id,
+            courseId: baseTarget.session.courseId || sch.courseId,
+            isSharedClass: !!baseTarget.session.isSharedClass,
+            sharedClassGroupId: baseTarget.session.sharedClassGroupId || '',
+            sharedGroupId: baseTarget.session.sharedGroupId || '',
+            combinedCourseIds: Array.isArray(baseTarget.session.combinedCourseIds) ? baseTarget.session.combinedCourseIds : combinedCourseIds,
+            combinedGrades: Array.isArray(baseTarget.session.combinedGrades) ? baseTarget.session.combinedGrades : combinedGrades
+          });
+          tfBuildCrossCenterSessions(crossBase, baseTarget.existing).forEach(function(crossTarget) {
+            if (baseTarget.session.isSharedClass) {
+              crossTarget.session.isSharedClass = true;
+              crossTarget.session.sharedClassGroupId = baseTarget.session.sharedClassGroupId || '';
+              crossTarget.session.sharedGroupId = baseTarget.session.sharedGroupId || baseTarget.session.sharedClassGroupId || '';
+              crossTarget.session.combinedCourseIds = Array.isArray(baseTarget.session.combinedCourseIds) ? baseTarget.session.combinedCourseIds : combinedCourseIds;
+              crossTarget.session.combinedGrades = Array.isArray(baseTarget.session.combinedGrades) ? baseTarget.session.combinedGrades : combinedGrades;
+            }
+            sessionTargets.push(crossTarget);
+          });
+        });
+      }
       const session = sessionTargets[0].session;
       const teacherConflicts = findTeacherConflicts(session);
       if (teacherConflicts.length) {
@@ -52970,8 +53087,8 @@ function receiptStatusText(status) {
         const target = sessionTargets[i];
         const targetId = target.session.id || target.session.firebaseDocId || editingId;
         const duplicate = tfFindDuplicateScheduleSession(target.session, targetId);
-        const targetGroupId = String(target.session.sharedClassGroupId || target.session.sharedGroupId || '');
-        const duplicateGroupId = duplicate ? String(duplicate.sharedClassGroupId || duplicate.sharedGroupId || '') : '';
+        const targetGroupId = String(target.session.sharedClassGroupId || target.session.sharedGroupId || target.session.crossCenterGroupId || '');
+        const duplicateGroupId = duplicate ? String(duplicate.sharedClassGroupId || duplicate.sharedGroupId || duplicate.crossCenterGroupId || '') : '';
         if (duplicate && (!targetGroupId || duplicateGroupId !== targetGroupId)) {
           const dupTime = [duplicate.timeStart || duplicate.sessionTime || '', duplicate.timeEnd || ''].filter(Boolean).join(' - ');
           if (errEl) {
@@ -53009,7 +53126,9 @@ function receiptStatusText(status) {
           tfClearScheduleFiltersWithoutRender();
         }
         tfRenderSchedule();
-        tfToast(isSharedClass ? 'บันทึกคาบรวมคลาส ' + sessionTargets.length + ' คลาสสำเร็จ' : 'บันทึกตารางสอนสำเร็จ', 'success');
+        tfToast(isSharedClass
+          ? 'บันทึกคาบรวมคลาส ' + sessionTargets.length + ' รายการสำเร็จ'
+          : (isCrossCenterClass ? 'บันทึกคาบรวมศูนย์ ' + sessionTargets.length + ' รายการสำเร็จ' : 'บันทึกตารางสอนสำเร็จ'), 'success');
         safeRun(renderStudentMonthlyPlanSummary, 'student-plan-summary-refresh');
         safeRun(renderTeacherMonthlyPlanSummary, 'teacher-plan-summary-refresh');
         safeRun(renderTodayTeachingList, 'tf-sync-today');
