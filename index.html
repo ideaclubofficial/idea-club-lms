@@ -9234,11 +9234,10 @@
           hideAuthLoadingOverlay();
           studentLogin(student.memberId || student.studentId || user.email || '');
         } else {
-          await ensureCoreDataLoaded({ force: false });
           const primaryRole = getPrimaryAppRole(profile);
           const uid = user.uid;
           if (isAdminRole(primaryRole)) {
-            const linkedTeacherProfile = findLinkedTeacherProfileForUserProfile(profile, uid);
+            const linkedTeacherProfile = await findLinkedTeacherProfileForUserProfileFast(profile, uid);
             currentAdmin = profile;
             currentStudent = null;
             setSuperAdminMode(getEffectivePermissions(profile).includes('admin.full') || primaryRole === 'SuperAdmin' || primaryRole === 'Admin');
@@ -9253,13 +9252,27 @@
               });
               setStaffRouteView('teacher');
               showTeacherPanel(currentTeacher);
+              scheduleStaffCoreDataRefresh({
+                uid: uid,
+                profile: profile,
+                email: user.email || profile.email || '',
+                loginId: profile.loginId || profile.username || user.email || '',
+                force: false
+              });
               return;
             }
             setStaffRouteView('admin');
             currentTeacher = null;
             showAdminPanel(true);
+            scheduleStaffCoreDataRefresh({
+              uid: uid,
+              profile: profile,
+              email: user.email || profile.email || '',
+              loginId: profile.loginId || profile.username || user.email || '',
+              force: false
+            });
           } else if (isTeacherRole(primaryRole)) {
-            const teacherProfile = findLinkedTeacherProfileForUserProfile(profile, uid) || { id: uid, authUid: uid, name: profile.name || profile.displayName || user.email || '', email: profile.email || user.email || '' };
+            const teacherProfile = await findLinkedTeacherProfileForUserProfileFast(profile, uid) || { id: uid, authUid: uid, name: profile.name || profile.displayName || user.email || '', email: profile.email || user.email || '' };
             const teacher = Object.assign({}, teacherProfile, {
               linkedTeacherId: profile.linkedTeacherId || teacherProfile.linkedTeacherId || teacherProfile.firebaseDocId || teacherProfile.id || '',
               teacherDocId: profile.teacherDocId || teacherProfile.teacherDocId || teacherProfile.firebaseDocId || teacherProfile.id || profile.linkedTeacherId || '',
@@ -9274,6 +9287,13 @@
             setSessionExpiry();
             hideAuthLoadingOverlay();
             showTeacherPanel(teacher);
+            scheduleStaffCoreDataRefresh({
+              uid: uid,
+              profile: profile,
+              email: user.email || profile.email || '',
+              loginId: profile.loginId || profile.username || user.email || '',
+              force: false
+            });
           } else {
             hideAuthLoadingOverlay();
           }
@@ -10618,6 +10638,7 @@
 
     function refreshStartupSettings() {
       if (!firebaseReady || !db) return Promise.resolve(null);
+      if (PRODUCTION_MODE && !firebaseUser) return Promise.resolve(null);
       if (startupSettingsLoadPromise) return startupSettingsLoadPromise;
       startupSettingsLoadPromise = db.collection('settings').doc('main').get().then(function(doc) {
         if (!doc.exists) return null;
@@ -12544,6 +12565,42 @@
       }) || null;
     }
 
+    async function findLinkedTeacherProfileForUserProfileFast(userProfile, uid) {
+      const local = findLinkedTeacherProfileForUserProfile(userProfile, uid);
+      if (local || !firebaseReady || !db) return local;
+      const profile = userProfile || {};
+      const authUid = String(uid || profile.authUid || profile.uid || '').trim();
+      const linkedTeacherId = String(profile.linkedTeacherId || profile.teacherDocId || '').trim();
+      const profileTeacherId = String(profile.teacherId || '').trim();
+
+      if (linkedTeacherId) {
+        try {
+          const directDoc = await db.collection('teachers').doc(linkedTeacherId).get();
+          if (directDoc.exists) return Object.assign({ id: directDoc.id, firebaseDocId: directDoc.id }, directDoc.data());
+        } catch (error) {
+          console.warn('linked teacher direct lookup skipped:', error);
+        }
+      }
+
+      const queries = [];
+      if (authUid) queries.push(db.collection('teachers').where('authUid', '==', authUid).limit(1).get());
+      if (profileTeacherId && profileTeacherId !== linkedTeacherId) queries.push(db.collection('teachers').where('teacherId', '==', profileTeacherId).limit(1).get());
+      if (!queries.length) return null;
+      const snapshots = await Promise.all(queries.map(function(queryPromise) {
+        return queryPromise.catch(function(error) {
+          console.warn('linked teacher query skipped:', error);
+          return null;
+        });
+      }));
+      for (const snapshot of snapshots) {
+        if (snapshot && !snapshot.empty) {
+          const doc = snapshot.docs[0];
+          return Object.assign({ id: doc.id, firebaseDocId: doc.id }, doc.data());
+        }
+      }
+      return null;
+    }
+
     function refreshTeacherPanelAfterCoreLoad(teacherProfile, userProfile, fallbackEmail, displayLoginId) {
       if (!teacherProfile || isCurrentStudentSession()) return;
       currentTeacher = buildTeacherSessionFromProfile(teacherProfile, userProfile || firebaseUserProfile || {}, fallbackEmail, displayLoginId);
@@ -12555,6 +12612,28 @@
       safeRun(renderTeacherPrivateLessons, 'teacher-private-lessons-after-core-load');
       safeRun(renderTeacherMobileHome, 'teacher-mobile-home-after-core-load');
       safeRun(renderTeacherMobileStudents, 'teacher-mobile-students-after-core-load');
+    }
+
+    function scheduleStaffCoreDataRefresh(options) {
+      options = options || {};
+      const uid = String(options.uid || (firebaseUser && firebaseUser.uid) || '').trim();
+      if (!uid) return;
+      console.info('staff-core-data-refresh-start', { uid: uid, force: !!options.force });
+      ensureCoreDataLoaded({ force: !!options.force }).then(function() {
+        if (!firebaseUser || String(firebaseUser.uid || '') !== uid) return;
+        console.info('staff-core-data-refresh-success', { uid: uid });
+        safeRun(applyRoleAccessToUI, 'staff-core-role-access-refresh');
+        if (currentTeacher && !isCurrentStudentSession()) {
+          const refreshedTeacher = findLinkedTeacherProfileForUserProfile(firebaseUserProfile || options.profile || {}, uid) || currentTeacher;
+          refreshTeacherPanelAfterCoreLoad(refreshedTeacher, firebaseUserProfile || options.profile || {}, options.email || '', options.loginId || '');
+          return;
+        }
+        if (currentAdmin) {
+          safeRun(renderActiveAdminTab, 'staff-core-active-admin-tab-refresh');
+        }
+      }).catch(function(error) {
+        console.warn('staff-core-data-refresh-skipped', error);
+      });
     }
 
     async function findTeacherProfileForAuthenticatedUser(user, fallbackEmail, preMatchedTeacher) {
@@ -12965,8 +13044,6 @@
             return;
           }
 
-          await ensureCoreDataLoaded({ force: true });
-
           // ============================================================
           // STAFF ROUTING - role source is users/{uid}; teachers is profile only
           // ============================================================
@@ -12985,7 +13062,7 @@
               appRole: activeAppRole,
               primaryStaffRole: primaryStaffRole
             });
-            const linkedTeacherProfile = findLinkedTeacherProfileForUserProfile(firebaseUserProfile, firebaseUser.uid);
+            const linkedTeacherProfile = fallbackTeacherBeforeCoreLoad || await findLinkedTeacherProfileForUserProfileFast(firebaseUserProfile, firebaseUser.uid);
             const staffTeacher = linkedTeacherProfile
               ? buildTeacherSessionFromProfile(linkedTeacherProfile, firebaseUserProfile, firebaseEmail, displayLoginId)
               : null;
@@ -13002,11 +13079,25 @@
               });
               setStaffRouteView('teacher');
               showTeacherPanel(staffTeacher);
+              scheduleStaffCoreDataRefresh({
+                uid: firebaseUser.uid,
+                profile: firebaseUserProfile,
+                email: firebaseEmail,
+                loginId: displayLoginId,
+                force: true
+              });
               return;
             }
             setStaffRouteView('admin');
             currentTeacher = null;
             showAdminPanel(true);
+            scheduleStaffCoreDataRefresh({
+              uid: firebaseUser.uid,
+              profile: firebaseUserProfile,
+              email: firebaseEmail,
+              loginId: displayLoginId,
+              force: true
+            });
             return;
           }
 
@@ -13054,6 +13145,13 @@
             currentTeacher = teacher;
             setSessionExpiry();
             showTeacherPanel(teacher);
+            scheduleStaffCoreDataRefresh({
+              uid: firebaseUser.uid,
+              profile: firebaseUserProfile,
+              email: firebaseEmail,
+              loginId: displayLoginId,
+              force: true
+            });
             console.log('teacher-route-success', {
               teacherId: teacher.teacherId || teacher.id,
               role: teacher.role,
