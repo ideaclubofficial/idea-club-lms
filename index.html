@@ -52095,20 +52095,23 @@ function receiptStatusText(status) {
       if (!session) return [];
       const sessionId = String(session.id || session.firebaseDocId || '').trim();
       const groupId = String(session.sharedClassGroupId || session.sharedGroupId || '').trim();
+      const crossCenterGroupId = String(session.crossCenterGroupId || '').trim();
       const baseCenters = tfGetAssignCenterKeys(session);
-      const shouldSearch = (groupId && session.isSharedClass) || session.isCrossCenterClass || session.center2 || baseCenters.length > 1;
+      const shouldSearch = (groupId && session.isSharedClass) || crossCenterGroupId || session.isCrossCenterClass || session.center2 || baseCenters.length > 1;
       if (!shouldSearch) return [session];
       const targets = monthlyPlanSessions.filter(function(item) {
         const itemId = String(item.id || item.firebaseDocId || '').trim();
         const itemGroupId = String(item.sharedClassGroupId || item.sharedGroupId || '').trim();
+        const itemCrossCenterGroupId = String(item.crossCenterGroupId || '').trim();
         const sameSharedGroup = groupId && (itemId === sessionId || itemGroupId === groupId);
+        const sameCrossCenterGroup = crossCenterGroupId && (itemId === sessionId || itemCrossCenterGroupId === crossCenterGroupId);
         const sameCrossCenterSlot = tfIsCrossCenterAssignMatch(session, item, baseCenters);
         return item &&
           item.deleted !== true &&
           item.status !== 'cancelled' &&
           item.status !== 'holiday' &&
           (itemId === sessionId || isMonthlySessionAwaitingTeacher(item)) &&
-          (sameSharedGroup || sameCrossCenterSlot);
+          (sameSharedGroup || sameCrossCenterGroup || sameCrossCenterSlot);
       });
       return targets.length ? targets : [session];
     }
@@ -53010,6 +53013,26 @@ function receiptStatusText(status) {
       return markMonthlySessionAwaitingTeacher(session);
     }
 
+    function tfExpandPendingCrossCenterSessions(session) {
+      if (!session || !session.isCrossCenterClass || !session.center2) return session ? [session] : [];
+      const centers = Array.from(new Set([session.center, session.center2].map(function(center) {
+        return String(center || '').trim();
+      }).filter(Boolean)));
+      if (centers.length < 2) return [session];
+      const groupId = session.crossCenterGroupId || createFirebaseDocId('monthlyPlanSessions');
+      return centers.map(function(center) {
+        const otherCenter = centers.find(function(item) { return item !== center; }) || '';
+        return Object.assign({}, session, {
+          center: center,
+          courseLocation: center,
+          center2: otherCenter,
+          centers: centers.slice(),
+          isCrossCenterClass: true,
+          crossCenterGroupId: groupId
+        });
+      });
+    }
+
     function tfIsDuplicatePendingMonthlySession(candidate) {
       const candidateSignature = tfPendingMonthlySessionSignature(candidate);
       return (monthlyPlanSessions || []).some(function(session) {
@@ -53060,19 +53083,21 @@ function receiptStatusText(status) {
           slots.forEach(function(slot) {
             if (slot.day !== dayKey) return;
             const candidate = tfBuildPendingMonthlySessionFromCourse(course, slot, dateText, center);
-            candidate.createdAtText = nowText;
-            candidate.updatedAtText = nowText;
-            if (getActiveHolidayForSession(candidate)) {
-              result.skipped += 1;
-              return;
-            }
-            const signature = tfPendingMonthlySessionSignature(candidate);
-            if (tfIsDuplicatePendingMonthlySession(candidate) || pendingSignatures[signature]) {
-              result.skipped += 1;
-              return;
-            }
-            pendingSignatures[signature] = true;
-            pending.push(candidate);
+            tfExpandPendingCrossCenterSessions(candidate).forEach(function(target) {
+              target.createdAtText = nowText;
+              target.updatedAtText = nowText;
+              if (getActiveHolidayForSession(target)) {
+                result.skipped += 1;
+                return;
+              }
+              const signature = tfPendingMonthlySessionSignature(target);
+              if (tfIsDuplicatePendingMonthlySession(target) || pendingSignatures[signature]) {
+                result.skipped += 1;
+                return;
+              }
+              pendingSignatures[signature] = true;
+              pending.push(target);
+            });
           });
         }
       });
