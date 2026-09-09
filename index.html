@@ -51071,11 +51071,15 @@ function receiptStatusText(status) {
       return String((course && course.access) || '').indexOf(text) !== -1;
     }
 
-    function tfCourseDefaultsCrossCenterForOnDemand(course, format) {
-      return format === 'ondemand' &&
-        !!course &&
-        courseFeatureEnabled(course, 'onDemand') &&
-        (tfCourseAccessIncludes(course, 'On-demand') || getCourseScheduleDefaults(course).ondemandSlots.length > 0);
+    function tfCourseDefaultsCrossCenter(course, format) {
+      if (!course || (format !== 'online' && format !== 'ondemand')) return false;
+      const schedule = getCourseScheduleDefaults(course);
+      if (format === 'online') {
+        return courseFeatureEnabled(course, 'online') &&
+          (tfCourseAccessIncludes(course, 'Online') || schedule.onlineSlots.length > 0);
+      }
+      return courseFeatureEnabled(course, 'onDemand') &&
+        (tfCourseAccessIncludes(course, 'On-demand') || schedule.ondemandSlots.length > 0);
     }
 
     function tfCourseSupportsFormat(course, format, selectedCenter) {
@@ -52391,7 +52395,7 @@ function receiptStatusText(status) {
         tfEl('tf-sched-notes').value = 'ซิงก์จากคอร์ส: ' + (course.name || course.title || '');
       }
       tfOnFormatChange({ skipSync: true });
-      tfApplyOnDemandCrossCenterDefault(course, finalFormat);
+      tfApplyCrossCenterDefault(course, finalFormat);
       tfRenderCourseSyncSummary(course, slot);
       tfRenderCombinedGradeOptions();
     }
@@ -52701,11 +52705,11 @@ function receiptStatusText(status) {
       if (other) sel2.value = other.value;
     }
 
-    function tfApplyOnDemandCrossCenterDefault(course, format) {
+    function tfApplyCrossCenterDefault(course, format) {
       const cross = tfEl('tf-sched-cross-center');
       const wrap = tfEl('tf-shared-center2-wrap');
       if (!cross || !tfSupportsCrossCenterClass(format)) return;
-      if (tfCourseDefaultsCrossCenterForOnDemand(course, format)) {
+      if (tfCourseDefaultsCrossCenter(course, format)) {
         cross.checked = true;
         if (wrap) wrap.classList.remove('hidden');
         if (tfEl('tf-sched-center2')) {
@@ -52966,7 +52970,7 @@ function receiptStatusText(status) {
       const courseName = (course && (course.name || course.title)) || '';
       const sessionType = slot.type || 'onsite';
       const primaryCenter = center || tfGetCourseCenterText(course) || '';
-      const autoCrossCenter = tfCourseDefaultsCrossCenterForOnDemand(course, sessionType);
+      const autoCrossCenter = tfCourseDefaultsCrossCenter(course, sessionType);
       const secondCenter = autoCrossCenter ? tfGetDefaultSecondCenterValue(primaryCenter) : '';
       const session = {
         id: '',
