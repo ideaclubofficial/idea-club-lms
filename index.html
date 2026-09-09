@@ -9211,17 +9211,9 @@
       }
       try {
         if (isStudentAccount(profile)) {
-          await ensureStudentDataLoaded(profile, { force: false });
           const uid = user.uid;
-          const linkedId = String(profile.linkedStudentId || profile.studentDocId || '').trim();
-          const memberId = String(profile.memberId || '').trim();
-          const studentId = String(profile.studentId || '').trim();
-          const student = students.find(function(s) {
-            return (uid && s.authUid === uid) ||
-                   (linkedId && String(s.firebaseDocId || s.id || '') === linkedId) ||
-                   (memberId && String(s.memberId || '') === memberId) ||
-                   (studentId && (String(s.studentId || '') === studentId || String(s.id || '') === studentId));
-          });
+          await loadStudentSessionRecord(profile);
+          const student = findStudentForUserProfile(profile, uid);
           if (!student) { hideAuthLoadingOverlay(); return; }
           currentStudent = student;
           currentTeacher = null;
@@ -9235,6 +9227,7 @@
           setSessionExpiry();
           hideAuthLoadingOverlay();
           studentLogin(student.memberId || student.studentId || user.email || '');
+          scheduleStudentDataRefresh(firebaseUserProfile, { uid: uid, force: false });
         } else {
           const primaryRole = getPrimaryAppRole(profile);
           const uid = user.uid;
@@ -9429,23 +9422,19 @@
         }
       }
 
-      for (const docId of candidates) {
-        try {
-          const doc = await db.collection('students').doc(docId).get();
-          if (doc.exists) {
-            addStudentRecord(doc.id, doc.data());
-          }
-        } catch (error) {
+      const lookupTasks = candidates.map(function(docId) {
+        return db.collection('students').doc(docId).get().then(function(doc) {
+          if (doc.exists) addStudentRecord(doc.id, doc.data());
+        }).catch(function(error) {
           console.warn('student owned doc lookup skipped:', docId, error);
-        }
-      }
-
-      try {
-        const snapshot = await db.collection('students').where('authUid', '==', uid).get();
+        });
+      });
+      lookupTasks.push(db.collection('students').where('authUid', '==', uid).get().then(function(snapshot) {
         snapshot.docs.forEach(function(doc) { addStudentRecord(doc.id, doc.data()); });
-      } catch (error) {
+      }).catch(function(error) {
         console.warn('student authUid query skipped:', error);
-      }
+      }));
+      await Promise.all(lookupTasks);
 
       return result;
     }
@@ -9455,39 +9444,82 @@
       return records[0] || null;
     }
 
-    async function loadStudentOwnCollection(collectionName, studentDocIds, authUid) {
+    function findStudentForUserProfile(userProfile, uid) {
+      const profile = userProfile || {};
+      const authUid = String(uid || profile.authUid || profile.uid || '').trim();
+      const linkedStudentId = String(profile.linkedStudentId || profile.studentDocId || '').trim();
+      const profileStudentId = String(profile.studentId || '').trim();
+      const profileMemberId = String(profile.memberId || '').trim();
+      return students.find(function(s) {
+        return (linkedStudentId && String(s.firebaseDocId || s.id || '') === linkedStudentId) ||
+          (profileStudentId && (String(s.studentId || '') === profileStudentId || String(s.id || '') === profileStudentId)) ||
+          (profileMemberId && String(s.memberId || '') === profileMemberId) ||
+          (authUid && String(s.authUid || '') === authUid);
+      }) || null;
+    }
+
+    async function loadStudentSessionRecord(userProfile) {
+      const studentRecords = await getOwnedStudentRecords(userProfile);
+      const normalizedStudents = studentRecords.map(normalizeStudentRecordForSession).filter(Boolean);
+      if (normalizedStudents.length) {
+        replaceArray(students, normalizedStudents);
+        currentStudent = normalizedStudents[0];
+      }
+      return normalizedStudents[0] || null;
+    }
+
+    function isAuthUidLikeStudentQueryKey(value, authUid) {
+      const text = String(value || '').trim();
+      if (!text) return false;
+      if (authUid && text === String(authUid)) return true;
+      return /^[A-Za-z0-9_-]{20,}$/.test(text);
+    }
+
+    function studentCollectionUsesAuthUidOnly(collectionName) {
+      return ['receipts', 'paymentBundles', 'prizeWheelSpins'].includes(collectionName);
+    }
+
+    function buildStudentOwnedQuerySpecs(collectionName, studentDocIds, authUid, paymentStudentIds) {
+      const sourceIds = collectionName === 'payments' && Array.isArray(paymentStudentIds) && paymentStudentIds.length
+        ? paymentStudentIds
+        : studentDocIds;
+      const ids = Array.isArray(sourceIds) ? sourceIds : [sourceIds];
+      const specs = [];
+      const addSpec = function(label, field, value) {
+        const clean = String(value || '').trim();
+        if (!clean) return;
+        const key = collectionName + ':' + field + ':' + clean;
+        if (specs.some(function(item) { return item.key === key; })) return;
+        specs.push({
+          key: key,
+          label: collectionName + ':' + field + ':' + clean,
+          query: db.collection(collectionName).where(field, '==', clean)
+        });
+      };
+
+      if (authUid) {
+        addSpec(collectionName + ':authUid', 'authUid', authUid);
+        if (collectionName === 'payments') addSpec(collectionName + ':studentAuthUid', 'studentAuthUid', authUid);
+      }
+      if (studentCollectionUsesAuthUidOnly(collectionName)) return specs;
+
+      ids.map(function(id) { return String(id || '').trim(); })
+        .filter(function(id, index, list) { return id && list.indexOf(id) === index; })
+        .forEach(function(studentDocId) {
+          addSpec(collectionName + ':studentId', 'studentId', studentDocId);
+          if (collectionName === 'payments' && !isAuthUidLikeStudentQueryKey(studentDocId, authUid)) {
+            addSpec(collectionName + ':memberId', 'memberId', studentDocId);
+          }
+        });
+      return specs;
+    }
+
+    async function loadStudentOwnCollection(collectionName, studentDocIds, authUid, paymentStudentIds) {
       if (!firebaseReady || !db) return [];
       try {
-        const queries = [];
-        const ids = Array.isArray(studentDocIds) ? studentDocIds : [studentDocIds];
-        ids.map(function(id) { return String(id || '').trim(); })
-          .filter(function(id, index, list) { return id && list.indexOf(id) === index; })
-          .forEach(function(studentDocId) {
-            queries.push({
-              label: collectionName + ':studentId:' + studentDocId,
-              promise: db.collection(collectionName).where('studentId', '==', studentDocId).get()
-            });
-            if (collectionName === 'payments') {
-              queries.push({
-                label: collectionName + ':memberId:' + studentDocId,
-                promise: db.collection(collectionName).where('memberId', '==', studentDocId).get()
-              });
-            }
-          });
-        if (authUid) {
-          queries.push({
-            label: collectionName + ':authUid:' + authUid,
-            promise: db.collection(collectionName).where('authUid', '==', String(authUid)).get()
-          });
-          if (collectionName === 'payments') {
-            queries.push({
-              label: collectionName + ':studentAuthUid:' + authUid,
-              promise: db.collection(collectionName).where('studentAuthUid', '==', String(authUid)).get()
-            });
-          }
-        }
-        const snapshots = await Promise.all(queries.map(function(item) {
-          return item.promise.catch(function(error) {
+        const specs = buildStudentOwnedQuerySpecs(collectionName, studentDocIds, authUid, paymentStudentIds);
+        const snapshots = await Promise.all(specs.map(function(item) {
+          return item.query.get().catch(function(error) {
             console.warn('student ' + item.label + ' query skipped:', error);
             return null;
           });
@@ -9633,22 +9665,7 @@
       }
 
       function buildStudentOwnedQueries(collectionName) {
-        const sourceIds = collectionName === 'payments' && Array.isArray(paymentStudentIds) && paymentStudentIds.length
-          ? paymentStudentIds
-          : studentDocIds;
-        const ids = Array.isArray(sourceIds) ? sourceIds : [sourceIds];
-        const queries = [];
-        ids.map(function(id) { return String(id || '').trim(); })
-          .filter(function(id, index, list) { return id && list.indexOf(id) === index; })
-          .forEach(function(studentDocId) {
-            queries.push(db.collection(collectionName).where('studentId', '==', studentDocId));
-            if (collectionName === 'payments') queries.push(db.collection(collectionName).where('memberId', '==', studentDocId));
-          });
-        if (authUid) {
-          queries.push(db.collection(collectionName).where('authUid', '==', String(authUid)));
-          if (collectionName === 'payments') queries.push(db.collection(collectionName).where('studentAuthUid', '==', String(authUid)));
-        }
-        return queries;
+        return buildStudentOwnedQuerySpecs(collectionName, studentDocIds, authUid, paymentStudentIds);
       }
 
       const paymentsQueries = buildStudentOwnedQueries('payments');
@@ -9660,70 +9677,70 @@
       const gamificationRedemptionQueries = buildStudentOwnedQueries('gamificationRedemptions');
       const prizeWheelSpinQueries = buildStudentOwnedQueries('prizeWheelSpins');
 
-      const paymentUnsubs = paymentsQueries.map(function(q) {
-        return q.onSnapshot(function(snapshot) {
+      const paymentUnsubs = paymentsQueries.map(function(spec) {
+        return spec.query.onSnapshot(function(snapshot) {
           if (snapshot.metadata && snapshot.metadata.hasPendingWrites) return;
           const changes = snapshot.docChanges().filter(function(c) { return c.type !== 'added' || true; });
           if (applyDocChanges(payments, changes)) refreshStudentUI();
-        }, function(err) { console.warn('payments listener error:', err); });
+        }, function(err) { console.warn('payments listener error:', spec.label, err); });
       });
 
-      const receiptUnsubs = receiptsQueries.map(function(q) {
-        return q.onSnapshot(function(snapshot) {
+      const receiptUnsubs = receiptsQueries.map(function(spec) {
+        return spec.query.onSnapshot(function(snapshot) {
           if (snapshot.metadata && snapshot.metadata.hasPendingWrites) return;
           const changes = snapshot.docChanges();
           if (applyDocChanges(receipts, changes)) refreshStudentUI();
-        }, function(err) { console.warn('receipts listener error:', err); });
+        }, function(err) { console.warn('receipts listener error:', spec.label, err); });
       });
 
-      const bundleUnsubs = bundleQueries.map(function(q) {
-        return q.onSnapshot(function(snapshot) {
+      const bundleUnsubs = bundleQueries.map(function(spec) {
+        return spec.query.onSnapshot(function(snapshot) {
           if (snapshot.metadata && snapshot.metadata.hasPendingWrites) return;
           const changes = snapshot.docChanges();
           if (applyDocChanges(paymentBundles, changes)) refreshStudentUI();
-        }, function(err) { console.warn('paymentBundles listener error:', err); });
+        }, function(err) { console.warn('paymentBundles listener error:', spec.label, err); });
       });
 
-      const gamificationProfileUnsubs = gamificationProfileQueries.map(function(q) {
-        return q.onSnapshot(function(snapshot) {
+      const gamificationProfileUnsubs = gamificationProfileQueries.map(function(spec) {
+        return spec.query.onSnapshot(function(snapshot) {
           if (snapshot.metadata && snapshot.metadata.hasPendingWrites) return;
           const changes = snapshot.docChanges();
           if (applyDocChanges(studentGamificationProfiles, changes)) refreshStudentUI();
-        }, function(err) { console.warn('studentGamificationProfiles listener error:', err); });
+        }, function(err) { console.warn('studentGamificationProfiles listener error:', spec.label, err); });
       });
 
-      const gamificationEventUnsubs = gamificationEventQueries.map(function(q) {
-        return q.onSnapshot(function(snapshot) {
+      const gamificationEventUnsubs = gamificationEventQueries.map(function(spec) {
+        return spec.query.onSnapshot(function(snapshot) {
           if (snapshot.metadata && snapshot.metadata.hasPendingWrites) return;
           const changes = snapshot.docChanges();
           if (applyDocChanges(studentGamificationEvents, changes)) refreshStudentUI();
-        }, function(err) { console.warn('studentGamificationEvents listener error:', err); });
+        }, function(err) { console.warn('studentGamificationEvents listener error:', spec.label, err); });
       });
 
-      const personalQuestUnsubs = personalQuestQueries.map(function(q) {
-        return q.onSnapshot(function(snapshot) {
+      const personalQuestUnsubs = personalQuestQueries.map(function(spec) {
+        return spec.query.onSnapshot(function(snapshot) {
           if (snapshot.metadata && snapshot.metadata.hasPendingWrites) return;
           const changes = snapshot.docChanges();
           if (applyDocChanges(studentPersonalQuests, changes)) refreshStudentUI();
-        }, function(err) { console.warn('studentPersonalQuests listener error:', err); });
+        }, function(err) { console.warn('studentPersonalQuests listener error:', spec.label, err); });
       });
 
-      const prizeWheelSpinUnsubs = prizeWheelSpinQueries.map(function(q) {
-        return q.onSnapshot(function(snapshot) {
+      const prizeWheelSpinUnsubs = prizeWheelSpinQueries.map(function(spec) {
+        return spec.query.onSnapshot(function(snapshot) {
           if (snapshot.metadata && snapshot.metadata.hasPendingWrites) return;
           const changes = snapshot.docChanges();
           if (applyDocChanges(prizeWheelSpins, changes)) refreshStudentUI();
-        }, function(err) { console.warn('prizeWheelSpins listener error:', err); });
+        }, function(err) { console.warn('prizeWheelSpins listener error:', spec.label, err); });
       });
 
-      const redemptionUnsubs = gamificationRedemptionQueries.map(function(q) {
-        return q.onSnapshot(function(snapshot) {
+      const redemptionUnsubs = gamificationRedemptionQueries.map(function(spec) {
+        return spec.query.onSnapshot(function(snapshot) {
           if (snapshot.metadata && snapshot.metadata.hasPendingWrites) return;
           const changes = snapshot.docChanges();
           if (applyDocChanges(gamificationRedemptions, changes)) {
             if (!prizeWheelSpinning) renderStudentGamificationPanel();
           }
-        }, function(err) { console.warn('gamificationRedemptions listener error:', err); });
+        }, function(err) { console.warn('gamificationRedemptions listener error:', spec.label, err); });
       });
 
       studentPaymentsUnsubscribe = function() { paymentUnsubs.forEach(function(u) { try { u(); } catch(e) {} }); };
@@ -9767,7 +9784,7 @@
         (firebaseReady && db ? db.collection('adminScoreRecords').where('status', '==', 'published').get().then(function(snap) { return snap.docs.map(function(d) { return Object.assign({ firebaseDocId: d.id }, d.data()); }).filter(function(x) { return x.deleted !== true; }); }).catch(function() { return []; }) : Promise.resolve([])),
         getFirebaseCollectionQuiet('paymentMonths'),
         getFirebaseCollectionQuiet('lineGroups'),
-        loadStudentOwnCollection('payments', studentPaymentIds, firebaseUser.uid),
+        loadStudentOwnCollection('payments', studentDocIds, firebaseUser.uid, studentPaymentIds),
         loadStudentOwnCollection('receipts', studentDocIds, firebaseUser.uid),
         loadStudentOwnCollection('paymentBundles', studentDocIds, firebaseUser.uid),
         getFirebaseCollectionQuiet('monthlyExamLinks'),
@@ -9867,6 +9884,39 @@
         });
       }
       return await studentDataLoadingPromise;
+    }
+
+    function refreshStudentPanelAfterDataLoad() {
+      safeRun(refreshProfileBox, 'student-profile-after-data-load');
+      safeRun(updateStudentCourseDisplay, 'student-course-after-data-load');
+      safeRun(renderStudentExamFilters, 'student-exam-after-data-load');
+      safeRun(renderStudentReceipts, 'student-receipts-after-data-load');
+      safeRun(renderStudentMobileHome, 'student-mobile-home-after-data-load');
+      safeRun(renderStudentMobileLearning, 'student-mobile-learning-after-data-load');
+      safeRun(renderStudentMobilePayment, 'student-mobile-payment-after-data-load');
+      safeRun(renderStudentMobileExam, 'student-mobile-exam-after-data-load');
+      if (getElement('onlineExamStudentContent') && getElement('onlineExamStudentContent').style.display !== 'none') {
+        safeRun(function() { loadOnlineExamCourses().then(renderOnlineExamCourseGrid); }, 'student-online-exam-after-data-load');
+      }
+    }
+
+    function scheduleStudentDataRefresh(userProfile, options) {
+      options = options || {};
+      const uid = String(options.uid || (firebaseUser && firebaseUser.uid) || '').trim();
+      if (!uid) return;
+      console.info('student-data-refresh-background-start', { uid: uid, force: !!options.force });
+      ensureStudentDataLoaded(userProfile, { force: !!options.force }).then(function(studentRecord) {
+        if (!firebaseUser || String(firebaseUser.uid || '') !== uid) return;
+        if (studentRecord) currentStudent = studentRecord;
+        console.info('student-data-refresh-background-success', {
+          uid: uid,
+          hasStudent: !!studentRecord,
+          studentCount: students.length
+        });
+        refreshStudentPanelAfterDataLoad();
+      }).catch(function(error) {
+        console.warn('student-data-refresh-background-skipped', error);
+      });
     }
 
     async function ensureCoreDataLoaded(options) {
@@ -12972,16 +13022,8 @@
               accountType: firebaseUserProfile.accountType,
               loginId: displayLoginId
             });
-            await ensureStudentDataLoaded(firebaseUserProfile, { force: true });
-            const linkedStudentId = String(firebaseUserProfile.linkedStudentId || firebaseUserProfile.studentDocId || '').trim();
-            const profileStudentId = String(firebaseUserProfile.studentId || '').trim();
-            const profileMemberId = String(firebaseUserProfile.memberId || '').trim();
-            const student = students.find(function(s) {
-              return (linkedStudentId && String(s.firebaseDocId || s.id || '') === linkedStudentId) ||
-                (profileStudentId && (String(s.studentId || '') === profileStudentId || String(s.id || '') === profileStudentId)) ||
-                (profileMemberId && String(s.memberId || '') === profileMemberId) ||
-                s.authUid === firebaseUser.uid;
-            });
+            await loadStudentSessionRecord(firebaseUserProfile);
+            const student = findStudentForUserProfile(firebaseUserProfile, firebaseUser.uid);
             if (!student) {
               console.warn('student-route-skipped-no-record', { userRole: userRole, loginId: displayLoginId });
               result.textContent = 'ไม่พบบัญชีนักเรียน กรุณาติดต่อเจ้าหน้าที่';
@@ -13020,6 +13062,7 @@
             setSessionExpiry();
             studentLogin(student.memberId || student.studentId || displayLoginId);
             firebaseUserProfile = sanitizedStudentUserProfile;
+            scheduleStudentDataRefresh(firebaseUserProfile, { uid: firebaseUser.uid, force: true });
             return;
           }
 
