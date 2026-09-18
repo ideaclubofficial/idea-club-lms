@@ -43188,19 +43188,6 @@ function receiptStatusText(status) {
       }) || null;
     }
 
-    function getCourseReadiness(course) {
-      const issues = [];
-      if (!course) return { ready: false, issues: ['ไม่พบข้อมูลคอร์ส'] };
-      if (!course.price || Number(course.price) <= 0) issues.push('ยังไม่ได้ตั้งราคา');
-      if (!course.location) issues.push('ยังไม่ได้ตั้งศูนย์ / สถานที่เรียน');
-      if (!hasCourseScheduleDefaults(course) && (!course.days || !course.days.length)) issues.push('ยังไม่ได้ตั้งวันเรียน');
-      if (!course.onlineLink && !course.roomId) issues.push('ยังไม่มีห้องเรียน Online');
-      if (!getCourseLineGroup(course)) issues.push('ยังไม่มี LINE กลุ่มสำหรับการสื่อสาร');
-      if (!hasAnyPaymentQrConfigured()) issues.push('ยังไม่มี QR Code รับชำระเงิน');
-      if (!paymentMonths || !paymentMonths.length) issues.push('ยังไม่มีเดือนชำระเงิน');
-      return { ready: issues.length === 0, issues: issues };
-    }
-
     function countDataQualityIssues() {
       const noCourseStudents = (students || []).filter(function(s) { return !s.courseId || s.course === 'ยังไม่ได้สมัครคอร์ส' || s.courseStatus === 'ยังไม่ได้สมัครคอร์ส'; });
       const pendingCourses = (students || []).filter(function(s) { return s.courseStatus === 'รออนุมัติคอร์ส'; });
@@ -43322,43 +43309,6 @@ function receiptStatusText(status) {
         if (filter) filter.value = status;
         renderAdminStudents();
       }, 50);
-    }
-
-    function injectCourseReadinessTools() {
-      const tab = getElement('admin-courses');
-      if (!tab) return;
-      ensureElement(tab, 'courseReadinessPanel', '<div id="courseReadinessPanel" class="form-box"><h3>ตรวจความพร้อมก่อนเปิดคอร์ส</h3><p style="color:#6b7280; margin-bottom:14px;">เช็กข้อมูลจำเป็นก่อนเปิดใช้งาน</p><div class="test-actions"><button class="btn btn-blue" type="button" onclick="renderAllCourseReadiness()">ตรวจทุกคอร์ส</button></div><div id="courseReadinessResult" style="margin-top:14px;"></div></div>', 'prepend');
-    }
-
-    function renderAllCourseReadiness() {
-      injectCourseReadinessTools();
-      const box = getElement('courseReadinessResult');
-      if (!box) return;
-      if (!courses || !courses.length) {
-        box.innerHTML = '<div class="feature-warning">ยังไม่มีคอร์สในระบบ</div>';
-        return;
-      }
-      const notReadyCourses = courses.map(function(c) {
-        const r = getCourseReadiness(c);
-        return { course: c, readiness: r };
-      }).filter(function(row) {
-        return !row.readiness.ready;
-      });
-      if (!notReadyCourses.length) {
-        box.innerHTML = '<div class="notice">ไม่พบรายการที่ต้องตรวจสอบ</div>';
-        return;
-      }
-      box.innerHTML = notReadyCourses.map(function(row) {
-        const c = row.course;
-        const r = row.readiness;
-        return '<div class="feature-warning"><strong>' + (c.grade || '-') + ' · ' + (c.name || '-') + '</strong><p>ยังไม่พร้อม: ' + r.issues.join(' / ') + '</p><button class="btn btn-dark" type="button" onclick="checkSingleCourseReadiness(\'' + jsArg(c.id) + '\')">ดูรายละเอียด</button></div>';
-      }).join('');
-    }
-
-    function checkSingleCourseReadiness(id) {
-      const c = (courses || []).find(function(item) { return String(item.id) === String(id); });
-      const r = getCourseReadiness(c);
-      openViewBubble('ผลตรวจความพร้อมคอร์ส', '<div class="' + (r.ready ? 'feature-ok' : 'feature-warning') + '"><h3>' + (c ? c.name : '-') + '</h3><p>' + (r.ready ? 'พร้อมเปิดใช้งาน' : 'ต้องแก้ไข:</p><ul style="margin-left:22px;">' + r.issues.map(function(i){return '<li>' + i + '</li>';}).join('') + '</ul>') + '</div>');
     }
 
     function getPaymentDocId(payment) {
@@ -43704,7 +43654,6 @@ function receiptStatusText(status) {
     showAdminTab = function(tabId) {
       originalShowAdminTabFinal(tabId);
       if (tabId === 'admin-dashboard') { renderNewMemberNotificationBox(); renderAdminDataQualityBox(); }
-      if (tabId === 'admin-courses') { injectCourseReadinessTools(); renderAllCourseReadiness(); }
       if (tabId === 'admin-payment') { injectOverdueDayFilter(); injectPaymentOwnerDiagnosticPanel(); }
       if (tabId === 'admin-settings') { injectBackupButton(); injectAuthCleanupPanel(); injectAdminRoleSettings(); }
       applyAdminRoleVisibility();
