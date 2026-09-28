@@ -13,6 +13,9 @@
   <script>tailwind.config = { corePlugins: { preflight: false } };</script>
   <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
   <style>
+    [data-staff-data-state]:not([data-staff-data-state="ready"]) > :not(.staff-data-load-status) { display: none !important; }
+    [data-student-home-state]:not([data-student-home-state="ready"]) > :not(.student-home-load-status) { display: none !important; }
+    [data-student-feature-state]:not([data-student-feature-state="ready"]) > :not(.student-feature-load-status) { display: none !important; }
     .menu-icon {
       display: inline-flex;
       width: 22px;
@@ -4138,10 +4141,6 @@
       }
     }
   </style>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
 </head>
 <body>
   <style>@keyframes ideaClubSpin{to{transform:rotate(360deg)}}</style>
@@ -6569,6 +6568,7 @@
                     <p style="color:#6b7280; margin:10px 0;">ปกติไม่ต้องใช้ ใช้เฉพาะกรณีต้องซ่อมข้อมูล</p>
                     <button class="btn btn-dark" type="button" onclick="createMonthlyPaymentRecords()">สร้าง payment records ล่วงหน้าของเดือนนี้</button>
                     <button class="btn btn-blue" type="button" style="margin-top:8px;" onclick="runRepairPaymentStatusFromReceipts()">ซ่อมสถานะ/ราคาจากใบเสร็จ</button>
+                    <button class="btn btn-dark" type="button" style="margin-top:8px;" onclick="runLegacyPaymentRepairs()">ซ่อมข้อมูลการชำระเงินและใบเสร็จเก่า</button>
                     <p style="color:#6b7280; font-size:12px; margin-top:4px;">กดเมื่อ: นักเรียนที่ชำระแล้วยังขึ้นรอชำระ หรือราคาแสดงผิด — ระบบจะซ่อมจากใบเสร็จที่ออกไปแล้ว</p>
                   </details>
                 </div>
@@ -9115,14 +9115,15 @@
     let firebaseUser = null;
     let firebaseUserProfile = null;
     let coreDataLoaded = false;
-    let coreDataLoadingPromise = null;
     let studentDataLoadedForUid = '';
     let studentDataLoadingPromise = null;
-    let studentPaymentsUnsubscribe = null;
-    let studentReceiptsUnsubscribe = null;
-    let studentPaymentBundlesUnsubscribe = null;
-    let studentGamificationUnsubscribe = null;
-    let adminPaymentDataUnsubscribe = null;
+    let studentDataLoadingForUid = '';
+    let studentDataSessionUid = '';
+    let studentDataSessionVersion = 0;
+    const STUDENT_HOME_REALTIME_COLLECTIONS = ['payments', 'receipts', 'paymentBundles', 'studentGamificationProfiles', 'studentGamificationEvents', 'studentPersonalQuests'];
+    let studentRealtimeSession = null;
+    let studentRealtimeRefreshTimer = null;
+    let adminRealtimeSession = null;
     let adminPaymentDataRefreshTimer = null;
     let authSessionRoutingDone = false;
     const SESSION_DURATION_MS = 24 * 60 * 60 * 1000; // 24 hours
@@ -9172,6 +9173,11 @@
       functionsApi = firebase.app().functions("asia-southeast1");
       firebaseReady = true;
       auth.onAuthStateChanged(async function(user) {
+        const nextUid = user ? user.uid : '';
+        if (studentDataSessionUid !== nextUid) {
+          resetStudentDataSession(nextUid);
+          stopAdminPaymentDataListeners();
+        }
         firebaseUser = user || null;
         firebaseUserProfile = null;
         if (user) {
@@ -9323,7 +9329,7 @@
       expenses:           { orderField: 'updatedAt', orderDir: 'desc', limit: 600 }
     };
 
-    async function getFirebaseCollection(collectionName, includeDeleted) {
+    async function getFirebaseCollection(collectionName, includeDeleted, loadStatus) {
       if (!firebaseReady || !db) return [];
       let query = db.collection(collectionName);
       const cap = COLLECTION_FETCH_LIMITS[collectionName];
@@ -9335,6 +9341,7 @@
       try {
         snapshot = await query.get();
       } catch (error) {
+        if (loadStatus) loadStatus.failed = true;
         console.warn('skip firebase collection:', collectionName, error);
         return [];
       }
@@ -9346,8 +9353,8 @@
       });
     }
 
-    async function getFirebasePaymentCollection(includeDeleted) {
-      const baseItems = await getFirebaseCollection('payments', includeDeleted);
+    async function getFirebasePaymentCollection(includeDeleted, loadStatus) {
+      const baseItems = await getFirebaseCollection('payments', includeDeleted, loadStatus);
       const byId = {};
       baseItems.forEach(function(item) {
         byId[String(item.firebaseDocId || item.id || '')] = item;
@@ -9359,6 +9366,7 @@
       ];
       const snapshots = await Promise.all(pendingQueries.map(function(query) {
         return query.get().catch(function(error) {
+          if (loadStatus) loadStatus.failed = true;
           console.warn('skip pending payment query:', error);
           return null;
         });
@@ -9374,11 +9382,12 @@
       return Object.keys(byId).map(function(id) { return byId[id]; });
     }
 
-    async function getFirebaseCollectionQuiet(collectionName, includeDeleted) {
+    async function getFirebaseCollectionQuiet(collectionName, includeDeleted, loadStatus) {
       if (!firebaseReady || !db) return [];
       try {
-        return await getFirebaseCollection(collectionName, includeDeleted);
+        return await getFirebaseCollection(collectionName, includeDeleted, loadStatus);
       } catch (error) {
+        if (loadStatus) loadStatus.failed = true;
         console.warn('student optional collection skipped:', collectionName, error);
         return [];
       }
@@ -9396,7 +9405,7 @@
       }));
     }
 
-    async function getOwnedStudentRecords(userProfile) {
+    async function getOwnedStudentRecords(userProfile, loadStatus) {
       if (!firebaseReady || !db || !firebaseUser) return [];
       const uid = firebaseUser.uid;
       const linkedStudentId = String(userProfile && (userProfile.linkedStudentId || userProfile.studentDocId) || '').trim();
@@ -9430,12 +9439,14 @@
         return db.collection('students').doc(docId).get().then(function(doc) {
           if (doc.exists) addStudentRecord(doc.id, doc.data());
         }).catch(function(error) {
+          if (loadStatus) loadStatus.failed = true;
           console.warn('student owned doc lookup skipped:', docId, error);
         });
       });
       lookupTasks.push(db.collection('students').where('authUid', '==', uid).get().then(function(snapshot) {
         snapshot.docs.forEach(function(doc) { addStudentRecord(doc.id, doc.data()); });
       }).catch(function(error) {
+          if (loadStatus) loadStatus.failed = true;
         console.warn('student authUid query skipped:', error);
       }));
       await Promise.all(lookupTasks);
@@ -9518,62 +9529,178 @@
       return specs;
     }
 
-    async function loadStudentOwnCollection(collectionName, studentDocIds, authUid, paymentStudentIds) {
-      if (!firebaseReady || !db) return [];
-      try {
-        const specs = buildStudentOwnedQuerySpecs(collectionName, studentDocIds, authUid, paymentStudentIds);
-        const snapshots = await Promise.all(specs.map(function(item) {
-          return item.query.get().catch(function(error) {
-            console.warn('student ' + item.label + ' query skipped:', error);
-            return null;
-          });
-        }));
-        const seen = new Set();
-        const result = [];
-        for (const snapshot of snapshots) {
-          if (!snapshot) continue;
-          for (const doc of snapshot.docs) {
-            if (!seen.has(doc.id) && doc.data().deleted !== true) {
-              seen.add(doc.id);
-              result.push(Object.assign({ firebaseDocId: doc.id }, doc.data()));
-            }
-          }
+
+
+    function createRealtimeCollectionGroup(specs, target, isCurrent, onChange) {
+      const memberships = specs.map(function() { return new Set(); });
+      const records = new Map(target.map(function(record) { return [String(record.firebaseDocId || record.id || ''), record]; }));
+      const skippedPending = specs.map(function() { return false; });
+      const settled = specs.map(function() { return false; });
+      const unsubs = [];
+      let resolveReady;
+      const group = { active: true, failed: false, initialized: false };
+      group.ready = new Promise(function(resolve) { resolveReady = resolve; });
+      const publish = function() {
+        if (!group.active || !isCurrent()) return;
+        const ids = new Set();
+        memberships.forEach(function(members) { members.forEach(function(id) { ids.add(id); }); });
+        const next = [];
+        ids.forEach(function(id) {
+          const record = records.get(id);
+          if (record && record.deleted !== true) next.push(record);
+        });
+        Array.from(records.keys()).forEach(function(id) { if (!ids.has(id)) records.delete(id); });
+        replaceArray(target, next);
+        onChange();
+      };
+      const settle = function(index) {
+        settled[index] = true;
+        if (!group.initialized && settled.every(Boolean)) {
+          group.initialized = true;
+          publish();
+          resolveReady(!group.failed);
         }
-        return result;
-      } catch (error) {
-        console.warn('student ' + collectionName + ' load skipped:', error);
-        return [];
+      };
+      group.stop = function() {
+        if (!group.active) return;
+        group.active = false;
+        unsubs.forEach(function(unsub) { try { unsub(); } catch(e) {} });
+        resolveReady(false);
+      };
+      specs.forEach(function(spec, index) {
+        const onError = function(error) {
+          if (!group.active || !isCurrent()) return;
+          group.failed = true;
+          console.warn('realtime collection query failed:', spec.key || spec.label, error);
+          settle(index);
+        };
+        try {
+          const unsubscribe = spec.query.onSnapshot({ includeMetadataChanges: true }, function(snapshot) {
+            if (!group.active || !isCurrent()) return;
+            // Metadata events deliver the confirmed snapshot even if only pending-write state changed.
+            if (snapshot.metadata && snapshot.metadata.hasPendingWrites) { skippedPending[index] = true; return; }
+            const wasInitialized = group.initialized;
+            memberships[index] = new Set(snapshot.docs.map(function(doc) { return doc.id; }));
+            snapshot.docs.forEach(function(doc) {
+              if (!records.has(doc.id) || !settled[index] || skippedPending[index]) {
+                const data = Object.assign({ firebaseDocId: doc.id }, doc.data());
+                const existing = records.get(doc.id);
+                records.set(doc.id, existing ? Object.assign(existing, data) : data);
+              }
+            });
+            snapshot.docChanges().forEach(function(change) {
+              if (change.type === 'removed') return; // Another query may still own this document.
+              const data = Object.assign({ firebaseDocId: change.doc.id }, change.doc.data());
+              const existing = records.get(change.doc.id);
+              records.set(change.doc.id, existing ? Object.assign(existing, data) : data);
+            });
+            skippedPending[index] = false;
+            settle(index);
+            if (wasInitialized) publish();
+          }, onError);
+          unsubs.push(unsubscribe);
+        } catch (error) { onError(error); }
+      });
+      if (!specs.length) {
+        group.initialized = true;
+        publish();
+        resolveReady(true);
       }
+      return group;
     }
 
     function stopStudentPaymentListeners() {
-      if (studentPaymentsUnsubscribe) { try { studentPaymentsUnsubscribe(); } catch(e) {} studentPaymentsUnsubscribe = null; }
-      if (studentReceiptsUnsubscribe) { try { studentReceiptsUnsubscribe(); } catch(e) {} studentReceiptsUnsubscribe = null; }
-      if (studentPaymentBundlesUnsubscribe) { try { studentPaymentBundlesUnsubscribe(); } catch(e) {} studentPaymentBundlesUnsubscribe = null; }
-      if (studentGamificationUnsubscribe) { try { studentGamificationUnsubscribe(); } catch(e) {} studentGamificationUnsubscribe = null; }
-    }
-
-    function applyRealtimeDocChanges(targetArray, changes) {
-      let changed = false;
-      changes.forEach(function(change) {
-        const data = Object.assign({ firebaseDocId: change.doc.id }, change.doc.data());
-        const idx = targetArray.findIndex(function(x) { return String(x.firebaseDocId || x.id || '') === String(change.doc.id); });
-        if (change.type === 'removed' || data.deleted === true) {
-          if (idx !== -1) { targetArray.splice(idx, 1); changed = true; }
-        } else if (idx !== -1) {
-          Object.assign(targetArray[idx], data);
-          changed = true;
-        } else {
-          targetArray.push(data);
-          changed = true;
-        }
-      });
-      return changed;
+      if (studentRealtimeSession) {
+        studentRealtimeSession.active = false;
+        Object.values(studentRealtimeSession.groups).forEach(function(group) { group.stop(); });
+        studentRealtimeSession = null;
+      }
+      if (studentRealtimeRefreshTimer) { clearTimeout(studentRealtimeRefreshTimer); studentRealtimeRefreshTimer = null; }
     }
 
     function stopAdminPaymentDataListeners() {
-      if (adminPaymentDataUnsubscribe) { try { adminPaymentDataUnsubscribe(); } catch(e) {} adminPaymentDataUnsubscribe = null; }
+      if (adminRealtimeSession) {
+        adminRealtimeSession.active = false;
+        Object.values(adminRealtimeSession.groups).forEach(function(group) { group.stop(); });
+        adminRealtimeSession = null;
+      }
       if (adminPaymentDataRefreshTimer) { clearTimeout(adminPaymentDataRefreshTimer); adminPaymentDataRefreshTimer = null; }
+    }
+
+    const adminPaymentRenderDirty = new Set();
+    let adminPaymentRenderQueued = false;
+    let adminPaymentPreviewRequest = null;
+
+    function isAdminPaymentSurfaceVisible(elementId) {
+      let element = getElement(elementId);
+      if (!element) return false;
+      while (element) {
+        const loading = element.getAttribute && element.getAttribute('data-staff-data-state');
+        if (loading && loading !== 'ready') return false;
+        if (element.hidden || (element.classList && element.classList.contains('hidden')) ||
+            (element.style && element.style.display === 'none')) return false;
+        element = element.parentElement;
+      }
+      return true;
+    }
+
+    function requestAdminPaymentRender(parts) {
+      parts.forEach(function(part) { adminPaymentRenderDirty.add(part); });
+      if (adminPaymentRenderQueued) return;
+      adminPaymentRenderQueued = true;
+      // Coalesce synchronous save callbacks and nested legacy render requests.
+      Promise.resolve().then(flushAdminPaymentRender);
+    }
+
+    function flushAdminPaymentRender() {
+      adminPaymentRenderQueued = false;
+      const surfaces = [
+        ['table', 'paymentTableBody', renderPaymentTableNow],
+        ['bundles', 'paymentBundlePanel', renderPaymentBundlePanelNow],
+        ['summary', 'pendingSlipCount', updatePaymentSummaryNow],
+        ['dashboard', 'dashTotalStudents', renderAdminDashboardNow],
+        ['dashboardSummary', 'dashboardPaymentSummary', renderDashboardPaymentSummaryNow],
+        ['preview', 'paymentRecordPreviewTableBody', function() {
+          const request = adminPaymentPreviewRequest;
+          adminPaymentPreviewRequest = null;
+          const sameMonth = request && request.month === getSelectedPaymentRecordMonth();
+          renderPaymentRecordPreviewNow(sameMonth ? request.message : undefined, sameMonth ? request.isError : undefined);
+        }]
+      ];
+      surfaces.forEach(function(surface) {
+        const part = surface[0];
+        if (!adminPaymentRenderDirty.has(part) || !isAdminPaymentSurfaceVisible(surface[1])) return;
+        adminPaymentRenderDirty.delete(part);
+        safeRun(surface[2], 'admin-payment-render-' + part);
+      });
+    }
+
+    // Keep existing event handlers; only the queue invokes the DOM renderers.
+    function renderPaymentTable() {
+      requestAdminPaymentRender(['table', 'bundles', 'summary', 'dashboardSummary']);
+    }
+
+    function renderPaymentBundlePanel() {
+      requestAdminPaymentRender(['bundles']);
+    }
+
+    function updatePaymentSummary() {
+      requestAdminPaymentRender(['summary', 'dashboardSummary']);
+    }
+
+    function renderAdminDashboard() {
+      requestAdminPaymentRender(['dashboard', 'summary', 'dashboardSummary']);
+    }
+
+    function renderDashboardPaymentSummary() {
+      requestAdminPaymentRender(['dashboardSummary']);
+    }
+
+    function renderPaymentRecordPreview(message, isError) {
+      if (message !== undefined) {
+        adminPaymentPreviewRequest = { message: message, isError: isError, month: getSelectedPaymentRecordMonth() };
+      }
+      requestAdminPaymentRender(['preview']);
     }
 
     function scheduleAdminPaymentDataRefresh(reason) {
@@ -9590,180 +9717,314 @@
       }, 150);
     }
 
-    function startAdminPaymentDataListeners() {
+    function startAdminPaymentDataListeners(options) {
+      options = options || {};
+      if (!firebaseReady || !db || !firebaseUser) return null;
+      if (!hasPermission('admin.finance') && !hasPermission('admin.full')) {
+        stopAdminPaymentDataListeners();
+        return null;
+      }
+      const uid = firebaseUser.uid;
+      if (!options.force && adminRealtimeSession && adminRealtimeSession.uid === uid &&
+          !Object.values(adminRealtimeSession.groups).some(function(group) { return group.failed; })) return adminRealtimeSession;
       stopAdminPaymentDataListeners();
-      if (!firebaseReady || !db) return;
-      if (!hasPermission('admin.finance') && !hasPermission('admin.full')) return;
-      const specs = [
-        { collection: 'payments', target: payments },
-        { collection: 'paymentBundles', target: paymentBundles },
-        { collection: 'receipts', target: receipts }
-      ];
-      const unsubs = specs.map(function(spec) {
-        let query = db.collection(spec.collection);
-        const cap = COLLECTION_FETCH_LIMITS[spec.collection];
+      const session = { uid: uid, active: true, groups: {} };
+      adminRealtimeSession = session;
+      const isCurrent = function() { return session.active && adminRealtimeSession === session && firebaseUser && firebaseUser.uid === uid; };
+      [['payments', payments], ['paymentBundles', paymentBundles], ['receipts', receipts]].forEach(function(item) {
+        const name = item[0];
+        let query = db.collection(name);
+        const cap = COLLECTION_FETCH_LIMITS[name];
         if (cap && cap.orderField) query = query.orderBy(cap.orderField, cap.orderDir || 'asc');
         if (cap && cap.limit) query = query.limit(cap.limit);
-        return query.onSnapshot(function(snapshot) {
-          if (snapshot.metadata && snapshot.metadata.hasPendingWrites) return;
-          if (applyRealtimeDocChanges(spec.target, snapshot.docChanges())) {
-            scheduleAdminPaymentDataRefresh(spec.collection);
-          }
-        }, function(err) {
-          console.warn('admin ' + spec.collection + ' listener error:', err);
+        const specs = [{ key: name + ':main', query: query }];
+        if (name === 'payments') {
+          [['slipStatus', 'waiting_admin_review'], ['status', 'รอตรวจสลิป'], ['paymentStatus', 'รอตรวจสลิป']].forEach(function(filter) {
+            specs.push({ key: name + ':' + filter[0], query: db.collection(name).where(filter[0], '==', filter[1]) });
+          });
+        }
+        session.groups[name] = createRealtimeCollectionGroup(specs, item[1], isCurrent, function() {
+          scheduleAdminPaymentDataRefresh(name);
         });
       });
-      [
-        db.collection('payments').where('slipStatus', '==', 'waiting_admin_review'),
-        db.collection('payments').where('status', '==', 'รอตรวจสลิป'),
-        db.collection('payments').where('paymentStatus', '==', 'รอตรวจสลิป')
-      ].forEach(function(query, index) {
-        unsubs.push(query.onSnapshot(function(snapshot) {
-          if (snapshot.metadata && snapshot.metadata.hasPendingWrites) return;
-          if (applyRealtimeDocChanges(payments, snapshot.docChanges())) {
-            scheduleAdminPaymentDataRefresh('pending-payment-slip-' + index);
-          }
-        }, function(err) {
-          console.warn('admin pending payment listener error:', err);
-        }));
-      });
-      adminPaymentDataUnsubscribe = function() {
-        unsubs.forEach(function(unsub) { try { unsub(); } catch(e) {} });
-      };
+      return session;
     }
 
-    function startStudentPaymentListeners(studentDocIds, authUid, paymentStudentIds) {
-      stopStudentPaymentListeners();
-      if (!firebaseReady || !db) return;
-
-      function applyDocChanges(targetArray, changes) {
-        let changed = false;
-        changes.forEach(function(change) {
-          const data = Object.assign({ firebaseDocId: change.doc.id }, change.doc.data());
-          if (change.type === 'removed') {
-            const idx = targetArray.findIndex(function(x) { return x.firebaseDocId === change.doc.id; });
-            if (idx !== -1) { targetArray.splice(idx, 1); changed = true; }
-          } else {
-            if (data.deleted === true) {
-              const idx = targetArray.findIndex(function(x) { return x.firebaseDocId === change.doc.id; });
-              if (idx !== -1) { targetArray.splice(idx, 1); changed = true; }
-            } else {
-              const idx = targetArray.findIndex(function(x) { return x.firebaseDocId === change.doc.id; });
-              if (idx !== -1) { Object.assign(targetArray[idx], data); changed = true; }
-              else { targetArray.push(data); changed = true; }
-            }
-          }
-        });
-        return changed;
-      }
-
-      function refreshStudentUI() {
+    function scheduleStudentRealtimeRefresh(session) {
+      if (!session.active || !session.uiReady) return;
+      if (studentRealtimeRefreshTimer) clearTimeout(studentRealtimeRefreshTimer);
+      studentRealtimeRefreshTimer = window.setTimeout(function() {
+        studentRealtimeRefreshTimer = null;
+        if (!session.active || studentRealtimeSession !== session || !firebaseUser || firebaseUser.uid !== session.uid) return;
         safeRun(refreshStudentPaymentMonthSelect, 'listener-refresh-month');
         safeRun(updateStudentSelectedPaymentMonth, 'listener-update-month');
         safeRun(renderStudentReceipts, 'listener-receipts');
         safeRun(renderStudentMobilePayment, 'listener-mobile-payment');
-        if (!prizeWheelSpinning) {
-          safeRun(renderStudentGamificationPanel, 'listener-gamification-panel');
-        }
+        if (!prizeWheelSpinning) safeRun(renderStudentGamificationPanel, 'listener-gamification-panel');
         safeRun(updateStudentCourseDisplay, 'listener-course-display');
-      }
-
-      function buildStudentOwnedQueries(collectionName) {
-        return buildStudentOwnedQuerySpecs(collectionName, studentDocIds, authUid, paymentStudentIds);
-      }
-
-      const paymentsQueries = buildStudentOwnedQueries('payments');
-      const bundleQueries = buildStudentOwnedQueries('paymentBundles');
-      const receiptsQueries = buildStudentOwnedQueries('receipts');
-      const gamificationProfileQueries = buildStudentOwnedQueries('studentGamificationProfiles');
-      const gamificationEventQueries = buildStudentOwnedQueries('studentGamificationEvents');
-      const personalQuestQueries = buildStudentOwnedQueries('studentPersonalQuests');
-      const gamificationRedemptionQueries = buildStudentOwnedQueries('gamificationRedemptions');
-      const prizeWheelSpinQueries = buildStudentOwnedQueries('prizeWheelSpins');
-
-      const paymentUnsubs = paymentsQueries.map(function(spec) {
-        return spec.query.onSnapshot(function(snapshot) {
-          if (snapshot.metadata && snapshot.metadata.hasPendingWrites) return;
-          const changes = snapshot.docChanges().filter(function(c) { return c.type !== 'added' || true; });
-          if (applyDocChanges(payments, changes)) refreshStudentUI();
-        }, function(err) { console.warn('payments listener error:', spec.label, err); });
-      });
-
-      const receiptUnsubs = receiptsQueries.map(function(spec) {
-        return spec.query.onSnapshot(function(snapshot) {
-          if (snapshot.metadata && snapshot.metadata.hasPendingWrites) return;
-          const changes = snapshot.docChanges();
-          if (applyDocChanges(receipts, changes)) refreshStudentUI();
-        }, function(err) { console.warn('receipts listener error:', spec.label, err); });
-      });
-
-      const bundleUnsubs = bundleQueries.map(function(spec) {
-        return spec.query.onSnapshot(function(snapshot) {
-          if (snapshot.metadata && snapshot.metadata.hasPendingWrites) return;
-          const changes = snapshot.docChanges();
-          if (applyDocChanges(paymentBundles, changes)) refreshStudentUI();
-        }, function(err) { console.warn('paymentBundles listener error:', spec.label, err); });
-      });
-
-      const gamificationProfileUnsubs = gamificationProfileQueries.map(function(spec) {
-        return spec.query.onSnapshot(function(snapshot) {
-          if (snapshot.metadata && snapshot.metadata.hasPendingWrites) return;
-          const changes = snapshot.docChanges();
-          if (applyDocChanges(studentGamificationProfiles, changes)) refreshStudentUI();
-        }, function(err) { console.warn('studentGamificationProfiles listener error:', spec.label, err); });
-      });
-
-      const gamificationEventUnsubs = gamificationEventQueries.map(function(spec) {
-        return spec.query.onSnapshot(function(snapshot) {
-          if (snapshot.metadata && snapshot.metadata.hasPendingWrites) return;
-          const changes = snapshot.docChanges();
-          if (applyDocChanges(studentGamificationEvents, changes)) refreshStudentUI();
-        }, function(err) { console.warn('studentGamificationEvents listener error:', spec.label, err); });
-      });
-
-      const personalQuestUnsubs = personalQuestQueries.map(function(spec) {
-        return spec.query.onSnapshot(function(snapshot) {
-          if (snapshot.metadata && snapshot.metadata.hasPendingWrites) return;
-          const changes = snapshot.docChanges();
-          if (applyDocChanges(studentPersonalQuests, changes)) refreshStudentUI();
-        }, function(err) { console.warn('studentPersonalQuests listener error:', spec.label, err); });
-      });
-
-      const prizeWheelSpinUnsubs = prizeWheelSpinQueries.map(function(spec) {
-        return spec.query.onSnapshot(function(snapshot) {
-          if (snapshot.metadata && snapshot.metadata.hasPendingWrites) return;
-          const changes = snapshot.docChanges();
-          if (applyDocChanges(prizeWheelSpins, changes)) refreshStudentUI();
-        }, function(err) { console.warn('prizeWheelSpins listener error:', spec.label, err); });
-      });
-
-      const redemptionUnsubs = gamificationRedemptionQueries.map(function(spec) {
-        return spec.query.onSnapshot(function(snapshot) {
-          if (snapshot.metadata && snapshot.metadata.hasPendingWrites) return;
-          const changes = snapshot.docChanges();
-          if (applyDocChanges(gamificationRedemptions, changes)) {
-            if (!prizeWheelSpinning) renderStudentGamificationPanel();
-          }
-        }, function(err) { console.warn('gamificationRedemptions listener error:', spec.label, err); });
-      });
-
-      studentPaymentsUnsubscribe = function() { paymentUnsubs.forEach(function(u) { try { u(); } catch(e) {} }); };
-      studentReceiptsUnsubscribe = function() { receiptUnsubs.forEach(function(u) { try { u(); } catch(e) {} }); };
-      studentPaymentBundlesUnsubscribe = function() { bundleUnsubs.forEach(function(u) { try { u(); } catch(e) {} }); };
-      studentGamificationUnsubscribe = function() {
-        gamificationProfileUnsubs.concat(gamificationEventUnsubs, personalQuestUnsubs, redemptionUnsubs, prizeWheelSpinUnsubs).forEach(function(u) { try { u(); } catch(e) {} });
-      };
+      }, 150);
     }
 
-    async function loadStudentDataOnly(userProfile) {
+    function startStudentPaymentListeners(studentDocIds, authUid, paymentStudentIds, collectionNames) {
+      if (!firebaseReady || !db || !firebaseUser || firebaseUser.uid !== authUid) return null;
+      const key = JSON.stringify([authUid, studentDocIds.slice().sort(), (paymentStudentIds || []).slice().sort()]);
+      if (!studentRealtimeSession || studentRealtimeSession.key !== key) {
+        stopStudentPaymentListeners();
+        studentRealtimeSession = { uid: authUid, key: key, active: true, uiReady: false, groups: {},
+          studentDocIds: studentDocIds.slice(), paymentStudentIds: (paymentStudentIds || []).slice() };
+      }
+      const session = studentRealtimeSession;
+      const isCurrent = function() { return session.active && studentRealtimeSession === session && firebaseUser && firebaseUser.uid === authUid; };
+      [
+        ['payments', payments], ['receipts', receipts], ['paymentBundles', paymentBundles],
+        ['studentGamificationProfiles', studentGamificationProfiles], ['studentGamificationEvents', studentGamificationEvents],
+        ['studentPersonalQuests', studentPersonalQuests], ['gamificationRedemptions', gamificationRedemptions], ['prizeWheelSpins', prizeWheelSpins]
+      ].forEach(function(item) {
+        if (collectionNames && !collectionNames.includes(item[0])) return;
+        const existing = session.groups[item[0]];
+        if (existing && !existing.failed) return;
+        if (existing) existing.stop();
+        const specs = buildStudentOwnedQuerySpecs(item[0], studentDocIds, authUid, paymentStudentIds);
+        session.groups[item[0]] = createRealtimeCollectionGroup(specs, item[1], isCurrent, function() {
+          scheduleStudentRealtimeRefresh(session);
+        });
+      });
+      return session;
+    }
+
+    async function waitForRealtimeCollection(session, name, loadStatus) {
+      const success = await session.groups[name].ready;
+      if ((!success || session.groups[name].failed) && loadStatus) loadStatus.failed = true;
+    }
+
+    const STUDENT_FEATURE_VIEWS = {
+      learning: { label: 'ห้องเรียนและคลิปเรียน', ids: ['student-learning'] },
+      exams: { label: 'ข้อสอบและผลคะแนน', ids: ['student-monthly-test'] },
+      games: { label: 'กิจกรรมและรางวัล', ids: ['studentGamificationPanel', 'studentMobileGamificationPanel'] }
+    };
+    let studentFeatureStates = {};
+    let studentFeatureObserver = null;
+
+    function updateStudentHomeLoadStatus(status) {
+      const root = getElement('studentDashboard');
+      if (!root) return;
+      root.setAttribute('data-student-home-state', status);
+      root.setAttribute('aria-busy', status === 'loading' ? 'true' : 'false');
+      let notice = root.querySelector('.student-home-load-status');
+      if (status === 'ready') { if (notice) notice.remove(); return; }
+      if (!notice) {
+        notice = document.createElement('div');
+        notice.className = 'student-home-load-status notice';
+        notice.setAttribute('role', 'status');
+        root.prepend(notice);
+      }
+      notice.innerHTML = status === 'error'
+        ? '<strong>โหลดข้อมูลนักเรียนไม่ครบ</strong><p>กรุณาลองใหม่เพื่อดูข้อมูลล่าสุด</p><button class="btn btn-blue" type="button" onclick="scheduleStudentDataRefresh(firebaseUserProfile, { force: true })">ลองใหม่</button>'
+        : '<strong>กำลังโหลดข้อมูลนักเรียน...</strong>';
+    }
+
+    function isStudentFeatureReady(name) {
+      return !!(studentFeatureStates[name] && studentFeatureStates[name].status === 'ready');
+    }
+
+    function resetStudentFeatureData() {
+      studentFeatureStates = {};
+      if (studentFeatureObserver) studentFeatureObserver.disconnect();
+      studentFeatureObserver = null;
+      [onDemandClips, monthlyExamLinks, leaderboardProfiles, gamificationRewards, specialVoucherActivities,
+        prizeWheelItems, prizeWheelSpins, avatarBattleQuestions, gamificationRedemptions].forEach(function(items) { items.length = 0; });
+      onlineExamCourseCache = [];
+      onlineExamCoursesLoaded = false;
+      onlineExamCoursesLoadSeq++;
+      dailyLoginQuestTriggeredThisSession = false;
+    }
+
+    function updateStudentFeatureStatus(name) {
+      const view = STUDENT_FEATURE_VIEWS[name];
+      if (!view) return;
+      const status = studentFeatureStates[name] ? studentFeatureStates[name].status : 'idle';
+      view.ids.forEach(function(id) {
+        const root = getElement(id);
+        if (!root) return;
+        root.setAttribute('data-student-feature-state', status);
+        root.setAttribute('aria-busy', status === 'loading' ? 'true' : 'false');
+        let notice = root.querySelector('.student-feature-load-status');
+        if (status === 'ready') { if (notice) notice.remove(); return; }
+        if (!notice) {
+          notice = document.createElement('div');
+          notice.className = 'student-feature-load-status notice';
+          notice.setAttribute('role', 'status');
+          root.prepend(notice);
+        }
+        const text = status === 'error' ? 'โหลดข้อมูลไม่สำเร็จ กรุณาลองใหม่' : status === 'loading' ? 'กำลังโหลดข้อมูล...' : 'ข้อมูลจะโหลดเมื่อเปิดส่วนนี้';
+        notice.innerHTML = '<strong>' + view.label + '</strong><p>' + text + '</p>' +
+          (status === 'loading' ? '' : '<button class="btn btn-blue" type="button" onclick="requestStudentFeatureData(\'' + name + '\', true)">' + (status === 'error' ? 'ลองใหม่' : 'โหลดข้อมูล') + '</button>');
+      });
+    }
+
+    function prepareStudentFeatureViews() {
+      if (!isCurrentStudentSession()) return;
+      if (!studentFeatureObserver && typeof IntersectionObserver === 'function') {
+        studentFeatureObserver = new IntersectionObserver(function(entries) {
+          entries.forEach(function(entry) {
+            if (!entry.isIntersecting) return;
+            const name = entry.target.getAttribute('data-student-feature');
+            if (!studentFeatureStates[name] || studentFeatureStates[name].status === 'idle') requestStudentFeatureData(name);
+          });
+        }, { rootMargin: '100px 0px' });
+      }
+      Object.keys(STUDENT_FEATURE_VIEWS).forEach(function(name) {
+        updateStudentFeatureStatus(name);
+        STUDENT_FEATURE_VIEWS[name].ids.forEach(function(id) {
+          const root = getElement(id);
+          if (!root) return;
+          root.setAttribute('data-student-feature', name);
+          if (studentFeatureObserver) studentFeatureObserver.observe(root);
+        });
+      });
+    }
+
+    function renderStudentFeatureData(name) {
+      if (name === 'learning') {
+        const course = getCurrentStudentCourse();
+        const entitled = studentCanUseCourseEntitlements(currentStudent) && course ? [course] : [];
+        const grade = currentStudent && currentStudent.grade ? currentStudent.grade : getProfileGrade();
+        renderStudentOnlineClasses(entitled, grade);
+        renderStudentOnDemandClasses(entitled, grade);
+        renderStudentMobileLearning();
+      } else if (name === 'exams') {
+        renderStudentExamFilters();
+        renderScoreHistoryByMonth();
+        renderStudentMobileExam();
+        renderOnlineExamCourseGrid();
+        safeRun(updateStudentInWebExamUx, 'student-feature-exam-ux');
+      } else if (name === 'games') {
+        renderStudentGamificationPanel();
+      }
+    }
+
+    async function ensureStudentFeatureData(name, force) {
+      if (!STUDENT_FEATURE_VIEWS[name] || !isCurrentStudentSession() || !firebaseUser) return false;
+      const uid = firebaseUser.uid;
+      if (studentDataSessionUid !== uid) resetStudentDataSession(uid);
+      const version = studentDataSessionVersion;
+      const previous = studentFeatureStates[name];
+      if (previous && previous.promise) return previous.promise;
+      const liveGamesFailed = name === 'games' && studentRealtimeSession && ['gamificationRedemptions', 'prizeWheelSpins'].some(function(key) {
+        return !studentRealtimeSession.groups[key] || studentRealtimeSession.groups[key].failed;
+      });
+      if (!force && previous && previous.status === 'ready' && !liveGamesFailed) return true;
+      const state = { status: 'loading', promise: null };
+      studentFeatureStates[name] = state;
+      updateStudentFeatureStatus(name);
+      const isCurrent = function() {
+        return firebaseUser && firebaseUser.uid === uid && studentDataSessionVersion === version && studentFeatureStates[name] === state;
+      };
+      state.promise = (async function() {
+        try {
+          const student = await ensureStudentDataLoaded(firebaseUserProfile);
+          if (!isCurrent()) return false;
+          if (!student || studentDataLoadedForUid !== uid) throw new Error('ข้อมูลนักเรียนยังโหลดไม่ครบ กรุณาลองใหม่');
+          const loadStatus = { failed: false };
+          const read = function(collection) { return getFirebaseCollectionQuiet(collection, false, loadStatus); };
+          const fromQuery = function(query) {
+            return query.get().then(function(snapshot) {
+              return snapshot.docs.map(function(doc) { return Object.assign({ firebaseDocId: doc.id }, doc.data()); }).filter(function(item) { return item.deleted !== true; });
+            });
+          };
+          let result;
+          if (name === 'learning') {
+            result = await read('onDemandClips');
+          } else if (name === 'exams') {
+            result = await Promise.all([
+              read('monthlyExamLinks'),
+              fromQuery(db.collection('onlineExamCourses').where('status', '==', 'active')),
+              fromQuery(db.collection('onlineExamCourses').where('publishStatus', '==', 'published'))
+            ]);
+          } else {
+            // Battle questions also use eligible online exam courses.
+            if (!await ensureStudentFeatureData('exams')) return false;
+            if (!isCurrent()) return false;
+            const live = studentRealtimeSession;
+            startStudentPaymentListeners(live.studentDocIds, uid, live.paymentStudentIds, ['gamificationRedemptions', 'prizeWheelSpins']);
+            result = await Promise.all([
+              fromQuery(db.collection('gamificationLeaderboard').orderBy('level', 'desc').orderBy('exp', 'desc').limit(10)),
+              read('gamificationRewards'),
+              fromQuery(db.collection('specialVoucherActivities').where('active', '==', true).where('deleted', '==', false)),
+              read('prizeWheelItems'), read('prizeWheelSettings'),
+              fromQuery(db.collection('avatarBattleQuestions').where('active', '==', true).where('deleted', '==', false)),
+              waitForRealtimeCollection(live, 'gamificationRedemptions', loadStatus),
+              waitForRealtimeCollection(live, 'prizeWheelSpins', loadStatus)
+            ]);
+          }
+          if (!isCurrent()) return false;
+          if (loadStatus.failed) throw new Error('โหลดข้อมูลบางส่วนไม่สำเร็จ');
+          if (name === 'learning') {
+            replaceArray(onDemandClips, result);
+          } else if (name === 'exams') {
+            replaceArray(monthlyExamLinks, result[0]);
+            const byId = new Map();
+            result[1].concat(result[2]).forEach(function(course) {
+              if (course.isActive !== false && course.status !== 'inactive') byId.set(course.firebaseDocId || course.id, course);
+            });
+            onlineExamCourseCache = Array.from(byId.values());
+            onlineExamCoursesLoaded = true;
+          } else {
+            replaceArray(leaderboardProfiles, result[0]);
+            replaceArray(gamificationRewards, result[1]);
+            replaceArray(specialVoucherActivities, result[2]);
+            replaceArray(prizeWheelItems, result[3]);
+            const settings = result[4].find(function(item) { return item.id === 'main' || item.firebaseDocId === 'main'; });
+            prizeWheelSettings = Object.assign({ spinCost: 30, enabled: true }, settings || {});
+            replaceArray(avatarBattleQuestions, result[5]);
+          }
+          state.status = 'ready';
+          updateStudentFeatureStatus(name);
+          safeRun(function() { renderStudentFeatureData(name); }, 'student-feature-' + name);
+          return true;
+        } catch (error) {
+          if (isCurrent()) {
+            state.status = 'error';
+            updateStudentFeatureStatus(name);
+          }
+          throw error;
+        } finally { state.promise = null; }
+      })();
+      return state.promise;
+    }
+
+    function requestStudentFeatureData(name, force) {
+      return ensureStudentFeatureData(name, force).catch(function(error) {
+        console.warn('student feature load failed:', name, error);
+        return false;
+      });
+    }
+
+    function resetStudentDataSession(uid) {
+      resetStudentFeatureData();
+      resetStaffDataSession();
+      studentDataSessionVersion++;
+      studentDataSessionUid = uid || '';
+      studentDataLoadedForUid = '';
+      studentDataLoadingForUid = '';
+      studentDataLoadingPromise = null;
+      stopStudentPaymentListeners();
+    }
+
+    async function loadStudentDataOnly(userProfile, sessionVersion, loadStatus) {
       if (!firebaseReady || !db || !firebaseUser) return null;
+      const uid = firebaseUser.uid;
+      const isCurrentSession = function() {
+        return !!firebaseUser && firebaseUser.uid === uid && studentDataSessionVersion === sessionVersion;
+      };
       console.log('student-data-load-start', {
-        uid: firebaseUser.uid,
+        uid: uid,
         accountType: userProfile && userProfile.accountType,
         role: userProfile && userProfile.role
       });
 
-      const studentRecords = await getOwnedStudentRecords(userProfile);
+      const studentRecords = await getOwnedStudentRecords(userProfile, loadStatus);
+      if (!isCurrentSession()) return null;
       const normalizedStudents = studentRecords.map(normalizeStudentRecordForSession).filter(Boolean);
       const studentRecord = normalizedStudents[0] || null;
       const studentDocIds = normalizedStudents.map(getStudentRecordDocId).filter(function(id, index, list) {
@@ -9775,119 +10036,76 @@
         });
         return keys;
       }, studentDocIds.slice());
-      if (studentRecord) {
-        replaceArray(students, normalizedStudents);
-        currentStudent = studentRecord;
-      }
+      if (!studentRecord) return null;
+      const realtime = startStudentPaymentListeners(studentDocIds, uid, studentPaymentIds, STUDENT_HOME_REALTIME_COLLECTIONS);
+      if (!realtime) return null;
 
       const results = await Promise.all([
-        getFirebaseCollectionQuiet('courses'),
-        getFirebaseCollectionQuiet('onDemandClips'),
-        getFirebaseCollectionQuiet('announcements'),
-        getFirebaseCollectionQuiet('scoreReports'),
-        (firebaseReady && db ? db.collection('adminScoreRecords').where('status', '==', 'published').get().then(function(snap) { return snap.docs.map(function(d) { return Object.assign({ firebaseDocId: d.id }, d.data()); }).filter(function(x) { return x.deleted !== true; }); }).catch(function() { return []; }) : Promise.resolve([])),
-        getFirebaseCollectionQuiet('paymentMonths'),
-        getFirebaseCollectionQuiet('lineGroups'),
-        loadStudentOwnCollection('payments', studentDocIds, firebaseUser.uid, studentPaymentIds),
-        loadStudentOwnCollection('receipts', studentDocIds, firebaseUser.uid),
-        loadStudentOwnCollection('paymentBundles', studentDocIds, firebaseUser.uid),
-        getFirebaseCollectionQuiet('monthlyExamLinks'),
-        getFirebaseCollectionQuiet('monthlyPlanSessions'),
-        loadStudentOwnCollection('studentGamificationProfiles', studentDocIds, firebaseUser.uid),
-        loadStudentOwnCollection('studentGamificationEvents', studentDocIds, firebaseUser.uid),
-        loadStudentOwnCollection('studentPersonalQuests', studentDocIds, firebaseUser.uid),
-        (firebaseReady && db ? db.collection('gamificationLeaderboard').orderBy('level', 'desc').orderBy('exp', 'desc').limit(10).get().then(function(snap) { return snap.docs.map(function(d) { return Object.assign({ firebaseDocId: d.id }, d.data()); }).filter(function(x) { return x.deleted !== true; }); }).catch(function() { return []; }) : Promise.resolve([])),
-        getFirebaseCollectionQuiet('gamificationRewards'),
-        loadStudentOwnCollection('gamificationRedemptions', studentDocIds, firebaseUser.uid),
-        (firebaseReady && db ? db.collection('specialVoucherActivities').where('active', '==', true).where('deleted', '==', false).get().then(function(snap) {
-          return snap.docs.map(function(d) { return Object.assign({ firebaseDocId: d.id }, d.data()); });
-        }).catch(function(e) { console.warn('specialVoucherActivities student query skipped:', e); return []; }) : Promise.resolve([])),
-        getFirebaseCollectionQuiet('prizeWheelItems'),
-        getFirebaseCollectionQuiet('prizeWheelSettings'),
-        loadStudentOwnCollection('prizeWheelSpins', studentDocIds, firebaseUser.uid),
-        (firebaseReady && db ? Promise.all([
-          db.collection('onlineExamCourses').where('status', '==', 'active').get().catch(function(e) { console.warn('onlineExamCourses active query skipped:', e); return { docs: [] }; }),
-          db.collection('onlineExamCourses').where('publishStatus', '==', 'published').get().catch(function(e) { console.warn('onlineExamCourses published query skipped:', e); return { docs: [] }; })
-        ]).then(function(snaps) {
-          const byId = {};
-          snaps.forEach(function(snap) {
-            (snap.docs || []).forEach(function(d) {
-              const c = Object.assign({ firebaseDocId: d.id }, d.data());
-              if (!c.firebaseDocId || c.deleted === true || c.isActive === false || c.status === 'inactive') return;
-              byId[c.firebaseDocId] = c;
-            });
-          });
-          return Object.keys(byId).map(function(id) { return byId[id]; });
-        }).catch(function(e) { console.warn('onlineExamCourses student battle query skipped:', e); return []; }) : Promise.resolve([])),
-        (firebaseReady && db ? db.collection('avatarBattleQuestions').where('active', '==', true).where('deleted', '==', false).get().then(function(snap) {
-          return snap.docs.map(function(d) { return Object.assign({ firebaseDocId: d.id }, d.data()); });
-        }).catch(function(e) { console.warn('avatarBattleQuestions student query skipped:', e); return []; }) : Promise.resolve([]))
+        getFirebaseCollectionQuiet('courses', false, loadStatus),
+        getFirebaseCollectionQuiet('announcements', false, loadStatus),
+        getFirebaseCollectionQuiet('scoreReports', false, loadStatus),
+        db.collection('adminScoreRecords').where('status', '==', 'published').get().then(function(snap) {
+          return snap.docs.map(function(doc) { return Object.assign({ firebaseDocId: doc.id }, doc.data()); }).filter(function(item) { return item.deleted !== true; });
+        }).catch(function(error) { loadStatus.failed = true; console.warn('student scores load failed:', error); return []; }),
+        getFirebaseCollectionQuiet('paymentMonths', false, loadStatus),
+        getFirebaseCollectionQuiet('lineGroups', false, loadStatus),
+        getFirebaseCollectionQuiet('monthlyPlanSessions', false, loadStatus),
+        Promise.all(STUDENT_HOME_REALTIME_COLLECTIONS.map(function(name) { return waitForRealtimeCollection(realtime, name, loadStatus); }))
       ]);
 
+      if (!isCurrentSession() || !realtime.active) return null;
+      replaceArray(students, normalizedStudents);
+      currentStudent = studentRecord;
       replaceArray(courses, results[0]);
-      replaceArray(onDemandClips, results[1]);
-      replaceArray(announcements, results[2]);
-      replaceArray(scoreReports, results[3]);
-      replaceArray(adminScoreRecords, results[4]);
-      replaceArray(paymentMonths, results[5]);
-      replaceArray(lineGroups, results[6]);
-      replaceArray(payments, results[7]);
-      replaceArray(receipts, results[8]);
-      replaceArray(paymentBundles, results[9]);
-      replaceArray(monthlyExamLinks, results[10]);
-      replaceArray(monthlyPlanSessions, results[11]);
-      replaceArray(studentGamificationProfiles, results[12]);
-      replaceArray(studentGamificationEvents, results[13]);
-      replaceArray(studentPersonalQuests, results[14] || []);
-      replaceArray(leaderboardProfiles, results[15] || []);
-      replaceArray(gamificationRewards, results[16] || []);
-      replaceArray(gamificationRedemptions, results[17] || []);
-      replaceArray(specialVoucherActivities, results[18] || []);
-      replaceArray(prizeWheelItems, results[19] || []);
-      const pwSettingsArr = results[20] || [];
-      const pwMainStu = pwSettingsArr.find(function(s) { return s.id === 'main' || s.firebaseDocId === 'main'; });
-      if (pwMainStu) prizeWheelSettings = Object.assign({ spinCost: 30, enabled: true }, pwMainStu);
-      replaceArray(prizeWheelSpins, results[21] || []);
-      onlineExamCourseCache = results[22] || [];
-      onlineExamCoursesLoaded = true;
-      replaceArray(avatarBattleQuestions, results[23] || []);
-
-      console.log('student-data-load-success', {
-        uid: firebaseUser.uid,
-        hasStudent: !!studentRecord,
-        studentCount: normalizedStudents.length,
-        scoreRecordsLoaded: results[4].length,
-        paymentsLoaded: results[7].length,
-        receiptsLoaded: results[8].length,
-        paymentBundlesLoaded: results[9].length,
-        examLinksLoaded: results[10].length,
-        monthlyPlanSessionsLoaded: results[11].length,
-        gamificationProfilesLoaded: results[12].length,
-        gamificationEventsLoaded: results[13].length,
-        onlineExamCoursesLoaded: (results[22] || []).length,
-        collections: ['students:own', 'courses', 'onDemandClips', 'announcements', 'scoreReports', 'adminScoreRecords', 'paymentMonths', 'lineGroups', 'payments:own', 'receipts:own', 'paymentBundles:own', 'monthlyExamLinks', 'monthlyPlanSessions', 'studentGamificationProfiles:own', 'studentGamificationEvents:own', 'studentPersonalQuests:own', 'onlineExamCourses:battle']
-      });
-      startStudentPaymentListeners(studentDocIds, firebaseUser.uid, studentPaymentIds);
+      replaceArray(announcements, results[1]);
+      replaceArray(scoreReports, results[2]);
+      replaceArray(adminScoreRecords, results[3]);
+      replaceArray(paymentMonths, results[4]);
+      replaceArray(lineGroups, results[5]);
+      replaceArray(monthlyPlanSessions, results[6]);
+      console.log('student-home-data-load-success', { uid: uid, studentCount: normalizedStudents.length, complete: !loadStatus.failed });
+      realtime.uiReady = true;
+      scheduleStudentRealtimeRefresh(realtime);
+      if (!loadStatus.failed) safeRun(triggerDailyLoginQuestIfNeeded, 'student-home-daily-login');
       return studentRecord;
     }
 
     async function ensureStudentDataLoaded(userProfile, options) {
       options = options || {};
       const uid = firebaseUser && firebaseUser.uid ? firebaseUser.uid : '';
-      if (!uid) return null;
-      if (options.force || studentDataLoadedForUid !== uid) {
-        studentDataLoadedForUid = '';
-        studentDataLoadingPromise = null;
+      if (studentDataSessionUid !== uid) resetStudentDataSession(uid);
+      if (!uid || !firebaseReady || !db) return null;
+      // Even a forced refresh joins a request already fetching this session.
+      if (studentDataLoadingPromise && studentDataLoadingForUid === uid) {
+        return await studentDataLoadingPromise;
       }
-      if (!studentDataLoadingPromise) {
-        studentDataLoadingPromise = loadStudentDataOnly(userProfile).then(function(studentRecord) {
-          studentDataLoadedForUid = uid;
-          return studentRecord;
-        }).finally(function() {
+      if (!options.force && studentDataLoadedForUid === uid && studentRealtimeSession && studentRealtimeSession.active &&
+          !STUDENT_HOME_REALTIME_COLLECTIONS.some(function(name) { return !studentRealtimeSession.groups[name] || studentRealtimeSession.groups[name].failed; })) {
+        const cachedStudent = findStudentForUserProfile(userProfile, uid);
+        if (cachedStudent) return cachedStudent;
+      }
+      const sessionVersion = studentDataSessionVersion;
+      studentDataLoadedForUid = '';
+      studentDataLoadingForUid = uid;
+      updateStudentHomeLoadStatus('loading');
+      const loadStatus = { failed: false };
+      const loadingPromise = loadStudentDataOnly(userProfile, sessionVersion, loadStatus).then(function(studentRecord) {
+        if (!firebaseUser || firebaseUser.uid !== uid || studentDataSessionVersion !== sessionVersion) return null;
+        if (studentRecord && !loadStatus.failed) studentDataLoadedForUid = uid;
+        updateStudentHomeLoadStatus(studentRecord && !loadStatus.failed ? 'ready' : 'error');
+        return studentRecord;
+      }).catch(function(error) {
+        if (firebaseUser && firebaseUser.uid === uid && studentDataSessionVersion === sessionVersion) updateStudentHomeLoadStatus('error');
+        throw error;
+      }).finally(function() {
+        // An old request must never clear a newer session's pending request.
+        if (studentDataLoadingPromise === loadingPromise) {
           studentDataLoadingPromise = null;
-        });
-      }
-      return await studentDataLoadingPromise;
+          studentDataLoadingForUid = '';
+        }
+      });
+      studentDataLoadingPromise = loadingPromise;
+      return await loadingPromise;
     }
 
     function refreshStudentPanelAfterDataLoad() {
@@ -9899,17 +10117,18 @@
       safeRun(renderStudentMobileLearning, 'student-mobile-learning-after-data-load');
       safeRun(renderStudentMobilePayment, 'student-mobile-payment-after-data-load');
       safeRun(renderStudentMobileExam, 'student-mobile-exam-after-data-load');
-      if (getElement('onlineExamStudentContent') && getElement('onlineExamStudentContent').style.display !== 'none') {
-        safeRun(function() { loadOnlineExamCourses().then(renderOnlineExamCourseGrid); }, 'student-online-exam-after-data-load');
-      }
+      prepareStudentFeatureViews();
     }
 
     function scheduleStudentDataRefresh(userProfile, options) {
       options = options || {};
       const uid = String(options.uid || (firebaseUser && firebaseUser.uid) || '').trim();
-      if (!uid) return;
+      if (!uid || !firebaseUser || firebaseUser.uid !== uid) return;
+      if (studentDataSessionUid !== uid) resetStudentDataSession(uid);
       console.info('student-data-refresh-background-start', { uid: uid, force: !!options.force });
+      const sessionVersion = studentDataSessionVersion;
       ensureStudentDataLoaded(userProfile, { force: !!options.force }).then(function(studentRecord) {
+        if (!studentRecord || studentDataSessionVersion !== sessionVersion) return;
         if (!firebaseUser || String(firebaseUser.uid || '') !== uid) return;
         if (studentRecord) currentStudent = studentRecord;
         console.info('student-data-refresh-background-success', {
@@ -9923,21 +10142,206 @@
       });
     }
 
-    async function ensureCoreDataLoaded(options) {
+    const STAFF_DATA_GROUPS = {
+      core: ['students', 'teachers', 'courses', 'settings'],
+      schedule: ['monthlyPlans', 'courseTeachingSettings', 'monthlyPlanSessions', 'teacherPreferenceRules', 'holidays', 'attendanceHistory'],
+      finance: ['paymentMonths', 'payments', 'receipts', 'paymentBundles'],
+      scores: ['scoreReports', 'adminScoreRecords', 'monthlyQuestions', 'monthlyExamLinks'],
+      rewards: ['studentGamificationProfiles', 'studentGamificationEvents', 'studentPersonalQuests', 'gamificationRewards', 'gamificationRedemptions', 'specialVoucherActivities'],
+      wheel: ['prizeWheelItems', 'prizeWheelSettings', 'prizeWheelSpins']
+    };
+    const STAFF_TAB_DATA = {
+      'admin-dashboard': ['finance', 'schedule', 'lineGroups'],
+      'admin-profile': [],
+      'admin-students': ['finance', 'scores', 'rewards', 'wheel', 'schedule'],
+      'admin-private-students': ['finance', 'schedule'],
+      'admin-courses': ['schedule', 'lineGroups', 'finance'],
+      'admin-online-class': ['schedule', 'lineGroups'],
+      'admin-online-documents': [],
+      'admin-video': ['onDemandClips'],
+      'admin-payment-round': ['finance', 'schedule'],
+      'admin-payment': ['finance', 'schedule'],
+      'admin-private-lesson-billing': ['finance', 'schedule'],
+      'admin-receipts': ['finance'],
+      'admin-finance-summary': ['finance', 'expenses'],
+      'admin-monthly-test': ['scores', 'rewards'],
+      'admin-online-exam': ['scores', 'rewards'],
+      'admin-monthly-planner': ['schedule', 'finance'],
+      'admin-teachers': ['schedule'],
+      'admin-announcements': ['announcements'],
+      'admin-gamification-shop': ['rewards', 'wheel'],
+      'admin-prize-wheel': ['rewards', 'wheel'],
+      'admin-avatar-battle': ['avatarBattleQuestions', 'rewards'],
+      'admin-settings': ['lineGroups'],
+      'admin-activity-log': ['activityLogs'],
+      'admin-id-cards': [],
+      'teacher-profile': [],
+      'teacher-dashboard': ['schedule'],
+      'teacher-online': ['schedule', 'lineGroups'],
+      'teacher-private-lessons': ['schedule'],
+      'teacher-attendance': ['schedule'],
+      'teacher-students': ['schedule', 'finance', 'scores', 'rewards', 'wheel'],
+      'teacher-tools': []
+    };
+    let staffCollectionStates = {};
+    let staffTabLoadPromises = {};
+    let staffDataSessionUid = '';
+
+    function resetStaffDataSession() {
+      staffCollectionStates = {};
+      staffTabLoadPromises = {};
+      staffDataSessionUid = '';
+      coreDataLoaded = false;
+    }
+
+    function getStaffCollectionTargets() {
+      return { students, teachers, courses, onDemandClips, paymentMonths, lineGroups, payments, receipts, paymentBundles,
+        monthlyQuestions, monthlyExamLinks, monthlyPlans, courseTeachingSettings, monthlyPlanSessions, teacherPreferenceRules,
+        holidays, attendanceHistory: pickupHistory, announcements, activityLogs, studentGamificationProfiles,
+        studentGamificationEvents, studentPersonalQuests, scoreReports, adminScoreRecords, gamificationRewards,
+        gamificationRedemptions, specialVoucherActivities, expenses, prizeWheelItems, prizeWheelSpins, avatarBattleQuestions };
+    }
+
+    function getStaffTabCollections(tabId) {
+      const groups = ['core'].concat(STAFF_TAB_DATA[tabId] || []);
+      return Array.from(new Set(groups.reduce(function(names, group) { return names.concat(STAFF_DATA_GROUPS[group] || [group]); }, [])));
+    }
+
+    function isStaffCollectionReady(name) {
+      const state = staffCollectionStates[name];
+      if (!state || state.status !== 'ready') return false;
+      if (state.realtime) {
+        const group = state.realtime.groups[name];
+        return state.realtime === adminRealtimeSession && state.realtime.active && group && !group.failed;
+      }
+      return true;
+    }
+
+    async function ensureStaffCollections(names, options) {
       options = options || {};
-      if (options.force) {
-        coreDataLoaded = false;
-        coreDataLoadingPromise = null;
+      if (!firebaseReady || !db || !firebaseUser || isCurrentStudentSession()) throw new Error('ไม่พบ session เจ้าหน้าที่');
+      const uid = firebaseUser.uid;
+      if (staffDataSessionUid !== uid) { resetStaffDataSession(); staffDataSessionUid = uid; }
+      const version = studentDataSessionVersion;
+      await Promise.all(names.map(function(name) {
+        const previous = staffCollectionStates[name];
+        if (previous && previous.promise) return previous.promise;
+        if (!options.force && isStaffCollectionReady(name)) return Promise.resolve();
+        const state = { status: 'loading', promise: null, realtime: null };
+        staffCollectionStates[name] = state;
+        const isCurrent = function() { return firebaseUser && firebaseUser.uid === uid && studentDataSessionVersion === version && staffCollectionStates[name] === state; };
+        state.promise = (async function() {
+          try {
+            const status = { failed: false };
+            const isFinancial = ['payments', 'receipts', 'paymentBundles'].includes(name);
+            const live = isFinancial ? startAdminPaymentDataListeners() : null;
+            let items;
+            if (live) {
+              state.realtime = live;
+              await waitForRealtimeCollection(live, name, status);
+              if (!live.active) throw new Error('การรับข้อมูลถูกยกเลิก กรุณาลองใหม่');
+            } else {
+              const targets = getStaffCollectionTargets();
+              if (!PRODUCTION_MODE && targets[name]) await seedCollectionIfEmpty(name, targets[name]);
+              items = name === 'payments' ? await getFirebasePaymentCollection(false, status) : await getFirebaseCollection(name, false, status);
+            }
+            if (!isCurrent()) return;
+            if (status.failed) throw new Error('โหลดข้อมูล ' + name + ' ไม่สำเร็จ');
+            if (!live) {
+              if (name === 'settings') {
+                const main = items.find(function(item) { return item.id === 'main' || item.firebaseDocId === 'main'; });
+                if (main) { systemSettings = Object.assign(systemSettings, main); cacheStartupSettings(systemSettings); }
+                safeRun(applySystemSettingsToPage, 'staff-settings-loaded');
+              } else if (name === 'prizeWheelSettings') {
+                const main = items.find(function(item) { return item.id === 'main' || item.firebaseDocId === 'main'; });
+                prizeWheelSettings = Object.assign({ spinCost: 30, enabled: true }, main || {});
+              } else {
+                // A listener opened while a one-off request was pending owns the live arrays now.
+                if (!isFinancial || !adminRealtimeSession) replaceArray(getStaffCollectionTargets()[name], items);
+                else {
+                  state.realtime = adminRealtimeSession;
+                  await waitForRealtimeCollection(state.realtime, name, status);
+                  if (status.failed || !state.realtime.active) throw new Error('โหลดข้อมูลการเงินไม่สำเร็จ');
+                }
+              }
+            }
+            state.status = 'ready';
+            if (name === 'students') rebuildStudentLookupMap();
+          } catch (error) {
+            if (isCurrent()) state.status = 'error';
+            throw error;
+          } finally { state.promise = null; }
+        })();
+        return state.promise;
+      }));
+    }
+
+    function setStaffTabLoadStatus(tabId, status) {
+      const root = getElement(tabId);
+      if (!root) return;
+      root.setAttribute('data-staff-data-state', status);
+      root.setAttribute('aria-busy', status === 'loading' ? 'true' : 'false');
+      let notice = root.querySelector('.staff-data-load-status');
+      if (status === 'ready') { if (notice) notice.remove(); return; }
+      if (!notice) {
+        notice = document.createElement('div');
+        notice.className = 'staff-data-load-status notice';
+        notice.setAttribute('role', 'status');
+        root.prepend(notice);
       }
-      if (coreDataLoaded) return;
-      if (!coreDataLoadingPromise) {
-        coreDataLoadingPromise = loadCoreDataFromFirebase().then(function() {
-          coreDataLoaded = true;
-        }).finally(function() {
-          coreDataLoadingPromise = null;
-        });
+      notice.innerHTML = status === 'error'
+        ? '<strong>โหลดข้อมูลหน้านี้ไม่ครบ</strong><p>กรุณาลองใหม่เพื่อดูข้อมูลล่าสุด</p><button class="btn btn-blue" type="button" onclick="requestStaffTabData(\'' + tabId + '\')">ลองใหม่</button>'
+        : '<strong>กำลังโหลดข้อมูลหน้านี้...</strong>';
+    }
+
+    function isStaffTabVisible(tabId) {
+      let root = getElement(tabId);
+      if (!root) return false;
+      while (root) {
+        if (root.hidden || (root.classList && root.classList.contains('hidden')) || (root.style && root.style.display === 'none')) return false;
+        root = root.parentElement;
       }
-      await coreDataLoadingPromise;
+      return true;
+    }
+
+    function requestStaffTabData(tabId) {
+      if (!Object.prototype.hasOwnProperty.call(STAFF_TAB_DATA, tabId)) return Promise.resolve(false);
+      const allowed = tabId.indexOf('teacher-') === 0 ? canOpenTeacherTab(tabId) : (canOpenAdminTab(tabId) || canOpenTeacherTool(tabId));
+      if (!allowed || !firebaseUser || isCurrentStudentSession()) return Promise.resolve(false);
+      if (staffTabLoadPromises[tabId]) return staffTabLoadPromises[tabId];
+      // Initialize the session before registering the tab promise (collection loading shares it).
+      if (staffDataSessionUid !== firebaseUser.uid) { resetStaffDataSession(); staffDataSessionUid = firebaseUser.uid; }
+      const uid = firebaseUser.uid, version = studentDataSessionVersion;
+      setStaffTabLoadStatus(tabId, 'loading');
+      const pending = ensureStaffCollections(getStaffTabCollections(tabId)).then(function() {
+        if (!firebaseUser || firebaseUser.uid !== uid || studentDataSessionVersion !== version) return false;
+        if (getStaffTabCollections(tabId).includes('payments')) safeRun(applyPaymentRepairsSync, 'staff-finance-normalize');
+        setStaffTabLoadStatus(tabId, 'ready');
+        if (!isStaffTabVisible(tabId)) return true;
+        if (tabId.indexOf('teacher-') === 0) renderTeacherTabContent(tabId);
+        else renderAdminTabContent(tabId);
+        return true;
+      }).catch(function(error) {
+        if (firebaseUser && firebaseUser.uid === uid && studentDataSessionVersion === version) setStaffTabLoadStatus(tabId, 'error');
+        console.warn('staff tab data load failed:', tabId, error);
+        return false;
+      }).finally(function() { if (staffTabLoadPromises[tabId] === pending) delete staffTabLoadPromises[tabId]; });
+      staffTabLoadPromises[tabId] = pending;
+      return pending;
+    }
+
+    function requireStaffTabData(tabId) {
+      if (!Object.prototype.hasOwnProperty.call(STAFF_TAB_DATA, tabId)) return true;
+      if (staffDataSessionUid !== (firebaseUser && firebaseUser.uid) || !getStaffTabCollections(tabId).every(isStaffCollectionReady)) {
+        requestStaffTabData(tabId);
+        return false;
+      }
+      setStaffTabLoadStatus(tabId, 'ready');
+      return true;
+    }
+
+    async function ensureCoreDataLoaded(options) {
+      await loadCoreDataFromFirebase(options);
     }
 
     function dataUrlToBlob(dataUrl) {
@@ -10482,139 +10886,11 @@
       newItems.forEach(function(item) { targetArray.push(item); });
     }
 
-    async function loadCoreDataFromFirebase() {
-      if (!firebaseReady || !db) {
-        console.warn('Firebase is not ready. ระบบจะไม่โหลดข้อมูลจนกว่า Firebase จะพร้อม');
-        return;
-      }
-
-      await Promise.all([
-        seedCollectionIfEmpty('students', students),
-        seedCollectionIfEmpty('teachers', teachers),
-        seedCollectionIfEmpty('courses', courses),
-        seedCollectionIfEmpty('onDemandClips', onDemandClips),
-        seedCollectionIfEmpty('paymentMonths', paymentMonths),
-        seedCollectionIfEmpty('lineGroups', lineGroups),
-        seedCollectionIfEmpty('receipts', receipts),
-        seedCollectionIfEmpty('monthlyQuestions', monthlyQuestions),
-        seedCollectionIfEmpty('monthlyExamLinks', monthlyExamLinks),
-        seedCollectionIfEmpty('monthlyPlans', monthlyPlans),
-        seedCollectionIfEmpty('courseTeachingSettings', courseTeachingSettings),
-        seedCollectionIfEmpty('monthlyPlanSessions', monthlyPlanSessions),
-        seedCollectionIfEmpty('teacherPreferenceRules', teacherPreferenceRules),
-        seedCollectionIfEmpty('holidays', holidays),
-        seedCollectionIfEmpty('announcements', announcements),
-        seedCollectionIfEmpty('activityLogs', activityLogs),
-        seedCollectionIfEmpty('studentGamificationProfiles', studentGamificationProfiles),
-        seedCollectionIfEmpty('studentGamificationEvents', studentGamificationEvents)
-      ]);
-
-      // Start score collections loading in parallel but don't block the main render on them
-      const scoreCollectionsPromise = Promise.all([
-        getFirebaseCollection('scoreReports'),
-        getFirebaseCollection('adminScoreRecords')
-      ]);
-
-      const results = await Promise.all([
-        getFirebaseCollection('students'),
-        getFirebaseCollection('teachers'),
-        getFirebaseCollection('courses'),
-        getFirebaseCollection('onDemandClips'),
-        getFirebaseCollection('paymentMonths'),
-        getFirebaseCollection('lineGroups'),
-        getFirebasePaymentCollection(),
-        getFirebaseCollection('receipts'),
-        getFirebaseCollection('paymentBundles'),
-        getFirebaseCollection('monthlyQuestions'),
-        getFirebaseCollection('monthlyExamLinks'),
-        getFirebaseCollection('monthlyPlans'),
-        getFirebaseCollection('courseTeachingSettings'),
-        getFirebaseCollection('monthlyPlanSessions'),
-        getFirebaseCollection('teacherPreferenceRules'),
-        getFirebaseCollection('holidays'),
-        getFirebaseCollection('attendanceHistory'),
-        getFirebaseCollection('announcements'),
-        getFirebaseCollection('activityLogs'),
-        getFirebaseCollection('studentGamificationProfiles'),
-        getFirebaseCollection('studentGamificationEvents'),
-        getFirebaseCollection('studentPersonalQuests'),
-        getFirebaseCollection('settings'),
-        getFirebaseCollection('gamificationRewards'),
-        getFirebaseCollection('gamificationRedemptions'),
-        getFirebaseCollection('specialVoucherActivities'),
-        getFirebaseCollection('expenses'),
-        getFirebaseCollection('prizeWheelItems'),
-        getFirebaseCollection('prizeWheelSpins'),
-        getFirebaseCollection('prizeWheelSettings'),
-        getFirebaseCollection('avatarBattleQuestions')
-      ]);
-
-      replaceArray(students, results[0]);
-      replaceArray(teachers, results[1]);
-      replaceArray(courses, results[2]);
-      replaceArray(onDemandClips, results[3]);
-      replaceArray(paymentMonths, results[4]);
-      replaceArray(lineGroups, results[5]);
-      replaceArray(payments, results[6]);
-      replaceArray(receipts, results[7]);
-      replaceArray(paymentBundles, results[8]);
-      replaceArray(monthlyQuestions, results[9]);
-      replaceArray(monthlyExamLinks, results[10]);
-      replaceArray(monthlyPlans, results[11]);
-      replaceArray(courseTeachingSettings, results[12]);
-      replaceArray(monthlyPlanSessions, results[13]);
-      replaceArray(teacherPreferenceRules, results[14]);
-      replaceArray(holidays, results[15]);
-      replaceArray(pickupHistory, results[16]);
-      replaceArray(announcements, results[17]);
-      replaceArray(activityLogs, results[18]);
-      replaceArray(studentGamificationProfiles, results[19]);
-      replaceArray(studentGamificationEvents, results[20]);
-      replaceArray(studentPersonalQuests, results[21] || []);
-      const settingsItems = results[22];
-      replaceArray(gamificationRewards, results[23] || []);
-      replaceArray(gamificationRedemptions, results[24] || []);
-      replaceArray(specialVoucherActivities, results[25] || []);
-      replaceArray(expenses, results[26] || []);
-      replaceArray(prizeWheelItems, results[27] || []);
-      replaceArray(prizeWheelSpins, results[28] || []);
-      const pwSettingsItems = results[29] || [];
-      const pwMain = pwSettingsItems.find(function(s) { return s.id === 'main' || s.firebaseDocId === 'main'; });
-      if (pwMain) prizeWheelSettings = Object.assign({ spinCost: 30, enabled: true }, pwMain);
-      replaceArray(avatarBattleQuestions, results[30] || []);
-      const mainSettings = settingsItems.find(function(item) { return item.id === 'main' || item.firebaseDocId === 'main'; });
-      if (mainSettings) {
-        systemSettings = Object.assign(systemSettings, mainSettings);
-        cacheStartupSettings(systemSettings);
-      }
-      safeRun(applySystemSettingsToPage, 'settings-apply-after-load');
-      safeRun(renderSystemSettingsForm, 'settings-form-after-load');
-      // Sync pre-repair: fix in-memory status immediately so first render is correct
-      safeRun(applyPaymentRepairsSync, 'sync-payment-repair');
-      safeRun(repairReceiptMonthsFromPayments, 'repair-receipt-months');
-      // Async repairs run in background to persist fixes and create missing receipts
-      safeRun(repairApprovedPaymentsForStudentInterface, 'repair-approved-payments-student-interface');
-      safeRun(repairPaymentStatusFromReceipts, 'repair-payment-status-from-receipts');
-      safeRun(updateMemberIdPreview, 'member-id-preview-after-load');
-      safeRun(updateTeacherIdPreview, 'teacher-id-preview-after-load');
-      safeRun(renderReceiptMonthFilter, 'receipt-month-filter-after-load');
-      safeRun(renderActiveAdminTab, 'active-admin-tab-after-load');
-      safeRun(renderStudentReceipts, 'student-receipts-after-load');
-      rebuildStudentLookupMap();
-
-      // Apply score collections when ready (already loading in parallel)
-      scoreCollectionsPromise.then(function(scoreResults) {
-        replaceArray(scoreReports, scoreResults[0]);
-        replaceArray(adminScoreRecords, scoreResults[1]);
-        rebuildStudentLookupMap();
-        if (getElement('adminScoreTestSetFilter')) {
-          safeRun(renderAdminScoreFilters, 'admin-score-filters-loaded');
-          safeRun(renderAdminScoreTables, 'admin-score-tables-loaded');
-        }
-        if (getElement('scoreHistoryTableBody') || getElement('scoreSummaryBox')) {
-          safeRun(renderScoreHistoryByMonth, 'score-history-loaded');
-        }
-      }).catch(function(e) { console.warn('score data load error:', e); });
+    async function loadCoreDataFromFirebase(options) {
+      const uid = firebaseUser && firebaseUser.uid;
+      const version = studentDataSessionVersion;
+      await ensureStaffCollections(STAFF_DATA_GROUPS.core, options);
+      if (firebaseUser && firebaseUser.uid === uid && studentDataSessionVersion === version) coreDataLoaded = true;
     }
 
     const announcements = [];
@@ -11943,6 +12219,8 @@
     }
 
     function showStudentAreas() {
+      updateStudentHomeLoadStatus(studentDataLoadedForUid === (firebaseUser && firebaseUser.uid) ? 'ready' : 'loading');
+      prepareStudentFeatureViews();
       document.querySelectorAll('.student-area').forEach(function(area) { area.classList.remove('hidden'); });
       setStudentMobileBottomNavCollapsed(true);
       setStudentDesktopQuickNavCollapsed(true);
@@ -12659,19 +12937,12 @@
     }
 
     function refreshTeacherPanelAfterCoreLoad(teacherProfile, userProfile, fallbackEmail, displayLoginId) {
-      if (!teacherProfile || isCurrentStudentSession()) return;
+      if (!teacherProfile || !currentTeacher || isCurrentStudentSession() || getStaffRouteView() !== 'teacher') return;
       currentTeacher = buildTeacherSessionFromProfile(teacherProfile, userProfile || firebaseUserProfile || {}, fallbackEmail, displayLoginId);
       renderTeacherCourseOptions();
       applyRoleAccessToUI();
-      safeRun(renderTeacherStudents, 'teacher-students-after-core-load');
-      safeRun(renderTeacherDashboardSummary, 'teacher-dashboard-after-core-load');
-      safeRun(renderTeacherOnlineClasses, 'teacher-online-after-core-load');
-      safeRun(renderTeacherPrivateLessons, 'teacher-private-lessons-after-core-load');
-      if (isTeacherAttendanceTabActive()) {
-        safeRun(refreshAttendanceData, 'teacher-attendance-after-core-load');
-      }
-      safeRun(renderTeacherMobileHome, 'teacher-mobile-home-after-core-load');
-      safeRun(renderTeacherMobileStudents, 'teacher-mobile-students-after-core-load');
+      const active = Array.from(document.querySelectorAll('.teacher-tab')).find(function(tab) { return !tab.classList.contains('hidden'); });
+      if (active) renderTeacherTabContent(active.id);
     }
 
     function scheduleStaffCoreDataRefresh(options) {
@@ -13566,8 +13837,10 @@
     }
 
     async function logoutSystem() {
-      stopStudentPaymentListeners();
+      resetStudentDataSession('');
       stopAdminPaymentDataListeners();
+      adminPaymentRenderDirty.clear();
+      adminPaymentPreviewRequest = null;
       clearSessionExpiry();
       clearStaffRouteView();
       if (PRODUCTION_MODE && auth) {
@@ -14113,20 +14386,31 @@
       const selectedTab = getElement(tabId);
       if (selectedTab) selectedTab.classList.remove('hidden');
       if (tabId !== 'teacher-tools') restoreTeacherEmbeddedTool();
+      if (tabId === 'teacher-attendance') {
+        ['students', 'attendanceHistory'].forEach(function(name) {
+          const state = staffCollectionStates[name];
+          if (state && !state.promise) state.status = 'idle';
+        });
+      }
+      renderTeacherTabContent(tabId);
+    }
+
+    function renderTeacherTabContent(tabId) {
+      if (!requireStaffTabData(tabId)) return;
       renderTeacherCourseOptions();
       if (tabId === 'teacher-students') renderTeacherStudents();
       if (tabId === 'teacher-dashboard') { renderTodayTeachingList(); renderTeacherDashboardSummary(); }
       if (tabId === 'teacher-online') renderTeacherOnlineClasses();
       if (tabId === 'teacher-private-lessons') renderTeacherPrivateLessons();
-      if (tabId === 'teacher-attendance') { initAttendanceDateToToday({ resetManualOverride: true }); refreshAttendanceData(); }
+      if (tabId === 'teacher-attendance') { initAttendanceDateToToday({ resetManualOverride: true }); renderPickupList(); renderPickupHistory(); renderTeacherMobileAttendance(); }
       if (tabId === 'teacher-tools') renderTeacherAdminShortcuts();
       if (tabId === 'teacher-profile') renderProfileSettingsForRole('teacher');
-      safeRun(renderTeacherMobileHome, 'teacher-mobile-home-tab');
-      safeRun(renderTeacherMobileOnlineClasses, 'teacher-mobile-online-tab');
-      safeRun(renderTeacherMobileAttendance, 'teacher-mobile-attendance-tab');
-      safeRun(renderTeacherMobileStudents, 'teacher-mobile-students-tab');
-      safeRun(renderTeacherMobilePrivateLessons, 'teacher-mobile-private-lessons-tab');
-      safeRun(renderTeacherMobileProfile, 'teacher-mobile-profile-tab');
+      if (tabId === 'teacher-dashboard') safeRun(renderTeacherMobileHome, 'teacher-mobile-home-tab');
+      if (tabId === 'teacher-online') safeRun(renderTeacherMobileOnlineClasses, 'teacher-mobile-online-tab');
+      if (tabId === 'teacher-attendance') safeRun(renderTeacherMobileAttendance, 'teacher-mobile-attendance-tab');
+      if (tabId === 'teacher-students') safeRun(renderTeacherMobileStudents, 'teacher-mobile-students-tab');
+      if (tabId === 'teacher-private-lessons') safeRun(renderTeacherMobilePrivateLessons, 'teacher-mobile-private-lessons-tab');
+      if (tabId === 'teacher-profile') safeRun(renderTeacherMobileProfile, 'teacher-mobile-profile-tab');
     }
 
     function getCourseTeachingSettingForCourse(course) {
@@ -15600,21 +15884,19 @@
     }
 
     async function refreshAttendanceData() {
+      const uid = firebaseUser && firebaseUser.uid;
+      const version = studentDataSessionVersion;
       setAttendanceResult('กำลังโหลดข้อมูลล่าสุด...', '#6b7280');
       try {
-        const [freshStudents, freshHistory] = await Promise.all([
-          getFirebaseCollection('students'),
-          getFirebaseCollection('attendanceHistory')
-        ]);
-        replaceArray(students, freshStudents);
-        replaceArray(pickupHistory, freshHistory);
-        rebuildStudentLookupMap();
-      } catch (e) {
-        console.warn('refreshAttendanceData error:', e);
+        await ensureStaffCollections(['students', 'attendanceHistory'], { force: true });
+        if (!firebaseUser || firebaseUser.uid !== uid || studentDataSessionVersion !== version) return;
+        renderPickupList();
+        renderPickupHistory();
+        setAttendanceResult('', '');
+      } catch (error) {
+        console.warn('refreshAttendanceData error:', error);
+        if (firebaseUser && firebaseUser.uid === uid && studentDataSessionVersion === version) setAttendanceResult('โหลดข้อมูลไม่สำเร็จ กรุณาลองใหม่', '#dc2626');
       }
-      renderPickupList();
-      renderPickupHistory();
-      setAttendanceResult('', '');
     }
 
     function syncPickupListFromStudents() {
@@ -16004,15 +16286,65 @@
       '</div>';
     }
 
+    const optionalLibraryLoads = new Map();
+    const optionalLibraryConfig = {
+      canvas: { src: 'https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js', ready: function() { return typeof window.html2canvas === 'function'; } },
+      pdf: { src: 'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js', ready: function() { return !!(window.jspdf && window.jspdf.jsPDF); } },
+      qr: { src: 'https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js', ready: function() { return typeof window.QRCode === 'function'; } }
+    };
+
+    function loadOptionalLibrary(name) {
+      const config = optionalLibraryConfig[name];
+      if (!config) return Promise.reject(new Error('Unknown library: ' + name));
+      if (config.ready()) return Promise.resolve();
+      if (optionalLibraryLoads.has(name)) return optionalLibraryLoads.get(name);
+      const promise = new Promise(function(resolve, reject) {
+        const script = document.createElement('script');
+        let settled = false;
+        const finish = function(error) {
+          if (settled) return;
+          settled = true;
+          clearTimeout(timer);
+          script.onload = script.onerror = null;
+          if (error) { script.remove(); reject(error); }
+          else resolve();
+        };
+        const timer = setTimeout(function() { finish(new Error('Library load timed out: ' + name)); }, 20000);
+        script.src = config.src;
+        script.async = true;
+        script.crossOrigin = 'anonymous';
+        script.referrerPolicy = 'no-referrer';
+        script.onload = function() { finish(config.ready() ? null : new Error('Library unavailable: ' + name)); };
+        script.onerror = function() { finish(new Error('Library load failed: ' + name)); };
+        document.head.appendChild(script);
+      });
+      optionalLibraryLoads.set(name, promise);
+      promise.catch(function() {
+        if (optionalLibraryLoads.get(name) === promise) optionalLibraryLoads.delete(name);
+      });
+      return promise;
+    }
+
+    async function ensureExportLibraries(includePdf) {
+      try {
+        await Promise.all((includePdf ? ['canvas', 'pdf'] : ['canvas']).map(loadOptionalLibrary));
+        return true;
+      } catch (error) {
+        console.warn('Export tools could not load:', error);
+        return false;
+      }
+    }
+
     async function downloadAttendanceRosterPng() {
       const rows = getFilteredPickupList().filter(function(item) { return item.hasClassToday; });
       if (!rows.length) {
         setAttendanceResult('ไม่มีรายชื่อสำหรับวันที่ คลาส หรือระดับชั้นที่เลือก', '#dc2626');
         return;
       }
+      const exportToolsReady = await ensureExportLibraries(false);
       const html2canvasLib = window.html2canvas;
-      if (!html2canvasLib) {
-        setAttendanceResult('ไม่สามารถสร้าง PNG ได้ เพราะโหลดเครื่องมือรูปภาพไม่ครบ กรุณารีเฟรชหน้าแล้วลองใหม่', '#dc2626');
+      if (!exportToolsReady || !html2canvasLib) {
+        setAttendanceResult('ไม่สามารถสร้าง PNG ได้ เพราะโหลดเครื่องมือรูปภาพไม่ครบ กรุณาตรวจสอบอินเทอร์เน็ตแล้วกดลองใหม่', '#dc2626');
         return;
       }
       const meta = getAttendanceRosterTitle();
@@ -16273,7 +16605,6 @@
       applyRoleAccessToUI();
 
       showAdminTab(findFirstAllowedAdminTab());
-      startAdminPaymentDataListeners();
       window.scrollTo({ top: 0, behavior: 'smooth' });
     }
 
@@ -16299,6 +16630,11 @@
     }
 
     function renderAdminTabContent(tabId) {
+      if (!requireStaffTabData(tabId)) return;
+      if (['admin-payment', 'admin-payment-round', 'admin-receipts', 'admin-finance-summary'].includes(tabId)) {
+        startAdminPaymentDataListeners();
+      }
+      if (adminPaymentRenderDirty.size) requestAdminPaymentRender([]);
       if (tabId === 'admin-dashboard') safeRun(renderAdminDashboard, 'admin-dashboard');
       if (tabId === 'admin-profile') safeRun(function() { renderProfileSettingsForRole('admin'); }, 'admin-profile');
       if (tabId === 'admin-students') {
@@ -16568,7 +16904,7 @@
       });
     }
 
-    function renderAdminDashboard() {
+    function renderAdminDashboardNow() {
       const totalStudents = Array.isArray(students) ? students.filter(isActiveStudentForDashboard).length : 0;
       const openCourses = Array.isArray(courses) ? courses.filter(function(c) { return c.status === 'open' || c.status === 'เปิดรับสมัคร'; }).length : 0;
       const pendingPaymentRecords = getPendingPaymentRecords();
@@ -16588,8 +16924,8 @@
       if (getElement('dashPendingCourses')) getElement('dashPendingCourses').textContent = pendingCourseStudents.length + ' คน';
       if (getElement('pickupWaitingCount')) getElement('pickupWaitingCount').textContent = todayAbsent + ' คน';
       renderAdminTodoList();
-      renderDashboardPaymentSummary();
-      if (getElement('paymentTableBody')) updatePaymentSummary();
+      renderNewMemberNotificationBox();
+      renderAdminDataQualityBox();
     }
 
     let adminStudentCurrentPage = 1;
@@ -21506,9 +21842,8 @@
       if (sectionId === 'course-section' && studentHasApprovedCourse()) sectionId = 'studentDashboard';
       if (sectionId !== 'student-monthly-test') document.body.classList.remove('student-mobile-online-exam-open');
       const target = getElement(sectionId);
-      if (sectionId === 'student-monthly-test' && currentStudent) {
-        safeRun(function() { loadOnlineExamCourses().then(renderOnlineExamCourseGrid); }, 'online-exam-student-load-monthly');
-      }
+      if (sectionId === 'student-learning') requestStudentFeatureData('learning');
+      if (sectionId === 'student-monthly-test') requestStudentFeatureData('exams');
       if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
 
@@ -24042,13 +24377,7 @@
       return { exp: 10, coins: 0 };
     }
 
-    function findStudentForScoreRecord(record) {
-      return students.find(function(s) {
-        if (record.studentId && String(s.id || s.firebaseDocId || '') === String(record.studentId)) return true;
-        if (record.authUid && String(s.authUid || '') === String(record.authUid)) return true;
-        return s.name === record.student;
-      }) || null;
-    }
+
 
     async function awardGamificationForPublishedScoreRecord(record) {
       if (!record || record.status !== 'published') return;
@@ -24088,19 +24417,7 @@
       }
     }
 
-    function findStudentForOnlineExamResult(result) {
-      if (!result) return null;
-      const uid = String(result.studentUid || result.authUid || '').trim();
-      const memberId = String(result.memberId || result.studentMemberId || result.studentId || '').trim();
-      const name = String(result.studentName || result.student || '').trim();
-      return students.find(function(student) {
-        if (!student) return false;
-        if (uid && String(student.authUid || student.studentAuthUid || '') === uid) return true;
-        if (memberId && String(student.memberId || student.studentId || student.id || student.firebaseDocId || '') === memberId) return true;
-        if (name && String(student.name || '') === name) return true;
-        return false;
-      }) || null;
-    }
+
 
     function isOnlineExamResultPassed(result) {
       if (!result || (result.resultStatus || 'submitted') !== 'published') return false;
@@ -24704,7 +25021,11 @@
       const loginData = progress.quests['daily_login'] || {};
       if (!loginData.rewardClaimed) {
         dailyLoginQuestTriggeredThisSession = true;
-        setTimeout(function() { triggerDailyQuestProgress('daily_login'); }, 500);
+        const uid = firebaseUser && firebaseUser.uid;
+        const version = studentDataSessionVersion;
+        setTimeout(function() {
+          if (firebaseUser && firebaseUser.uid === uid && studentDataSessionVersion === version) triggerDailyQuestProgress('daily_login');
+        }, 500);
       } else {
         dailyLoginQuestTriggeredThisSession = true;
       }
@@ -26082,6 +26403,10 @@
     }
 
     function renderStudentGamificationPanel() {
+      if (isCurrentStudentSession() && !isStudentFeatureReady('games')) {
+        updateStudentFeatureStatus('games');
+        return;
+      }
       const desktop = getElement('studentGamificationPanel');
       const mobile = getElement('studentMobileGamificationPanel');
       if (desktop) desktop.innerHTML = renderStudentGamificationHtml({ mobile: false });
@@ -28668,7 +28993,7 @@
       }
       if (onlineExamContent) {
         onlineExamContent.style.display = canUseOnlineExamArea ? '' : 'none';
-        if (canUseOnlineExamArea) safeRun(function() { loadOnlineExamCourses().then(renderOnlineExamCourseGrid); }, 'online-exam-student-load');
+        if (canUseOnlineExamArea && isStudentFeatureReady('exams')) safeRun(renderOnlineExamCourseGrid, 'online-exam-student-render');
       }
 
       if (getElement('studentDashboardCourseName')) getElement('studentDashboardCourseName').textContent = selectedCourse ? selectedCourse.name : '';
@@ -29617,7 +29942,7 @@
       });
     }
 
-    function renderPaymentBundlePanel() {
+    function renderPaymentBundlePanelNow() {
       const box = getElement('paymentBundlePanel');
       if (!box) return;
       const visibleBundles = getScopedPaymentBundles()
@@ -31207,14 +31532,11 @@
       const btn = document.getElementById('adminPaymentRefreshBtn');
       if (btn) { btn.disabled = true; btn.textContent = 'กำลังโหลด...'; }
       try {
-        const [freshPayments, freshBundles, freshReceipts] = await Promise.all([
-          getFirebasePaymentCollection(),
-          getFirebaseCollection('paymentBundles'),
-          getFirebaseCollection('receipts')
-        ]);
-        replaceArray(payments, freshPayments);
-        replaceArray(paymentBundles, freshBundles);
-        replaceArray(receipts, freshReceipts);
+        const session = startAdminPaymentDataListeners({ force: true });
+        if (!session) throw new Error('ไม่สามารถเริ่มรับข้อมูลการชำระเงินได้');
+        const ready = await Promise.all(Object.values(session.groups).map(function(group) { return group.ready; }));
+        if (!session.active || session !== adminRealtimeSession) return;
+        if (ready.some(function(success) { return !success; })) throw new Error('โหลดข้อมูลบางส่วนไม่สำเร็จ กรุณาลองใหม่');
         safeRun(applyPaymentRepairsSync, 'refresh-payment-repair');
         renderPaymentTable();
         updatePaymentSummary();
@@ -31631,7 +31953,7 @@
       renderPaymentTable();
     }
 
-    function renderPaymentRecordPreview(message, isError) {
+    function renderPaymentRecordPreviewNow(message, isError) {
       const summaryBox = getElement('paymentRecordPreviewSummary');
       const tbody = getElement('paymentRecordPreviewTableBody');
       const result = getElement('paymentRecordPreviewResult');
@@ -32459,7 +32781,11 @@
     }
 
     function getFilteredPaymentsForTable() {
-      return getDashboardScopedPayments(true).sort(function(a, b) {
+      const overdueFilter = getElement('paymentOverdueDayFilter');
+      const overdueDays = overdueFilter && overdueFilter.value !== 'ทั้งหมด' ? Number(overdueFilter.value) : 0;
+      return getDashboardScopedPayments(true).filter(function(payment) {
+        return !overdueDays || (getPaymentDisplayStatus(payment).includes('ค้าง') && getOverdueDays(payment) >= overdueDays);
+      }).sort(function(a, b) {
         const sA = getPaymentStudentRecord(a);
         const sB = getPaymentStudentRecord(b);
         const gDiff = gradeOrder(sB ? sB.grade : '') - gradeOrder(sA ? sA.grade : '');
@@ -32470,7 +32796,7 @@
       });
     }
 
-    function renderPaymentTable() {
+    function renderPaymentTableNow() {
       const tbody = getElement('paymentTableBody');
       if (!tbody) return;
       const filtered = getFilteredPaymentsForTable();
@@ -32507,8 +32833,6 @@
       renderTablePagination('paymentTablePagination', paymentCurrentPage, ptTotalPages, filtered.length, 'changePaymentPage');
       if (getElement('paymentBundleSelectAll')) getElement('paymentBundleSelectAll').checked = false;
       updatePaymentBundleSelectionHint();
-      renderPaymentBundlePanel();
-      updatePaymentSummary();
     }
 
     function changePaymentPage(direction) {
@@ -32518,7 +32842,7 @@
       renderPaymentTable();
     }
 
-    function updatePaymentSummary() {
+    function updatePaymentSummaryNow() {
       const filtered = getDashboardScopedPayments(false);
       const scopedBundles = getDashboardScopedPaymentBundles(false);
       let pending = 0, overdue = 0, paid = 0;
@@ -32538,7 +32862,6 @@
       if (getElement('overdueCount')) getElement('overdueCount').textContent = overdue + ' รายการ';
       if (getElement('paidThisMonthCount')) getElement('paidThisMonthCount').textContent = paid + ' รายการ';
       updatePaymentAmountSummary();
-      renderDashboardPaymentSummary();
     }
 
     function getPaymentDataFromRow(row) {
@@ -32664,10 +32987,11 @@
     }
 
     async function downloadHtmlAsPdf(title, bodyHtml, fileName) {
+      const exportToolsReady = await ensureExportLibraries(true);
       const html2canvasLib = window.html2canvas;
       const JsPdfClass = window.jspdf && window.jspdf.jsPDF;
-      if (!html2canvasLib || !JsPdfClass) {
-        alert('ไม่สามารถสร้าง PDF ได้ เพราะโหลดเครื่องมือ PDF ไม่ครบ กรุณารีเฟรชหน้าแล้วลองใหม่');
+      if (!exportToolsReady || !html2canvasLib || !JsPdfClass) {
+        alert('ไม่สามารถสร้าง PDF ได้ เพราะโหลดเครื่องมือ PDF ไม่ครบ กรุณาตรวจสอบอินเทอร์เน็ตแล้วกดลองใหม่');
         return;
       }
       const element = buildPdfDocumentElement(title, bodyHtml);
@@ -32717,9 +33041,10 @@
     }
 
     async function downloadHtmlAsImage(title, bodyHtml, fileName) {
+      const exportToolsReady = await ensureExportLibraries(false);
       const html2canvasLib = window.html2canvas;
-      if (!html2canvasLib) {
-        alert('ไม่สามารถสร้างรูปได้ เพราะโหลดเครื่องมือไม่ครบ กรุณารีเฟรชหน้าแล้วลองใหม่');
+      if (!exportToolsReady || !html2canvasLib) {
+        alert('ไม่สามารถสร้างรูปได้ เพราะโหลดเครื่องมือไม่ครบ กรุณาตรวจสอบอินเทอร์เน็ตแล้วกดลองใหม่');
         return;
       }
       const element = buildPdfDocumentElement(title, bodyHtml);
@@ -33802,6 +34127,21 @@ function receiptStatusText(status) {
       return repaired;
     }
 
+    async function runLegacyPaymentRepairs() {
+      if (!hasPermission('admin.finance') && !hasPermission('admin.full')) return;
+      try {
+        await ensureStaffCollections(getStaffTabCollections('admin-payment-round'));
+        await repairReceiptMonthsFromPayments();
+        await repairApprovedPaymentsForStudentInterface();
+        await repairPaymentStatusFromReceipts();
+        renderPaymentTable();
+        renderPaymentRecordPreview('ตรวจและซ่อมข้อมูลการชำระเงินเก่าเรียบร้อย');
+      } catch (error) {
+        console.error('legacy payment repair failed:', error);
+        renderPaymentRecordPreview('ซ่อมข้อมูลไม่สำเร็จ กรุณาลองใหม่', true);
+      }
+    }
+
     async function runRepairPaymentStatusFromReceipts() {
       const repaired = await repairPaymentStatusFromReceipts();
       alert(repaired ? 'ซ่อมแล้ว ' + repaired + ' รายการ' : 'ไม่พบรายการที่ต้องซ่อม');
@@ -34623,17 +34963,7 @@ function receiptStatusText(status) {
       alert('เข้าสู่ระบบเรียบร้อยแล้ว สามารถใช้งานส่วนนี้ได้');
     }
 
-    function openMonthlyExamPage() {
-      if (!(currentStudent && currentStudent.courseId)) {
-        alert('กรุณาสมัครคอร์สก่อนทำแบบทดสอบ');
-        return;
-      }
-      if (!studentCanUseCourseEntitlements(currentStudent)) {
-        alert(getPausedCourseAccessMessage());
-        return;
-      }
-      studentMobileGoToOnlineExam();
-    }
+
 
     function openScoreHistory() {
       const c = getCurrentStudentCourse ? getCurrentStudentCourse() : null;
@@ -34701,18 +35031,9 @@ function receiptStatusText(status) {
       getElement('scorePublishStatus').className = 'status-waiting';
     }
 
-    function saveMonthlyTestSettings() {
-      renderAdminExamSetFilters();
-      renderAdminQuestions();
-      getElement('monthlyTestSaveResult').textContent = 'บันทึกแบบทดสอบรายเดือนเรียบร้อย';
-      getElement('monthlyTestSaveResult').style.color = '#16a34a';
-    }
 
-    function publishMonthlyScores() {
-      const testDate = getElement('monthlyTestDate').value;
-      getElement('adminScorePublishSelect').value = 'published';
-      alert('ประกาศคะแนนเรียบร้อย สำหรับวันสอบ ' + (testDate || '-') + ' นักเรียนสามารถกดดูคะแนนย้อนหลังได้');
-    }
+
+
 
     async function createScoreRecordsForSelectedMonthGrade() {
       syncAdminScoreFiltersFromOnlineExamFilters();
@@ -35139,43 +35460,9 @@ function receiptStatusText(status) {
       getElement('questionSaveResult').style.color = '#dc2626';
     }
 
-    function renderAdminQuestions() {
-      const tbody = getElement('adminQuestionTableBody');
-      if (!tbody) return;
-      const selectedSubject = getElement('questionSubjectFilter') ? getElement('questionSubjectFilter').value : 'ทั้งหมด';
-      const selectedMonth = getElement('adminQuestionMonthFilter') ? getElement('adminQuestionMonthFilter').value : 'ทั้งหมด';
-      const selectedTime = getElement('adminQuestionTimeFilter') ? getElement('adminQuestionTimeFilter').value : 'ทั้งหมด';
-      const filtered = monthlyQuestions.filter(function(q) {
-        const subjectMatched = selectedSubject === 'ทั้งหมด' || q.subject === selectedSubject;
-        const monthMatched = selectedMonth === 'ทั้งหมด' || getThaiMonthFromDate(q.testDate) === selectedMonth;
-        const timeMatched = selectedTime === 'ทั้งหมด' || (q.testTime || '09:00') === selectedTime;
-        return subjectMatched && monthMatched && timeMatched;
-      });
-      tbody.innerHTML = filtered.length ? filtered.map(function(q, i) {
-        return '<tr><td>' + (i + 1) + '</td><td>' + (q.testDate || '-') + '</td><td>' + (q.testTime || '-') + '</td><td>' + q.subject + '</td><td>' + q.text + '</td><td>' + q.correct + '</td><td><button class="btn btn-blue" type="button" onclick="' + actionCall('editQuestion', q.id) + '">แก้ไข</button><button class="btn btn-red" type="button" onclick="' + actionCall('deleteQuestion', q.id) + '">ลบ</button></td></tr>';
-      }).join('') : '<tr><td colspan="7">ยังไม่มีข้อสอบในเดือน เวลา และวิชาที่เลือก</td></tr>';
-    }
 
-    function renderAdminExamSetFilters() {
-      const monthSelect = getElement('adminQuestionMonthFilter');
-      const timeSelect = getElement('adminQuestionTimeFilter');
-      if (!monthSelect || !timeSelect) return;
 
-      const currentMonth = monthSelect.value || 'ทั้งหมด';
-      const currentTime = timeSelect.value || 'ทั้งหมด';
-      const months = Array.from(new Set(monthlyQuestions.map(function(q) { return getThaiMonthFromDate(q.testDate); })));
-      const times = Array.from(new Set(monthlyQuestions.map(function(q) { return q.testTime || '09:00'; }))).sort();
 
-      monthSelect.innerHTML = '<option value="ทั้งหมด">ทั้งหมด</option>' + months.map(function(month) {
-        return '<option value="' + month + '">' + month + '</option>';
-      }).join('');
-      timeSelect.innerHTML = '<option value="ทั้งหมด">ทั้งหมด</option>' + times.map(function(time) {
-        return '<option value="' + time + '">' + time + ' น.</option>';
-      }).join('');
-
-      monthSelect.value = months.includes(currentMonth) ? currentMonth : 'ทั้งหมด';
-      timeSelect.value = times.includes(currentTime) ? currentTime : 'ทั้งหมด';
-    }
 
     function getThaiMonthFromDate(dateText) {
       const monthNames = ['มกราคม', 'กุมภาพันธ์', 'มีนาคม', 'เมษายน', 'พฤษภาคม', 'มิถุนายน', 'กรกฎาคม', 'สิงหาคม', 'กันยายน', 'ตุลาคม', 'พฤศจิกายน', 'ธันวาคม'];
@@ -35302,65 +35589,7 @@ function receiptStatusText(status) {
       setThaiMonthYearPickerValue('monthlyPlanGeneratorMonthKey', getElement('monthlyPlanGeneratorMonthKey') ? getElement('monthlyPlanGeneratorMonthKey').value : '', 'key');
     }
 
-    function renderStudentExamFilters() {
-      const monthSelect = getElement('studentExamMonthFilter');
-      const subjectSelect = getElement('studentExamSubjectFilter');
-      const scoreMonthSelect = getElement('scoreHistoryMonthFilter');
-      const months = Array.from(new Set(monthlyQuestions.map(function(q) { return getThaiMonthFromDate(q.testDate); })));
-      months.sort(function(a, b) { return compareThaiMonthYear(b, a); });
-      const options = months.length ? months.map(function(month) { return '<option value="' + month + '">' + month + '</option>'; }).join('') : '<option value="">ยังไม่มีเดือนสอบ</option>';
 
-      if (monthSelect) {
-        const current = monthSelect.value;
-        monthSelect.innerHTML = options;
-        if (months.includes(current)) monthSelect.value = current;
-      }
-
-      if (subjectSelect) {
-        const selectedMonth = monthSelect ? monthSelect.value : '';
-        const currentSubject = subjectSelect.value;
-        const subjects = Array.from(new Set(monthlyQuestions
-          .filter(function(q) { return !selectedMonth || getThaiMonthFromDate(q.testDate) === selectedMonth; })
-          .map(function(q) { return q.subject; })
-        ));
-        subjectSelect.innerHTML = subjects.length ? subjects.map(function(subject) {
-          return '<option value="' + subject + '">' + subject + '</option>';
-        }).join('') : '<option value="">ยังไม่มีวิชาสอบ</option>';
-        subjectSelect.value = subjects.includes(currentSubject) ? currentSubject : (subjects[0] || '');
-      }
-
-      if (scoreMonthSelect) {
-        const studentGrade = currentStudent ? currentStudent.grade : getProfileGrade();
-        const publishedMonths = Array.from(new Set(
-          adminScoreRecords
-            .filter(function(r) { return r.status === 'published' && r.grade === studentGrade && isRecordBeforeStudentPause(r, currentStudent); })
-            .map(function(r) { return r.month; })
-            .filter(Boolean)
-        )).sort(function(a, b) { return compareThaiMonthYear(b, a); });
-
-        if (publishedMonths.length) {
-          scoreMonthSelect.innerHTML = publishedMonths.map(function(m) {
-            return '<option value="' + escapeHtml(m) + '">' + escapeHtml(m) + '</option>';
-          }).join('');
-          if (!publishedMonths.includes(scoreMonthSelect.value)) {
-            scoreMonthSelect.value = publishedMonths[0];
-          }
-        } else {
-          scoreMonthSelect.innerHTML = '<option value="">ยังไม่มีคะแนนที่ประกาศ</option>';
-        }
-        const mobileScoreMonthSelect = getElement('studentMobileScoreMonthFilter');
-        if (mobileScoreMonthSelect) {
-          mobileScoreMonthSelect.innerHTML = scoreMonthSelect.innerHTML;
-          mobileScoreMonthSelect.value = scoreMonthSelect.value;
-        }
-      }
-      if (getElement('scoreHistoryGradeFilter')) {
-        const profileGrade = currentStudent ? currentStudent.grade : getProfileGrade();
-        getElement('scoreHistoryGradeFilter').value = profileGrade;
-      }
-      updateStudentExamInfo();
-      renderScoreHistoryByMonth();
-    }
 
     function getStudentExamQuestions() {
       const selectedMonth = getElement('studentExamMonthFilter') ? getElement('studentExamMonthFilter').value : '';
@@ -35372,16 +35601,7 @@ function receiptStatusText(status) {
       });
     }
 
-    function updateStudentExamInfo() {
-      const selectedMonth = getElement('studentExamMonthFilter') ? getElement('studentExamMonthFilter').value : 'พฤษภาคม 2569';
-      const selectedSubject = getElement('studentExamSubjectFilter') ? getElement('studentExamSubjectFilter').value : '';
-      const examQuestions = getStudentExamQuestions();
 
-      if (getElement('studentExamCardMonth')) getElement('studentExamCardMonth').textContent = selectedMonth || '-';
-      if (getElement('studentExamCardSubject')) getElement('studentExamCardSubject').textContent = selectedSubject || '-';
-      if (getElement('studentExamCardCount')) getElement('studentExamCardCount').textContent = examQuestions.length;
-      if (getElement('studentExamCardTitle')) getElement('studentExamCardTitle').textContent = 'Monthly Test ' + (selectedMonth || '-') + (selectedSubject ? ' · ' + selectedSubject : '');
-    }
 
     function choiceLabel(choice) {
       const map = { A: '1', B: '2', C: '3', D: '4' };
@@ -35607,15 +35827,7 @@ function receiptStatusText(status) {
 
     const adminScoreRecords = [];
 
-    function getAdminScoreMonths() {
-      const months = Array.from(new Set(
-        adminScoreRecords
-          .map(function(item) { return item.month; })
-          .concat((onlineExamCourseCache || []).map(function(course) { return course.examMonth; }))
-      )).filter(Boolean);
-      months.sort(function(a, b) { return compareThaiMonthYear(b, a); });
-      return months;
-    }
+
 
     function syncAdminScoreFiltersFromOnlineExamFilters() {
       const monthSelect = getElement('adminScoreTestSetFilter');
@@ -42648,7 +42860,7 @@ function receiptStatusText(status) {
       if (getElement('expectedAmountThisMonth')) getElement('expectedAmountThisMonth').textContent = formatPrice(totals.expectedAmount);
     }
 
-    function renderDashboardPaymentSummary() {
+    function renderDashboardPaymentSummaryNow() {
       const box = getElement('dashboardPaymentSummary');
       if (!box) return;
       const totals = getPaymentDashboardAmountTotals();
@@ -43471,7 +43683,15 @@ function receiptStatusText(status) {
     }
 
 
-    function exportAllDataBackup() {
+    async function exportAllDataBackup() {
+      try {
+        // A lazy-loaded tab must never export unopened datasets as empty arrays.
+        await ensureStaffCollections(Object.keys(getStaffCollectionTargets()).concat(['settings', 'prizeWheelSettings']));
+      } catch (error) {
+        console.error('backup data load failed:', error);
+        alert('ยังส่งออกไม่ได้ เพราะโหลดข้อมูลสำรองไม่ครบ กรุณาลองใหม่');
+        return;
+      }
       const backup = {
         exportedAt: new Date().toISOString(),
         systemSettings: systemSettings || {},
@@ -43643,17 +43863,9 @@ function receiptStatusText(status) {
     }
 
     // ----- Function wrappers / overrides -----
-    const originalRenderAdminDashboardFinal = renderAdminDashboard;
-    renderAdminDashboard = function() {
-      originalRenderAdminDashboardFinal();
-      renderNewMemberNotificationBox();
-      renderAdminDataQualityBox();
-    };
-
     const originalShowAdminTabFinal = showAdminTab;
     showAdminTab = function(tabId) {
       originalShowAdminTabFinal(tabId);
-      if (tabId === 'admin-dashboard') { renderNewMemberNotificationBox(); renderAdminDataQualityBox(); }
       if (tabId === 'admin-payment') { injectOverdueDayFilter(); injectPaymentOwnerDiagnosticPanel(); }
       if (tabId === 'admin-settings') { injectBackupButton(); injectAuthCleanupPanel(); injectAdminRoleSettings(); }
       applyAdminRoleVisibility();
@@ -43673,22 +43885,6 @@ function receiptStatusText(status) {
       safeRun(renderStudentMobileLearning, 'student-mobile-learning');
       safeRun(renderStudentMobilePayment, 'student-mobile-payment');
       safeRun(renderStudentMobileExam, 'student-mobile-exam');
-    };
-
-    const originalFilterPaymentStatusByMonthFinal = filterPaymentStatusByMonth;
-    filterPaymentStatusByMonth = function() {
-      originalFilterPaymentStatusByMonthFinal();
-      const filter = getElement('paymentOverdueDayFilter');
-      if (!filter || filter.value === 'ทั้งหมด') return;
-      const days = Number(filter.value);
-      document.querySelectorAll('#paymentTableBody tr').forEach(function(row) {
-        if (row.style.display === 'none') return;
-        const payment = getPaymentByRow(row);
-        const statusText = row.children && row.children[5] ? row.children[5].innerText : '';
-        const show = statusText.includes('ค้าง') && getOverdueDays(payment) >= days;
-        row.style.display = show ? '' : 'none';
-      });
-      updatePaymentSummary();
     };
 
     const originalShowStudentProfileDetailFinal = showStudentProfileDetail;
@@ -45121,6 +45317,7 @@ function receiptStatusText(status) {
     }
 
     async function loadOnlineExamCourses(forceRefresh) {
+      if (isCurrentStudentSession()) return requestStudentFeatureData('exams', !!forceRefresh);
       if (!firebaseReady || !db) return;
       if (onlineExamCoursesLoadPromise && !forceRefresh) return onlineExamCoursesLoadPromise;
       const loadSeq = ++onlineExamCoursesLoadSeq;
@@ -45131,40 +45328,14 @@ function receiptStatusText(status) {
               .map(function(d) { return Object.assign({ firebaseDocId: d.id }, d.data()); })
               .filter(function(c) { return !c.deleted; });
           };
-          if (isCurrentStudentSession()) {
-            const byId = {};
-            const addSnap = function(snap) {
-              buildCourses(snap).forEach(function(c) {
-                if (!c.firebaseDocId) return;
-                if (c.isActive === false || c.status === 'inactive') return;
-                byId[c.firebaseDocId] = c;
-              });
-            };
-            const activeSnap = await db.collection('onlineExamCourses')
-              .where('status', '==', 'active')
-              .get();
-            addSnap(activeSnap);
-            const publishedSnap = await db.collection('onlineExamCourses')
-              .where('publishStatus', '==', 'published')
-              .get()
-              .catch(function(e) {
-                console.warn('loadOnlineExamCourses published query skipped', e);
-                return { docs: [] };
-              });
-            addSnap(publishedSnap);
-            if (loadSeq === onlineExamCoursesLoadSeq) {
-              onlineExamCourseCache = Object.keys(byId).map(function(id) { return byId[id]; });
-            }
-          } else {
-            const snap = await db.collection('onlineExamCourses')
-              .where('deleted', '!=', true)
-              .get()
-              .catch(function() {
-                return db.collection('onlineExamCourses').get();
-              });
-            if (loadSeq === onlineExamCoursesLoadSeq) {
-              onlineExamCourseCache = buildCourses(snap);
-            }
+          const snap = await db.collection('onlineExamCourses')
+            .where('deleted', '!=', true)
+            .get()
+            .catch(function() {
+              return db.collection('onlineExamCourses').get();
+            });
+          if (loadSeq === onlineExamCoursesLoadSeq) {
+            onlineExamCourseCache = buildCourses(snap);
           }
         } catch (e) {
           console.error('loadOnlineExamCourses error', e);
@@ -46807,14 +46978,17 @@ function receiptStatusText(status) {
     async function exportOnlineExamCoursePdf(courseId, btn) {
       const course = (onlineExamCourseCache || []).find(function(c) { return String(c.firebaseDocId || '') === String(courseId || ''); });
       if (!course) { alert('ไม่พบชุดข้อสอบที่ต้องการ Export'); return; }
-      const html2canvasLib = window.html2canvas;
-      const JsPdfClass = window.jspdf && window.jspdf.jsPDF;
-      if (!html2canvasLib || !JsPdfClass) {
-        alert('โหลด PDF library ไม่ครบ กรุณารีเฟรชหน้าแล้วลองใหม่');
-        return;
-      }
+      if (btn && btn.disabled) return;
       const originalText = btn ? btn.textContent : '';
       if (btn) { btn.disabled = true; btn.textContent = 'กำลังสร้าง...'; }
+      const exportToolsReady = await ensureExportLibraries(true);
+      const html2canvasLib = window.html2canvas;
+      const JsPdfClass = window.jspdf && window.jspdf.jsPDF;
+      if (!exportToolsReady || !html2canvasLib || !JsPdfClass) {
+        if (btn) { btn.disabled = false; btn.textContent = originalText; }
+        alert('โหลด PDF library ไม่ครบ กรุณาตรวจสอบอินเทอร์เน็ตแล้วกดลองใหม่');
+        return;
+      }
       const tempDiv = document.createElement('div');
       tempDiv.style.cssText = 'position:absolute;left:0;top:-10000px;width:794px;background:#fff;z-index:-9999;';
       tempDiv.innerHTML = buildOnlineExamPrintableHtml(course);
@@ -48111,6 +48285,7 @@ function receiptStatusText(status) {
       const btn = document.querySelector('#studentIdCardModal .btn-blue');
       if (btn) { btn.disabled = true; btn.textContent = 'กำลังสร้างรูป...'; }
       try {
+        await loadOptionalLibrary('canvas');
         const canvas = await window.html2canvas(cardEl, { scale: 3, useCORS: true, backgroundColor: '#ffffff' });
         const link = document.createElement('a');
         link.download = 'id-card.png';
@@ -50443,7 +50618,8 @@ function receiptStatusText(status) {
       return idCardStudents.filter(function(s) { return idCardSelectedUids.has(s.uid || ''); });
     }
 
-    function generateQrDataUrl(text) {
+    async function generateQrDataUrl(text) {
+      await loadOptionalLibrary('qr');
       return new Promise(function(resolve) {
         if (!window.QRCode) { resolve(''); return; }
         var div = document.createElement('div');
@@ -50696,14 +50872,18 @@ function receiptStatusText(status) {
       }
       const btn = getElement('idCardExportBtn');
       const resultEl = getElement('idCardExportResult');
-      const JsPdfClass = window.jspdf && window.jspdf.jsPDF;
-      const html2canvasLib = window.html2canvas;
-      if (!JsPdfClass || !html2canvasLib) {
-        if (resultEl) { resultEl.textContent = 'โหลด PDF library ไม่ครบ กรุณารีเฟรชหน้าแล้วลองใหม่'; resultEl.style.color = '#dc2626'; }
-        return;
-      }
+      if (btn && btn.disabled) return;
+      const originalButtonText = btn ? btn.textContent : '';
       if (btn) { btn.disabled = true; btn.textContent = 'กำลังสร้าง PDF...'; }
       if (resultEl) { resultEl.textContent = 'กำลังสร้าง PDF...'; resultEl.style.color = '#d97706'; }
+      const exportToolsReady = await ensureExportLibraries(true);
+      const JsPdfClass = window.jspdf && window.jspdf.jsPDF;
+      const html2canvasLib = window.html2canvas;
+      if (!exportToolsReady || !JsPdfClass || !html2canvasLib) {
+        if (btn) { btn.disabled = false; btn.textContent = originalButtonText; }
+        if (resultEl) { resultEl.textContent = 'โหลด PDF library ไม่ครบ กรุณาตรวจสอบอินเทอร์เน็ตแล้วกดลองใหม่'; resultEl.style.color = '#dc2626'; }
+        return;
+      }
       try {
         const logoUrl = parseDriveImageUrl((getElement('idCardLogoManualUrl') && getElement('idCardLogoManualUrl').value.trim()) || idCardLogoUrl);
         const resolvedBackLogo = idCardBackLogoUrl ? parseDriveImageUrl(idCardBackLogoUrl) : '';
