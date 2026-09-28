@@ -123,6 +123,67 @@ test('custom amount save persists 1200 and updates visible totals once', async (
   assert.equal(h.counts.updatePaymentSummary, 1);
 });
 
+test('failed custom amount write keeps the bubble open and restores the prior amount', async () => {
+  const h = setup(), payment = { id: 'p1', originalAmount: 1500, amount: 1500, status: 'ค้างชำระ' };
+  h.c.payments = [payment];
+  h.elements.bubblePaymentOriginalAmount = { value: '1500' };
+  h.c.findPaymentByAnyId = () => payment;
+  h.c.canAdjustPaymentAmount = () => true;
+  h.c.getPaymentFinalAmount = p => p.amount;
+  h.c.escapeHtml = s => s;
+  h.c.currentAdmin = { name: 'Admin' };
+  h.c.firebaseUser = { email: 'admin@example.com' };
+  h.c.bubbleValue = id => ({ bubbleDiscountType: 'manualCustom', bubblePaymentFinalAmount: '1200' }[id] || '');
+  let save;
+  let closeCalls = 0;
+  h.c.openEditBubble = (title, body, handler) => { save = handler; };
+  h.c.setFirebaseDocument = async () => { throw new Error('network unavailable'); };
+  h.c.syncPaymentAmountToStudentMonthPrice = () => { throw new Error('must not sync after failed payment write'); };
+  for (const name of ['addActivityLog','updateStudentSelectedPaymentMonth','updateStudentCourseDisplay','renderStudentMobilePayment']) h.c[name] = () => {};
+  h.c.closeEditBubble = () => { closeCalls++; };
+  vm.runInContext(source('editPaymentAmountDiscount'), h.c);
+  h.c.editPaymentAmountDiscount({ closest: () => ({ getAttribute: () => 'p1' }) });
+
+  await assert.rejects(save(), /network unavailable/);
+  assert.equal(payment.amount, 1500);
+  assert.equal(payment.originalAmount, 1500);
+  assert.equal(closeCalls, 0);
+});
+
+test('edit bubble accepts only one save while an async write is pending', async () => {
+  let resolveSave;
+  let saveCalls = 0;
+  const saveButton = { disabled: false, textContent: 'บันทึกการแก้ไข' };
+  const result = { textContent: '', style: {} };
+  const c = {
+    console: { error() {} },
+    clearTimeout() {},
+    getElement(id) {
+      if (id === 'editBubbleSaveButton') return saveButton;
+      if (id === 'editBubbleResult') return result;
+      return null;
+    },
+    window: { setTimeout() {} }
+  };
+  vm.createContext(c);
+  const start = html.indexOf('    let editBubbleSaveHandler = null;');
+  const end = html.indexOf('    function getMonthlySessionStatusLabel(', start);
+  vm.runInContext(html.slice(start, end), c);
+  c.pendingSave = new Promise(resolve => { resolveSave = resolve; });
+  vm.runInContext("editBubbleSaveHandler = function() { saveCalls(); return pendingSave; }", Object.assign(c, {
+    saveCalls() { saveCalls++; }
+  }));
+
+  const first = c.saveEditBubble();
+  const second = c.saveEditBubble();
+  assert.equal(saveCalls, 1);
+  assert.equal(first, second);
+  assert.equal(saveButton.disabled, true);
+  resolveSave();
+  await first;
+  assert.equal(saveButton.disabled, false);
+});
+
 test('overdue filter runs against status before table pagination', () => {
   const h = setup();
   h.elements.paymentOverdueDayFilter = { value: '15' };

@@ -4214,7 +4214,7 @@
       </div>
       <div id="editBubbleBody"></div>
       <div id="editBubbleActions" class="test-actions">
-        <button class="btn btn-green" type="button" onclick="saveEditBubble()">บันทึกการแก้ไข</button>
+        <button id="editBubbleSaveButton" class="btn btn-green" type="button" onclick="saveEditBubble()">บันทึกการแก้ไข</button>
         <button class="btn btn-dark" type="button" onclick="closeEditBubble()">ยกเลิก</button>
       </div>
       <p id="editBubbleResult" style="margin-top:14px; font-weight:bold;"></p>
@@ -12042,6 +12042,7 @@
     }
 
     let editBubbleSaveHandler = null;
+    let editBubbleSavePromise = null;
     let editBubbleInstanceId = 0;
     let editBubbleCloseTimer = null;
 
@@ -12072,6 +12073,11 @@
       getElement('editBubbleBody').innerHTML = '<div class="edit-bubble-note">แก้ไขข้อมูลในกล่องนี้ แล้วกด “บันทึกการแก้ไข”</div>' + bodyHtml;
       getElement('editBubbleResult').textContent = '';
       getElement('editBubbleActions').classList.remove('hidden');
+      const saveButton = getElement('editBubbleSaveButton');
+      if (saveButton) {
+        saveButton.disabled = false;
+        saveButton.textContent = 'บันทึกการแก้ไข';
+      }
       editBubbleSaveHandler = saveHandler;
       getElement('editBubbleOverlay').classList.remove('hidden');
     }
@@ -12097,7 +12103,43 @@
     }
 
     function saveEditBubble() {
-      if (typeof editBubbleSaveHandler === 'function') editBubbleSaveHandler();
+      if (editBubbleSavePromise) return editBubbleSavePromise;
+      if (typeof editBubbleSaveHandler !== 'function') return null;
+      const targetInstanceId = editBubbleInstanceId;
+      const saveHandler = editBubbleSaveHandler;
+      const saveButton = getElement('editBubbleSaveButton');
+      const originalButtonText = saveButton ? saveButton.textContent : '';
+      if (saveButton) {
+        saveButton.disabled = true;
+        saveButton.textContent = 'กำลังบันทึก...';
+      }
+      let finishSave;
+      const activeSave = new Promise(function(resolve) { finishSave = resolve; });
+      editBubbleSavePromise = activeSave;
+      let handlerResult;
+      try {
+        handlerResult = saveHandler();
+      } catch (error) {
+        handlerResult = Promise.reject(error);
+      }
+      Promise.resolve(handlerResult)
+        .catch(function(error) {
+          console.error('edit bubble save error:', error);
+          const result = getElement('editBubbleResult');
+          if (result && targetInstanceId === editBubbleInstanceId) {
+            result.textContent = 'บันทึกไม่สำเร็จ: ' + (error.message || error.code || 'ไม่ทราบสาเหตุ');
+            result.style.color = '#dc2626';
+          }
+        })
+        .finally(function() {
+          if (editBubbleSavePromise === activeSave) editBubbleSavePromise = null;
+          if (targetInstanceId === editBubbleInstanceId && saveButton) {
+            saveButton.disabled = false;
+            saveButton.textContent = originalButtonText || 'บันทึกการแก้ไข';
+          }
+          finishSave();
+        });
+      return activeSave;
     }
 
     function getMonthlySessionStatusLabel(session) {
@@ -42508,6 +42550,21 @@ function receiptStatusText(status) {
         '<textarea id="bubblePaymentAmountNote">' + escapeHtml(payment.adminNote || '') + '</textarea>' +
         '<div class="notice" style="margin-top:8px;">ระบบจะเก็บทั้งราคาเต็ม ส่วนลด และยอดชำระจริงไว้ในรายการนี้</div>',
         async function() {
+          const previousPaymentState = {
+            originalAmount: payment.originalAmount,
+            baseAmount: payment.baseAmount,
+            expectedAmount: payment.expectedAmount,
+            discount: payment.discount,
+            finalAmount: payment.finalAmount,
+            amount: payment.amount,
+            totalAmount: payment.totalAmount,
+            discountType: payment.discountType,
+            discountReason: payment.discountReason,
+            adjustedBy: payment.adjustedBy,
+            adjustedAtText: payment.adjustedAtText,
+            updatedAtText: payment.updatedAtText,
+            adminNote: payment.adminNote
+          };
           const discountType = bubbleValue('bubbleDiscountType') || 'none';
           const origAmt = Number(getElement('bubblePaymentOriginalAmount') ? getElement('bubblePaymentOriginalAmount').value : originalAmount);
           let newFinal;
@@ -42537,7 +42594,10 @@ function receiptStatusText(status) {
             const monthPriceAmount = discountType === 'manualHalf' ? origAmt : newFinal;
             await syncPaymentAmountToStudentMonthPrice(payment, monthPriceAmount);
             addActivityLog('ปรับยอดชำระ/ส่วนลด', (payment.student || '-') + ' · ' + (payment.month || '-') + ' · ' + discountType + ' · ' + formatPrice(newFinal));
-          } catch (error) { console.error(error); }
+          } catch (error) {
+            Object.assign(payment, previousPaymentState);
+            throw error;
+          }
           renderPaymentTable();
           renderAdminDashboard();
           renderPaymentRecordPreview();
