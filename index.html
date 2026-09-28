@@ -29724,7 +29724,7 @@
       const deleteSlipBtn = p && canDeletePaymentSlip(p) ? '<button class="btn btn-red" type="button" onclick="' + actionCall('deletePaymentSlipOnly', paymentId) + '">ลบสลิป</button>' : '';
       const isOverdue = displayStatus === 'ค้างชำระ';
       const overdueNoticeBtn = isOverdue && paymentId ? '<button class="btn btn-orange" type="button" onclick="' + actionCall('printOverdueNotice', paymentId) + '">ใบแจ้งหนี้</button>' : '';
-      const adjustAmountBtn = p && canAdjustPaymentAmount(p) ? '<button class="btn btn-blue" type="button" onclick="editPaymentAmountDiscount(this)">แก้ยอด</button>' : '';
+      const adjustAmountBtn = p && canEditPaymentAmount(p) ? '<button class="btn btn-blue" type="button" onclick="editPaymentAmountDiscount(this)">แก้ยอด</button>' : '';
       if (isPaid) {
         return '<div class="payment-actions-wrap">' +
           '<button class="btn btn-blue" type="button" onclick="' + rowIdScript + '">ตรวจสลิป</button>' +
@@ -31173,6 +31173,26 @@
       return true;
     }
 
+    function canEditPaymentAmount(payment) {
+      if (!payment) return false;
+      if (!hasPermission('admin.finance') && !hasPermission('admin.full')) return false;
+      if (isPaymentInActiveBundle(payment)) return false;
+      if (canAdjustPaymentAmount(payment)) return true;
+      return getPaymentDisplayStatus(payment) === 'ชำระแล้ว';
+    }
+
+    function findReceiptLinkedToPayment(payment) {
+      if (!payment) return null;
+      const paymentId = String(payment.id || payment.firebaseDocId || '').trim();
+      return (receipts || []).find(function(receipt) {
+        if (!receipt) return false;
+        if (payment.receiptId && String(receipt.id || receipt.firebaseDocId || '') === String(payment.receiptId)) return true;
+        if (payment.receiptNo && receipt.receiptNo && String(receipt.receiptNo) === String(payment.receiptNo)) return true;
+        if (paymentId && receipt.paymentId && String(receipt.paymentId) === paymentId) return true;
+        return findPaymentForReceipt(receipt) === payment;
+      }) || null;
+    }
+
     function applyDirectPaymentAmount(payment, amount, noteText) {
       const finalAmount = Number(amount || 0) || 0;
       const nowText = new Date().toLocaleDateString('th-TH');
@@ -31222,9 +31242,10 @@
       return true;
     }
 
-    async function commitPaymentAmountAdjustment(payment, monthPriceAmount) {
+    async function commitPaymentAmountAdjustment(payment, monthPriceAmount, audit) {
       if (!firebaseReady || !db || !payment) throw new Error('Firebase ยังไม่พร้อมใช้งาน');
       if (PRODUCTION_MODE && !firebaseUser) throw new Error('กรุณาเข้าสู่ระบบก่อนบันทึกข้อมูล');
+      audit = audit || {};
       const paymentDocId = String(payment.firebaseDocId || payment.id || '').trim();
       if (!paymentDocId) throw new Error('ไม่พบรหัสรายการชำระเงิน');
 
@@ -31256,6 +31277,34 @@
         batch.set(db.collection('paymentMonths').doc(monthDocId), monthPayload, { merge: true });
       }
 
+      const linkedReceipt = findReceiptLinkedToPayment(payment);
+      let updatedReceipt = null;
+      if (linkedReceipt) {
+        const receiptDocId = String(linkedReceipt.firebaseDocId || linkedReceipt.id || '').trim();
+        if (!receiptDocId) throw new Error('ไม่พบรหัสใบเสร็จที่เชื่อมกับรายการ');
+        updatedReceipt = Object.assign({}, linkedReceipt, {
+          amount: String(getPaymentFinalAmount(payment)),
+          adjustedBy: audit.user || payment.adjustedBy || '',
+          adjustedAtText: audit.adjustedAtText || payment.adjustedAtText || '',
+          adjustmentReason: audit.reason || payment.discountReason || ''
+        });
+        batch.set(db.collection('receipts').doc(receiptDocId), buildFirebasePayload(updatedReceipt, receiptDocId, false), { merge: true });
+      }
+
+      const logId = createFirebaseDocId('activityLogs');
+      const oldAmount = Number(audit.oldAmount || 0) || 0;
+      const newAmount = getPaymentFinalAmount(payment);
+      const reason = String(audit.reason || payment.discountReason || '').trim();
+      const logItem = {
+        id: logId,
+        firebaseDocId: logId,
+        action: audit.isHistorical ? 'แก้ยอดย้อนหลังที่อนุมัติแล้ว' : 'ปรับยอดชำระ/ส่วนลด',
+        detail: (payment.student || '-') + ' · ' + (payment.month || '-') + ' · ' + formatPrice(oldAmount) + ' → ' + formatPrice(newAmount) + (reason ? ' · เหตุผล: ' + reason : ''),
+        user: audit.user || (getElement('profileName') ? getElement('profileName').textContent : 'Admin IDEA CLUB'),
+        createdAtText: audit.adjustedAtText || new Date().toLocaleString('th-TH')
+      };
+      batch.set(db.collection('activityLogs').doc(logId), buildFirebasePayload(logItem, logId, true), { merge: true });
+
       await batch.commit();
       payment.firebaseDocId = paymentDocId;
       payment.deleted = paymentPayload.deleted;
@@ -31263,7 +31312,9 @@
         monthItem.studentPrices = updatedMonthItem.studentPrices;
         monthItem.firebaseDocId = updatedMonthItem.firebaseDocId || updatedMonthItem.id;
       }
-      return { payment: payment, paymentMonth: monthItem };
+      if (linkedReceipt && updatedReceipt) Object.assign(linkedReceipt, updatedReceipt);
+      if (!(activityLogs || []).some(function(item) { return String(item.id || item.firebaseDocId || '') === logId; })) activityLogs.push(logItem);
+      return { payment: payment, paymentMonth: monthItem, receipt: linkedReceipt, activityLog: logItem };
     }
 
     async function savePaymentCoursePricesForMonth(month) {
@@ -42561,20 +42612,25 @@ function receiptStatusText(status) {
       const paymentId = row.getAttribute('data-payment-id');
       const payment = findPaymentByAnyId(paymentId);
       if (!payment) return;
-      if (!canAdjustPaymentAmount(payment)) {
-        alert('รายการนี้มีสลิป/ชำระแล้ว/อยู่ในยอดรวม หรือออกใบเสร็จแล้ว จึงแก้ยอดไม่ได้');
+      if (!canEditPaymentAmount(payment)) {
+        alert(isPaymentInActiveBundle(payment) ? 'รายการนี้อยู่ในยอดรวมหลายรายการ จึงต้องจัดการจากยอดรวม' : 'ไม่มีสิทธิ์แก้ไขยอดรายการนี้');
         renderPaymentTable();
         renderPaymentRecordPreview();
         return;
       }
+      const isHistoricalAdjustment = getPaymentDisplayStatus(payment) === 'ชำระแล้ว';
       const originalAmount = Number(payment.originalAmount || payment.baseAmount || getPaymentFinalAmount(payment));
       const currentFinal = getPaymentFinalAmount(payment);
       const currentDiscountType = payment.discountType || 'none';
       const noneSelected = (!currentDiscountType || currentDiscountType === 'none') ? ' selected' : '';
       const halfSelected = currentDiscountType === 'manualHalf' ? ' selected' : '';
       const customSelected = currentDiscountType === 'manualCustom' ? ' selected' : '';
-      const customHidden = (currentDiscountType !== 'manualCustom') ? 'style="display:none"' : '';
-      openEditBubble('ปรับยอดชำระ / ส่วนลด',
+      const customRowStyle = 'style="margin-top:8px;' + (currentDiscountType !== 'manualCustom' ? 'display:none;' : '') + '"';
+      const historicalNotice = isHistoricalAdjustment
+        ? '<div class="notice" style="margin-bottom:10px;border-color:#f59e0b;background:#fffbeb;">รายการนี้อนุมัติแล้ว ระบบจะคงสถานะชำระแล้ว สลิป และเลขใบเสร็จเดิม พร้อมอัปเดตยอดในใบเสร็จและประวัติการแก้ไข</div>'
+        : '';
+      openEditBubble(isHistoricalAdjustment ? 'แก้ยอดย้อนหลังที่อนุมัติแล้ว' : 'ปรับยอดชำระ / ส่วนลด',
+        historicalNotice +
         '<div class="form-row">' +
           '<div><label>ราคาเต็มจากคอร์ส</label><input id="bubblePaymentOriginalAmount" type="number" value="' + originalAmount + '" readonly style="background:#f3f4f6;"></div>' +
         '</div>' +
@@ -42584,12 +42640,12 @@ function receiptStatusText(status) {
           '<option value="manualHalf"' + halfSelected + '>ครึ่งราคา</option>' +
           '<option value="manualCustom"' + customSelected + '>กำหนดยอดเอง</option>' +
         '</select>' +
-        '<div id="bubbleDiscountCustomRow" ' + customHidden + ' style="margin-top:8px;">' +
+        '<div id="bubbleDiscountCustomRow" ' + customRowStyle + '>' +
           '<label>ยอดที่ต้องชำระจริง</label>' +
-          '<input id="bubblePaymentFinalAmount" type="number" value="' + currentFinal + '">' +
+          '<input id="bubblePaymentFinalAmount" type="number" min="1" value="' + currentFinal + '">' +
         '</div>' +
-        '<label style="margin-top:8px;">เหตุผลส่วนลด</label>' +
-        '<input id="bubbleDiscountReason" type="text" placeholder="เช่น ส่วนลดพิเศษ" value="' + escapeHtml(payment.discountReason || '') + '">' +
+        '<label style="margin-top:8px;">' + (isHistoricalAdjustment ? 'เหตุผลการแก้ไขย้อนหลัง <span style="color:#dc2626;">*</span>' : 'เหตุผลส่วนลด') + '</label>' +
+        '<input id="bubbleDiscountReason" type="text" placeholder="เช่น แก้ไขยอดตามข้อตกลงกับผู้ปกครอง" value="' + escapeHtml(isHistoricalAdjustment ? '' : (payment.discountReason || '')) + '">' +
         '<label style="margin-top:8px;">หมายเหตุ Admin</label>' +
         '<textarea id="bubblePaymentAmountNote">' + escapeHtml(payment.adminNote || '') + '</textarea>' +
         '<div class="notice" style="margin-top:8px;">ระบบจะเก็บทั้งราคาเต็ม ส่วนลด และยอดชำระจริงไว้ในรายการนี้</div>',
@@ -42617,7 +42673,23 @@ function receiptStatusText(status) {
           } else if (discountType === 'manualHalf') {
             newFinal = Math.ceil(origAmt / 2);
           } else {
-            newFinal = Number(bubbleValue('bubblePaymentFinalAmount') || 0) || origAmt;
+            newFinal = Number(bubbleValue('bubblePaymentFinalAmount'));
+          }
+          const adjustmentReason = String(bubbleValue('bubbleDiscountReason') || '').trim();
+          const result = getElement('editBubbleResult');
+          if (!Number.isFinite(newFinal) || newFinal <= 0) {
+            if (result) {
+              result.textContent = 'กรุณาระบุยอดที่ต้องชำระจริงมากกว่า 0 บาท';
+              result.style.color = '#dc2626';
+            }
+            return false;
+          }
+          if (isHistoricalAdjustment && !adjustmentReason) {
+            if (result) {
+              result.textContent = 'กรุณาระบุเหตุผลการแก้ไขยอดย้อนหลัง';
+              result.style.color = '#dc2626';
+            }
+            return false;
           }
           const newDiscount = Math.max(0, origAmt - newFinal);
           payment.originalAmount = origAmt;
@@ -42628,15 +42700,20 @@ function receiptStatusText(status) {
           payment.amount = newFinal;
           payment.totalAmount = newFinal;
           payment.discountType = discountType;
-          payment.discountReason = bubbleValue('bubbleDiscountReason') || '';
+          payment.discountReason = adjustmentReason;
           payment.adjustedBy = (currentAdmin && currentAdmin.name) || (firebaseUser && firebaseUser.email) || 'Admin';
-          payment.adjustedAtText = new Date().toLocaleDateString('th-TH');
-          payment.updatedAtText = new Date().toLocaleDateString('th-TH');
+          payment.adjustedAtText = new Date().toLocaleString('th-TH');
+          payment.updatedAtText = payment.adjustedAtText;
           payment.adminNote = bubbleValue('bubblePaymentAmountNote');
           try {
             const monthPriceAmount = discountType === 'manualHalf' ? origAmt : newFinal;
-            await commitPaymentAmountAdjustment(payment, monthPriceAmount);
-            addActivityLog('ปรับยอดชำระ/ส่วนลด', (payment.student || '-') + ' · ' + (payment.month || '-') + ' · ' + discountType + ' · ' + formatPrice(newFinal));
+            await commitPaymentAmountAdjustment(payment, monthPriceAmount, {
+              oldAmount: currentFinal,
+              reason: adjustmentReason,
+              user: payment.adjustedBy,
+              adjustedAtText: payment.adjustedAtText,
+              isHistorical: isHistoricalAdjustment
+            });
           } catch (error) {
             Object.assign(payment, previousPaymentState);
             throw error;
@@ -42647,6 +42724,8 @@ function receiptStatusText(status) {
           updateStudentSelectedPaymentMonth();
           updateStudentCourseDisplay();
           renderDashboardPaymentSummary();
+          renderAdminReceipts();
+          renderStudentReceipts();
           safeRun(renderStudentMobilePayment, 'edit-payment-amount-mobile');
           closeEditBubble();
         }

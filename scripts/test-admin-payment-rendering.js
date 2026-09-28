@@ -106,14 +106,15 @@ test('custom amount save persists 1200 and updates visible totals once', async (
   const h = setup(), payment = { id: 'p1', originalAmount: 1500, amount: 1500, status: 'ค้างชำระ' }, writes = [];
   h.c.payments = [payment];
   h.elements.bubblePaymentOriginalAmount = { value: '1500' };
-  h.c.findPaymentByAnyId = () => payment; h.c.canAdjustPaymentAmount = () => true;
+  h.c.findPaymentByAnyId = () => payment; h.c.canEditPaymentAmount = () => true;
+  h.c.isPaymentInActiveBundle = () => false; h.c.getPaymentDisplayStatus = p => p.status;
   h.c.getPaymentFinalAmount = p => p.amount; h.c.escapeHtml = s => s;
   h.c.currentAdmin = { name: 'Admin' }; h.c.firebaseUser = { email: 'admin@example.com' };
   h.c.bubbleValue = id => ({ bubbleDiscountType: 'manualCustom', bubblePaymentFinalAmount: '1200' }[id] || '');
   let save;
   h.c.openEditBubble = (title, body, handler) => { save = handler; };
   h.c.commitPaymentAmountAdjustment = async (data, monthPriceAmount) => writes.push({ data: { ...data }, monthPriceAmount });
-  for (const name of ['addActivityLog','updateStudentSelectedPaymentMonth','updateStudentCourseDisplay','renderStudentMobilePayment','closeEditBubble']) h.c[name] = () => {};
+  for (const name of ['updateStudentSelectedPaymentMonth','updateStudentCourseDisplay','renderStudentMobilePayment','renderAdminReceipts','renderStudentReceipts','closeEditBubble']) h.c[name] = () => {};
   vm.runInContext(source('editPaymentAmountDiscount'), h.c);
   h.c.editPaymentAmountDiscount({ closest: () => ({ getAttribute: () => 'p1' }) });
   await save(); await h.flush();
@@ -130,7 +131,9 @@ test('failed custom amount write keeps the bubble open and restores the prior am
   h.c.payments = [payment];
   h.elements.bubblePaymentOriginalAmount = { value: '1500' };
   h.c.findPaymentByAnyId = () => payment;
-  h.c.canAdjustPaymentAmount = () => true;
+  h.c.canEditPaymentAmount = () => true;
+  h.c.isPaymentInActiveBundle = () => false;
+  h.c.getPaymentDisplayStatus = p => p.status;
   h.c.getPaymentFinalAmount = p => p.amount;
   h.c.escapeHtml = s => s;
   h.c.currentAdmin = { name: 'Admin' };
@@ -140,7 +143,7 @@ test('failed custom amount write keeps the bubble open and restores the prior am
   let closeCalls = 0;
   h.c.openEditBubble = (title, body, handler) => { save = handler; };
   h.c.commitPaymentAmountAdjustment = async () => { throw new Error('network unavailable'); };
-  for (const name of ['addActivityLog','updateStudentSelectedPaymentMonth','updateStudentCourseDisplay','renderStudentMobilePayment']) h.c[name] = () => {};
+  for (const name of ['updateStudentSelectedPaymentMonth','updateStudentCourseDisplay','renderStudentMobilePayment','renderAdminReceipts','renderStudentReceipts']) h.c[name] = () => {};
   h.c.closeEditBubble = () => { closeCalls++; };
   vm.runInContext(source('editPaymentAmountDiscount'), h.c);
   h.c.editPaymentAmountDiscount({ closest: () => ({ getAttribute: () => 'p1' }) });
@@ -151,7 +154,73 @@ test('failed custom amount write keeps the bubble open and restores the prior am
   assert.equal(closeCalls, 0);
 });
 
-test('payment adjustment commits payment and month override in one atomic batch', async () => {
+test('approved payment requires a reason and a positive amount before saving', async () => {
+  const h = setup();
+  const payment = { id: 'p1', originalAmount: 2700, amount: 2700, finalAmount: 2700, status: 'ชำระแล้ว', slipStatus: 'approved', receiptId: 'r1' };
+  h.c.payments = [payment];
+  h.elements.bubblePaymentOriginalAmount = { value: '2700' };
+  h.elements.editBubbleResult = { textContent: '', style: {} };
+  h.c.findPaymentByAnyId = () => payment;
+  h.c.canEditPaymentAmount = () => true;
+  h.c.isPaymentInActiveBundle = () => false;
+  h.c.getPaymentDisplayStatus = () => 'ชำระแล้ว';
+  h.c.getPaymentFinalAmount = p => p.finalAmount;
+  h.c.escapeHtml = s => s;
+  h.c.currentAdmin = { name: 'Admin' };
+  h.c.firebaseUser = { email: 'admin@example.com' };
+  let values = { bubbleDiscountType: 'manualCustom', bubblePaymentFinalAmount: '1000', bubbleDiscountReason: '' };
+  h.c.bubbleValue = id => values[id] || '';
+  let save;
+  let commits = 0;
+  h.c.openEditBubble = (title, body, handler) => { save = handler; };
+  h.c.commitPaymentAmountAdjustment = async () => { commits++; };
+  for (const name of ['updateStudentSelectedPaymentMonth','updateStudentCourseDisplay','renderStudentMobilePayment','renderAdminReceipts','renderStudentReceipts','closeEditBubble']) h.c[name] = () => {};
+  vm.runInContext(source('editPaymentAmountDiscount'), h.c);
+  h.c.editPaymentAmountDiscount({ closest: () => ({ getAttribute: () => 'p1' }) });
+
+  assert.equal(await save(), false);
+  assert.equal(commits, 0);
+  assert.match(h.elements.editBubbleResult.textContent, /เหตุผล/);
+  values = { bubbleDiscountType: 'manualCustom', bubblePaymentFinalAmount: '0', bubbleDiscountReason: 'แก้ไขยอด' };
+  assert.equal(await save(), false);
+  assert.equal(commits, 0);
+  assert.match(h.elements.editBubbleResult.textContent, /มากกว่า 0/);
+});
+
+test('approved payment adjustment preserves approval, slip, and receipt identifiers', async () => {
+  const h = setup();
+  const payment = { id: 'p1', originalAmount: 2700, amount: 2700, finalAmount: 2700, status: 'ชำระแล้ว', paymentStatus: 'ชำระแล้ว', slipStatus: 'approved', slipUrl: 'https://example.com/slip.jpg', receiptId: 'r1', receiptNo: 'R001', receiptStatus: 'published' };
+  h.c.payments = [payment];
+  h.elements.bubblePaymentOriginalAmount = { value: '2700' };
+  h.c.findPaymentByAnyId = () => payment;
+  h.c.canEditPaymentAmount = () => true;
+  h.c.isPaymentInActiveBundle = () => false;
+  h.c.getPaymentDisplayStatus = () => 'ชำระแล้ว';
+  h.c.getPaymentFinalAmount = p => p.finalAmount;
+  h.c.escapeHtml = s => s;
+  h.c.currentAdmin = { name: 'Admin' };
+  h.c.firebaseUser = { email: 'admin@example.com' };
+  h.c.bubbleValue = id => ({ bubbleDiscountType: 'manualCustom', bubblePaymentFinalAmount: '1000', bubbleDiscountReason: 'แก้ไขตามข้อตกลง' }[id] || '');
+  let save;
+  let committedAudit;
+  h.c.openEditBubble = (title, body, handler) => { save = handler; };
+  h.c.commitPaymentAmountAdjustment = async (data, amount, audit) => { committedAudit = audit; };
+  for (const name of ['updateStudentSelectedPaymentMonth','updateStudentCourseDisplay','renderStudentMobilePayment','renderAdminReceipts','renderStudentReceipts','closeEditBubble']) h.c[name] = () => {};
+  vm.runInContext(source('editPaymentAmountDiscount'), h.c);
+  h.c.editPaymentAmountDiscount({ closest: () => ({ getAttribute: () => 'p1' }) });
+  await save();
+  assert.equal(payment.finalAmount, 1000);
+  assert.equal(payment.status, 'ชำระแล้ว');
+  assert.equal(payment.paymentStatus, 'ชำระแล้ว');
+  assert.equal(payment.slipStatus, 'approved');
+  assert.equal(payment.slipUrl, 'https://example.com/slip.jpg');
+  assert.equal(payment.receiptId, 'r1');
+  assert.equal(payment.receiptNo, 'R001');
+  assert.equal(committedAudit.oldAmount, 2700);
+  assert.equal(committedAudit.isHistorical, true);
+});
+
+test('payment adjustment commits payment, month override, and audit log in one atomic batch', async () => {
   const writes = [];
   let commits = 0;
   let reads = 0;
@@ -172,7 +241,13 @@ test('payment adjustment commits payment and month override in one atomic batch'
         };
       }
     },
+    receipts: [], activityLogs: [],
     buildFirebasePayload(item, id) { return Object.assign({}, item, { firebaseDocId: id, deleted: false }); },
+    createFirebaseDocId: () => 'log1',
+    findReceiptLinkedToPayment: () => null,
+    getPaymentFinalAmount: item => item.finalAmount || item.amount,
+    formatPrice: amount => amount + ' บาท',
+    getElement: () => null,
     getPaymentMonthItem: () => monthItem,
     findStudentByIdentityKey: () => ({ id: 's1', memberId: 'S001' }),
     getPrimaryStudentIdentityKey: student => student.memberId,
@@ -180,13 +255,126 @@ test('payment adjustment commits payment and month override in one atomic batch'
   };
   vm.createContext(c);
   vm.runInContext(source('commitPaymentAmountAdjustment'), c);
-  await c.commitPaymentAmountAdjustment(payment, 1200);
+  await c.commitPaymentAmountAdjustment(payment, 1200, { oldAmount: 1500, reason: 'แก้ยอด', user: 'Admin', adjustedAtText: '28/9/2569', isHistorical: true });
   assert.equal(reads, 0);
   assert.equal(commits, 1);
-  assert.equal(writes.length, 2);
-  assert.deepEqual(writes.map(write => write.ref.name), ['payments', 'paymentMonths']);
+  assert.equal(writes.length, 3);
+  assert.deepEqual(writes.map(write => write.ref.name), ['payments', 'paymentMonths', 'activityLogs']);
   assert.equal(writes[1].data.studentPrices.S001, 1200);
   assert.equal(monthItem.studentPrices.S001, 1200);
+  assert.match(writes[2].data.detail, /1500 บาท → 1200 บาท/);
+  assert.match(writes[2].data.detail, /เหตุผล: แก้ยอด/);
+  assert.equal(c.activityLogs.length, 1);
+});
+
+test('approved payment batch updates a linked receipt without changing its status or number', async () => {
+  const writes = [];
+  const receipt = { id: 'r1', paymentId: 'p1', receiptNo: 'R001', status: 'published', amount: '2700' };
+  const payment = { id: 'p1', status: 'ชำระแล้ว', finalAmount: 1000, receiptId: 'r1', receiptNo: 'R001' };
+  const c = {
+    firebaseReady: true, PRODUCTION_MODE: true, firebaseUser: { uid: 'admin' }, receipts: [receipt], activityLogs: [],
+    db: {
+      collection(name) { return { doc(id) { return { name, id }; } }; },
+      batch() { return { set(ref, data, options) { writes.push({ ref, data, options }); }, async commit() {} }; }
+    },
+    buildFirebasePayload(item, id) { return Object.assign({}, item, { firebaseDocId: id, deleted: false }); },
+    createFirebaseDocId: () => 'log1',
+    getPaymentMonthItem: () => null,
+    findReceiptLinkedToPayment: () => receipt,
+    getPaymentFinalAmount: item => item.finalAmount,
+    formatPrice: amount => amount + ' บาท',
+    getElement: () => null
+  };
+  vm.createContext(c);
+  vm.runInContext(source('commitPaymentAmountAdjustment'), c);
+  await c.commitPaymentAmountAdjustment(payment, 1000, { oldAmount: 2700, reason: 'แก้ไขตามข้อตกลง', user: 'Admin', adjustedAtText: '28/9/2569', isHistorical: true });
+  assert.deepEqual(writes.map(write => write.ref.name), ['payments', 'receipts', 'activityLogs']);
+  assert.equal(writes[1].data.amount, '1000');
+  assert.equal(writes[1].data.status, 'published');
+  assert.equal(writes[1].data.receiptNo, 'R001');
+  assert.equal(receipt.amount, '1000');
+  assert.equal(receipt.status, 'published');
+});
+
+test('failed atomic adjustment leaves month, receipt, and audit collections unchanged', async () => {
+  const receipt = { id: 'r1', paymentId: 'p1', amount: '2700', status: 'published' };
+  const monthItem = { id: 'm1', studentPrices: { S001: 2700 } };
+  const c = {
+    firebaseReady: true, PRODUCTION_MODE: true, firebaseUser: { uid: 'admin' }, receipts: [receipt], activityLogs: [],
+    db: {
+      collection(name) { return { doc(id) { return { name, id }; } }; },
+      batch() { return { set() {}, async commit() { throw new Error('batch failed'); } }; }
+    },
+    buildFirebasePayload(item, id) { return Object.assign({}, item, { firebaseDocId: id, deleted: false }); },
+    createFirebaseDocId: () => 'log1',
+    getPaymentMonthItem: () => monthItem,
+    findStudentByIdentityKey: () => ({ id: 's1', memberId: 'S001' }),
+    getPrimaryStudentIdentityKey: student => student.memberId,
+    getStudentIdentityKeys: () => ['s1', 'S001'],
+    findReceiptLinkedToPayment: () => receipt,
+    getPaymentFinalAmount: item => item.finalAmount,
+    formatPrice: String,
+    getElement: () => null
+  };
+  vm.createContext(c);
+  vm.runInContext(source('commitPaymentAmountAdjustment'), c);
+  await assert.rejects(c.commitPaymentAmountAdjustment({ id: 'p1', studentId: 's1', month: 'กันยายน 2569', finalAmount: 1000 }, 1000, { oldAmount: 2700, reason: 'แก้ไข' }), /batch failed/);
+  assert.equal(monthItem.studentPrices.S001, 2700);
+  assert.equal(receipt.amount, '2700');
+  assert.equal(c.activityLogs.length, 0);
+});
+
+test('linked receipt lookup supports receipt number and legacy identity matching', () => {
+  const payment = { id: 'p1', receiptNo: 'R001' };
+  const byNumber = { id: 'r1', receiptNo: 'R001' };
+  const legacy = { id: 'r2' };
+  const c = { receipts: [byNumber], findPaymentForReceipt: () => null };
+  vm.createContext(c);
+  vm.runInContext(source('findReceiptLinkedToPayment'), c);
+  assert.equal(c.findReceiptLinkedToPayment(payment), byNumber);
+  c.receipts = [legacy];
+  c.findPaymentForReceipt = receipt => receipt === legacy ? payment : null;
+  assert.equal(c.findReceiptLinkedToPayment(payment), legacy);
+});
+
+test('paid standalone rows show edit amount while active bundle rows stay locked', () => {
+  const paid = { id: 'p1', status: 'ชำระแล้ว' };
+  const c = {
+    payments: [paid],
+    getPaymentDisplayStatus: () => 'ชำระแล้ว',
+    getPaymentBundleForPayment: () => null,
+    paymentHasOcrData: () => false,
+    canMovePaymentSlipToAnotherMonth: () => false,
+    canDeletePaymentSlip: () => false,
+    canEditPaymentAmount: () => true,
+    actionCall: () => 'noop()',
+    formatPrice: String
+  };
+  vm.createContext(c);
+  vm.runInContext(source('paymentActionButtons'), c);
+  assert.match(c.paymentActionButtons('ชำระแล้ว', 'p1'), /editPaymentAmountDiscount/);
+  c.getPaymentBundleForPayment = () => ({ id: 'b1', status: 'ชำระแล้ว' });
+  assert.doesNotMatch(c.paymentActionButtons('ชำระแล้ว', 'p1'), /editPaymentAmountDiscount/);
+});
+
+test('retroactive amount edit requires finance permission and rejects active bundles', () => {
+  const payment = { id: 'p1', status: 'ชำระแล้ว', slipStatus: 'approved' };
+  const c = {
+    allowed: true,
+    bundled: false,
+    canAdjustPaymentAmount: () => false,
+    getPaymentDisplayStatus: () => 'ชำระแล้ว'
+  };
+  c.hasPermission = key => c.allowed && key === 'admin.finance';
+  c.isPaymentInActiveBundle = () => c.bundled;
+  vm.createContext(c);
+  vm.runInContext(source('canEditPaymentAmount'), c);
+  assert.equal(c.canEditPaymentAmount(payment), true);
+  c.allowed = false;
+  assert.equal(c.canEditPaymentAmount(payment), false);
+  c.allowed = true;
+  c.bundled = true;
+  assert.equal(c.canEditPaymentAmount(payment), false);
 });
 
 test('edit bubble accepts only one save while an async write is pending', async () => {
