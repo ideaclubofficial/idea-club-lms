@@ -112,13 +112,15 @@ test('custom amount save persists 1200 and updates visible totals once', async (
   h.c.bubbleValue = id => ({ bubbleDiscountType: 'manualCustom', bubblePaymentFinalAmount: '1200' }[id] || '');
   let save;
   h.c.openEditBubble = (title, body, handler) => { save = handler; };
-  h.c.setFirebaseDocument = async (collection, data) => writes.push({ collection, data: { ...data } });
-  for (const name of ['syncPaymentAmountToStudentMonthPrice','addActivityLog','updateStudentSelectedPaymentMonth','updateStudentCourseDisplay','renderStudentMobilePayment','closeEditBubble']) h.c[name] = () => {};
+  h.c.commitPaymentAmountAdjustment = async (data, monthPriceAmount) => writes.push({ data: { ...data }, monthPriceAmount });
+  for (const name of ['addActivityLog','updateStudentSelectedPaymentMonth','updateStudentCourseDisplay','renderStudentMobilePayment','closeEditBubble']) h.c[name] = () => {};
   vm.runInContext(source('editPaymentAmountDiscount'), h.c);
   h.c.editPaymentAmountDiscount({ closest: () => ({ getAttribute: () => 'p1' }) });
   await save(); await h.flush();
+  assert.equal(writes.length, 1);
   assert.equal(writes[0].data.finalAmount, 1200);
   assert.equal(writes[0].data.discount, 300);
+  assert.equal(writes[0].monthPriceAmount, 1200);
   assert.equal(h.elements.expectedAmountThisMonth.textContent, '1200');
   assert.equal(h.counts.updatePaymentSummary, 1);
 });
@@ -137,8 +139,7 @@ test('failed custom amount write keeps the bubble open and restores the prior am
   let save;
   let closeCalls = 0;
   h.c.openEditBubble = (title, body, handler) => { save = handler; };
-  h.c.setFirebaseDocument = async () => { throw new Error('network unavailable'); };
-  h.c.syncPaymentAmountToStudentMonthPrice = () => { throw new Error('must not sync after failed payment write'); };
+  h.c.commitPaymentAmountAdjustment = async () => { throw new Error('network unavailable'); };
   for (const name of ['addActivityLog','updateStudentSelectedPaymentMonth','updateStudentCourseDisplay','renderStudentMobilePayment']) h.c[name] = () => {};
   h.c.closeEditBubble = () => { closeCalls++; };
   vm.runInContext(source('editPaymentAmountDiscount'), h.c);
@@ -148,6 +149,44 @@ test('failed custom amount write keeps the bubble open and restores the prior am
   assert.equal(payment.amount, 1500);
   assert.equal(payment.originalAmount, 1500);
   assert.equal(closeCalls, 0);
+});
+
+test('payment adjustment commits payment and month override in one atomic batch', async () => {
+  const writes = [];
+  let commits = 0;
+  let reads = 0;
+  const monthItem = { id: 'm1', month: 'กันยายน 2569', studentPrices: {} };
+  const payment = { id: 'p1', studentId: 's1', month: 'กันยายน 2569', amount: 1200 };
+  const c = {
+    firebaseReady: true,
+    PRODUCTION_MODE: true,
+    firebaseUser: { uid: 'admin' },
+    db: {
+      collection(name) {
+        return { doc(id) { return { name, id, get() { reads++; } }; } };
+      },
+      batch() {
+        return {
+          set(ref, data, options) { writes.push({ ref, data, options }); },
+          async commit() { commits++; }
+        };
+      }
+    },
+    buildFirebasePayload(item, id) { return Object.assign({}, item, { firebaseDocId: id, deleted: false }); },
+    getPaymentMonthItem: () => monthItem,
+    findStudentByIdentityKey: () => ({ id: 's1', memberId: 'S001' }),
+    getPrimaryStudentIdentityKey: student => student.memberId,
+    getStudentIdentityKeys: () => ['s1', 'S001']
+  };
+  vm.createContext(c);
+  vm.runInContext(source('commitPaymentAmountAdjustment'), c);
+  await c.commitPaymentAmountAdjustment(payment, 1200);
+  assert.equal(reads, 0);
+  assert.equal(commits, 1);
+  assert.equal(writes.length, 2);
+  assert.deepEqual(writes.map(write => write.ref.name), ['payments', 'paymentMonths']);
+  assert.equal(writes[1].data.studentPrices.S001, 1200);
+  assert.equal(monthItem.studentPrices.S001, 1200);
 });
 
 test('edit bubble accepts only one save while an async write is pending', async () => {

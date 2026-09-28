@@ -31222,6 +31222,50 @@
       return true;
     }
 
+    async function commitPaymentAmountAdjustment(payment, monthPriceAmount) {
+      if (!firebaseReady || !db || !payment) throw new Error('Firebase ยังไม่พร้อมใช้งาน');
+      if (PRODUCTION_MODE && !firebaseUser) throw new Error('กรุณาเข้าสู่ระบบก่อนบันทึกข้อมูล');
+      const paymentDocId = String(payment.firebaseDocId || payment.id || '').trim();
+      if (!paymentDocId) throw new Error('ไม่พบรหัสรายการชำระเงิน');
+
+      const batch = db.batch();
+      const paymentPayload = buildFirebasePayload(payment, paymentDocId, false);
+      batch.set(db.collection('payments').doc(paymentDocId), paymentPayload, { merge: true });
+
+      const month = String(payment.month || payment.paymentMonth || '').trim();
+      const studentId = String(payment.studentId || '').trim();
+      const monthItem = month && studentId ? getPaymentMonthItem(month) : null;
+      let updatedMonthItem = null;
+      if (monthItem) {
+        updatedMonthItem = Object.assign({}, monthItem, {
+          studentPrices: Object.assign({}, monthItem.studentPrices || {})
+        });
+        const student = findStudentByIdentityKey(studentId);
+        const priceKey = student ? getPrimaryStudentIdentityKey(student) : studentId;
+        const amount = Number(monthPriceAmount || 0) || 0;
+        if (amount > 0) {
+          updatedMonthItem.studentPrices[String(priceKey)] = amount;
+        } else {
+          getStudentIdentityKeys(student || { id: studentId }).forEach(function(key) {
+            delete updatedMonthItem.studentPrices[key];
+          });
+        }
+        const monthDocId = String(updatedMonthItem.firebaseDocId || updatedMonthItem.id || '').trim();
+        if (!monthDocId) throw new Error('ไม่พบรหัสรอบชำระเงิน');
+        const monthPayload = buildFirebasePayload(updatedMonthItem, monthDocId, false);
+        batch.set(db.collection('paymentMonths').doc(monthDocId), monthPayload, { merge: true });
+      }
+
+      await batch.commit();
+      payment.firebaseDocId = paymentDocId;
+      payment.deleted = paymentPayload.deleted;
+      if (monthItem && updatedMonthItem) {
+        monthItem.studentPrices = updatedMonthItem.studentPrices;
+        monthItem.firebaseDocId = updatedMonthItem.firebaseDocId || updatedMonthItem.id;
+      }
+      return { payment: payment, paymentMonth: monthItem };
+    }
+
     async function savePaymentCoursePricesForMonth(month) {
       const item = getPaymentMonthItem(month);
       if (!item) throw new Error('กรุณาเลือกเดือนก่อนบันทึกราคา');
@@ -42590,9 +42634,8 @@ function receiptStatusText(status) {
           payment.updatedAtText = new Date().toLocaleDateString('th-TH');
           payment.adminNote = bubbleValue('bubblePaymentAmountNote');
           try {
-            await setFirebaseDocument('payments', payment);
             const monthPriceAmount = discountType === 'manualHalf' ? origAmt : newFinal;
-            await syncPaymentAmountToStudentMonthPrice(payment, monthPriceAmount);
+            await commitPaymentAmountAdjustment(payment, monthPriceAmount);
             addActivityLog('ปรับยอดชำระ/ส่วนลด', (payment.student || '-') + ' · ' + (payment.month || '-') + ' · ' + discountType + ' · ' + formatPrice(newFinal));
           } catch (error) {
             Object.assign(payment, previousPaymentState);
