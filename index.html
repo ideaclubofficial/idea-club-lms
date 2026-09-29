@@ -4307,6 +4307,8 @@
 
         <div class="student-mobile-card">
           <h3>คอร์สของฉัน</h3>
+          <label for="studentMobileActiveCourseSelect" class="student-mobile-muted">เลือกคอร์สที่ต้องการใช้งาน</label>
+          <select id="studentMobileActiveCourseSelect" onchange="selectStudentCourseContext(this.value)" style="width:100%;margin:8px 0 10px;"></select>
           <strong id="studentMobileCourseName">-</strong>
           <p id="studentMobileCourseMeta" class="student-mobile-muted">ยังไม่มีคอร์สที่สมัคร</p>
         </div>
@@ -4428,6 +4430,8 @@
         </div>
         <div id="studentCourseSummaryCard" class="hero-card hidden">
           <h3>คอร์สที่สมัคร</h3>
+          <label for="studentActiveCourseSelect">เลือกคอร์สที่ต้องการใช้งาน</label>
+          <select id="studentActiveCourseSelect" onchange="selectStudentCourseContext(this.value)" style="width:100%;margin:8px 0 12px;"></select>
           <p><strong>คอร์ส:</strong> <span id="studentDashboardCourseName">-</span></p>
           <p id="studentDashboardCourseAccessRow" class="hidden"><strong>สิทธิ์ที่ได้รับ:</strong> <span id="studentDashboardCourseAccess"></span></p>
           <p id="studentDashboardPaymentRow" class="hidden"><strong>ชำระเงิน:</strong> <span id="studentDashboardPaymentStatus" class="status-waiting"></span></p>
@@ -4545,6 +4549,10 @@
 
       <br />
 
+      <h3>คอร์สของฉัน</h3>
+      <div id="studentMyCourseList" class="grid" style="margin-bottom:22px;"></div>
+
+      <h3>คอร์สที่สมัครเพิ่มได้</h3>
       <div id="studentCourseList" class="grid">
         <div class="card">
           <h3>กำลังตรวจสอบข้อมูลลงทะเบียน</h3>
@@ -9120,7 +9128,7 @@
     let studentDataLoadingForUid = '';
     let studentDataSessionUid = '';
     let studentDataSessionVersion = 0;
-    const STUDENT_HOME_REALTIME_COLLECTIONS = ['payments', 'receipts', 'paymentBundles', 'studentGamificationProfiles', 'studentGamificationEvents', 'studentPersonalQuests'];
+    const STUDENT_HOME_REALTIME_COLLECTIONS = ['courses', 'courseEnrollments', 'payments', 'receipts', 'paymentBundles', 'studentGamificationProfiles', 'studentGamificationEvents', 'studentPersonalQuests'];
     let studentRealtimeSession = null;
     let studentRealtimeRefreshTimer = null;
     let adminRealtimeSession = null;
@@ -9491,7 +9499,7 @@
     }
 
     function studentCollectionUsesAuthUidOnly(collectionName) {
-      return ['receipts', 'paymentBundles', 'prizeWheelSpins'].includes(collectionName);
+      return ['courseEnrollments', 'receipts', 'paymentBundles', 'prizeWheelSpins'].includes(collectionName);
     }
 
     function buildStudentOwnedQuerySpecs(collectionName, studentDocIds, authUid, paymentStudentIds) {
@@ -9776,6 +9784,7 @@
       const session = studentRealtimeSession;
       const isCurrent = function() { return session.active && studentRealtimeSession === session && firebaseUser && firebaseUser.uid === authUid; };
       [
+        ['courseEnrollments', courseEnrollments],
         ['payments', payments], ['receipts', receipts], ['paymentBundles', paymentBundles],
         ['studentGamificationProfiles', studentGamificationProfiles], ['studentGamificationEvents', studentGamificationEvents],
         ['studentPersonalQuests', studentPersonalQuests], ['gamificationRedemptions', gamificationRedemptions], ['prizeWheelSpins', prizeWheelSpins]
@@ -9789,6 +9798,15 @@
           scheduleStudentRealtimeRefresh(session);
         });
       });
+      if (!collectionNames || collectionNames.includes('courses')) {
+        const existingCourses = session.groups.courses;
+        if (!existingCourses || existingCourses.failed) {
+          if (existingCourses) existingCourses.stop();
+          session.groups.courses = createRealtimeCollectionGroup([
+            { key: 'courses:all', query: db.collection('courses') }
+          ], courses, isCurrent, function() { scheduleStudentRealtimeRefresh(session); });
+        }
+      }
       return session;
     }
 
@@ -9886,8 +9904,7 @@
 
     function renderStudentFeatureData(name) {
       if (name === 'learning') {
-        const course = getCurrentStudentCourse();
-        const entitled = studentCanUseCourseEntitlements(currentStudent) && course ? [course] : [];
+        const entitled = getStudentMediaEntitledCourses(currentStudent);
         const grade = currentStudent && currentStudent.grade ? currentStudent.grade : getProfileGrade();
         renderStudentOnlineClasses(entitled, grade);
         renderStudentOnDemandClasses(entitled, grade);
@@ -10008,6 +10025,8 @@
       studentDataLoadedForUid = '';
       studentDataLoadingForUid = '';
       studentDataLoadingPromise = null;
+      currentStudentCourseId = null;
+      courseEnrollments.length = 0;
       stopStudentPaymentListeners();
     }
 
@@ -10041,7 +10060,7 @@
       if (!realtime) return null;
 
       const results = await Promise.all([
-        getFirebaseCollectionQuiet('courses', false, loadStatus),
+        waitForRealtimeCollection(realtime, 'courses', loadStatus),
         getFirebaseCollectionQuiet('announcements', false, loadStatus),
         getFirebaseCollectionQuiet('scoreReports', false, loadStatus),
         db.collection('adminScoreRecords').where('status', '==', 'published').get().then(function(snap) {
@@ -10056,7 +10075,6 @@
       if (!isCurrentSession() || !realtime.active) return null;
       replaceArray(students, normalizedStudents);
       currentStudent = studentRecord;
-      replaceArray(courses, results[0]);
       replaceArray(announcements, results[1]);
       replaceArray(scoreReports, results[2]);
       replaceArray(adminScoreRecords, results[3]);
@@ -10143,7 +10161,7 @@
     }
 
     const STAFF_DATA_GROUPS = {
-      core: ['students', 'teachers', 'courses', 'settings'],
+      core: ['students', 'teachers', 'courses', 'courseEnrollments', 'settings'],
       schedule: ['monthlyPlans', 'courseTeachingSettings', 'monthlyPlanSessions', 'teacherPreferenceRules', 'holidays', 'attendanceHistory'],
       finance: ['paymentMonths', 'payments', 'receipts', 'paymentBundles'],
       scores: ['scoreReports', 'adminScoreRecords', 'monthlyQuestions', 'monthlyExamLinks'],
@@ -10195,7 +10213,7 @@
     }
 
     function getStaffCollectionTargets() {
-      return { students, teachers, courses, onDemandClips, paymentMonths, lineGroups, payments, receipts, paymentBundles,
+      return { students, teachers, courses, courseEnrollments, onDemandClips, paymentMonths, lineGroups, payments, receipts, paymentBundles,
         monthlyQuestions, monthlyExamLinks, monthlyPlans, courseTeachingSettings, monthlyPlanSessions, teacherPreferenceRules,
         holidays, attendanceHistory: pickupHistory, announcements, activityLogs, studentGamificationProfiles,
         studentGamificationEvents, studentPersonalQuests, scoreReports, adminScoreRecords, gamificationRewards,
@@ -10377,8 +10395,11 @@
         .replace(/'/g, '&#39;');
     }
 
-    function actionCall(functionName, id) {
-      return functionName + "('" + jsArg(id) + "')";
+    function actionCall(functionName) {
+      const args = Array.prototype.slice.call(arguments, 1).map(function(value) {
+        return "'" + jsArg(value) + "'";
+      });
+      return functionName + '(' + args.join(',') + ')';
     }
 
     function parseDriveImageUrl(url) {
@@ -11766,6 +11787,7 @@
     const teachers = [];
 
     const courses = [];
+    const courseEnrollments = [];
 
     const teacherPreferenceRules = [];
     const courseTeachingSettings = [];
@@ -16937,7 +16959,12 @@
     }
 
     function getPendingCourseStudents() {
-      return students.filter(function(s) { return isActiveStudentForDashboard(s) && s.courseStatus === 'รออนุมัติคอร์ส'; });
+      const pendingStudentIds = new Set((courseEnrollments || []).filter(function(enrollment) {
+        return enrollment.deleted !== true && enrollment.courseStatus === 'รออนุมัติคอร์ส';
+      }).map(function(enrollment) { return String(enrollment.studentId || ''); }));
+      return students.filter(function(s) {
+        return isActiveStudentForDashboard(s) && (pendingStudentIds.has(getEnrollmentStudentId(s)) || (!getStudentCourseEnrollments(s).some(function(item) { return !item.legacy; }) && s.courseStatus === 'รออนุมัติคอร์ส'));
+      });
     }
 
     function getNoCourseStudents() {
@@ -17004,10 +17031,14 @@
     }
 
     function renderAdminStudentActions(s) {
-      const approvalBtns = s.courseStatus === 'รออนุมัติคอร์ส'
-        ? '<button class="btn btn-green" type="button" onclick="' + actionCall('approveStudentCourse', s.id) + '">อนุมัติคอร์ส</button>' +
-          '<button class="btn btn-red" type="button" onclick="' + actionCall('cancelStudentCourse', s.id) + '">ยกเลิกคอร์ส</button>'
-        : '';
+      const pendingEnrollments = getStudentCourseEnrollments(s, { currentOnly: true }).filter(function(enrollment) { return enrollment.courseStatus === 'รออนุมัติคอร์ส'; });
+      const approvalBtns = pendingEnrollments.map(function(enrollment) {
+        const course = getCourseForEnrollment(enrollment);
+        const label = (course && course.name) || enrollment.courseName || enrollment.courseId || '-';
+        return '<span class="mini-muted">' + escapeHtml(label) + '</span>' +
+          '<button class="btn btn-green" type="button" onclick="' + actionCall('approveStudentCourse', s.id, enrollment.courseId) + '">อนุมัติคอร์ส</button>' +
+          '<button class="btn btn-red" type="button" onclick="' + actionCall('cancelStudentCourse', s.id, enrollment.courseId) + '">ยกเลิกคอร์ส</button>';
+      }).join('');
       const privateLessonBtn = canUseAdminTabOperation('admin-monthly-planner')
         ? '<button class="btn btn-blue" type="button" onclick="' + actionCall('openOneOnOneMonthlyPlanSessionFormForStudent', s.id) + '">เพิ่มคาบ 1:1</button>'
         : '';
@@ -17162,6 +17193,22 @@
       return data;
     }
 
+    function getPromotionHistoricalMediaEnrollments(student, fromGrade) {
+      const targetGrade = String(fromGrade || '').trim();
+      const rows = getStudentCourseEnrollments(student).filter(function(enrollment) {
+        const approvedBeforeCompletion = enrollment.everApproved === true || isCourseStatusApproved(enrollment.courseStatusBeforeCompletion || '');
+        return String(enrollment.courseStatus || '') === 'จบคอร์ส'
+          && approvedBeforeCompletion
+          && String(enrollment.historicalMediaStatus || 'allowed') !== 'revoked'
+          && String(enrollment.grade || '').trim() === targetGrade;
+      });
+      getLegacyHistoricalMediaEnrollments(student).forEach(function(enrollment) {
+        if (String(enrollment.grade || '').trim() !== targetGrade) return;
+        if (!rows.some(function(item) { return String(item.courseId || '') === String(enrollment.courseId || ''); })) rows.push(enrollment);
+      });
+      return rows;
+    }
+
     async function confirmGradePromotionRound() {
       if (!hasPermission('admin.students')) { alert('ไม่มีสิทธิ์'); return; }
       const data = renderGradePromotionPreview();
@@ -17179,6 +17226,23 @@
         for (let i = 0; i < data.promotable.length; i++) {
           const student = data.promotable[i].student;
           const history = Array.isArray(student.gradePromotionHistory) ? student.gradePromotionHistory.slice() : [];
+          const promotionTimeMs = Date.now();
+          const historicalEnrollments = getPromotionHistoricalMediaEnrollments(student, data.state.fromGrade);
+          const revokedHistoricalCourseIds = historicalEnrollments.map(function(enrollment) {
+            return String(enrollment.courseId || '');
+          }).filter(function(courseId, index, list) { return courseId && list.indexOf(courseId) === index; });
+          for (let enrollmentIndex = 0; enrollmentIndex < historicalEnrollments.length; enrollmentIndex++) {
+            const enrollment = historicalEnrollments[enrollmentIndex];
+            if (enrollment.legacy || enrollment.legacyHistory || enrollment.historicalMediaStatus === 'revoked') continue;
+            enrollment.historicalMediaStatus = 'revoked';
+            enrollment.historicalMediaRevokedAt = nowText;
+            enrollment.historicalMediaRevokedAtMs = promotionTimeMs;
+            enrollment.historicalMediaRevokedReason = 'grade_promotion';
+            enrollment.historicalMediaRevokedBy = actor;
+            enrollment.historicalMediaRevokedFromGrade = data.state.fromGrade;
+            enrollment.historicalMediaRevokedToGrade = data.state.toGrade === 'graduate' ? 'จบการศึกษา' : data.state.toGrade;
+            await setFirebaseDocument('courseEnrollments', enrollment);
+          }
           history.push({
             previousGrade: student.grade || '',
             promotedToGrade: data.state.toGrade === 'graduate' ? 'จบการศึกษา' : data.state.toGrade,
@@ -17186,14 +17250,28 @@
             courseId: student.courseId || '',
             course: student.course || '',
             promotedAtText: nowText,
+            promotedAtMs: promotionTimeMs,
             promotedAtMonth: nowMonth,
-            promotedBy: actor
+            promotedBy: actor,
+            revokedHistoricalCourseIds: revokedHistoricalCourseIds
+          });
+          const courseCompletionHistory = (Array.isArray(student.courseCompletionHistory) ? student.courseCompletionHistory : []).map(function(item) {
+            const courseId = String(item && (item.courseId || item.id) || '');
+            if (!revokedHistoricalCourseIds.includes(courseId)) return item;
+            return Object.assign({}, item, {
+              historicalMediaStatus: 'revoked',
+              historicalMediaRevokedAt: nowText,
+              historicalMediaRevokedAtMs: promotionTimeMs,
+              historicalMediaRevokedReason: 'grade_promotion'
+            });
           });
           const nextStudent = Object.assign({}, student, {
             gradePromotionHistory: history,
+            courseCompletionHistory: courseCompletionHistory,
             previousGrade: student.grade || '',
             promotedToGrade: data.state.toGrade === 'graduate' ? 'จบการศึกษา' : data.state.toGrade,
             promotedAtText: nowText,
+            promotedAtMs: promotionTimeMs,
             promotedAtMonth: nowMonth,
             promotedBy: actor,
             statusChangedAtText: data.state.toGrade === 'graduate' ? nowText : student.statusChangedAtText,
@@ -17245,15 +17323,23 @@
 
       renderPendingCourseApprovalList();
       tbody.innerHTML = pageItems.length ? pageItems.map(function(s, i) {
+        const studentEnrollments = getStudentCourseEnrollments(s);
+        const courseSummaryHtml = studentEnrollments.length ? studentEnrollments.map(function(enrollment) {
+          const course = getCourseForEnrollment(enrollment);
+          return '<span class="tag">' + escapeHtml((course && course.name) || enrollment.courseName || '-') + '</span>';
+        }).join(' ') : '-';
+        const statusSummaryHtml = studentEnrollments.length ? studentEnrollments.map(function(enrollment) {
+          const status = enrollment.courseStatus || '-';
+          const cls = status === 'อนุมัติแล้ว' ? 'status-paid' : status === 'รออนุมัติคอร์ส' ? 'status-waiting' : 'status-absent';
+          return '<span class="' + cls + '">' + escapeHtml(status) + '</span>';
+        }).join('<br>') : '<span class="status-absent">ยังไม่ได้สมัครคอร์ส</span>';
         const learningStatus = s.learningStatus || s.status || 'เรียนอยู่';
         const learningType = normalizeStudentLearningType(s.learningType);
         const privateLessonText = isPrivateLessonStudentEnabled(s)
           ? '<br><span class="mini-muted">1:1 ' + (getMonthlyPlanDayText(s.privateLessonDay || '') || '-') + ' ' + ((s.privateLessonTimeStart || '-') + '-' + (s.privateLessonTimeEnd || '-')) + '</span>'
           : '';
         const learningClass = learningStatus === 'เรียนอยู่' || learningStatus === 'จบคอร์ส' ? 'status-paid' : learningStatus === 'พักเรียน' ? 'status-waiting' : 'status-absent';
-        const courseStatus = s.courseStatus || 'ยังไม่ได้สมัครคอร์ส';
         const paymentStatus = getStudentLatestPaymentStatus(s);
-        const courseStatusClass = courseStatus === 'อนุมัติแล้ว' ? 'status-paid' : courseStatus === 'รออนุมัติคอร์ส' ? 'status-waiting' : 'status-absent';
         const paymentClass = paymentStatus === 'ชำระแล้ว' ? 'status-paid' : paymentStatus === 'รอตรวจสลิป' || paymentStatus === 'รอชำระเงิน' ? 'status-waiting' : paymentStatus === 'ค้างชำระ' || paymentStatus === 'สลิปไม่ผ่าน' ? 'status-absent' : 'status-parent';
         return '<tr>' +
           '<td>' + (start + i + 1) + '</td>' +
@@ -17262,8 +17348,8 @@
           '<td>' + (s.nickname || '-') + '</td>' +
           '<td>' + (s.grade || '-') + '</td>' +
           '<td title="' + escapeHtml(s.preferredLocation || '-') + '"><span class="admin-student-center-ellipsis">' + escapeHtml(s.preferredLocation || '-') + '</span></td>' +
-          '<td>' + (s.course || '-') + '</td>' +
-          '<td><span class="' + courseStatusClass + '">' + courseStatus + '</span></td>' +
+          '<td>' + courseSummaryHtml + '</td>' +
+          '<td>' + statusSummaryHtml + '</td>' +
           '<td><span class="' + learningClass + '">' + learningStatus + '</span><br><span class="mini-muted">' + learningType + '</span>' + privateLessonText + '</td>' +
           '<td>' + (s.parentName || '-') + '</td>' +
           '<td style="white-space:nowrap;">' + (s.phone || '-') + '</td>' +
@@ -17518,6 +17604,7 @@
           ? students.find(function(item) { return String(item.id) === String(editingId); })
           : students[students.length - 1];
         if (savedStudent) {
+          if (selectedCourse) await ensureAdminCourseEnrollment(savedStudent, selectedCourse, courseStatusInput || savedStudent.courseStatus || 'อนุมัติแล้ว');
           if (getElement('generatedMemberId')) getElement('generatedMemberId').textContent = savedStudent.memberId || '-';
           if (getElement('generatedUsername')) getElement('generatedUsername').textContent = savedStudent.memberId || savedStudent.studentId || '-';
           if (getElement('generatedDefaultPassword')) getElement('generatedDefaultPassword').textContent = savedStudent.defaultPassword || '-';
@@ -17537,19 +17624,67 @@
       }
     }
 
+    async function ensureAdminCourseEnrollment(student, course, courseStatus) {
+      if (!student || !course) return null;
+      const studentId = getEnrollmentStudentId(student);
+      const courseId = String(course.id || course.firebaseDocId || '');
+      if (!studentId || !courseId) return null;
+      const docId = getCourseEnrollmentDocId(studentId, courseId);
+      let enrollment = (courseEnrollments || []).find(function(item) {
+        return String(item.firebaseDocId || item.id || '') === docId;
+      });
+      if (!enrollment) {
+        enrollment = {
+          id: docId,
+          firebaseDocId: docId,
+          studentId: studentId,
+          authUid: student.authUid || '',
+          memberId: student.memberId || student.studentId || '',
+          studentName: student.name || '',
+          courseId: courseId,
+          courseName: course.name || '',
+          courseAccess: course.access || '',
+          grade: student.grade || course.grade || '',
+          location: student.preferredLocation || course.location || '',
+          courseStatus: courseStatus || 'อนุมัติแล้ว',
+          everApproved: isCourseStatusApproved(courseStatus || 'อนุมัติแล้ว'),
+          approvedAtMs: isCourseStatusApproved(courseStatus || 'อนุมัติแล้ว') ? Date.now() : 0,
+          historicalMediaStatus: 'not_applicable',
+          paymentStatus: student.paymentStatus && student.paymentStatus !== 'ยังไม่ได้สมัครคอร์ส' ? student.paymentStatus : 'รอชำระเงิน',
+          registeredCourseMonth: student.registeredCourseMonth || getThaiMonthFromDate(new Date().toISOString().slice(0, 10)),
+          enrollmentStatus: 'active'
+        };
+        await setFirebaseDocument('courseEnrollments', enrollment);
+        courseEnrollments.push(enrollment);
+      }
+      return enrollment;
+    }
+
     
-    async function approveStudentCourse(id) {
+    async function approveStudentCourse(id, courseId) {
       const student = students.find(function(item) { return String(item.id) === String(id); });
       if (!student) return;
-      if (!student.courseId) {
+      const enrollment = getStudentCourseEnrollment(student, courseId || student.courseId);
+      if (!enrollment) {
         alert('นักเรียนคนนี้ยังไม่ได้สมัครคอร์ส');
         return;
       }
-      if (!confirm('อนุมัติคอร์สให้ ' + (student.name || '-') + ' ใช่หรือไม่?')) return;
-      student.courseStatus = 'อนุมัติแล้ว';
-      if (!student.paymentStatus || student.paymentStatus === 'ยังไม่ได้สมัครคอร์ส') student.paymentStatus = 'รอชำระเงิน';
-      await setFirebaseDocument('students', student);
-      addActivityLog('อนุมัติคอร์ส', (student.name || '-') + ' · ' + (student.course || '-'));
+      const course = getCourseForEnrollment(enrollment);
+      if (!confirm('อนุมัติคอร์ส ' + ((course && course.name) || enrollment.courseName || '-') + ' ให้ ' + (student.name || '-') + ' ใช่หรือไม่?')) return;
+      if (enrollment.legacy) {
+        student.courseStatus = 'อนุมัติแล้ว';
+        if (!student.paymentStatus || student.paymentStatus === 'ยังไม่ได้สมัครคอร์ส') student.paymentStatus = 'รอชำระเงิน';
+        await setFirebaseDocument('students', student);
+      } else {
+        enrollment.courseStatus = 'อนุมัติแล้ว';
+        enrollment.everApproved = true;
+        enrollment.approvedAtMs = Number(enrollment.approvedAtMs || Date.now());
+        enrollment.historicalMediaStatus = 'not_applicable';
+        if (!enrollment.paymentStatus || enrollment.paymentStatus === 'ยังไม่ได้สมัครคอร์ส') enrollment.paymentStatus = 'รอชำระเงิน';
+        enrollment.enrollmentStatus = 'active';
+        await setFirebaseDocument('courseEnrollments', enrollment);
+      }
+      addActivityLog('อนุมัติคอร์ส', (student.name || '-') + ' · ' + ((course && course.name) || enrollment.courseName || '-'));
       renderAdminStudents();
       renderAdminDashboard();
       if (currentStudent && String(currentStudent.id) === String(student.id)) {
@@ -17560,17 +17695,28 @@
     }
 
 
-    async function cancelStudentCourse(id) {
+    async function cancelStudentCourse(id, courseId) {
       const student = students.find(function(item) { return String(item.id) === String(id); });
       if (!student) return;
-      if (!confirm('ยกเลิกคอร์สของ ' + (student.name || '-') + ' ใช่หรือไม่?')) return;
-      const oldCourse = student.course || '-';
-      student.courseStatus = 'ยกเลิก';
-      student.paymentStatus = 'ยกเลิก';
-      student.courseId = null;
-      student.course = 'ยังไม่ได้สมัครคอร์ส';
-      student.courseAccess = '-';
-      await setFirebaseDocument('students', student);
+      const enrollment = getStudentCourseEnrollment(student, courseId || student.courseId);
+      if (!enrollment) return;
+      const course = getCourseForEnrollment(enrollment);
+      const oldCourse = (course && course.name) || enrollment.courseName || student.course || '-';
+      if (!confirm('ยกเลิกคอร์ส ' + oldCourse + ' ของ ' + (student.name || '-') + ' ใช่หรือไม่?')) return;
+      if (enrollment.legacy) {
+        student.courseStatus = 'ยกเลิก';
+        student.paymentStatus = 'ยกเลิก';
+        student.courseId = null;
+        student.course = 'ยังไม่ได้สมัครคอร์ส';
+        student.courseAccess = '-';
+        await setFirebaseDocument('students', student);
+      } else {
+        enrollment.courseStatus = 'ยกเลิก';
+        enrollment.paymentStatus = 'ยกเลิก';
+        enrollment.enrollmentStatus = 'cancelled';
+        enrollment.cancelledAtText = new Date().toLocaleString('th-TH');
+        await setFirebaseDocument('courseEnrollments', enrollment);
+      }
       addActivityLog('ยกเลิกคอร์ส', (student.name || '-') + ' · เดิม: ' + oldCourse);
       renderAdminStudents();
       renderAdminDashboard();
@@ -17581,9 +17727,15 @@
     function renderPendingCourseApprovalList() {
       const box = getElement('pendingCourseApprovalList');
       if (!box) return;
-      const pending = students.filter(function(s) { return s.courseStatus === 'รออนุมัติคอร์ส'; }).sort(function(a, b) {
-        var idA = String(a.memberId || a.memberID || a.id || '');
-        var idB = String(b.memberId || b.memberID || b.id || '');
+      const pending = [];
+      students.forEach(function(student) {
+        getStudentCourseEnrollments(student, { currentOnly: true }).forEach(function(enrollment) {
+          if (enrollment.courseStatus === 'รออนุมัติคอร์ส') pending.push({ student: student, enrollment: enrollment });
+        });
+      });
+      pending.sort(function(a, b) {
+        var idA = String(a.student.memberId || a.student.memberID || a.student.id || '');
+        var idB = String(b.student.memberId || b.student.memberID || b.student.id || '');
         return idA.localeCompare(idB, undefined, { numeric: true });
       });
       if (!pending.length) {
@@ -17591,14 +17743,18 @@
         safeRun(renderTeacherMobileStudents, 'teacher-mobile-students-pending-empty');
         return;
       }
-      box.innerHTML = pending.map(function(s) {
-        const payment = payments.slice().reverse().find(function(p) { return String(p.studentId) === String(s.id) || p.student === s.name; });
+      box.innerHTML = pending.map(function(item) {
+        const s = item.student;
+        const enrollment = item.enrollment;
+        const course = getCourseForEnrollment(enrollment);
+        const courseName = (course && course.name) || enrollment.courseName || '-';
+        const payment = payments.slice().reverse().find(function(p) { return (String(p.studentId) === String(s.id) || p.student === s.name) && String(p.courseId || '') === String(enrollment.courseId || ''); });
         return '<div class="status-display-row" style="align-items:flex-start;">' +
           '<span><strong>' + (s.name || '-') + '</strong><br>' +
-          '<span style="color:#6b7280;">' + (s.grade || '-') + ' · ' + (s.course || '-') + '</span><br>' +
-          '<span style="color:#6b7280;">เดือนแรกที่สมัคร: ' + (s.registeredCourseMonth || '-') + ' · สลิป: ' + (payment ? (payment.month || '-') + ' / ' + (payment.status || '-') : '-') + '</span></span>' +
-          '<span><button class="btn btn-green" type="button" onclick="approveStudentCourse(\' + s.id + \')">อนุมัติคอร์ส</button>' +
-          '<button class="btn btn-red" type="button" onclick="' + actionCall('cancelStudentCourse', s.id) + '">ยกเลิกคอร์ส</button></span>' +
+          '<span style="color:#6b7280;">' + (s.grade || '-') + ' · ' + escapeHtml(courseName) + '</span><br>' +
+          '<span style="color:#6b7280;">เดือนแรกที่สมัคร: ' + (enrollment.registeredCourseMonth || '-') + ' · สลิป: ' + (payment ? (payment.month || '-') + ' / ' + (payment.status || '-') : '-') + '</span></span>' +
+          '<span><button class="btn btn-green" type="button" onclick="' + actionCall('approveStudentCourse', s.id, enrollment.courseId) + '">อนุมัติคอร์ส</button>' +
+          '<button class="btn btn-red" type="button" onclick="' + actionCall('cancelStudentCourse', s.id, enrollment.courseId) + '">ยกเลิกคอร์ส</button></span>' +
         '</div>';
       }).join('');
       safeRun(renderTeacherMobileStudents, 'teacher-mobile-students-pending');
@@ -17735,6 +17891,7 @@
           applyStudentLearningStatusAuditFields(s, nextLearningStatus, previousLearningStatus);
           try {
             await setFirebaseDocument('students', s);
+            if (selectedCourse) await ensureAdminCourseEnrollment(s, selectedCourse, bubbleSelectValue('bubbleStudentCourseStatus') || 'อนุมัติแล้ว');
             if (s.authUid && db) {
               await db.collection('users').doc(s.authUid).set({
                 name: s.name,
@@ -19106,10 +19263,10 @@
       return Number(course.monthlyPrice || course.price || 0) || 0;
     }
 
-    function getExpectedPaymentAmountForStudent(student, month) {
+    function getExpectedPaymentAmountForStudent(student, month, targetCourse) {
       const studentOverride = (student && month) ? getStudentMonthPriceOverrideForStudent(month, student) : 0;
       if (studentOverride > 0) return studentOverride;
-      const course = getCourseByStudentOrName(student, student ? student.course : '');
+      const course = targetCourse || (student === currentStudent ? getCurrentStudentCourse() : getCourseByStudentOrName(student, student ? student.course : ''));
       const monthlyCoursePrice = course ? getMonthCoursePrice(month, course.id) : 0;
       const coursePrice = getCourseMonthlyPrice(course);
       const fallbackMonthAmount = getPaymentMonthAmount(month);
@@ -19182,6 +19339,135 @@
       return String((currentStudent && currentStudent.preferredLocation) || '').trim();
     }
 
+    function getCourseEnrollmentDocId(studentId, courseId) {
+      return String(studentId || '').trim() + '__' + String(courseId || '').trim();
+    }
+
+    function getEnrollmentStudentId(student) {
+      return String(student && (student.firebaseDocId || student.id || student.studentId) || '').trim();
+    }
+
+    function enrollmentBelongsToStudent(enrollment, student) {
+      if (!enrollment || !student) return false;
+      const studentId = getEnrollmentStudentId(student);
+      const authUid = String(student.authUid || (firebaseUser ? firebaseUser.uid : '') || '').trim();
+      return (studentId && String(enrollment.studentId || '').trim() === studentId) ||
+        (authUid && String(enrollment.authUid || '').trim() === authUid);
+    }
+
+    function isCourseEnrollmentCurrent(enrollment) {
+      const status = String(enrollment && enrollment.courseStatus || '').trim();
+      return !!enrollment && enrollment.deleted !== true && status !== 'ยกเลิก' && status !== 'จบคอร์ส';
+    }
+
+    function buildLegacyCourseEnrollment(student) {
+      const courseId = String(student && student.courseId || '').trim();
+      if (!courseId || String(student.course || '') === 'ยังไม่ได้สมัครคอร์ส') return null;
+      return {
+        id: getCourseEnrollmentDocId(getEnrollmentStudentId(student), courseId),
+        firebaseDocId: getCourseEnrollmentDocId(getEnrollmentStudentId(student), courseId),
+        studentId: getEnrollmentStudentId(student),
+        authUid: student.authUid || '',
+        memberId: student.memberId || student.studentId || '',
+        studentName: student.name || '',
+        courseId: courseId,
+        courseName: student.course || '',
+        courseAccess: student.courseAccess || '',
+        grade: student.grade || '',
+        location: student.preferredLocation || '',
+        courseStatus: student.courseStatus || 'รออนุมัติคอร์ส',
+        paymentStatus: student.paymentStatus || 'รอชำระเงิน',
+        registeredCourseMonth: student.registeredCourseMonth || '',
+        legacy: true
+      };
+    }
+
+    function getStudentCourseEnrollments(student, options) {
+      const activeStudent = student || currentStudent;
+      if (!activeStudent) return [];
+      const opts = options || {};
+      const list = (courseEnrollments || []).filter(function(enrollment) {
+        return enrollmentBelongsToStudent(enrollment, activeStudent) && enrollment.deleted !== true;
+      });
+      const legacy = buildLegacyCourseEnrollment(activeStudent);
+      if (legacy && !list.some(function(item) { return String(item.courseId || '') === String(legacy.courseId || ''); })) list.push(legacy);
+      return opts.currentOnly ? list.filter(isCourseEnrollmentCurrent) : list;
+    }
+
+    function getStudentCourseEnrollment(student, courseId) {
+      const target = String(courseId || '').trim();
+      return getStudentCourseEnrollments(student).find(function(item) {
+        return String(item.courseId || '').trim() === target;
+      }) || null;
+    }
+
+    function getSelectedStudentCourseEnrollment(student) {
+      const activeStudent = student || currentStudent;
+      const list = getStudentCourseEnrollments(activeStudent, { currentOnly: true });
+      const selectedId = activeStudent === currentStudent ? String(currentStudentCourseId || '').trim() : '';
+      return list.find(function(item) { return String(item.courseId || '') === selectedId; }) ||
+        list.find(function(item) { return isCourseStatusApproved(item.courseStatus || ''); }) || list[0] || null;
+    }
+
+    function getCourseForEnrollment(enrollment) {
+      if (!enrollment) return null;
+      return courses.find(function(course) {
+        return String(course.id || course.firebaseDocId || '') === String(enrollment.courseId || '');
+      }) || null;
+    }
+
+    function getEnrollmentPaymentStatus(enrollment, student) {
+      if (!enrollment) return '-';
+      const matched = (payments || []).filter(function(payment) {
+        return isStudentPaymentRecord(student || currentStudent, payment) && String(payment.courseId || '') === String(enrollment.courseId || '');
+      }).slice().sort(compareStudentVisiblePaymentPriority);
+      return matched.length ? getPaymentDisplayStatus(matched[0]) : (enrollment.paymentStatus || 'รอชำระเงิน');
+    }
+
+    function getStudentCourseContextStorageKey(student) {
+      const authUid = String(student && student.authUid || (firebaseUser ? firebaseUser.uid : '') || 'guest');
+      return 'ideaClubActiveCourse:' + authUid + ':' + getEnrollmentStudentId(student);
+    }
+
+    function restoreStudentCourseContext() {
+      if (!currentStudent) return;
+      let saved = '';
+      try { saved = localStorage.getItem(getStudentCourseContextStorageKey(currentStudent)) || ''; } catch (error) {}
+      const current = getStudentCourseEnrollments(currentStudent, { currentOnly: true });
+      const preferred = current.find(function(item) { return String(item.courseId || '') === String(saved); }) ||
+        current.find(function(item) { return isCourseStatusApproved(item.courseStatus || ''); }) || current[0];
+      currentStudentCourseId = preferred ? preferred.courseId : null;
+    }
+
+    function renderStudentCourseContextSelectors() {
+      const list = getStudentCourseEnrollments(currentStudent, { currentOnly: true });
+      if (list.length && !getSelectedStudentCourseEnrollment()) restoreStudentCourseContext();
+      const selected = getSelectedStudentCourseEnrollment();
+      const html = list.length ? list.map(function(enrollment) {
+        const course = getCourseForEnrollment(enrollment);
+        const label = (course && course.name) || enrollment.courseName || enrollment.course || enrollment.courseId || '-';
+        return '<option value="' + escapeHtml(enrollment.courseId || '') + '"' + (selected && String(selected.courseId) === String(enrollment.courseId) ? ' selected' : '') + '>' + escapeHtml(label + ' · ' + (enrollment.courseStatus || '-')) + '</option>';
+      }).join('') : '<option value="">ยังไม่มีคอร์ส</option>';
+      ['studentActiveCourseSelect', 'studentMobileActiveCourseSelect'].forEach(function(id) {
+        const select = getElement(id);
+        if (!select) return;
+        select.innerHTML = html;
+        select.disabled = list.length < 2;
+      });
+    }
+
+    function selectStudentCourseContext(courseId) {
+      const enrollment = getStudentCourseEnrollment(currentStudent, courseId);
+      if (!enrollment || !isCourseEnrollmentCurrent(enrollment)) return;
+      currentStudentCourseId = enrollment.courseId;
+      try { localStorage.setItem(getStudentCourseContextStorageKey(currentStudent), String(enrollment.courseId)); } catch (error) {}
+      updateStudentCourseDisplay();
+      safeRun(renderStudentMonthlyPlan, 'student-course-context-schedule');
+      safeRun(renderStudentMobileLearning, 'student-course-context-learning');
+      safeRun(renderStudentReceipts, 'student-course-context-receipts');
+      safeRun(renderStudentCourses, 'student-course-context-courses');
+    }
+
     function getCurrentStudentRegisteredGrade() {
       return String((currentStudent && currentStudent.grade) || '').trim();
     }
@@ -19193,19 +19479,19 @@
     }
 
     function getStudentAppliedCourseId(student) {
-      return String((student && student.courseId) || '').trim();
+      const enrollment = student === currentStudent || !student ? getSelectedStudentCourseEnrollment(student || currentStudent) : null;
+      return String((enrollment && enrollment.courseId) || (student && student.courseId) || '').trim();
     }
 
     function studentHasAppliedCourse(student) {
       const activeStudent = student || currentStudent;
-      const courseId = getStudentAppliedCourseId(activeStudent);
-      const courseName = String((activeStudent && activeStudent.course) || '').trim();
-      return !!courseId && courseName !== 'ยังไม่ได้สมัครคอร์ส';
+      return getStudentCourseEnrollments(activeStudent, { currentOnly: true }).length > 0;
     }
 
     function studentHasApprovedCourse(student) {
       const activeStudent = student || currentStudent;
-      return studentHasAppliedCourse(activeStudent) && isCourseStatusApproved(activeStudent.courseStatus || '');
+      const enrollment = getSelectedStudentCourseEnrollment(activeStudent);
+      return !!enrollment && isCourseStatusApproved(enrollment.courseStatus || '');
     }
 
     function getStudentLearningStatus(student) {
@@ -19228,6 +19514,108 @@
     function studentCanUseCourseEntitlements(student) {
       const activeStudent = student || currentStudent;
       return studentHasApprovedCourse(activeStudent) && !isStudentLimitedAccess(activeStudent);
+    }
+
+    function isHistoricalMediaEnrollmentAllowed(enrollment) {
+      if (!enrollment || enrollment.deleted === true) return false;
+      return String(enrollment.courseStatus || '') === 'จบคอร์ส'
+        && enrollment.everApproved === true
+        && String(enrollment.historicalMediaStatus || 'allowed') !== 'revoked';
+    }
+
+    function getLegacyHistoricalMediaEnrollments(student) {
+      const activeStudent = student || currentStudent;
+      if (!activeStudent) return [];
+      const rows = Array.isArray(activeStudent.courseCompletionHistory) ? activeStudent.courseCompletionHistory.slice() : [];
+      if (activeStudent.completedCourseId || activeStudent.completedCourse) {
+        rows.push({
+          courseId: activeStudent.completedCourseId || '',
+          course: activeStudent.completedCourse || '',
+          courseAccess: activeStudent.completedCourseAccess || '',
+          courseStatus: activeStudent.completedCourseStatus || '',
+          paymentStatus: activeStudent.completedCoursePaymentStatus || '',
+          grade: activeStudent.completedCourseGrade || activeStudent.grade || '',
+          location: activeStudent.preferredLocation || '',
+          completedAtText: activeStudent.completedAtText || ''
+        });
+      }
+      const revokedIds = [];
+      (Array.isArray(activeStudent.gradePromotionHistory) ? activeStudent.gradePromotionHistory : []).forEach(function(entry) {
+        (Array.isArray(entry && entry.revokedHistoricalCourseIds) ? entry.revokedHistoricalCourseIds : []).forEach(function(id) {
+          if (!revokedIds.includes(String(id))) revokedIds.push(String(id));
+        });
+      });
+      return rows.map(function(item, index) {
+        const courseId = String(item && (item.courseId || item.id) || '').trim();
+        const originalStatus = String(item && (item.courseStatus || item.completedCourseStatus) || '').trim();
+        return {
+          id: 'legacy-history-' + (courseId || index),
+          studentId: getEnrollmentStudentId(activeStudent),
+          authUid: activeStudent.authUid || '',
+          courseId: courseId,
+          courseName: item && (item.course || item.courseName) || '',
+          courseAccess: item && item.courseAccess || '',
+          grade: item && item.grade || '',
+          location: item && item.location || activeStudent.preferredLocation || '',
+          courseStatus: 'จบคอร์ส',
+          paymentStatus: item && item.paymentStatus || '',
+          everApproved: item && item.everApproved === true || isCourseStatusApproved(originalStatus),
+          historicalMediaStatus: revokedIds.includes(courseId) || item && item.historicalMediaStatus === 'revoked' ? 'revoked' : 'allowed',
+          completedAtText: item && item.completedAtText || '',
+          legacyHistory: true
+        };
+      }).filter(function(item) { return item.courseId && item.everApproved && item.historicalMediaStatus !== 'revoked'; });
+    }
+
+    function getStudentHistoricalMediaEnrollments(student) {
+      const activeStudent = student || currentStudent;
+      if (!activeStudent || isStudentLimitedAccess(activeStudent)) return [];
+      const list = getStudentCourseEnrollments(activeStudent).filter(isHistoricalMediaEnrollmentAllowed);
+      getLegacyHistoricalMediaEnrollments(activeStudent).forEach(function(item) {
+        if (!list.some(function(existing) { return String(existing.courseId || '') === String(item.courseId || ''); })) list.push(item);
+      });
+      return list;
+    }
+
+    function getStudentMediaEntitledCourses(student) {
+      const activeStudent = student || currentStudent;
+      if (!activeStudent || isStudentLimitedAccess(activeStudent)) return [];
+      const result = [];
+      const selectedEnrollment = getSelectedStudentCourseEnrollment(activeStudent);
+      const selectedCourse = getCourseForEnrollment(selectedEnrollment);
+      if (selectedEnrollment && selectedCourse && isCourseEnrollmentCurrent(selectedEnrollment) && isCourseStatusApproved(selectedEnrollment.courseStatus || '')) {
+        result.push(selectedCourse);
+      }
+      getStudentHistoricalMediaEnrollments(activeStudent).forEach(function(enrollment) {
+        const course = getCourseForEnrollment(enrollment);
+        if (!course || result.some(function(item) { return String(item.id || '') === String(course.id || ''); })) return;
+        result.push(Object.assign({}, course, { _historicalMedia: true }));
+      });
+      return result;
+    }
+
+    function studentCanAccessCourseMedia(courseId, featureKey) {
+      const targetId = String(courseId || '').trim();
+      return getStudentMediaEntitledCourses(currentStudent).some(function(course) {
+        if (String(course.id || course.firebaseDocId || '') !== targetId) return false;
+        if (featureKey === 'online') return String(course.access || '').indexOf('Online') !== -1 && courseFeatureEnabled(course, 'online');
+        if (featureKey === 'onDemand') return String(course.access || '').indexOf('On-demand') !== -1 && courseFeatureEnabled(course, 'onDemand');
+        if (featureKey === 'onlineDocs') return courseFeatureEnabled(course, 'onlineDocs');
+        return true;
+      });
+    }
+
+    function studentCanAccessOnDemandGrade(grade) {
+      const targetGrade = String(grade || '').trim();
+      return getStudentMediaEntitledCourses(currentStudent).some(function(course) {
+        return String(course.grade || '').trim() === targetGrade
+          && String(course.access || '').indexOf('On-demand') !== -1
+          && courseFeatureEnabled(course, 'onDemand');
+      });
+    }
+
+    function shouldEnforceStudentMediaAccess() {
+      return isStudentAccount(firebaseUserProfile) || (!firebaseUserProfile && isStudentAccount(currentStudent));
     }
 
     function studentCanReceiveIdCard(student) {
@@ -19320,35 +19708,37 @@
     function updateStudentCourseApplySectionVisibility() {
       const section = getElement('course-section');
       if (!section) return;
-      section.classList.toggle('hidden', studentHasApprovedCourse());
+      section.classList.remove('hidden');
     }
 
     function getStudentAppliedCourse(student) {
-      const activeStudent = student || currentStudent;
-      const appliedCourseId = getStudentAppliedCourseId(activeStudent);
-      return courses.find(function(item) {
-        return String(item.id || '') === appliedCourseId;
-      }) || null;
+      return getCourseForEnrollment(getSelectedStudentCourseEnrollment(student || currentStudent));
     }
 
     function renderStudentCourseApplyState(course) {
-      if (!studentHasAppliedCourse()) {
+      const enrollment = getStudentCourseEnrollment(currentStudent, course && (course.id || course.firebaseDocId));
+      if (!enrollment || !isCourseEnrollmentCurrent(enrollment)) {
         return '<button class="btn btn-blue" type="button" onclick="' + actionCall('applyCourse', course.id) + '">สมัครคอร์สนี้</button>';
       }
-      const appliedCourse = getStudentAppliedCourse();
-      const appliedCourseName = (appliedCourse && appliedCourse.name) || currentStudent.course || '-';
-      const courseStatus = currentStudent.courseStatus || 'รออนุมัติคอร์ส';
-      const paymentStatus = getCurrentStudentPaymentStatusText ? getCurrentStudentPaymentStatusText() : (currentStudent.paymentStatus || 'รอชำระเงิน');
-      const isCurrentCourse = getStudentAppliedCourseId(currentStudent) === String(course.id || '') || currentStudent.course === course.name;
-      if (isCurrentCourse) {
-        return '<div class="feature-ok"><strong>สมัครคอร์สนี้แล้ว</strong><p>สถานะคอร์ส: ' + escapeHtml(courseStatus) + '</p><p>สถานะชำระเงิน: ' + escapeHtml(paymentStatus) + '</p></div><button class="btn btn-green" type="button" onclick="scrollToStudentSection(\'student-services\')">ไปหน้าชำระเงิน</button>';
-      }
-      return '<div class="notice"><strong>สมัครคอร์สแล้ว</strong><p>คุณสมัครคอร์ส ' + escapeHtml(appliedCourseName) + ' แล้ว จึงไม่สามารถสมัครซ้ำหรือสมัครคอร์สอื่นได้</p></div><button class="btn btn-dark" type="button" disabled>สมัครซ้ำไม่ได้</button>';
+      const courseStatus = enrollment.courseStatus || 'รออนุมัติคอร์ส';
+      const paymentStatus = getEnrollmentPaymentStatus(enrollment, currentStudent);
+      return '<div class="feature-ok"><strong>สมัครคอร์สนี้แล้ว</strong><p>สถานะคอร์ส: ' + escapeHtml(courseStatus) + '</p><p>สถานะชำระเงิน: ' + escapeHtml(paymentStatus) + '</p></div>' +
+        '<button class="btn btn-green" type="button" onclick="selectStudentCourseContext(\'' + jsArg(course.id) + '\');scrollToStudentSection(\'student-services\')">ไปหน้าชำระเงิน</button>';
     }
 
     function getCurrentStudentCourseCompletionHistory() {
       if (!currentStudent) return [];
       const history = Array.isArray(currentStudent.courseCompletionHistory) ? currentStudent.courseCompletionHistory.slice() : [];
+      getStudentCourseEnrollments(currentStudent).filter(function(enrollment) { return enrollment.courseStatus === 'จบคอร์ส'; }).forEach(function(enrollment) {
+        if (history.some(function(item) { return String(item && item.courseId || '') === String(enrollment.courseId || ''); })) return;
+        history.push({
+          courseId: enrollment.courseId || '',
+          course: enrollment.courseName || '',
+          courseAccess: enrollment.courseAccess || '',
+          completedAtText: enrollment.completedAtText || '',
+          completedAtMonth: enrollment.completedAtMonth || ''
+        });
+      });
       if (currentStudent.completedCourseId || currentStudent.completedCourse) {
         const alreadyIncluded = history.some(function(item) {
           return String((item && item.courseId) || '') === String(currentStudent.completedCourseId || '') &&
@@ -19402,12 +19792,19 @@
     function renderStudentCourses() {
       const gradeFilter = getElement('courseGradeFilter');
       const list = getElement('studentCourseList');
+      const myList = getElement('studentMyCourseList');
       if (!gradeFilter || !list) return;
       updateStudentCourseApplySectionVisibility();
-      if (studentHasApprovedCourse()) {
-        list.innerHTML = '<div class="card"><h3>คอร์สของคุณได้รับอนุมัติแล้ว</h3><p>ระบบซ่อนหน้าสมัครคอร์สเพื่อป้องกันการสมัครซ้ำ</p></div>';
-        return;
-      }
+      const enrollments = getStudentCourseEnrollments(currentStudent);
+      if (myList) myList.innerHTML = enrollments.length ? enrollments.map(function(enrollment) {
+        const course = getCourseForEnrollment(enrollment);
+        const name = (course && course.name) || enrollment.courseName || enrollment.course || '-';
+        const status = enrollment.courseStatus || '-';
+        const isCurrent = isCourseEnrollmentCurrent(enrollment);
+        return '<div class="card"><span class="tag">' + escapeHtml(status) + '</span><h3>' + escapeHtml(name) + '</h3>' +
+          '<p><strong>ชำระเงิน:</strong> ' + escapeHtml(getEnrollmentPaymentStatus(enrollment, currentStudent)) + '</p>' +
+          (isCurrent ? '<button class="btn btn-blue" type="button" onclick="selectStudentCourseContext(\'' + jsArg(enrollment.courseId) + '\')">เลือกใช้คอร์สนี้</button>' : '') + '</div>';
+      }).join('') : '<div class="card"><p>ยังไม่มีคอร์สที่สมัคร</p></div>';
       const registeredGrade = getCurrentStudentRegisteredGrade();
       const studentLocation = getCurrentStudentPreferredLocation();
       const grade = registeredGrade || gradeFilter.value;
@@ -19424,11 +19821,14 @@
         list.innerHTML = '<div class="card"><h3>ยังไม่พบข้อมูลศูนย์ของนักเรียน</h3><p>กรุณาติดต่อเจ้าหน้าที่ให้ตรวจสอบศูนย์ที่ลงทะเบียนไว้ ก่อนสมัครคอร์ส</p></div>';
         return;
       }
-      const filtered = courses.filter(function(c) { return c.grade === grade && c.status === 'open' && isCourseInCurrentStudentCenter(c); });
+      const filtered = courses.filter(function(c) {
+        const existing = getStudentCourseEnrollment(currentStudent, c.id || c.firebaseDocId);
+        return c.grade === grade && c.status === 'open' && isCourseInCurrentStudentCenter(c) && !existing;
+      });
       list.innerHTML = filtered.length ? filtered.map(function(c) {
         const scheduleSummary = formatCourseScheduleSummary(c);
         return '<div class="card"><span class="tag">' + c.grade + ' · ' + getStudentCourseTag(c) + '</span><h3>' + c.name + '</h3><p>' + c.desc + '</p>' + renderStudentCompletedCourseBadge(c) + renderCourseFeatureBadges(c) + '<p><strong>สถานที่เรียน:</strong> ' + c.location + '</p><p><strong>วันเวลาเรียน:</strong> ' + (getCourseDisplaySchedule(c) || '-') + '</p>' + '<p class="price">' + formatPrice(getCourseMonthlyPrice(c)) + ' / เดือน</p>' + renderStudentCourseApplyState(c) + '</div>';
-      }).join('') : '<div class="card"><h3>ยังไม่มีคอร์สเปิดรับสมัครตามข้อมูลที่ลงทะเบียนไว้</h3><p>ระดับชั้น ' + grade + ' ที่ ' + studentLocation + ' ยังไม่มีคอร์สเปิดรับสมัครในขณะนี้</p></div>';
+      }).join('') : '<div class="card"><h3>ยังไม่มีคอร์สใหม่ที่สมัครเพิ่มได้</h3><p>ระดับชั้น ' + grade + ' ที่ ' + studentLocation + ' ยังไม่มีคอร์สเปิดรับสมัครเพิ่มเติมในขณะนี้</p></div>';
     }
 
     function getSelectedCourseDays() {
@@ -19696,6 +20096,8 @@
     function studentHasCompletedCourseRecord(student, courseId) {
       const targetId = String(courseId || '').trim();
       if (!student || !targetId) return false;
+      const enrollment = getStudentCourseEnrollment(student, targetId);
+      if (enrollment && enrollment.courseStatus === 'จบคอร์ส') return true;
       const completedIds = [
         student.completedCourseId
       ].map(function(value) { return String(value || '').trim(); }).filter(Boolean);
@@ -19709,22 +20111,17 @@
       const courseId = String((course && course.id) || '').trim();
       const summary = { total: 0, active: 0, pending: 0, completed: 0, current: 0 };
       if (!courseId || !Array.isArray(students)) return summary;
-      const seen = {};
       students.forEach(function(student) {
         if (!student || student.deleted) return;
-        const studentKey = String(student.firebaseDocId || student.id || student.memberId || student.studentId || '');
-        const hasCurrentCourse = String(student.courseId || '').trim() === courseId;
-        const hasCompletedCourse = studentHasCompletedCourseRecord(student, courseId);
-        if (!hasCurrentCourse && !hasCompletedCourse) return;
-        if (studentKey && seen[studentKey]) return;
-        if (studentKey) seen[studentKey] = true;
+        const enrollment = getStudentCourseEnrollment(student, courseId);
+        const hasCompletedCourse = enrollment ? enrollment.courseStatus === 'จบคอร์ส' : studentHasCompletedCourseRecord(student, courseId);
+        if (!enrollment && !hasCompletedCourse) return;
         summary.total++;
-        const learningStatus = getStudentLearningStatus(student);
-        const courseStatus = String(student.courseStatus || '').trim();
-        if (hasCurrentCourse) summary.current++;
-        if (hasCurrentCourse && learningStatus === 'เรียนอยู่') summary.active++;
-        if (hasCurrentCourse && courseStatus === 'รออนุมัติคอร์ส') summary.pending++;
-        if (learningStatus === 'จบคอร์ส' || courseStatus === 'จบคอร์ส' || hasCompletedCourse) summary.completed++;
+        const courseStatus = String(enrollment && enrollment.courseStatus || '').trim();
+        if (enrollment && isCourseEnrollmentCurrent(enrollment)) summary.current++;
+        if (enrollment && isCourseEnrollmentCurrent(enrollment) && courseStatus === 'อนุมัติแล้ว') summary.active++;
+        if (enrollment && courseStatus === 'รออนุมัติคอร์ส') summary.pending++;
+        if (courseStatus === 'จบคอร์ส' || hasCompletedCourse) summary.completed++;
       });
       return summary;
     }
@@ -19745,9 +20142,8 @@
       if (!targetId || !Array.isArray(students)) return [];
       return students.filter(function(student) {
         if (!student || student.deleted) return false;
-        if (String(student.courseId || '').trim() !== targetId) return false;
-        const learningStatus = getStudentLearningStatus(student);
-        return learningStatus !== 'จบคอร์ส' && learningStatus !== 'ลาออก' && learningStatus !== 'พักเรียน';
+        const enrollment = getStudentCourseEnrollment(student, targetId);
+        return !!enrollment && isCourseEnrollmentCurrent(enrollment) && enrollment.courseStatus === 'อนุมัติแล้ว';
       });
     }
 
@@ -19789,6 +20185,20 @@
       try {
         for (let i = 0; i < targets.length; i++) {
           const student = targets[i];
+          const enrollment = getStudentCourseEnrollment(student, courseId);
+          if (enrollment && !enrollment.legacy) {
+            enrollment.courseStatusBeforeCompletion = enrollment.courseStatus || '';
+            enrollment.courseStatus = 'จบคอร์ส';
+            enrollment.enrollmentStatus = 'completed';
+            enrollment.everApproved = enrollment.everApproved === true || isCourseStatusApproved(enrollment.courseStatusBeforeCompletion);
+            enrollment.historicalMediaStatus = enrollment.everApproved ? 'allowed' : 'not_eligible';
+            enrollment.completedAtText = nowText;
+            enrollment.completedAtMonth = nowMonth;
+            enrollment.completedAtMs = Date.now();
+            enrollment.completedBy = actor;
+            await setFirebaseDocument('courseEnrollments', enrollment);
+            continue;
+          }
           const history = Array.isArray(student.courseCompletionHistory) ? student.courseCompletionHistory.slice() : [];
           history.push({
             courseId: student.courseId || course.id || '',
@@ -20110,9 +20520,18 @@
       return '<div style="margin-top:10px;">' +
         '<p style="color:#d1d5db; font-weight:bold; margin-bottom:6px;">เอกสารที่แนบกับคลิปนี้</p>' +
         files.map(function(file) {
-          return '<button class="btn btn-blue" type="button" onclick="openExternalLink(\'' + jsArg(file.url) + '\')">📄 ' + escapeHtml(file.title || 'เปิดลิงก์') + '</button>';
+          return '<button class="btn btn-blue" type="button" onclick="openStudentOnDemandDocument(\'' + jsArg(getOnDemandClipId(item)) + '\',\'' + jsArg(file.url) + '\')">📄 ' + escapeHtml(file.title || 'เปิดลิงก์') + '</button>';
         }).join('') +
       '</div>';
+    }
+
+    function openStudentOnDemandDocument(clipId, url) {
+      const item = onDemandClips.find(function(clip) { return getOnDemandClipId(clip) === String(clipId || ''); });
+      if (!item || !studentCanAccessOnDemandGrade(item.grade)) {
+        alert('ไม่มีสิทธิ์ดูเอกสาร On-demand นี้');
+        return;
+      }
+      openExternalLink(url);
     }
 
     function openExternalLink(url) {
@@ -20226,11 +20645,11 @@
       return text;
     }
 
-    function renderOnlineDocButtons(doc, darkMode) {
+    function renderOnlineDocButtons(doc, darkMode, courseId) {
       const files = Array.isArray(doc && doc.files) ? doc.files.filter(function(file) { return file && file.url; }) : [];
       if (!files.length) return '<p class="mini-muted">ยังไม่มีไฟล์เอกสาร</p>';
       return '<div class="online-doc-buttons">' + files.map(function(file) {
-        return '<button class="btn btn-blue" type="button" onclick="openExternalLink(\'' + jsArg(file.url) + '\')">📄 ' + escapeHtml(getOnlineDocFileButtonTitle(file.title)) + '</button>';
+        return '<button class="btn btn-blue" type="button" onclick="openStudentOnlineDocFile(\'' + jsArg(courseId || '') + '\',\'' + jsArg(file.url) + '\')">📄 ' + escapeHtml(getOnlineDocFileButtonTitle(file.title)) + '</button>';
       }).join('') + '</div>';
     }
 
@@ -20242,13 +20661,21 @@
       return 'onlineDocDisplay-' + String(courseId).replace(/[^a-zA-Z0-9_-]/g, '-');
     }
 
-    function renderOnlineDocDetail(doc) {
+    function renderOnlineDocDetail(doc, courseId) {
       if (!doc) return '<div class="online-doc-group"><p class="mini-muted">ยังไม่มีเอกสารสำหรับวันที่เลือก</p></div>';
       return '<div class="online-doc-group">' +
         '<h4>' + onlineDocDateText(doc.classDate) + '</h4>' +
         '<p><strong>หัวข้อ:</strong> ' + (doc.topic || '-') + '</p>' +
-        renderOnlineDocButtons(doc) +
+        renderOnlineDocButtons(doc, false, courseId) +
       '</div>';
+    }
+
+    function openStudentOnlineDocFile(courseId, url) {
+      if (!studentCanAccessCourseMedia(courseId, 'onlineDocs')) {
+        alert('ไม่มีสิทธิ์ดูเอกสาร Online ของคอร์สนี้');
+        return;
+      }
+      openExternalLink(url);
     }
 
     function renderSelectedOnlineDocForCourse(courseId) {
@@ -20258,7 +20685,7 @@
       if (!course || !selector || !display) return;
       const docs = getCourseOnlineDocs(course, false);
       const selectedDoc = docs.find(function(doc) { return String(doc.id) === String(selector.value); }) || docs[0];
-      display.innerHTML = renderOnlineDocDetail(selectedDoc);
+      display.innerHTML = renderOnlineDocDetail(selectedDoc, courseId);
     }
 
     function renderOnlineDocsForCourse(course, limit) {
@@ -20277,7 +20704,7 @@
           return '<option value="' + escapeHtml(String(doc.id || '')) + '"' + (index === 0 ? ' selected' : '') + '>' + (index === 0 ? 'ล่าสุด · ' : '') + onlineDocDateText(doc.classDate) + ' · ' + escapeHtml(doc.topic || '-') + '</option>';
         }).join('') +
         '</select>' +
-        '<div id="' + displayId + '">' + renderOnlineDocDetail(selectedDoc) + '</div>' +
+        '<div id="' + displayId + '">' + renderOnlineDocDetail(selectedDoc, courseId) + '</div>' +
       '</div>';
     }
 
@@ -20936,6 +21363,30 @@
       const index = courses.findIndex(function(item) { return String(item.id) === String(id); });
       if (index === -1) return;
       const item = courses[index];
+      const hasEnrollmentHistory = (courseEnrollments || []).some(function(enrollment) {
+        return String(enrollment.courseId || '') === String(id);
+      }) || (students || []).some(function(student) {
+        if (String(student.courseId || '') === String(id) || String(student.completedCourseId || '') === String(id)) return true;
+        return (Array.isArray(student.courseCompletionHistory) ? student.courseCompletionHistory : []).some(function(history) {
+          const historyId = String(history && (history.courseId || history.id) || '');
+          const historyName = normalizeTextValue(history && (history.course || history.courseName) || '');
+          return historyId === String(id) || (!historyId && historyName && historyName === normalizeTextValue(item.name || ''));
+        });
+      });
+      if (hasEnrollmentHistory) {
+        if (!confirm('คอร์สนี้มีประวัติการเรียน จึงไม่สามารถลบถาวรได้\n\nต้องการปิดและเก็บคอร์สไว้เพื่อให้นักเรียนที่ยังมีสิทธิ์ดูย้อนหลังหรือไม่?')) return;
+        item.status = 'closed';
+        item.archived = true;
+        item.archivedAtText = new Date().toLocaleString('th-TH');
+        await setFirebaseDocument('courses', item);
+        renderAdminCourses();
+        renderAdminStudentCourseOptions();
+        renderStudentCourses();
+        renderTodayTeachingList();
+        getElement('courseSaveResult').textContent = 'ปิดและเก็บคอร์สไว้แล้ว ข้อมูลย้อนหลังยังคงอยู่';
+        getElement('courseSaveResult').style.color = '#b45309';
+        return;
+      }
       if (!confirm('ต้องการลบคอร์ส ' + (item.name || '') + ' ใช่หรือไม่?\n\nการลบคอร์สจะลบข้อมูลใน Firestore แต่ไม่ลบบัญชีผู้ใช้งานนักเรียน/ครู')) return;
       await deleteFirebaseDocument('courses', item);
       courses.splice(index, 1);
@@ -20983,15 +21434,12 @@
         return;
       }
       currentStudent = activeStudent;
-      if (studentHasAppliedCourse(activeStudent)) {
-        currentStudentCourseId = getStudentAppliedCourseId(activeStudent);
+      const existingEnrollment = getStudentCourseEnrollment(activeStudent, id);
+      if (existingEnrollment && isCourseEnrollmentCurrent(existingEnrollment)) {
+        currentStudentCourseId = existingEnrollment.courseId;
         updateStudentCourseDisplay();
         scrollToStudentPaymentSection();
-        if (String(currentStudentCourseId) === String(id)) {
-          alert('คุณสมัครคอร์สนี้แล้ว กำลังพาไปหน้าชำระเงิน');
-        } else {
-          alert('คุณสมัครคอร์สแล้ว จึงไม่สามารถสมัครซ้ำได้ กำลังพาไปหน้าชำระเงิน');
-        }
+        alert('คุณสมัครคอร์สนี้แล้ว กำลังพาไปหน้าชำระเงิน');
         return;
       }
       if (!activeStudent.preferredLocation) {
@@ -21016,54 +21464,44 @@
         return;
       }
 
-      const previousCourseState = {
-        courseId: activeStudent.courseId,
-        course: activeStudent.course,
-        courseAccess: activeStudent.courseAccess,
-        courseStatus: activeStudent.courseStatus,
-        paymentStatus: activeStudent.paymentStatus,
-        learningStatus: activeStudent.learningStatus,
-        status: activeStudent.status,
-        registeredCourseMonth: activeStudent.registeredCourseMonth,
-        currentStudentCourseId: currentStudentCourseId
-      };
-      const previousLearningStatus = getStudentLearningStatus(activeStudent);
-      currentStudentCourseId = c.id;
-      Object.assign(activeStudent, {
+      const studentDocId = getEnrollmentStudentId(activeStudent);
+      const enrollmentId = getCourseEnrollmentDocId(studentDocId, c.id);
+      const registeredCourseMonth = getElement('studentPaymentMonth') ? getElement('studentPaymentMonth').value : getThaiMonthFromDate(new Date().toISOString().slice(0, 10));
+      const enrollment = {
+        id: enrollmentId,
+        firebaseDocId: enrollmentId,
+        studentId: studentDocId,
+        authUid: activeStudent.authUid || (firebaseUser ? firebaseUser.uid : ''),
+        memberId: activeStudent.memberId || activeStudent.studentId || '',
+        studentName: activeStudent.name || '',
         courseId: c.id,
-        course: c.name,
+        courseName: c.name,
         courseAccess: c.access,
+        grade: activeStudent.grade || '',
+        location: activeStudent.preferredLocation || '',
         courseStatus: 'รออนุมัติคอร์ส',
+        everApproved: false,
+        approvedAtMs: 0,
+        historicalMediaStatus: 'not_applicable',
         paymentStatus: 'รอชำระเงิน',
-        registeredCourseMonth: getElement('studentPaymentMonth') ? getElement('studentPaymentMonth').value : getThaiMonthFromDate(new Date().toISOString().slice(0, 10))
-      });
-      if (previousLearningStatus === 'จบคอร์ส') {
-        activeStudent.learningStatus = 'เรียนอยู่';
-        activeStudent.status = 'เรียนอยู่';
-        applyStudentLearningStatusAuditFields(activeStudent, 'เรียนอยู่', previousLearningStatus);
-      }
-      currentStudent = activeStudent;
+        registeredCourseMonth: registeredCourseMonth,
+        enrollmentStatus: 'active'
+      };
 
       try {
-        await setFirebaseDocument('students', currentStudent);
-        await ensureCurrentStudentPaymentForMonth(currentStudent.registeredCourseMonth);
+        const ref = db.collection('courseEnrollments').doc(enrollmentId);
+        await ref.set(buildFirebasePayload(enrollment, enrollmentId, true));
       } catch (error) {
         console.error('apply course firebase error:', error);
-        Object.assign(activeStudent, {
-          courseId: previousCourseState.courseId,
-          course: previousCourseState.course,
-          courseAccess: previousCourseState.courseAccess,
-          courseStatus: previousCourseState.courseStatus,
-          paymentStatus: previousCourseState.paymentStatus,
-          learningStatus: previousCourseState.learningStatus,
-          status: previousCourseState.status,
-          registeredCourseMonth: previousCourseState.registeredCourseMonth
-        });
-        currentStudentCourseId = previousCourseState.currentStudentCourseId;
         updateStudentCourseDisplay();
         alert('บันทึกการสมัครคอร์สไม่สำเร็จ กรุณาลองใหม่หรือติดต่อเจ้าหน้าที่');
         return;
       }
+      const localIndex = courseEnrollments.findIndex(function(item) { return String(item.firebaseDocId || item.id || '') === enrollmentId; });
+      if (localIndex === -1) courseEnrollments.push(enrollment);
+      else Object.assign(courseEnrollments[localIndex], enrollment);
+      currentStudentCourseId = c.id;
+      try { localStorage.setItem(getStudentCourseContextStorageKey(activeStudent), String(c.id)); } catch (error) {}
       updateStudentCourseDisplay();
       if (!isCurrentStudentSession()) renderAdminStudents();
       scrollToStudentPaymentSection();
@@ -21071,10 +21509,9 @@
     }
 
     function getCurrentStudentCourse() {
-      if (currentStudent && currentStudent.courseId) {
-        const byStudentId = courses.find(function(item) { return String(item.id) === String(currentStudent.courseId); });
-        if (byStudentId) return byStudentId;
-      }
+      const enrollment = getSelectedStudentCourseEnrollment(currentStudent);
+      const enrollmentCourse = getCourseForEnrollment(enrollment);
+      if (enrollmentCourse) return enrollmentCourse;
       return courses.find(function(item) { return String(item.id) === String(currentStudentCourseId); }) || null;
     }
 
@@ -21085,6 +21522,12 @@
     function isCurrentStudentMatchRecord(record) {
       if (!currentStudent || !record) return false;
       return isStudentPaymentRecord(currentStudent, record);
+    }
+
+    function isCurrentStudentCoursePaymentRecord(record) {
+      if (!isCurrentStudentMatchRecord(record)) return false;
+      const enrollment = getSelectedStudentCourseEnrollment(currentStudent);
+      return !!enrollment && String(record && record.courseId || '') === String(enrollment.courseId || '');
     }
 
     function getCurrentStudentLatestPayment() {
@@ -21203,10 +21646,11 @@
       return false;
     }
 
-    function getStudentVisiblePayments(student) {
+    function getStudentVisiblePayments(student, courseId) {
       if (!student || !Array.isArray(payments)) return [];
       return payments.filter(function(payment) {
         if (!isStudentPaymentRecord(student, payment)) return false;
+        if (courseId && String(payment.courseId || '') !== String(courseId)) return false;
         return !!(payment.paymentMonth || payment.month || payment.billingMonth);
       });
     }
@@ -21245,8 +21689,9 @@
     }
 
     function getCurrentStudentRelevantPaymentMonthNames() {
-      if (!currentStudent || !currentStudent.courseId) return [];
-      const months = getStudentVisiblePayments(currentStudent)
+      const enrollment = getSelectedStudentCourseEnrollment(currentStudent);
+      if (!currentStudent || !enrollment) return [];
+      const months = getStudentVisiblePayments(currentStudent, enrollment.courseId)
         .map(function(p) { return p.paymentMonth || p.month || p.billingMonth; })
         .filter(function(month) { return month; });
       return Array.from(new Set(months));
@@ -21259,17 +21704,18 @@
     }
 
     function getStudentPaymentMonthOptions() {
-      if (!currentStudent || !currentStudent.courseId) return [];
+      const enrollment = getSelectedStudentCourseEnrollment(currentStudent);
+      if (!currentStudent || !enrollment) return [];
       const visibleRoundMonths = getVisiblePaymentMonthsForStudents()
         .map(function(item) { return String(item.month || '').trim(); })
         .filter(function(month) { return month && isStudentBillingMonthActive(month); });
-      const paymentRecordMonths = getStudentVisiblePayments(currentStudent)
+      const paymentRecordMonths = getStudentVisiblePayments(currentStudent, enrollment.courseId)
         .map(function(p) { return String(p.paymentMonth || p.month || p.billingMonth || '').trim(); })
         .filter(function(month) {
           if (!month || !isPaymentMonthVisibleByName(month) || !isStudentBillingMonthActive(month)) return false;
           const payment = payments.find(function(p) {
             const pMonth = String(p.paymentMonth || p.month || p.billingMonth || '').trim();
-            return isCurrentStudentMatchRecord(p) && pMonth === month;
+            return isCurrentStudentCoursePaymentRecord(p) && pMonth === month;
           });
           return !(payment && String(payment.status || payment.paymentStatus || '').trim() === 'ยกเว้น');
         });
@@ -21297,7 +21743,7 @@
 
     function buildStudentMonthlyPaymentRecord(student, course, month) {
       if (!student || !month) return null;
-      const listAmount = getExpectedPaymentAmountForStudent(student, month);
+      const listAmount = getExpectedPaymentAmountForStudent(student, month, course);
       const paymentId = createFirebaseDocId('payments');
       const nowText = new Date().toLocaleDateString('th-TH');
       const studentKey = getPrimaryStudentIdentityKey(student);
@@ -21310,9 +21756,9 @@
         studentAuthUid: student.authUid || (firebaseUser ? firebaseUser.uid : ''),
         authUid: student.authUid || (firebaseUser ? firebaseUser.uid : ''),
         student: student.name || '',
-        courseId: student.courseId || (course ? course.id : ''),
-        courseName: student.course || (course ? course.name : ''),
-        course: student.course || (course ? course.name : ''),
+        courseId: (course ? (course.id || course.firebaseDocId) : '') || student.courseId || '',
+        courseName: (course ? course.name : '') || student.course || '',
+        course: (course ? course.name : '') || student.course || '',
         preferredLocation: student.preferredLocation || (course ? course.location : '') || '',
         courseLocation: (course ? course.location : '') || student.preferredLocation || '',
         paymentCenter: student.preferredLocation || (course ? course.location : '') || '',
@@ -21343,13 +21789,15 @@
     }
 
     async function ensurePaymentForStudentMonth(student, month) {
-      if (!student || !student.courseId || !month) return null;
+      const enrollment = student === currentStudent ? getSelectedStudentCourseEnrollment(student) : null;
+      const courseId = enrollment ? enrollment.courseId : student && student.courseId;
+      if (!student || !courseId || !month) return null;
       const existing = (payments || []).find(function(p) {
-        return isStudentPaymentRecord(student, p) && String(p.month || '') === String(month);
+        return isStudentPaymentRecord(student, p) && String(p.courseId || '') === String(courseId) && String(p.month || '') === String(month);
       });
       if (existing) return existing;
       if (isCurrentStudentSession() && !hasPermission('admin.finance') && !hasPermission('admin.full')) return null;
-      const course = getCourseByStudentOrName(student, student.course || '');
+      const course = enrollment ? getCourseForEnrollment(enrollment) : getCourseByStudentOrName(student, student.course || '');
       const payment = buildStudentMonthlyPaymentRecord(student, course, month);
       if (!payment) return null;
       payments.push(payment);
@@ -21384,7 +21832,7 @@
         return pMonth === String(selectedMonth);
       };
       const matched = payments.filter(function(p) {
-        return isCurrentStudentMatchRecord(p) && matchMonth(p);
+        return isCurrentStudentCoursePaymentRecord(p) && matchMonth(p);
       }).slice().sort(compareStudentVisiblePaymentPriority);
       return matched[0] || null;
     }
@@ -21395,9 +21843,11 @@
 
     function getCurrentStudentBundlePayments() {
       if (!currentStudent) return [];
+      const enrollment = getSelectedStudentCourseEnrollment(currentStudent);
       const seen = new Set();
       return (payments || []).filter(function(payment) {
         if (!isCurrentFamilyPaymentRecord(payment)) return false;
+        if (!enrollment || String(payment.courseId || '') !== String(enrollment.courseId || '')) return false;
         if (!(payment.paymentMonth || payment.month || payment.billingMonth)) return false;
         const paymentId = getPaymentRecordId(payment);
         if (paymentId && seen.has(paymentId)) return false;
@@ -21418,14 +21868,21 @@
     function getCurrentStudentPaymentBundles() {
       if (!currentStudent) return [];
       const authUid = firebaseUser ? String(firebaseUser.uid || '') : '';
+      const enrollment = getSelectedStudentCourseEnrollment(currentStudent);
       return (paymentBundles || []).filter(function(bundle) {
         if (!bundle || bundle.status === 'ยกเลิก' || bundle.status === 'cancelled') return false;
-        return (authUid && String(bundle.authUid || '') === authUid) ||
+        const belongs = (authUid && String(bundle.authUid || '') === authUid) ||
           getCurrentStudentFamilyRecords().some(function(student) { return isStudentPaymentRecord(student, bundle); }) ||
           (Array.isArray(bundle.paymentItems) && bundle.paymentItems.some(function(item) {
             return isCurrentFamilyPaymentRecord(item) ||
               getCurrentStudentFamilyRecords().some(function(student) { return isStudentPaymentRecord(student, item); });
           }));
+        if (!belongs || !enrollment) return false;
+        if (String(bundle.courseId || '') === String(enrollment.courseId || '')) return true;
+        const itemCourseIds = (Array.isArray(bundle.paymentItems) ? bundle.paymentItems : []).map(function(item) { return String(item.courseId || ''); }).filter(Boolean);
+        if (itemCourseIds.length) return itemCourseIds.every(function(courseId) { return courseId === String(enrollment.courseId || ''); });
+        const linkedPayments = (bundle.paymentIds || []).map(findPaymentByAnyId).filter(Boolean);
+        return linkedPayments.length > 0 && linkedPayments.every(function(payment) { return String(payment.courseId || '') === String(enrollment.courseId || ''); });
       }).sort(function(a, b) {
         return String(b.createdAtText || '').localeCompare(String(a.createdAtText || ''));
       });
@@ -21455,6 +21912,11 @@
         alert('กรุณาเลือกอย่างน้อย 2 รายการเพื่อรวมยอด');
         return;
       }
+      const selectedCourseIds = Array.from(new Set(selected.map(function(payment) { return String(payment.courseId || '').trim(); }).filter(Boolean)));
+      if (selectedCourseIds.length !== 1) {
+        alert('รวมยอดได้เฉพาะหลายเดือนของคอร์สเดียวกัน');
+        return;
+      }
       const totalAmount = selected.reduce(function(sum, payment) { return sum + getPaymentFinalAmount(payment); }, 0);
       if (!confirm('สร้างยอดรวม ' + selected.length + ' รายการ รวม ' + formatPrice(totalAmount) + ' ใช่หรือไม่?')) return;
       const bundleId = createFirebaseDocId('paymentBundles');
@@ -21479,6 +21941,7 @@
         memberIds: memberIds,
         student: studentNames[0] || currentStudent.name || '-',
         studentNames: studentNames,
+        courseId: selectedCourseIds[0],
         months: months,
         paymentIds: selected.map(getPaymentRecordId),
         paymentItems: selected.map(function(payment) {
@@ -21489,6 +21952,7 @@
             authUid: payment.authUid || payment.studentAuthUid || student.authUid || currentStudent.authUid || firebaseUser.uid || '',
             memberId: payment.memberId || student.memberId || student.studentId || currentStudent.memberId || currentStudent.studentId || '',
             student: payment.student || student.name || currentStudent.name || '-',
+            courseId: payment.courseId || '',
             course: payment.course || payment.courseName || student.course || currentStudent.course || '-',
             month: payment.month || '',
             amount: getPaymentFinalAmount(payment)
@@ -21567,7 +22031,7 @@
           paymentCenter: bundleUploadCenter,
           courseLocation: bundleUploadCenter,
           preferredLocation: currentStudent.preferredLocation || bundleUploadCenter,
-          courseId: currentStudent.courseId || '',
+          courseId: (getSelectedStudentCourseEnrollment(currentStudent) || {}).courseId || '',
           courseName: 'ยอดรวมหลายรายการ',
           grade: currentStudent.grade || ''
         });
@@ -21624,10 +22088,10 @@
       if (!currentStudent || !month) return 0;
       const payment = payments.find(function(p) {
         const pMonth = String(p.paymentMonth || p.month || p.billingMonth || '').trim();
-        return isCurrentStudentMatchRecord(p) && pMonth === String(month);
+        return isCurrentStudentCoursePaymentRecord(p) && pMonth === String(month);
       });
       if (payment) return getPaymentFinalAmount(payment);
-      return getExpectedPaymentAmountForStudent(currentStudent, month);
+      return getExpectedPaymentAmountForStudent(currentStudent, month, getCurrentStudentCourse());
     }
 
     function canStudentUploadSlipForMonth(month) {
@@ -21846,8 +22310,8 @@
       const selectedMonthPayment = getCurrentStudentPaymentForSelectedMonth();
       if (selectedMonthPayment) return getPaymentDisplayStatus(selectedMonthPayment);
       // Month exists in paymentMonths but admin hasn't created the bill record yet
-      if (currentStudent && currentStudent.courseId) return 'รอเปิดบิล';
-      if (currentStudent && currentStudent.paymentStatus) return currentStudent.paymentStatus;
+      const enrollment = getSelectedStudentCourseEnrollment(currentStudent);
+      if (enrollment) return enrollment.paymentStatus || 'รอเปิดบิล';
       return '-';
     }
 
@@ -21947,7 +22411,8 @@
       const today = getThaiDayName(new Date());
       const classSummary = getStudentTodayClassSummary(selectedCourse);
       const hasClassToday = classSummary.hasClassToday;
-      const courseStatusForHome = currentStudent && currentStudent.courseStatus ? currentStudent.courseStatus : '';
+      const homeEnrollment = getSelectedStudentCourseEnrollment(currentStudent);
+      const courseStatusForHome = homeEnrollment ? homeEnrollment.courseStatus || '' : '';
       const isApprovedForHome = hasRegisteredCourse && isCourseStatusApproved(courseStatusForHome);
       const canUseCourseForHome = hasRegisteredCourse && studentCanUseCourseEntitlements(currentStudent);
       const isPausedForHome = isStudentOnLearningPause(currentStudent);
@@ -22031,7 +22496,8 @@
       if (getElement('studentPaymentMonth') && getElement('studentPaymentMonth').value) {
         return getElement('studentPaymentMonth').value;
       }
-      const studentMonths = currentStudent ? getStudentVisiblePayments(currentStudent).map(function(p) { return String(p.month || '').trim(); }).filter(function(month) { return month; }) : [];
+      const enrollment = getSelectedStudentCourseEnrollment(currentStudent);
+      const studentMonths = currentStudent ? getStudentVisiblePayments(currentStudent, enrollment && enrollment.courseId).map(function(p) { return String(p.month || '').trim(); }).filter(function(month) { return month; }) : [];
       return studentMonths.length ? studentMonths[0] : '';
     }
 
@@ -22040,7 +22506,8 @@
       const student = currentStudent || {};
       const displayName = student.nickname || student.name || 'นักเรียน';
       const memberId = student.memberId || student.studentId || '-';
-      const courseStatus = student.courseStatus || '';
+      const mobileEnrollment = getSelectedStudentCourseEnrollment(student);
+      const courseStatus = mobileEnrollment ? mobileEnrollment.courseStatus || '' : '';
       const isApproved = !!(hasRegisteredCourse && isCourseStatusApproved(courseStatus));
       const canUseCourse = !!(hasRegisteredCourse && studentCanUseCourseEntitlements(student));
       const isPaused = isStudentOnLearningPause(student);
@@ -22102,7 +22569,7 @@
 
     function renderStudentMobileHome() {
       const selectedCourse = getCurrentStudentCourse();
-      updateStudentMobileHomeFromCurrentStudent(selectedCourse, !!(currentStudent && currentStudent.courseId && selectedCourse));
+      updateStudentMobileHomeFromCurrentStudent(selectedCourse, !!(currentStudent && getSelectedStudentCourseEnrollment(currentStudent) && selectedCourse));
     }
 
     function studentMobileGo(sectionId) {
@@ -28956,9 +29423,11 @@
     }
 
     function updateStudentCourseDisplay() {
+      if (currentStudent && !currentStudentCourseId) restoreStudentCourseContext();
       const profileGrade = currentStudent && currentStudent.grade ? currentStudent.grade : getProfileGrade();
       const gradeCourses = getCoursesForProfileGrade();
       const selectedCourse = getCurrentStudentCourse();
+      const selectedEnrollment = getSelectedStudentCourseEnrollment(currentStudent);
 
       if (currentStudent) {
         const memberId = currentStudent.memberId || currentStudent.studentId || '-';
@@ -28974,8 +29443,8 @@
         if (getElement('studentDashboardMemberId')) getElement('studentDashboardMemberId').textContent = '-';
       }
 
-      const hasRegisteredCourse = !!(currentStudent && currentStudent.courseId && selectedCourse);
-      const courseStatus = currentStudent && currentStudent.courseStatus ? currentStudent.courseStatus : '';
+      const hasRegisteredCourse = !!(currentStudent && selectedEnrollment && selectedCourse && isCourseEnrollmentCurrent(selectedEnrollment));
+      const courseStatus = selectedEnrollment ? selectedEnrollment.courseStatus || '' : '';
       const isCourseApproved = hasRegisteredCourse && isCourseStatusApproved(courseStatus);
       const canUseCourseEntitlements = hasRegisteredCourse && selectedCourse && studentCanUseCourseEntitlements(currentStudent);
       const selectedFeatures = selectedCourse ? normalizeCourseFeatures(selectedCourse) : {};
@@ -28991,6 +29460,7 @@
       const canUseAnnouncements = (!selectedCourse || selectedFeatures.announcements !== false) && !isLimitedAccess;
 
       if (selectedCourse) currentStudentCourseId = selectedCourse.id;
+      renderStudentCourseContextSelectors();
       updateStudentCourseApplySectionVisibility();
 
       safeRun(function() { updateStudentHomeSummary(selectedCourse, hasRegisteredCourse); }, 'student-home-summary');
@@ -29055,7 +29525,7 @@
         getElement('studentDashboardPaymentRow').classList.toggle('hidden', !hasRegisteredCourse);
       }
       if (getElement('studentDashboardCourseStatus')) {
-        const courseStatusText = hasRegisteredCourse && currentStudent && currentStudent.courseStatus ? currentStudent.courseStatus : '';
+        const courseStatusText = hasRegisteredCourse && selectedEnrollment ? selectedEnrollment.courseStatus || '' : '';
         getElement('studentDashboardCourseStatus').textContent = courseStatusText;
         getElement('studentDashboardCourseStatus').className = isCourseStatusApproved(courseStatusText) ? 'status-paid' : 'status-waiting';
       }
@@ -29097,7 +29567,7 @@
 
       safeRun(renderStudentLineGroupButton, 'student-line-group-display');
 
-      const entitledCourses = canUseCourseEntitlements ? [selectedCourse] : [];
+      const entitledCourses = getStudentMediaEntitledCourses(currentStudent);
       renderStudentOnlineClasses(entitledCourses, profileGrade);
       renderStudentOnDemandClasses(entitledCourses, profileGrade);
       safeRun(renderStudentMobileLearning, 'student-mobile-learning');
@@ -29210,7 +29680,7 @@
       box.innerHTML = onlineCourses.map(function(c) {
         const hasLink = !!c.onlineLink;
         return '<div class="notice" style="background:white; margin-top:0;">' +
-          '<h3 style="margin-bottom:8px;">' + c.name + '</h3>' +
+          '<h3 style="margin-bottom:8px;">' + escapeHtml(c.name || '-') + (c._historicalMedia ? ' <span class="status-waiting">คอร์สย้อนหลัง</span>' : '') + '</h3>' +
           '<p><strong>วันเรียน:</strong> ' + (c.onlineClassDay || ((c.days || []).join(' / ') || '-')) + '</p>' +
           '<p><strong>เวลาเรียน:</strong> ' + (c.onlineClassTime || '-') + '</p>' +
           '<p><strong>Meeting ID:</strong> ' + (c.roomId || '-') + '</p>' +
@@ -29224,8 +29694,7 @@
 
     function refreshStudentOnDemandFilter() {
       const profileGrade = currentStudent && currentStudent.grade ? currentStudent.grade : getProfileGrade();
-      const selectedCourse = getCurrentStudentCourse();
-      const entitledCourses = studentCanUseCourseEntitlements(currentStudent) && selectedCourse ? [selectedCourse] : [];
+      const entitledCourses = getStudentMediaEntitledCourses(currentStudent);
       renderStudentOnDemandClasses(entitledCourses, profileGrade);
       renderStudentMobileOnDemandClasses(entitledCourses, profileGrade);
     }
@@ -29405,10 +29874,10 @@
     }
 
     function launchOnDemandYouTubePlayer(id) {
-      if (!studentCanUseCourseEntitlements(currentStudent)) {
-        alert(getPausedCourseAccessMessage()); return;
-      }
       var item = onDemandClips.find(function(p) { return getOnDemandClipId(p) === String(id || ''); });
+      if (!item || !studentCanAccessOnDemandGrade(item.grade)) {
+        alert(isStudentLimitedAccess(currentStudent) ? getStudentLimitedAccessMessage(currentStudent) : 'ไม่มีสิทธิ์ดูคลิป On-demand นี้'); return;
+      }
       if (!item || !item.link) { alert('ยังไม่ได้เพิ่มลิงก์คลิปนี้'); return; }
       var videoId = getOnDemandYouTubeId(item.link);
       if (!videoId) { window.open(item.link, '_blank'); return; }
@@ -29524,8 +29993,7 @@
     }
 
     function getStudentEntitledCoursesForMobile() {
-      const selectedCourse = getCurrentStudentCourse();
-      return studentCanUseCourseEntitlements(currentStudent) && selectedCourse ? [selectedCourse] : [];
+      return getStudentMediaEntitledCourses(currentStudent);
     }
 
     function renderStudentMobileOnlineClasses(courseList, grade) {
@@ -29542,7 +30010,7 @@
         const hasLink = !!c.onlineLink;
         const docs = courseFeatureEnabled(c, 'onlineDocs') ? getCourseOnlineDocs(c, false) : [];
         return '<div class="student-mobile-media-card">' +
-          '<strong>' + escapeHtml(c.name || '-') + '</strong>' +
+          '<strong>' + escapeHtml(c.name || '-') + (c._historicalMedia ? ' · คอร์สย้อนหลัง' : '') + '</strong>' +
           '<p class="student-mobile-muted">' + escapeHtml(c.grade || grade || '-') + ' · ' + escapeHtml(c.onlineClassDay || ((c.days || []).join(' / ') || '-')) + ' · ' + escapeHtml(c.onlineClassTime || '-') + '</p>' +
           '<p class="student-mobile-muted">Meeting ID: ' + escapeHtml(c.roomId || '-') + ' · Passcode: ' + escapeHtml(c.roomPassword || '-') + '</p>' +
           '<div class="student-mobile-actions">' +
@@ -29610,6 +30078,10 @@
     }
 
     function studentMobileOpenLatestOnlineDoc(courseId) {
+      if (!studentCanAccessCourseMedia(courseId, 'onlineDocs')) {
+        alert('ไม่มีสิทธิ์ดูเอกสาร Online ของคอร์สนี้');
+        return;
+      }
       const course = courses.find(function(c) { return String(c.id) === String(courseId); });
       const doc = getCourseOnlineDocs(course, false)[0];
       const file = doc && Array.isArray(doc.files) ? doc.files.find(function(item) { return item && item.url; }) : null;
@@ -29625,8 +30097,8 @@
     }
 
     function openOnlineClassByCourseId(id) {
-      if (!studentCanUseCourseEntitlements(currentStudent)) {
-        alert(getPausedCourseAccessMessage());
+      if (shouldEnforceStudentMediaAccess() && !studentCanAccessCourseMedia(id, 'online')) {
+        alert(isStudentLimitedAccess(currentStudent) ? getStudentLimitedAccessMessage(currentStudent) : 'ไม่มีสิทธิ์เข้าห้องเรียน Online ของคอร์สนี้');
         return;
       }
       const c = courses.find(function(item) { return String(item.id) === String(id); });
@@ -29642,8 +30114,8 @@
     }
 
     function openOnDemandByCourseId(id) {
-      if (!studentCanUseCourseEntitlements(currentStudent)) {
-        alert(getPausedCourseAccessMessage());
+      if (shouldEnforceStudentMediaAccess() && !studentCanAccessCourseMedia(id, 'onDemand')) {
+        alert(isStudentLimitedAccess(currentStudent) ? getStudentLimitedAccessMessage(currentStudent) : 'ไม่มีสิทธิ์ดู On-demand ของคอร์สนี้');
         return;
       }
       const c = courses.find(function(course) { return String(course.id) === String(id); });
@@ -30143,6 +30615,17 @@
         return isStudentPaymentRecord(s, payment);
       });
       if (!student) return null;
+      const enrollment = getStudentCourseEnrollment(student, payment.courseId || '');
+      if (enrollment && !enrollment.legacy) {
+        enrollment.paymentStatus = status;
+        if (status === 'ชำระแล้ว' && enrollment.courseStatus === 'รออนุมัติคอร์ส') {
+          enrollment.courseStatus = 'อนุมัติแล้ว';
+          enrollment.everApproved = true;
+          enrollment.approvedAtMs = Number(enrollment.approvedAtMs || Date.now());
+          enrollment.historicalMediaStatus = 'not_applicable';
+        }
+        await setFirebaseDocument('courseEnrollments', enrollment);
+      }
       const month = payment.paymentMonth || payment.month || payment.billingMonth || '';
       const beforeSync = [student.paymentStatus, student.courseStatus, Array.isArray(student.overdueMonths) ? student.overdueMonths.join('|') : ''].join('::');
       student.overdueMonths = Array.isArray(student.overdueMonths) ? student.overdueMonths : [];
@@ -30155,7 +30638,7 @@
         student.paymentStatus = status;
       }
 
-      if (status === 'ชำระแล้ว' && student.courseId && String(student.courseId) === String(payment.courseId || '') && student.courseStatus === 'รออนุมัติคอร์ส') {
+      if ((!enrollment || enrollment.legacy) && status === 'ชำระแล้ว' && student.courseId && String(student.courseId) === String(payment.courseId || '') && student.courseStatus === 'รออนุมัติคอร์ส') {
         student.courseStatus = 'อนุมัติแล้ว';
       }
 
@@ -30402,7 +30885,15 @@
           || normalizeTextValue(s.name) === normalizeTextValue(payment.student);
       });
       if (!student) return null;
-      if (student.courseId && String(student.courseId) === String(payment.courseId) && student.courseStatus === 'รออนุมัติคอร์ส') {
+      const enrollment = getStudentCourseEnrollment(student, payment.courseId || '');
+      if (enrollment && !enrollment.legacy && enrollment.courseStatus === 'รออนุมัติคอร์ส') {
+        enrollment.courseStatus = 'อนุมัติแล้ว';
+        enrollment.paymentStatus = 'ชำระแล้ว';
+        enrollment.everApproved = true;
+        enrollment.approvedAtMs = Number(enrollment.approvedAtMs || Date.now());
+        enrollment.historicalMediaStatus = 'not_applicable';
+        await setFirebaseDocument('courseEnrollments', enrollment);
+      } else if (student.courseId && String(student.courseId) === String(payment.courseId) && student.courseStatus === 'รออนุมัติคอร์ส') {
         student.courseStatus = 'อนุมัติแล้ว';
         await setFirebaseDocument('students', student);
         if (currentStudent && String(currentStudent.id) === String(student.id)) currentStudent = student;
@@ -30647,7 +31138,9 @@
               }
             } else {
 	              if (!payment) {
-	                const paymentAmount = getExpectedPaymentAmountForStudent(currentStudent, month);
+	                const contextCourse = getCurrentStudentCourse();
+	                const contextEnrollment = getSelectedStudentCourseEnrollment(currentStudent);
+	                const paymentAmount = getExpectedPaymentAmountForStudent(currentStudent, month, contextCourse);
 	                const paymentId = createFirebaseDocId('payments');
 	                payment = {
 	                  id: paymentId,
@@ -30658,9 +31151,9 @@
                   studentAuthUid: currentStudent.authUid || (firebaseUser ? firebaseUser.uid : ''),
                   authUid: currentStudent.authUid || (firebaseUser ? firebaseUser.uid : ''),
                   student: currentStudent.name || '',
-                  courseId: currentStudent.courseId || '',
-                  courseName: currentStudent.course || '',
-                  course: currentStudent.course || '',
+	                  courseId: contextEnrollment ? contextEnrollment.courseId : '',
+	                  courseName: contextCourse ? contextCourse.name : '',
+	                  course: contextCourse ? contextCourse.name : '',
                   month: month,
                   baseAmount: paymentAmount,
                   expectedAmount: paymentAmount,
@@ -30913,7 +31406,7 @@
     function updateStudentPendingPaymentBanner() {
       var banner = getElement('studentPendingPaymentBanner');
       var mobileBanner = getElement('studentMobilePendingPaymentBanner');
-      var hasData = currentStudent && currentStudent.courseId;
+      var hasData = currentStudent && getSelectedStudentCourseEnrollment(currentStudent);
       var month = hasData ? getStudentSelectedPaymentMonth() : null;
       if (!hasData || !month) {
         if (banner) banner.classList.add('hidden');
@@ -31701,7 +32194,7 @@
 
     function getVisiblePaymentMonthsForStudents() {
       const visible = (Array.isArray(paymentMonths) ? paymentMonths : []).filter(isPaymentMonthVisibleToStudents);
-      if (!currentStudent || !currentStudent.courseId) return visible;
+      if (!currentStudent || !getSelectedStudentCourseEnrollment(currentStudent)) return visible;
       return visible.filter(function(item) {
         const skipped = item && item.skippedStudents ? item.skippedStudents : {};
         if (getStudentIdentityKeys(currentStudent).some(function(key) { return !!skipped[key]; })) return false;
@@ -31788,16 +32281,31 @@
     }
 
     function getMonthlyPaymentTargetStudents() {
-      return students.filter(function(s) {
-        return s.courseId && (s.courseStatus === 'อนุมัติแล้ว' || s.courseStatus === 'รออนุมัติคอร์ส') && (s.learningStatus || s.status || 'เรียนอยู่') === 'เรียนอยู่';
+      const targets = [];
+      students.forEach(function(student) {
+        if ((student.learningStatus || student.status || 'เรียนอยู่') !== 'เรียนอยู่') return;
+        getStudentCourseEnrollments(student, { currentOnly: true }).forEach(function(enrollment) {
+          if (!['อนุมัติแล้ว', 'รออนุมัติคอร์ส'].includes(enrollment.courseStatus)) return;
+          const course = getCourseForEnrollment(enrollment);
+          targets.push(Object.assign({}, student, {
+            courseId: enrollment.courseId,
+            course: (course && course.name) || enrollment.courseName || student.course || '',
+            courseAccess: (course && course.access) || enrollment.courseAccess || '',
+            courseStatus: enrollment.courseStatus,
+            paymentStatus: enrollment.paymentStatus,
+            registeredCourseMonth: enrollment.registeredCourseMonth,
+            _courseEnrollment: enrollment
+          }));
+        });
       });
+      return targets;
     }
 
     function findPaymentForStudentMonth(student, month) {
       const m = String(month || '').trim();
       return payments.find(function(p) {
         const pMonth = String(p.paymentMonth || p.month || p.billingMonth || '').trim();
-        return isStudentPaymentRecord(student, p) && pMonth === m;
+        return isStudentPaymentRecord(student, p) && String(p.courseId || '') === String(student.courseId || '') && pMonth === m;
       }) || null;
     }
 
@@ -34289,7 +34797,8 @@ function receiptStatusText(status) {
       if (!tbody) return;
 
       const visibleReceipts = receipts.filter(function(r) {
-        return normalizeReceiptStatus(r.status) === 'published' && isCurrentStudentMatchRecord(r);
+        const enrollment = getSelectedStudentCourseEnrollment(currentStudent);
+        return normalizeReceiptStatus(r.status) === 'published' && isCurrentStudentMatchRecord(r) && enrollment && String(r.courseId || '') === String(enrollment.courseId || '');
       }).slice().sort(function(a, b) {
         return Number(b.id || 0) - Number(a.id || 0);
       });
@@ -34317,7 +34826,8 @@ function receiptStatusText(status) {
 
     function getStudentReceiptRowsForMobile() {
       const visibleReceipts = receipts.filter(function(r) {
-        return normalizeReceiptStatus(r.status) === 'published' && isCurrentStudentMatchRecord(r);
+        const enrollment = getSelectedStudentCourseEnrollment(currentStudent);
+        return normalizeReceiptStatus(r.status) === 'published' && isCurrentStudentMatchRecord(r) && enrollment && String(r.courseId || '') === String(enrollment.courseId || '');
       }).slice().sort(function(a, b) {
         return Number(b.id || 0) - Number(a.id || 0);
       });
@@ -34342,7 +34852,7 @@ function receiptStatusText(status) {
       const canShowMonth = !!(selectedMonth && selectedMonth !== '-');
       const mobilePaymentRecord = currentStudent && canShowMonth ? getCurrentStudentPaymentForSelectedMonth() : null;
       const amount = mobilePaymentRecord ? getPaymentFinalAmount(mobilePaymentRecord) : 0;
-      const statusText = currentStudent && currentStudent.courseId ? getCurrentStudentPaymentStatusText() : '-';
+      const statusText = currentStudent && getSelectedStudentCourseEnrollment(currentStudent) ? getCurrentStudentPaymentStatusText() : '-';
       const courseText = selectedCourse ? selectedCourse.name : '-';
 
       setStudentMobileText('studentMobilePaymentHero', (selectedMonth || '-') + ' · ' + (statusText || '-'));
@@ -34534,7 +35044,9 @@ function receiptStatusText(status) {
         result.style.color = '#0f4cbd';
         slipUrl = await uploadFileToFirebaseStorage('slips/' + getSafeFileName(currentStudent.authUid || currentStudent.id || currentStudent.phone) + '/' + getSafeFileName(month) + '-' + Date.now() + '.png', studentSlipData);
         const paymentId = createFirebaseDocId('payments');
-        const payment = {
+        const selectedCourse = getCurrentStudentCourse();
+        const selectedEnrollment = getSelectedStudentCourseEnrollment(currentStudent);
+	          const payment = {
           id: paymentId,
           firebaseDocId: paymentId,
           studentId: currentStudent.id || '',
@@ -34543,15 +35055,15 @@ function receiptStatusText(status) {
           studentAuthUid: currentStudent.authUid || (firebaseUser ? firebaseUser.uid : ''),
           authUid: currentStudent.authUid || (firebaseUser ? firebaseUser.uid : ''),
           student: currentStudent.name || '',
-          courseId: currentStudent.courseId || '',
-          courseName: currentStudent.course || '',
-          course: currentStudent.course || '',
+	          courseId: selectedEnrollment ? selectedEnrollment.courseId : '',
+	          courseName: selectedCourse ? selectedCourse.name : '',
+	          course: selectedCourse ? selectedCourse.name : '',
           month: month,
-          baseAmount: getExpectedPaymentAmountForStudent(currentStudent, month),
-          expectedAmount: getExpectedPaymentAmountForStudent(currentStudent, month),
+	          baseAmount: getExpectedPaymentAmountForStudent(currentStudent, month, selectedCourse),
+	          expectedAmount: getExpectedPaymentAmountForStudent(currentStudent, month, selectedCourse),
           discount: 0,
-          finalAmount: getExpectedPaymentAmountForStudent(currentStudent, month),
-          amount: getExpectedPaymentAmountForStudent(currentStudent, month),
+	          finalAmount: getExpectedPaymentAmountForStudent(currentStudent, month, selectedCourse),
+	          amount: getExpectedPaymentAmountForStudent(currentStudent, month, selectedCourse),
           slipUrl: slipUrl,
           slipNote: 'นักเรียนอัปโหลดสลิปของเดือน ' + month,
           paymentStatus: 'รอตรวจสลิป',
@@ -34663,7 +35175,7 @@ function receiptStatusText(status) {
       let payment = getCurrentStudentPaymentForSelectedMonth();
       let createdPaymentForUpload = false;
       if (!payment) {
-        const uploadCourse = getCourseByStudentOrName(currentStudent, currentStudent.course || '');
+        const uploadCourse = getCurrentStudentCourse();
         payment = buildStudentMonthlyPaymentRecord(currentStudent, uploadCourse, month);
         if (!payment) {
           result.textContent = 'ยังไม่มีรายการบิลสำหรับเดือนนี้ กรุณารอเจ้าหน้าที่เปิดบิลก่อนอัปโหลดสลิป';
@@ -34684,7 +35196,7 @@ function receiptStatusText(status) {
       try {
         result.textContent = 'กำลังอัปโหลดสลิปไปยัง Google Drive...';
         const fileBase64 = await fileToBase64(file);
-        const uploadCourse = getCourseByPaymentStudentOrName(payment, currentStudent, payment.course || payment.courseName || currentStudent.course || '');
+        const uploadCourse = getCourseByPaymentStudentOrName(payment, currentStudent, payment.course || payment.courseName || (getCurrentStudentCourse() || {}).name || '');
         uploadCenter = getPaymentUploadCenterText(payment, currentStudent, uploadCourse);
         driveData = await uploadFileToDriveViaAppsScript({
           file: file,
@@ -34700,8 +35212,8 @@ function receiptStatusText(status) {
           paymentCenter: uploadCenter,
           courseLocation: uploadCenter || (uploadCourse && (uploadCourse.location || uploadCourse.center || uploadCourse.courseLocation)) || '',
           preferredLocation: currentStudent.preferredLocation || uploadCenter,
-          courseId: payment.courseId || currentStudent.courseId || '',
-          courseName: payment.courseName || payment.course || currentStudent.course || '',
+          courseId: payment.courseId || (getSelectedStudentCourseEnrollment(currentStudent) || {}).courseId || '',
+          courseName: payment.courseName || payment.course || (getCurrentStudentCourse() || {}).name || '',
           grade: currentStudent.grade || payment.studentGrade || payment.grade || '',
         });
       } catch (driveError) {
@@ -34759,17 +35271,9 @@ function receiptStatusText(status) {
         }
         // Publish local success only after Firestore accepts the original document write.
         Object.assign(payment, slipFields, { firebaseDocId: paymentDocId });
-        currentStudent.paymentStatus = 'รอตรวจสลิป';
         currentStudent.overdueMonths = Array.isArray(currentStudent.overdueMonths)
           ? currentStudent.overdueMonths.filter(function(item) { return item !== (payment.month || month); })
           : [];
-        const studentDocId = String(currentStudent.firebaseDocId || currentStudent.id || currentStudent.authUid || '');
-        try {
-          if (!studentDocId) throw new Error('ไม่พบรหัสเอกสารนักเรียนสำหรับบันทึกสถานะชำระเงิน');
-          await db.collection('students').doc(studentDocId).set(buildFirebasePayload(currentStudent, studentDocId, false), { merge: true });
-        } catch (studentSaveError) {
-          console.warn('student payment status sync skipped after slip upload:', studentSaveError);
-        }
         if (createdPaymentForUpload && !payments.some(function(item) {
           return String(item.firebaseDocId || item.id || '') === paymentDocId;
         })) {
@@ -35108,7 +35612,7 @@ function receiptStatusText(status) {
         alert(getWithdrawnAccessMessage());
         return;
       }
-      if (!(currentStudent && currentStudent.courseId)) {
+      if (!(currentStudent && getSelectedStudentCourseEnrollment(currentStudent))) {
         alert('กรุณาสมัครคอร์สก่อนดูคะแนนย้อนหลัง');
         return;
       }
@@ -42197,7 +42701,7 @@ function receiptStatusText(status) {
     }
 
     function openMonthlyExamPage() {
-      if (!(currentStudent && currentStudent.courseId)) {
+      if (!(currentStudent && getSelectedStudentCourseEnrollment(currentStudent))) {
         alert('กรุณาสมัครคอร์สก่อนทำแบบทดสอบ');
         return;
       }
@@ -42228,16 +42732,18 @@ function receiptStatusText(status) {
       const selectedOverdue = getElement('studentOverdueFilter') ? getElement('studentOverdueFilter').value : 'ทั้งหมด';
       const selectedLearningStatus = getElement('studentLearningStatusFilter') ? getElement('studentLearningStatusFilter').value : 'ทั้งหมด';
       return students.filter(function(s) {
-        const course = getCourseByStudentOrName(s, s.course);
-        const locationText = course ? course.location : '';
+        const enrollments = getStudentCourseEnrollments(s);
+        const enrollmentCourses = enrollments.map(getCourseForEnrollment).filter(Boolean);
+        const locationTexts = enrollmentCourses.map(function(course) { return course.location || ''; });
         const hasOverdue = Array.isArray(s.overdueMonths) && s.overdueMonths.length > 0;
-        const text = [s.name, s.nickname, s.parentName, s.phone, s.lineId, s.school, s.preferredLocation, s.memberId, s.grade, s.course, s.courseStatus, s.paymentStatus].join(' ').toLowerCase();
+        const enrollmentText = enrollments.map(function(enrollment) { return [enrollment.courseName, enrollment.courseStatus, enrollment.paymentStatus].join(' '); }).join(' ');
+        const text = [s.name, s.nickname, s.parentName, s.phone, s.lineId, s.school, s.preferredLocation, s.memberId, s.grade, enrollmentText, s.course, s.courseStatus, s.paymentStatus].join(' ').toLowerCase();
         return (!keyword || text.includes(keyword)) &&
           (selectedGrade === 'ทั้งหมด' || s.grade === selectedGrade) &&
-          (selectedLocation === 'ทั้งหมด' || locationText === selectedLocation) &&
-          (selectedCourse === 'ทั้งหมด' || String(s.courseId) === String(selectedCourse) || s.course === selectedCourse) &&
-          (selectedCourseStatus === 'ทั้งหมด' || (s.courseStatus || 'ยังไม่ได้สมัครคอร์ส') === selectedCourseStatus) &&
-          (selectedPayment === 'ทั้งหมด' || s.paymentStatus === selectedPayment) &&
+          (selectedLocation === 'ทั้งหมด' || locationTexts.includes(selectedLocation) || s.preferredLocation === selectedLocation) &&
+          (selectedCourse === 'ทั้งหมด' || enrollments.some(function(enrollment) { return String(enrollment.courseId) === String(selectedCourse); })) &&
+          (selectedCourseStatus === 'ทั้งหมด' || (selectedCourseStatus === 'ยังไม่ได้สมัครคอร์ส' ? !enrollments.length : enrollments.some(function(enrollment) { return enrollment.courseStatus === selectedCourseStatus; }))) &&
+          (selectedPayment === 'ทั้งหมด' || enrollments.some(function(enrollment) { return enrollment.paymentStatus === selectedPayment; }) || s.paymentStatus === selectedPayment) &&
           (selectedLearningStatus === 'ทั้งหมด' || (s.learningStatus || s.status || 'เรียนอยู่') === selectedLearningStatus) &&
           (selectedOverdue === 'ทั้งหมด' || (selectedOverdue === 'มีค้างชำระ' ? hasOverdue : !hasOverdue));
       });
@@ -43583,8 +44089,10 @@ function receiptStatusText(status) {
     }
 
     function countDataQualityIssues() {
-      const noCourseStudents = (students || []).filter(function(s) { return !s.courseId || s.course === 'ยังไม่ได้สมัครคอร์ส' || s.courseStatus === 'ยังไม่ได้สมัครคอร์ส'; });
-      const pendingCourses = (students || []).filter(function(s) { return s.courseStatus === 'รออนุมัติคอร์ส'; });
+      const noCourseStudents = (students || []).filter(function(s) { return !getStudentCourseEnrollments(s, { currentOnly: true }).length; });
+      const pendingCourses = (students || []).filter(function(s) {
+        return getStudentCourseEnrollments(s, { currentOnly: true }).some(function(enrollment) { return enrollment.courseStatus === 'รออนุมัติคอร์ส'; });
+      });
       const coursesWithoutOnline = (courses || []).filter(function(c) { return !c.onlineLink && !c.roomId; });
       const coursesWithoutLine = (courses || []).filter(function(c) { return !getCourseLineGroup(c); });
       const qrMissing = !hasAnyPaymentQrConfigured();

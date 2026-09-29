@@ -237,6 +237,51 @@ service cloud.firestore {
       return signedIn() && request.resource.data.authUid == request.auth.uid;
     }
 
+    function protectedStudentCourseFields() {
+      return [
+        'courseId', 'course', 'courseName', 'courseAccess', 'courseStatus',
+        'paymentStatus', 'registeredCourseMonth', 'completedCourseId',
+        'completedCourse', 'completedCourseAccess', 'completedCourseStatus',
+        'completedCoursePaymentStatus', 'courseCompletionHistory', 'grade',
+        'gradePromotionHistory', 'previousGrade', 'promotedToGrade',
+        'promotedAtText', 'promotedAtMs', 'promotedAtMonth', 'promotedBy'
+      ];
+    }
+
+    function studentEnrollmentDocId(studentId, courseId) {
+      return studentId + '__' + courseId;
+    }
+
+    function ownsIncomingCourseEnrollment() {
+      return signedIn()
+        && request.resource.data.authUid == request.auth.uid
+        && exists(/databases/$(database)/documents/students/$(request.resource.data.studentId))
+        && get(/databases/$(database)/documents/students/$(request.resource.data.studentId)).data.authUid == request.auth.uid;
+    }
+
+    function isValidStudentCourseEnrollmentCreate(docId) {
+      return ownsIncomingCourseEnrollment()
+        && docId == studentEnrollmentDocId(request.resource.data.studentId, request.resource.data.courseId)
+        && request.resource.data.courseStatus == 'รออนุมัติคอร์ส'
+        && request.resource.data.paymentStatus == 'รอชำระเงิน'
+        && request.resource.data.enrollmentStatus == 'active'
+        && (!('everApproved' in request.resource.data) || request.resource.data.everApproved == false)
+        && (!('historicalMediaStatus' in request.resource.data) || request.resource.data.historicalMediaStatus == 'not_applicable')
+        && request.resource.data.deleted == false
+        && exists(/databases/$(database)/documents/courses/$(request.resource.data.courseId))
+        && get(/databases/$(database)/documents/courses/$(request.resource.data.courseId)).data.status == 'open'
+        && get(/databases/$(database)/documents/courses/$(request.resource.data.courseId)).data.grade == get(/databases/$(database)/documents/students/$(request.resource.data.studentId)).data.grade
+        && get(/databases/$(database)/documents/courses/$(request.resource.data.courseId)).data.location == get(/databases/$(database)/documents/students/$(request.resource.data.studentId)).data.preferredLocation
+        && request.resource.data.grade == get(/databases/$(database)/documents/students/$(request.resource.data.studentId)).data.grade
+        && request.resource.data.location == get(/databases/$(database)/documents/students/$(request.resource.data.studentId)).data.preferredLocation;
+    }
+
+    function hasOwnedCourseEnrollment(studentId, courseId) {
+      return signedIn()
+        && exists(/databases/$(database)/documents/courseEnrollments/$(studentEnrollmentDocId(studentId, courseId)))
+        && get(/databases/$(database)/documents/courseEnrollments/$(studentEnrollmentDocId(studentId, courseId))).data.authUid == request.auth.uid;
+    }
+
     function isLinkedStudentDocId(studentDocId) {
       return signedIn()
         && userProfileExists()
@@ -439,6 +484,7 @@ service cloud.firestore {
         && request.resource.data.firebaseDocId == docId
         && request.resource.data.deleted == false
         && isIncomingPaymentOwner()
+        && hasOwnedCourseEnrollment(request.resource.data.studentId, request.resource.data.courseId)
         && request.resource.data.month != ''
         && (
           request.resource.data.driveFileId != ''
@@ -530,7 +576,19 @@ service cloud.firestore {
                     || hasAdminPermission('admin.students')
                     || isTeacher()
                     || (ownsExistingDoc() && ownsIncomingDoc()
-                        && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['pickupStatus', 'pickupDate']));
+                        && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['pickupStatus', 'pickupDate'])
+                        && !request.resource.data.diff(resource.data).affectedKeys().hasAny(protectedStudentCourseFields()));
+      allow delete: if isAdmin();
+    }
+
+    match /courseEnrollments/{docId} {
+      allow read: if hasStaffAccountType() || (signedIn() && resource.data.authUid == request.auth.uid);
+      allow create: if isAdmin()
+                    || hasAdminPermission('admin.students')
+                    || isValidStudentCourseEnrollmentCreate(docId);
+      allow update: if isAdmin()
+                    || hasAdminPermission('admin.students')
+                    || hasAdminPermission('admin.finance');
       allow delete: if isAdmin();
     }
 
