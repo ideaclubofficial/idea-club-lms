@@ -13,6 +13,7 @@ function setup(){
  for(const id of ['admin-video','admin-courses','admin-dashboard','admin-settings','teacher-dashboard','teacher-attendance'])roots[id]=element();
  const c={firebaseReady:true,db:{},firebaseUser:{uid:'A'},studentDataSessionVersion:1,coreDataLoaded:false,PRODUCTION_MODE:true,
    adminRealtimeSession:null,isCurrentStudentSession:()=>false,startAdminPaymentDataListeners:()=>null,
+   courseEndScheduleTimer:null,courseEndScheduleProcessing:false,clearInterval(){},startCourseEndScheduleChecks(){},
    getFirebaseCollection:async(name,deleted,status)=>{reads.push(name);return [{id:name}];},getFirebasePaymentCollection:async()=>{reads.push('payments');return [{id:'bill'}];},
    applyPaymentRepairsSync() {}, safeRun:fn=>fn(),replaceArray:(a,b)=>a.splice(0,a.length,...b),rebuildStudentLookupMap(){},applySystemSettingsToPage(){},cacheStartupSettings(){},systemSettings:{},prizeWheelSettings:{},
    getElement:id=>roots[id]||null,document:{createElement:element},console:{warn(){},error(){}},
@@ -24,9 +25,9 @@ function setup(){
  return {c,reads,renders,roots};
 }
 
-test('staff core requests only four base collections and never repairs records',async()=>{
+test('staff core requests only the five base collections and never repairs records',async()=>{
  const h=setup();await h.c.loadCoreDataFromFirebase();
- assert.deepEqual(h.reads.sort(),['courses','settings','students','teachers']);assert.equal(h.c.coreDataLoaded,true);
+ assert.deepEqual(h.reads.sort(),['courseEnrollments','courses','settings','students','teachers']);assert.equal(h.c.coreDataLoaded,true);
  assert.ok(!source('loadCoreDataFromFirebase').includes('repair'));
 });
 
@@ -39,7 +40,7 @@ test('teacher home loads schedules but not finance, scores, clips, games or expe
 
 test('concurrent menus share base collection reads and revisit uses cache',async()=>{
  const h=setup();await Promise.all([h.c.requestStaffTabData('admin-video'),h.c.requestStaffTabData('admin-courses')]);
- for(const name of ['students','teachers','courses','settings'])assert.equal(h.reads.filter(x=>x===name).length,1,name);
+ for(const name of ['students','teachers','courses','courseEnrollments','settings'])assert.equal(h.reads.filter(x=>x===name).length,1,name);
  const count=h.reads.length;await h.c.requestStaffTabData('admin-video');assert.equal(h.reads.length,count);
 });
 

@@ -27,6 +27,7 @@ function setup() {
   const c = { firebaseReady: true, firebaseUser: { uid: 'A' }, db: { collection: query },
     studentDataSessionVersion: 0, studentRealtimeSession: null, studentRealtimeRefreshTimer: null,
     adminRealtimeSession: null, adminPaymentDataRefreshTimer: null, prizeWheelSpinning: false,
+    courseEndScheduleTimer: null, courseEndScheduleProcessing: false,
     COLLECTION_FETCH_LIMITS: { payments: { limit: 600 }, receipts: { limit: 600 }, paymentBundles: { limit: 300 } },
     console: { warn() {}, log() {} }, hasPermission: () => true,
     replaceArray: (a, b) => a.splice(0, a.length, ...b), safeRun: fn => fn(),
@@ -34,7 +35,7 @@ function setup() {
     clearTimeout: id => timers.delete(id), scheduleAdminPaymentDataRefresh() {},
     isAuthUidLikeStudentQueryKey: (id, uid) => id === uid
   };
-  for (const name of ['payments','receipts','paymentBundles','studentGamificationProfiles','studentGamificationEvents','studentPersonalQuests','gamificationRedemptions','prizeWheelSpins']) c[name] = [];
+  for (const name of ['courses','courseEnrollments','payments','receipts','paymentBundles','studentGamificationProfiles','studentGamificationEvents','studentPersonalQuests','gamificationRedemptions','prizeWheelSpins']) c[name] = [];
   for (const name of ['refreshStudentPaymentMonthSelect','updateStudentSelectedPaymentMonth','renderStudentReceipts','renderStudentMobilePayment','renderStudentGamificationPanel','updateStudentCourseDisplay']) c[name] = () => renders.push(name);
   vm.createContext(c);
   for (const name of ['createRealtimeCollectionGroup','stopStudentPaymentListeners','stopAdminPaymentDataListeners','startAdminPaymentDataListeners','startStudentPaymentListeners','scheduleStudentRealtimeRefresh','waitForRealtimeCollection','studentCollectionUsesAuthUidOnly','buildStudentOwnedQuerySpecs']) vm.runInContext(source(name), c);
@@ -110,6 +111,7 @@ test('admin finance tab loads from listeners without duplicate financial get cal
   for (const name of source('getStaffCollectionTargets').match(/return \{([\s\S]*?)\};/)[1].match(/\b\w+\b/g)) if (!h.c[name]) h.c[name]=[];
   h.c.PRODUCTION_MODE=true; h.c.isCurrentStudentSession=()=>false;
   h.c.systemSettings={}; h.c.safeRun=()=>{}; h.c.applySystemSettingsToPage=()=>{};
+  h.c.clearInterval=()=>{}; h.c.startCourseEndScheduleChecks=()=>{};
   h.c.getFirebaseCollection=async name=>{h.reads.push(name);return [];};
   h.c.getFirebasePaymentCollection=async()=>{throw new Error('Duplicate payment get');};
   h.c.rebuildStudentLookupMap=()=>{};

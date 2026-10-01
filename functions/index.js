@@ -1,10 +1,17 @@
 const { onCall, HttpsError } = require("firebase-functions/v2/https");
+const { onSchedule } = require("firebase-functions/v2/scheduler");
 const { setGlobalOptions } = require("firebase-functions/v2");
 const admin = require("firebase-admin");
 const { google } = require("googleapis");
 const path = require("path");
 const os = require("os");
 const fs = require("fs");
+const {
+  buildEnrollmentCompletionPatch,
+  hasCourseCompletionHistory,
+  isCourseEndDue,
+  isCurrentApprovedEnrollment,
+} = require("./course-end-helpers");
 
 setGlobalOptions({
   region: "asia-southeast1",
@@ -1214,4 +1221,206 @@ exports.resetStudentPasswordToDefault = onCall(async (request) => {
   });
 
   return { ok: true };
+});
+
+// ============================================================
+// Scheduled course completion
+// ============================================================
+
+function getBangkokCompletionLabels(date) {
+  return {
+    text: date.toLocaleString("th-TH", { timeZone: "Asia/Bangkok" }),
+    month: date.toLocaleDateString("th-TH", { timeZone: "Asia/Bangkok", month: "long", year: "numeric" }),
+  };
+}
+
+async function commitInChunks(writes, chunkSize = 400) {
+  for (let offset = 0; offset < writes.length; offset += chunkSize) {
+    const batch = db.batch();
+    writes.slice(offset, offset + chunkSize).forEach((write) => {
+      batch.set(write.ref, write.data, { merge: true });
+    });
+    await batch.commit();
+  }
+}
+
+async function completeLegacyCourseStudents(courseDoc, enrollmentDocs, now, labels) {
+  const courseId = courseDoc.id;
+  const course = courseDoc.data() || {};
+  const linkedStudentIds = new Set();
+  const linkedAuthUids = new Set();
+  enrollmentDocs.forEach((doc) => {
+    const data = doc.data() || {};
+    if (data.studentId) linkedStudentIds.add(String(data.studentId));
+    if (data.authUid) linkedAuthUids.add(String(data.authUid));
+  });
+
+  const studentSnapshot = await db.collection("students").where("courseId", "==", courseId).get();
+  let completed = 0;
+  for (const studentDoc of studentSnapshot.docs) {
+    const student = studentDoc.data() || {};
+    if (student.deleted === true || student.courseStatus !== "อนุมัติแล้ว") continue;
+    if (linkedStudentIds.has(studentDoc.id) || linkedAuthUids.has(String(student.authUid || ""))) continue;
+
+    const history = Array.isArray(student.courseCompletionHistory) ? student.courseCompletionHistory.slice() : [];
+    if (!hasCourseCompletionHistory(history, courseId)) {
+      history.push({
+        courseId,
+        course: student.course || course.name || "",
+        courseAccess: student.courseAccess || course.access || "",
+        courseStatus: student.courseStatus || "",
+        paymentStatus: student.paymentStatus || "",
+        grade: student.grade || course.grade || "",
+        location: student.preferredLocation || course.location || "",
+        everApproved: true,
+        historicalMediaStatus: "allowed",
+        completedAtText: labels.text,
+        completedAtMonth: labels.month,
+        completedAtMs: now.getTime(),
+        completedBy: "system:course_end_scheduler",
+      });
+    }
+
+    const otherEnrollmentSnapshot = await db.collection("courseEnrollments").where("studentId", "==", studentDoc.id).get();
+    const hasOtherCurrentEnrollment = otherEnrollmentSnapshot.docs.some((doc) => {
+      const enrollment = doc.data() || {};
+      return String(enrollment.courseId || "") !== courseId &&
+        enrollment.deleted !== true &&
+        !["จบคอร์ส", "ยกเลิก"].includes(String(enrollment.courseStatus || ""));
+    });
+
+    await studentDoc.ref.set({
+      courseCompletionHistory: history,
+      completedCourseId: courseId,
+      completedCourse: student.course || course.name || "",
+      completedCourseAccess: student.courseAccess || course.access || "",
+      completedCourseStatus: student.courseStatus || "",
+      completedCoursePaymentStatus: student.paymentStatus || "",
+      completedAtText: labels.text,
+      completedAtMonth: labels.month,
+      courseId: null,
+      course: "ยังไม่ได้สมัครคอร์ส",
+      courseAccess: "-",
+      courseStatus: "จบคอร์ส",
+      paymentStatus: "ยังไม่ได้สมัครคอร์ส",
+      learningStatus: hasOtherCurrentEnrollment ? "เรียนอยู่" : "จบคอร์ส",
+      status: hasOtherCurrentEnrollment ? "เรียนอยู่" : "จบคอร์ส",
+      statusChangedAtText: labels.text,
+      statusChangedAtMonth: labels.month,
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      updatedBy: "system:course_end_scheduler",
+    }, { merge: true });
+    completed++;
+  }
+  return completed;
+}
+
+async function syncScheduledStudentLearningStatuses(enrollmentDocs, labels) {
+  const targets = new Map();
+  enrollmentDocs.forEach((doc) => {
+    const enrollment = doc.data() || {};
+    if (!isCurrentApprovedEnrollment(enrollment)) return;
+    const studentId = String(enrollment.studentId || "").trim();
+    if (studentId && !targets.has(studentId)) targets.set(studentId, enrollment);
+  });
+
+  let updated = 0;
+  for (const [studentId, enrollment] of targets.entries()) {
+    let studentDoc = await db.collection("students").doc(studentId).get();
+    if (!studentDoc.exists && enrollment.authUid) {
+      const byAuth = await db.collection("students").where("authUid", "==", enrollment.authUid).limit(1).get();
+      studentDoc = byAuth.empty ? null : byAuth.docs[0];
+    }
+    if (!studentDoc || !studentDoc.exists) continue;
+
+    const allEnrollments = await db.collection("courseEnrollments").where("studentId", "==", studentId).get();
+    const hasOtherCurrentEnrollment = allEnrollments.docs.some((doc) => {
+      const item = doc.data() || {};
+      return item.deleted !== true && !["จบคอร์ส", "ยกเลิก"].includes(String(item.courseStatus || ""));
+    });
+    const nextStatus = hasOtherCurrentEnrollment ? "เรียนอยู่" : "จบคอร์ส";
+    await studentDoc.ref.set({
+      learningStatus: nextStatus,
+      status: nextStatus,
+      statusChangedAtText: labels.text,
+      statusChangedAtMonth: labels.month,
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      updatedBy: "system:course_end_scheduler",
+    }, { merge: true });
+    updated++;
+  }
+  return updated;
+}
+
+async function completeScheduledCourse(courseDoc, now) {
+  const courseId = courseDoc.id;
+  const course = courseDoc.data() || {};
+  const labels = getBangkokCompletionLabels(now);
+  const enrollmentSnapshot = await db.collection("courseEnrollments").where("courseId", "==", courseId).get();
+  const enrollmentWrites = enrollmentSnapshot.docs.filter((doc) => {
+    return isCurrentApprovedEnrollment(doc.data() || {});
+  }).map((doc) => ({
+    ref: doc.ref,
+    data: {
+      ...buildEnrollmentCompletionPatch(doc.data() || {}, now.getTime(), labels.text, labels.month),
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      updatedBy: "system:course_end_scheduler",
+    },
+  }));
+
+  await commitInChunks(enrollmentWrites);
+  const studentStatusesUpdated = await syncScheduledStudentLearningStatuses(enrollmentSnapshot.docs, labels);
+  const legacyCompleted = await completeLegacyCourseStudents(courseDoc, enrollmentSnapshot.docs, now, labels);
+
+  await courseDoc.ref.set({
+    status: "closed",
+    courseEndEnabled: false,
+    courseEndStatus: "completed",
+    courseEndedAt: admin.firestore.FieldValue.serverTimestamp(),
+    courseEndedAtText: labels.text,
+    courseEndedAtMs: now.getTime(),
+    courseEndedBy: "system:course_end_scheduler",
+    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    updatedBy: "system:course_end_scheduler",
+  }, { merge: true });
+
+  await writeActivityLog({
+    functionName: "completeScheduledCourses",
+    type: "course_completed_automatically",
+    severity: "info",
+    courseId,
+    courseName: course.name || "",
+    enrollmentCount: enrollmentWrites.length,
+    studentStatusCount: studentStatusesUpdated,
+    legacyStudentCount: legacyCompleted,
+  });
+
+  return { courseId, enrollments: enrollmentWrites.length, studentStatuses: studentStatusesUpdated, legacyStudents: legacyCompleted };
+}
+
+exports.completeScheduledCourses = onSchedule({
+  schedule: "every 5 minutes",
+  timeZone: "Asia/Bangkok",
+  maxInstances: 1,
+  retryCount: 3,
+}, async () => {
+  const now = new Date();
+  const courseSnapshot = await db.collection("courses").where("courseEndEnabled", "==", true).get();
+  const dueCourses = courseSnapshot.docs.filter((doc) => isCourseEndDue(doc.data() || {}, now.getTime()));
+  const results = [];
+  for (const courseDoc of dueCourses) {
+    try {
+      results.push(await completeScheduledCourse(courseDoc, now));
+    } catch (error) {
+      console.error("completeScheduledCourses error:", courseDoc.id, error);
+      await writeActivityLog({
+        functionName: "completeScheduledCourses",
+        type: "course_completion_failed",
+        severity: "error",
+        courseId: courseDoc.id,
+        error: error && error.message || String(error),
+      });
+    }
+  }
+  console.log("completeScheduledCourses finished", { checked: courseSnapshot.size, completed: results.length, results });
 });

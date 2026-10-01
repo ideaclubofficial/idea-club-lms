@@ -15,7 +15,7 @@ function setup() {
   const query = { where() { return this; }, orderBy() { return this; }, limit() { return this; }, get: async () => ({ docs: [] }),
     onSnapshot(options, next) { Promise.resolve().then(() => next({ docs: [], docChanges: () => [] })); return () => {}; } };
   const c = {
-    STUDENT_HOME_REALTIME_COLLECTIONS: ['payments','receipts','paymentBundles','studentGamificationProfiles','studentGamificationEvents','studentPersonalQuests'],
+    STUDENT_HOME_REALTIME_COLLECTIONS: ['courses','courseEnrollments','payments','receipts','paymentBundles','studentGamificationProfiles','studentGamificationEvents','studentPersonalQuests'],
     resetStaffDataSession() {}, getElement: () => null, onlineExamCoursesLoadSeq: 0, safeRun: fn => fn(), triggerDailyLoginQuestIfNeeded() {},
     firebaseReady: true, firebaseUser: { uid: 'A' }, db: { collection: () => query },
     console: { log() {}, warn() {} }, currentStudent: null,
@@ -32,7 +32,7 @@ function setup() {
     startStudentPaymentListeners: (ids, uid) => listeners.push(uid), stopStudentPaymentListeners() {},
     findStudentForUserProfile: (profile, uid) => c.students.find(x => x.authUid === uid) || null
   };
-  for (const name of ['students','courses','onDemandClips','announcements','scoreReports','adminScoreRecords','paymentMonths','lineGroups','payments','receipts','paymentBundles','monthlyExamLinks','monthlyPlanSessions','studentGamificationProfiles','studentGamificationEvents','studentPersonalQuests','leaderboardProfiles','gamificationRewards','gamificationRedemptions','specialVoucherActivities','prizeWheelItems','prizeWheelSpins','avatarBattleQuestions']) c[name] = [];
+  for (const name of ['students','courses','courseEnrollments','onDemandClips','announcements','scoreReports','adminScoreRecords','paymentMonths','lineGroups','payments','receipts','paymentBundles','monthlyExamLinks','monthlyPlanSessions','studentGamificationProfiles','studentGamificationEvents','studentPersonalQuests','leaderboardProfiles','gamificationRewards','gamificationRedemptions','specialVoucherActivities','prizeWheelItems','prizeWheelSpins','avatarBattleQuestions']) c[name] = [];
   vm.createContext(c);
   for (const [start, end] of [
     ['    function createRealtimeCollectionGroup(', '    function stopAdminPaymentDataListeners('],
@@ -149,7 +149,7 @@ test('student initial load uses listeners instead of one-off owned collection re
   const h = setup();
   h.c.loadStudentOwnCollection = () => { throw new Error('Duplicate owned collection read'); };
   const first = h.load(); h.finish(0); await first;
-  assert.equal(Object.keys(h.c.studentRealtimeSession.groups).length, 6);
+  assert.equal(Object.keys(h.c.studentRealtimeSession.groups).length, 8);
   assert.equal(h.c.studentDataLoadedForUid, 'A');
 });
 
@@ -169,6 +169,7 @@ test('home load never requests deferred clips, exam bank, reward shop or wheel d
   h.c.getFirebaseCollectionQuiet=async name=>{reads.push(name);return [];};
   const first=h.load();h.finish(0);await first;
   for(const name of ['onDemandClips','monthlyExamLinks','gamificationRewards','prizeWheelItems','prizeWheelSettings'])assert.ok(!reads.includes(name),name);
-  for(const name of ['courses','announcements','scoreReports','paymentMonths','lineGroups','monthlyPlanSessions'])assert.ok(reads.includes(name),name);
-  assert.equal(Object.keys(h.c.studentRealtimeSession.groups).length,6);
+  assert.ok(!reads.includes('courses'),'courses');
+  for(const name of ['announcements','scoreReports','paymentMonths','lineGroups','monthlyPlanSessions'])assert.ok(reads.includes(name),name);
+  assert.equal(Object.keys(h.c.studentRealtimeSession.groups).length,8);
 });

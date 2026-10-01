@@ -6217,6 +6217,11 @@
                     <option value="closed">ปิดรับสมัคร</option>
                   </select>
                 </div>
+                <div>
+                  <label><input id="adminCourseEndEnabled" type="checkbox" onchange="syncCourseEndScheduleInput('admin')" /> ตั้งเวลาจบคอร์สอัตโนมัติ</label>
+                  <input id="adminCourseEndAt" type="datetime-local" disabled />
+                  <p class="mini-muted">ระบบจะจบ enrollment ที่อนุมัติแล้วและปิดรับสมัครเมื่อถึงเวลา โดยตรวจทันทีเมื่อเจ้าหน้าที่เปิดหลังบ้าน</p>
+                </div>
               </div>
 
               <div class="permission-panel">
@@ -6270,6 +6275,7 @@
                     <th>วันเวลาเรียน</th>
                     <th>ฟังก์ชันที่เปิด</th>
                     <th class="sortable" onclick="sortData('courses','status')">สถานะ</th>
+                    <th>เวลาจบอัตโนมัติ</th>
                     <th>นักเรียน</th>
                     <th>จัดการ</th>
                   </tr>
@@ -10210,6 +10216,9 @@
       staffTabLoadPromises = {};
       staffDataSessionUid = '';
       coreDataLoaded = false;
+      if (courseEndScheduleTimer) clearInterval(courseEndScheduleTimer);
+      courseEndScheduleTimer = null;
+      courseEndScheduleProcessing = false;
     }
 
     function getStaffCollectionTargets() {
@@ -10911,7 +10920,10 @@
       const uid = firebaseUser && firebaseUser.uid;
       const version = studentDataSessionVersion;
       await ensureStaffCollections(STAFF_DATA_GROUPS.core, options);
-      if (firebaseUser && firebaseUser.uid === uid && studentDataSessionVersion === version) coreDataLoaded = true;
+      if (firebaseUser && firebaseUser.uid === uid && studentDataSessionVersion === version) {
+        coreDataLoaded = true;
+        startCourseEndScheduleChecks();
+      }
     }
 
     const announcements = [];
@@ -11788,6 +11800,8 @@
 
     const courses = [];
     const courseEnrollments = [];
+    let courseEndScheduleTimer = null;
+    let courseEndScheduleProcessing = false;
 
     const teacherPreferenceRules = [];
     const courseTeachingSettings = [];
@@ -20147,41 +20161,134 @@
       });
     }
 
+    function getCourseEndAtDate(course) {
+      const value = course && course.courseEndAt;
+      if (!value) return null;
+      if (typeof value.toDate === 'function') return value.toDate();
+      if (typeof value.toMillis === 'function') return new Date(value.toMillis());
+      if (typeof value === 'object' && Number.isFinite(value.seconds)) return new Date(value.seconds * 1000);
+      const parsed = new Date(value);
+      return Number.isNaN(parsed.getTime()) ? null : parsed;
+    }
+
+    function courseEndAtInputValue(course) {
+      const date = getCourseEndAtDate(course);
+      if (!date) return '';
+      const pad = function(value) { return String(value).padStart(2, '0'); };
+      return date.getFullYear() + '-' + pad(date.getMonth() + 1) + '-' + pad(date.getDate()) + 'T' + pad(date.getHours()) + ':' + pad(date.getMinutes());
+    }
+
+    function getCourseEndScheduleFromInputs(context) {
+      const prefix = context === 'bubble' ? 'bubble' : 'admin';
+      const enabledEl = getElement(prefix + 'CourseEndEnabled');
+      const dateEl = getElement(prefix + 'CourseEndAt');
+      const enabled = !!(enabledEl && enabledEl.checked);
+      const raw = dateEl ? String(dateEl.value || '').trim() : '';
+      if (enabled && !raw) return { valid: false, message: 'กรุณาเลือกวันและเวลาจบคอร์ส' };
+      const date = raw ? new Date(raw) : null;
+      if (enabled && (!date || Number.isNaN(date.getTime()))) return { valid: false, message: 'วันและเวลาจบคอร์สไม่ถูกต้อง' };
+      return {
+        valid: true,
+        courseEndEnabled: enabled,
+        courseEndAt: enabled ? firebase.firestore.Timestamp.fromDate(date) : null,
+        courseEndStatus: enabled ? 'scheduled' : 'disabled'
+      };
+    }
+
+    function syncCourseEndScheduleInput(context) {
+      const prefix = context === 'bubble' ? 'bubble' : 'admin';
+      const enabledEl = getElement(prefix + 'CourseEndEnabled');
+      const dateEl = getElement(prefix + 'CourseEndAt');
+      if (dateEl) dateEl.disabled = !(enabledEl && enabledEl.checked);
+    }
+
+    function renderCourseEndSchedule(course) {
+      const date = getCourseEndAtDate(course);
+      if (course && course.courseEndStatus === 'completed') {
+        return '<span class="status-parent">จบอัตโนมัติแล้ว</span>' + (date ? '<br><span class="mini-muted">' + escapeHtml(date.toLocaleString('th-TH')) + '</span>' : '');
+      }
+      if (!course || course.courseEndEnabled !== true || !date) return '<span class="mini-muted">ไม่ได้ตั้งเวลา</span>';
+      const isPast = date.getTime() <= Date.now();
+      return '<span class="' + (isPast ? 'status-waiting' : 'status-paid') + '">' + (isPast ? 'รอระบบดำเนินการ' : 'ตั้งเวลาแล้ว') + '</span><br>' +
+        '<span class="mini-muted">' + escapeHtml(date.toLocaleString('th-TH')) + '</span>';
+    }
+
+    function isCourseEndScheduleDue(course, nowMs) {
+      const date = getCourseEndAtDate(course);
+      return !!course && course.courseEndEnabled === true && course.courseEndStatus !== 'completed' && !!date && date.getTime() <= Number(nowMs || Date.now());
+    }
+
+    async function processDueCourseEndSchedules() {
+      if (courseEndScheduleProcessing || !coreDataLoaded || isCurrentStudentSession()) return;
+      if (!hasPermission('admin.students') || !hasPermission('admin.courses')) return;
+      if (!['students', 'courses', 'courseEnrollments'].every(isStaffCollectionReady)) return;
+      const dueCourses = (courses || []).filter(function(course) {
+        return isCourseEndScheduleDue(course, Date.now());
+      }).sort(function(a, b) {
+        return getCourseEndAtDate(a).getTime() - getCourseEndAtDate(b).getTime();
+      });
+      if (!dueCourses.length) return;
+      courseEndScheduleProcessing = true;
+      try {
+        for (let i = 0; i < dueCourses.length; i++) {
+          await completeCourseForStudents(dueCourses[i].id || dueCourses[i].firebaseDocId, { automatic: true });
+        }
+      } finally {
+        courseEndScheduleProcessing = false;
+      }
+    }
+
+    function triggerCourseEndScheduleCheck(label) {
+      processDueCourseEndSchedules().catch(function(error) {
+        console.error('IDEA CLUB error @ ' + (label || 'course-end-schedule') + ':', error);
+      });
+    }
+
+    function startCourseEndScheduleChecks() {
+      if (courseEndScheduleTimer) clearInterval(courseEndScheduleTimer);
+      setTimeout(function() { triggerCourseEndScheduleCheck('course-end-schedule-initial'); }, 500);
+      courseEndScheduleTimer = setInterval(function() {
+        triggerCourseEndScheduleCheck('course-end-schedule-interval');
+      }, 60000);
+    }
+
     function renderAdminCourses() {
       const tbody = getElement('adminCourseTableBody');
       if (!tbody) return;
       if (!Array.isArray(courses) || courses.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="10">ยังไม่มีคอร์สในระบบ ให้เพิ่มคอร์สใหม่จากฟอร์มด้านบน</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="11">ยังไม่มีคอร์สในระบบ ให้เพิ่มคอร์สใหม่จากฟอร์มด้านบน</td></tr>';
         return;
       }
       tbody.innerHTML = sortRecordsForTable(courses, 'courses').map(function(c) {
         const statusText = c.status === 'open' ? '<span class="status-paid">เปิดรับสมัคร</span>' : '<span class="status-absent">ปิดรับสมัคร</span>';
         const completionTargets = getCourseCompletionTargets(c.id);
         const completeDisabled = completionTargets.length ? '' : ' disabled';
-        return '<tr><td>' + c.grade + '</td><td>' + c.name + '</td><td>' + formatPrice(c.price) + '</td><td>' + getCourseAccessLabel(c) + '</td><td>' + c.location + '</td><td>' + (getCourseDisplaySchedule(c) || '-') + '</td><td>' + renderCourseFeatureSummary(c) + '</td><td>' + statusText + '</td><td>' + renderCourseStudentStatusSummary(c) + '</td><td><button class="btn btn-blue" type="button" onclick="' + actionCall('editCourse', c.id) + '">แก้ไข</button><button class="btn btn-green" type="button" onclick="' + actionCall('completeCourseForStudents', c.id) + '"' + completeDisabled + '>จบคอร์ส</button><button class="btn btn-red" type="button" onclick="' + actionCall('deleteCourse', c.id) + '">ลบ</button></td></tr>';
+        return '<tr><td>' + c.grade + '</td><td>' + c.name + '</td><td>' + formatPrice(c.price) + '</td><td>' + getCourseAccessLabel(c) + '</td><td>' + c.location + '</td><td>' + (getCourseDisplaySchedule(c) || '-') + '</td><td>' + renderCourseFeatureSummary(c) + '</td><td>' + statusText + '</td><td>' + renderCourseEndSchedule(c) + '</td><td>' + renderCourseStudentStatusSummary(c) + '</td><td><button class="btn btn-blue" type="button" onclick="' + actionCall('editCourse', c.id) + '">แก้ไข</button><button class="btn btn-green" type="button" onclick="' + actionCall('completeCourseForStudents', c.id) + '"' + completeDisabled + '>จบคอร์ส</button><button class="btn btn-red" type="button" onclick="' + actionCall('deleteCourse', c.id) + '">ลบ</button></td></tr>';
       }).join('');
     }
 
-    async function completeCourseForStudents(courseId) {
+    async function completeCourseForStudents(courseId, options) {
+      const opts = options || {};
+      const automatic = opts.automatic === true;
       if (!hasPermission('admin.students')) {
-        alert('ไม่มีสิทธิ์แก้ไขสถานะนักเรียน');
-        return;
+        if (!automatic) alert('ไม่มีสิทธิ์แก้ไขสถานะนักเรียน');
+        return false;
       }
       const course = (courses || []).find(function(item) { return String(item.id) === String(courseId); });
       if (!course) {
-        alert('ไม่พบข้อมูลคอร์ส');
-        return;
+        if (!automatic) alert('ไม่พบข้อมูลคอร์ส');
+        return false;
       }
       const targets = getCourseCompletionTargets(courseId);
-      if (!targets.length) {
+      if (!targets.length && !automatic) {
         alert('ไม่มีนักเรียนที่ต้องจบคอร์สในคอร์สนี้');
-        return;
+        return false;
       }
       const courseTitle = (course.grade ? course.grade + ' · ' : '') + (course.name || '-');
-      if (!confirm('ต้องการจบคอร์ส "' + courseTitle + '" ให้กับนักเรียน ' + targets.length + ' คน ใช่หรือไม่?\n\nระบบจะเปลี่ยนสถานะนักเรียนเป็นจบคอร์สและเปิดให้สมัครคอร์สใหม่ได้ทันที')) return;
+      if (!automatic && !confirm('ต้องการจบคอร์ส "' + courseTitle + '" ให้กับนักเรียน ' + targets.length + ' คน ใช่หรือไม่?\n\nระบบจะเปลี่ยนสถานะนักเรียนเป็นจบคอร์สและเปิดให้สมัครคอร์สใหม่ได้ทันที')) return false;
       const nowText = new Date().toLocaleString('th-TH');
       const nowMonth = getThaiMonthFromDate(new Date().toISOString().slice(0, 10));
-      const actor = getElement('profileName') ? getElement('profileName').textContent : '';
+      const actor = automatic ? 'system:course_end_browser_fallback' : (getElement('profileName') ? getElement('profileName').textContent : '');
       try {
         for (let i = 0; i < targets.length; i++) {
           const student = targets[i];
@@ -20197,6 +20304,14 @@
             enrollment.completedAtMs = Date.now();
             enrollment.completedBy = actor;
             await setFirebaseDocument('courseEnrollments', enrollment);
+            const hasOtherCurrentEnrollment = getStudentCourseEnrollments(student, { currentOnly: true }).some(function(item) {
+              return String(item.courseId || '') !== String(courseId || '');
+            });
+            student.learningStatus = hasOtherCurrentEnrollment ? 'เรียนอยู่' : 'จบคอร์ส';
+            student.status = student.learningStatus;
+            student.statusChangedAtText = nowText;
+            student.statusChangedAtMonth = nowMonth;
+            await setFirebaseDocument('students', student);
             continue;
           }
           const history = Array.isArray(student.courseCompletionHistory) ? student.courseCompletionHistory.slice() : [];
@@ -20234,7 +20349,14 @@
           await setFirebaseDocument('students', nextStudent);
           Object.assign(student, nextStudent);
         }
-        await addActivityLog('จบคอร์ส', courseTitle + ' · นักเรียน ' + targets.length + ' คน');
+        course.status = 'closed';
+        course.courseEndEnabled = false;
+        course.courseEndStatus = automatic ? 'completed' : 'completed_manually';
+        course.courseEndedAtText = nowText;
+        course.courseEndedAtMs = Date.now();
+        course.courseEndedBy = actor;
+        await setFirebaseDocument('courses', course);
+        await addActivityLog(automatic ? 'จบคอร์สอัตโนมัติ' : 'จบคอร์ส', courseTitle + ' · นักเรียน ' + targets.length + ' คน');
         renderAdminCourses();
         renderAdminStudents();
         renderAdminDashboard();
@@ -20246,10 +20368,12 @@
           result.textContent = 'จบคอร์ส ' + courseTitle + ' ให้นักเรียน ' + targets.length + ' คนเรียบร้อย';
           result.style.color = '#16a34a';
         }
-        alert('จบคอร์สเรียบร้อย ' + targets.length + ' คน');
+        if (!automatic) alert('จบคอร์สเรียบร้อย ' + targets.length + ' คน');
+        return true;
       } catch (error) {
         console.error('completeCourseForStudents error:', error);
-        alert('จบคอร์สไม่สำเร็จ: ' + (error.message || error.code || 'ไม่ทราบสาเหตุ'));
+        if (!automatic) alert('จบคอร์สไม่สำเร็จ: ' + (error.message || error.code || 'ไม่ทราบสาเหตุ'));
+        return false;
       }
     }
 
@@ -21248,16 +21372,22 @@
       const status = getElement('adminCourseStatus').value;
       const features = getSelectedCourseFeatures('.course-feature');
       const desc = getElement('adminCourseDesc').value.trim();
+      const endSchedule = getCourseEndScheduleFromInputs('admin');
       const result = getElement('courseSaveResult');
       if (!name || !price) {
         result.textContent = 'กรุณากรอกชื่อคอร์สและราคา';
         result.style.color = '#dc2626';
         return;
       }
+      if (!endSchedule.valid) {
+        result.textContent = endSchedule.message;
+        result.style.color = '#dc2626';
+        return;
+      }
       if (editingId) {
         const c = courses.find(function(item) { return String(item.id) === String(editingId); });
         if (c) {
-          Object.assign(c, { name: name, grade: grade, price: price, monthlyPrice: price, access: access, location: location, days: mergedDays, scheduleDefaults: scheduleDefaults, status: status, features: features, desc: desc || 'ไม่มีรายละเอียดเพิ่มเติม' });
+          Object.assign(c, { name: name, grade: grade, price: price, monthlyPrice: price, access: access, location: location, days: mergedDays, scheduleDefaults: scheduleDefaults, status: status, features: features, desc: desc || 'ไม่มีรายละเอียดเพิ่มเติม' }, endSchedule);
           try {
             await setFirebaseDocument('courses', c);
           } catch (error) {
@@ -21269,7 +21399,7 @@
         result.textContent = 'แก้ไขคอร์สเรียบร้อย และบันทึกลง Firebase แล้ว';
       } else {
         const newId = createFirebaseDocId('courses');
-        const newCourse = { id: newId, firebaseDocId: newId, grade: grade, name: name, price: price, monthlyPrice: price, access: access, location: location, days: mergedDays, scheduleDefaults: scheduleDefaults, status: status, features: features, onlineLink: '', onlineClassDay: '', onlineClassTime: '', roomId: '', roomPassword: '', onDemandSubject: guessSubjectFromCourse(name), onDemandGrade: grade, onDemandTitle: '', onDemandLink: '', desc: desc || 'ไม่มีรายละเอียดเพิ่มเติม' };
+        const newCourse = Object.assign({ id: newId, firebaseDocId: newId, grade: grade, name: name, price: price, monthlyPrice: price, access: access, location: location, days: mergedDays, scheduleDefaults: scheduleDefaults, status: status, features: features, onlineLink: '', onlineClassDay: '', onlineClassTime: '', roomId: '', roomPassword: '', onDemandSubject: guessSubjectFromCourse(name), onDemandGrade: grade, onDemandTitle: '', onDemandLink: '', desc: desc || 'ไม่มีรายละเอียดเพิ่มเติม' }, endSchedule);
         courses.push(newCourse);
         try {
           await setFirebaseDocument('courses', newCourse);
@@ -21314,6 +21444,10 @@
           '<div><label>สถานที่เรียน</label><select id="bubbleCourseLocation"><option' + (c.location === 'IDEA CLUB ศูนย์ นครสวรรค์' ? ' selected' : '') + '>IDEA CLUB ศูนย์ นครสวรรค์</option><option' + (c.location === 'IDEA CLUB ศูนย์ หนองฉาง' ? ' selected' : '') + '>IDEA CLUB ศูนย์ หนองฉาง</option></select></div>' +
           '<div><label>สถานะคอร์ส</label><select id="bubbleCourseStatus"><option value="open"' + (c.status === 'open' ? ' selected' : '') + '>เปิดรับสมัคร</option><option value="closed"' + (c.status === 'closed' ? ' selected' : '') + '>ปิดรับสมัคร</option></select></div>' +
         '</div>' +
+        '<div class="form-row">' +
+          '<div><label><input id="bubbleCourseEndEnabled" type="checkbox" onchange="syncCourseEndScheduleInput(\'bubble\')"' + (c.courseEndEnabled === true ? ' checked' : '') + '> ตั้งเวลาจบคอร์สอัตโนมัติ</label><p class="mini-muted">ใช้ได้กับคอร์สเดิม ระบบตรวจเมื่อเจ้าหน้าที่เปิดหลังบ้าน</p></div>' +
+          '<div><label>วันและเวลาจบคอร์ส</label><input id="bubbleCourseEndAt" type="datetime-local" value="' + escapeHtml(courseEndAtInputValue(c)) + '"' + (c.courseEndEnabled === true ? '' : ' disabled') + '></div>' +
+        '</div>' +
         '<p class="mini-muted" style="margin:0 0 14px;">วันและเวลาเรียนจะแสดงจากการตั้งค่าในส่วน <strong>เวลาเรียนของคอร์ส</strong> ด้านล่าง</p>' +
         '<div class="permission-panel"><h3 style="font-size:18px;">เวลาเรียนของคอร์ส</h3><p class="mini-muted">ตั้งเวลาเรียนเริ่มต้นเพื่อดึงไปใช้ในแผนสอนรายเดือน</p><div class="table-wrap" style="margin-bottom:12px;"><table><thead><tr><th>ประเภท</th><th>วัน</th><th>เวลาเริ่ม</th><th>เวลาจบ / เผยแพร่</th><th>จัดการ</th></tr></thead><tbody id="bubbleCourseScheduleTableBody"></tbody></table></div><button class="btn btn-blue" type="button" onclick="addCourseScheduleSlot(\'onsite\', \'bubble\')">เพิ่ม Onsite</button><button class="btn btn-blue" type="button" onclick="addCourseScheduleSlot(\'online\', \'bubble\')">เพิ่ม Online</button><button class="btn btn-dark" type="button" onclick="addCourseScheduleSlot(\'ondemand\', \'bubble\')">เพิ่ม On-demand</button></div>' +
         '<div class="permission-panel"><h3 style="font-size:18px;">เปิด / ปิดฟังก์ชันของคอร์สนี้</h3><p class="mini-muted">กำหนดเมนูที่นักเรียนจะเห็นสำหรับคอร์สนี้</p><div id="bubbleCourseFeatureList" class="course-feature-grid">' + courseFeatureCheckboxesHtml(normalizeCourseFeatures(c), 'bubble-course-feature') + '</div></div>' +
@@ -21323,6 +21457,12 @@
           const price = Number(bubbleValue('bubbleCoursePrice') || 0);
           if (!name || !price) {
             getElement('editBubbleResult').textContent = 'กรุณากรอกชื่อคอร์สและราคา';
+            getElement('editBubbleResult').style.color = '#dc2626';
+            return;
+          }
+          const endSchedule = getCourseEndScheduleFromInputs('bubble');
+          if (!endSchedule.valid) {
+            getElement('editBubbleResult').textContent = endSchedule.message;
             getElement('editBubbleResult').style.color = '#dc2626';
             return;
           }
@@ -21339,7 +21479,7 @@
             status: bubbleSelectValue('bubbleCourseStatus'),
             features: getSelectedCourseFeatures('.bubble-course-feature'),
             desc: bubbleValue('bubbleCourseDesc') || 'ไม่มีรายละเอียดเพิ่มเติม'
-          });
+          }, endSchedule);
           setFirebaseDocument('courses', c).catch(function(error) { console.error('save course firebase error:', error); });
           renderAdminCourses();
           renderAdminDashboard();
@@ -21357,6 +21497,7 @@
         }
       );
       renderCourseScheduleRows(c.scheduleDefaults, 'bubble');
+      syncCourseEndScheduleInput('bubble');
     }
 
     async function deleteCourse(id) {
@@ -21407,6 +21548,9 @@
       getElement('adminCourseLocation').value = 'IDEA CLUB ศูนย์ นครสวรรค์';
       renderCourseScheduleRows(null);
       getElement('adminCourseStatus').value = 'open';
+      getElement('adminCourseEndEnabled').checked = false;
+      getElement('adminCourseEndAt').value = '';
+      syncCourseEndScheduleInput('admin');
       setSelectedCourseFeatures(getDefaultCourseFeaturesByAccess('Online'), 'Online');
       getElement('adminCourseDesc').value = '';
       if (clearMessage !== false) getElement('courseSaveResult').textContent = '';
@@ -42882,9 +43026,11 @@ function receiptStatusText(status) {
     }
 
     function exportPaymentsCsv() {
-      const rows = [['นักเรียน','คอร์ส','เดือนที่ชำระ','ยอดเงิน','สถานะ','หมายเหตุ Admin','แจ้งเมื่อ']];
+      const rows = [['นักเรียน','ชื่อเล่น','คอร์ส','เดือนที่ชำระ','ยอดเงิน','สถานะ','หมายเหตุ Admin','แจ้งเมื่อ']];
       payments.forEach(function(p) {
-        rows.push([p.student || '', p.course || '', p.month || '', p.amount || '', p.status || '', p.adminNote || '', p.createdAtText || '']);
+        const student = getPaymentStudentRecord(p) || {};
+        const nickname = p.nickname || p.studentNickname || student.nickname || '';
+        rows.push([p.student || student.name || '', nickname, p.course || '', p.month || '', p.amount || '', p.status || '', p.adminNote || '', p.createdAtText || '']);
       });
       downloadCsv('idea-club-payments.csv', rows);
       addActivityLog('Export ข้อมูลการเงิน', 'ดาวน์โหลด CSV รายการชำระเงิน');

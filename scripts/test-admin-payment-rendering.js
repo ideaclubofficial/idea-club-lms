@@ -425,3 +425,23 @@ test('overdue filter runs against status before table pagination', () => {
   h.elements.paymentOverdueDayFilter.value = 'ทั้งหมด';
   assert.equal(h.c.getFilteredPaymentsForTable().length, 3);
 });
+
+test('payment export includes nickname from payment or linked student', () => {
+  let exported;
+  const c = {
+    payments: [
+      { id: 'p1', student: 'สมชาย', nickname: 'ชาย', course: 'Math', month: 'กันยายน 2569', amount: 1200 },
+      { id: 'p2', student: 'สมหญิง', studentId: 's2', course: 'Science', month: 'กันยายน 2569', amount: 1500 }
+    ],
+    getPaymentStudentRecord: payment => payment.id === 'p2' ? { id: 's2', name: 'สมหญิง', nickname: 'หญิง' } : null,
+    downloadCsv: (filename, rows) => { exported = { filename, rows }; },
+    addActivityLog() {}
+  };
+  vm.createContext(c);
+  vm.runInContext(source('exportPaymentsCsv'), c);
+  c.exportPaymentsCsv();
+  assert.equal(exported.filename, 'idea-club-payments.csv');
+  assert.equal(exported.rows[0][1], 'ชื่อเล่น');
+  assert.equal(exported.rows[1][1], 'ชาย');
+  assert.equal(exported.rows[2][1], 'หญิง');
+});

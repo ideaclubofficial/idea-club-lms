@@ -26,7 +26,7 @@ function setup() {
     ensureStudentDataLoaded:async()=>c.currentStudent,
     getFirebaseCollectionQuiet:async(name,deleted,status)=>{reads.push(name);return [{id:name}];},
     replaceArray:(a,b)=>a.splice(0,a.length,...b),
-    getCurrentStudentCourse:()=>({id:'course'}),studentCanUseCourseEntitlements:()=>true,getProfileGrade:()=>'',
+    getCurrentStudentCourse:()=>({id:'course'}),getStudentMediaEntitledCourses:()=>[],studentCanUseCourseEntitlements:()=>true,getProfileGrade:()=>'',
     startStudentPaymentListeners:(ids,uid,paymentIds,names)=>{
       liveStarts.push(...names); for(const name of names)c.studentRealtimeSession.groups[name]={ready:Promise.resolve(true),failed:false};
     },
