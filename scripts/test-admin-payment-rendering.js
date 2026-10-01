@@ -426,13 +426,15 @@ test('overdue filter runs against status before table pagination', () => {
   assert.equal(h.c.getFilteredPaymentsForTable().length, 3);
 });
 
-test('payment export includes nickname from payment or linked student', () => {
+test('payment export includes nickname and only the currently filtered rows', () => {
   let exported;
   const c = {
     payments: [
       { id: 'p1', student: 'สมชาย', nickname: 'ชาย', course: 'Math', month: 'กันยายน 2569', amount: 1200 },
-      { id: 'p2', student: 'สมหญิง', studentId: 's2', course: 'Science', month: 'กันยายน 2569', amount: 1500 }
+      { id: 'p2', student: 'สมหญิง', studentId: 's2', course: 'Science', month: 'กันยายน 2569', amount: 1500 },
+      { id: 'hidden', student: 'ไม่ควรถูกส่งออก', course: 'English', month: 'สิงหาคม 2569', amount: 900 }
     ],
+    getFilteredPaymentsForTable: () => c.payments.filter(payment => payment.id !== 'hidden'),
     getPaymentStudentRecord: payment => payment.id === 'p2' ? { id: 's2', name: 'สมหญิง', nickname: 'หญิง' } : null,
     downloadCsv: (filename, rows) => { exported = { filename, rows }; },
     addActivityLog() {}
@@ -444,4 +446,5 @@ test('payment export includes nickname from payment or linked student', () => {
   assert.equal(exported.rows[0][1], 'ชื่อเล่น');
   assert.equal(exported.rows[1][1], 'ชาย');
   assert.equal(exported.rows[2][1], 'หญิง');
+  assert.equal(exported.rows.length, 3);
 });
