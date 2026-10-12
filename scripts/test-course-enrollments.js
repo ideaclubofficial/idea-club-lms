@@ -172,6 +172,8 @@ test('course enrollment screens expose bulk controls, filters, summaries, and gu
   assert.match(html, /onclick="adminEnrollStudentInCourseFromRow\(this\)"/);
   assert.match(html, /class="admin-enroll-row-course"/);
   assert.match(html, /class="admin-enroll-row-status"/);
+  assert.match(html, /นักเรียน \/ ชื่อเล่น/);
+  assert.match(html, /ชื่อเล่น: ' \+ escapeHtml\(student\.nickname \|\| '-'\)/);
   assert.match(html, /function approveStudentCourse\(id, courseId\) \{\s+if \(!canManageAdminCourseEnrollments\(\)\)/);
   assert.match(html, /function cancelStudentCourse\(id, courseId\) \{\s+if \(!canManageAdminCourseEnrollments\(\)\)/);
   assert.match(html, /function adminBulkEnrollStudents\(\) \{\s+if \(!canManageAdminCourseEnrollments\(\)\)/);
