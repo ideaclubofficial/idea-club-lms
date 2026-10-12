@@ -9,12 +9,18 @@ const start = html.indexOf('    function getCourseEnrollmentDocId(');
 const end = html.indexOf('    function studentCanReceiveIdCard(', start);
 const promotionStart = html.indexOf('    function getPromotionHistoricalMediaEnrollments(');
 const promotionEnd = html.indexOf('    async function confirmGradePromotionRound(', promotionStart);
-const source = html.slice(start, end) + '\n' + html.slice(promotionStart, promotionEnd);
+const bulkEligibilityStart = html.indexOf('    function getAdminBulkEligibleStudents(');
+const bulkEligibilityEnd = html.indexOf('    function renderAdminBulkEnrollmentControls(', bulkEligibilityStart);
+const concurrencyStart = html.indexOf('    async function runAdminEnrollmentTasksWithConcurrency(');
+const concurrencyEnd = html.indexOf('    async function adminBulkEnrollStudents(', concurrencyStart);
+const source = html.slice(start, end) + '\n' + html.slice(promotionStart, promotionEnd) + '\n' +
+  html.slice(bulkEligibilityStart, bulkEligibilityEnd) + '\n' + html.slice(concurrencyStart, concurrencyEnd);
 
 function createContext() {
   const context = {
     courseEnrollments: [],
     courses: [],
+    students: [],
     currentStudent: null,
     currentStudentCourseId: null,
     firebaseUser: null,
@@ -29,7 +35,8 @@ function createContext() {
     renderStudentMonthlyPlan() {},
     renderStudentMobileLearning() {},
     renderStudentReceipts() {},
-    renderStudentCourses() {}
+    renderStudentCourses() {},
+    setTimeout
   };
   vm.createContext(context);
   vm.runInContext(source, context);
@@ -107,6 +114,62 @@ test('admin enrollment builder creates independent pending payment state and app
   assert.equal(pending.paymentStatus, 'รอชำระเงิน');
   assert.equal(pending.everApproved, false);
   assert.equal(pending.approvedAtMs, 0);
+});
+
+test('bulk enrollment candidates match the selected open course and exclude every prior enrollment status', () => {
+  const context = createContext();
+  const course = { id: 'course-a', grade: 'ม.1', location: 'ศูนย์ A', status: 'open' };
+  context.students.push(
+    { id: 'eligible', name: 'Eligible', grade: 'ม.1', preferredLocation: 'ศูนย์ A' },
+    { id: 'wrong-grade', name: 'Wrong grade', grade: 'ม.2', preferredLocation: 'ศูนย์ A' },
+    { id: 'wrong-center', name: 'Wrong center', grade: 'ม.1', preferredLocation: 'ศูนย์ B' },
+    { id: 'history', name: 'History', grade: 'ม.1', preferredLocation: 'ศูนย์ A' }
+  );
+  context.courseEnrollments.push({ studentId: 'history', courseId: 'course-a', courseStatus: 'ยกเลิก' });
+  assert.deepEqual(Array.from(context.getAdminBulkEligibleStudents(course), student => student.id), ['eligible']);
+  course.status = 'closed';
+  assert.equal(context.getAdminBulkEligibleStudents(course).length, 0);
+});
+
+test('bulk enrollment runner limits concurrency and preserves per-student failures', async () => {
+  const context = createContext();
+  let active = 0;
+  let maxActive = 0;
+  const results = await context.runAdminEnrollmentTasksWithConcurrency(['a', 'b', 'c', 'd'], 2, async item => {
+    active++;
+    maxActive = Math.max(maxActive, active);
+    await new Promise(resolve => setTimeout(resolve, 5));
+    active--;
+    if (item === 'c') throw new Error('failed-c');
+    return item.toUpperCase();
+  });
+  assert.equal(maxActive, 2);
+  assert.deepEqual(Array.from(results, result => result.status), ['fulfilled', 'fulfilled', 'rejected', 'fulfilled']);
+  assert.equal(results[0].value, 'A');
+  assert.equal(results[2].reason.message, 'failed-c');
+});
+
+test('course admin markup exposes three separate subtabs and panels', () => {
+  const ids = [
+    'adminCourseSubtabBtnManage', 'adminCourseSubtabBtnEnroll', 'adminCourseSubtabBtnList',
+    'adminCourseSubtabManage', 'adminCourseSubtabEnroll', 'adminCourseSubtabList'
+  ];
+  ids.forEach(id => assert.match(html, new RegExp('id="' + id + '"')));
+  assert.ok(html.indexOf('adminCourseSubtabManage') < html.indexOf('adminCourseSubtabEnroll'));
+  assert.ok(html.indexOf('adminCourseSubtabEnroll') < html.indexOf('adminCourseSubtabList'));
+});
+
+test('course enrollment screens expose bulk controls, filters, summaries, and guarded actions', () => {
+  [
+    'adminBulkEnrollCourse', 'adminBulkEnrollSearch', 'adminBulkEnrollStatus',
+    'adminBulkEnrollSelectAll', 'adminBulkEnrollStudentList', 'adminBulkEnrollResult',
+    'adminEnrollmentSummaryCards', 'adminEnrollmentListSearch', 'adminEnrollmentListCourse',
+    'adminEnrollmentListGrade', 'adminEnrollmentListLocation', 'adminEnrollmentListStatus',
+    'adminEnrollmentListPayment', 'adminEnrollmentListTableBody', 'adminEnrollmentListPagination'
+  ].forEach(id => assert.match(html, new RegExp('id="' + id + '"')));
+  assert.match(html, /function approveStudentCourse\(id, courseId\) \{\s+if \(!canManageAdminCourseEnrollments\(\)\)/);
+  assert.match(html, /function cancelStudentCourse\(id, courseId\) \{\s+if \(!canManageAdminCourseEnrollments\(\)\)/);
+  assert.match(html, /function adminBulkEnrollStudents\(\) \{\s+if \(!canManageAdminCourseEnrollments\(\)\)/);
 });
 
 test('approved completed enrollment keeps media access until revoked', () => {
