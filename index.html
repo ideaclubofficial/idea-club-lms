@@ -32363,7 +32363,7 @@
         return;
       }
 
-      const rows = courses.map(function(c) {
+      const rows = getBillableCourses().map(function(c) {
         const savedPrice = getMonthCoursePrice(selectedMonth, c.id);
         const normalPrice = getCourseMonthlyPrice(c);
         const inputValue = savedPrice || normalPrice || '';
@@ -32395,7 +32395,7 @@
     }
 
     function useDefaultCoursePricesForSelectedMonth() {
-      courses.forEach(function(c) {
+      getBillableCourses().forEach(function(c) {
         const input = getElement(getPaymentCoursePriceInputId(c.id));
         if (input) input.value = getCourseMonthlyPrice(c) || '';
       });
@@ -32414,7 +32414,7 @@
         return;
       }
       const previousMonth = paymentMonths[currentIndex - 1];
-      courses.forEach(function(c) {
+      getBillableCourses().forEach(function(c) {
         const input = getElement(getPaymentCoursePriceInputId(c.id));
         if (!input) return;
         const previousPrice = previousMonth && previousMonth.coursePrices ? Number(previousMonth.coursePrices[String(c.id)] || 0) : 0;
@@ -33092,7 +33092,7 @@
       students.forEach(function(student) {
         if ((student.learningStatus || student.status || 'เรียนอยู่') !== 'เรียนอยู่') return;
         getStudentCourseEnrollments(student, { currentOnly: true }).forEach(function(enrollment) {
-          if (!['อนุมัติแล้ว', 'รออนุมัติคอร์ส'].includes(enrollment.courseStatus)) return;
+          if (!isCourseEnrollmentBillable(enrollment)) return;
           const course = getCourseForEnrollment(enrollment);
           targets.push(Object.assign({}, student, {
             courseId: enrollment.courseId,
@@ -33106,6 +33106,29 @@
         });
       });
       return targets;
+    }
+
+    function isCourseCompletedForBilling(course) {
+      if (!course) return false;
+      const endStatus = String(course.courseEndStatus || '').trim().toLowerCase();
+      const status = String(course.status || '').trim().toLowerCase();
+      return endStatus === 'completed' || endStatus === 'completed_manually' ||
+        status === 'completed' || status === 'จบคอร์ส' ||
+        !!course.courseEndedAtMs || !!course.courseEndedAtText;
+    }
+
+    function getBillableCourses() {
+      return (courses || []).filter(function(course) {
+        return course && course.deleted !== true && !isCourseCompletedForBilling(course);
+      });
+    }
+
+    function isCourseEnrollmentBillable(enrollment) {
+      if (!enrollment || enrollment.deleted === true) return false;
+      if (!['อนุมัติแล้ว', 'รออนุมัติคอร์ส'].includes(String(enrollment.courseStatus || '').trim())) return false;
+      if (['completed', 'cancelled'].includes(String(enrollment.enrollmentStatus || '').trim().toLowerCase())) return false;
+      const course = getCourseForEnrollment(enrollment);
+      return !course || !isCourseCompletedForBilling(course);
     }
 
     function findPaymentForStudentMonth(student, month) {
@@ -33386,6 +33409,36 @@
       renderPaymentTable();
     }
 
+    async function deleteStudentMonthPayment(month, studentId) {
+      const result = getElement('paymentRecordPreviewResult');
+      const student = findStudentByIdentityKey(studentId);
+      const payment = student ? findPaymentForStudentMonth(student, month) : null;
+      if (!payment) {
+        if (result) { result.textContent = 'ไม่พบรายการยอดที่ต้องการลบ'; result.style.color = '#dc2626'; }
+        return;
+      }
+      if (!isPaymentRecordUpdatable(payment)) {
+        if (result) { result.textContent = 'ลบไม่ได้ เพราะรายการนี้มีสลิป ชำระแล้ว มีใบเสร็จ หรืออยู่ในยอดรวม'; result.style.color = '#dc2626'; }
+        return;
+      }
+      if (!confirm('ยืนยันลบรายการยอดรอบ ' + month + ' ของ ' + ((student && student.name) || payment.student || '-') + '?')) return;
+      try {
+        await deleteFirebaseDocument('payments', payment);
+        const index = payments.indexOf(payment);
+        if (index !== -1) payments.splice(index, 1);
+        addActivityLog('ลบรายการยอดเรียกเก็บ', ((student && student.name) || payment.student || '-') + ' · ' + month);
+        const message = 'ลบรายการยอดของ ' + ((student && student.name) || payment.student || '-') + ' แล้ว';
+        renderPaymentRecordPreview(message);
+        renderPaymentTable();
+        renderAdminDashboard();
+        updateStudentSelectedPaymentMonth();
+        updateStudentCourseDisplay();
+        renderDashboardPaymentSummary();
+      } catch (error) {
+        if (result) { result.textContent = 'ลบรายการยอดไม่สำเร็จ: ' + (error.message || error.code || error); result.style.color = '#dc2626'; }
+      }
+    }
+
     async function restoreStudentMonthPayment(month, studentId) {
       const pmItem = getPaymentMonthItem(month);
       if (!pmItem || !pmItem.skippedStudents) return;
@@ -33484,6 +33537,7 @@
         const canSelect = !isSkipped && (!payment || canAdjustPaymentAmount(payment));
         const selectTitle = canSelect ? 'เลือกรายการนี้' : 'รายการนี้ไม่สามารถอัปเดตหรือยกเลิกเป็นชุดได้';
         const saveRowButton = canSelect ? '<button class="btn btn-green" style="font-size:12px;padding:4px 10px;" type="button" onclick="saveSinglePaymentCoursePriceAndRecord(\'' + jsArg(month) + '\',\'' + jsArg(studentKey) + '\')">บันทึกยอด</button>' : '';
+        const deleteRowButton = payment && isPaymentRecordUpdatable(payment) ? '<button class="btn btn-red" style="font-size:12px;padding:4px 10px;" type="button" onclick="deleteStudentMonthPayment(\'' + jsArg(month) + '\',\'' + jsArg(studentKey) + '\')">ลบรายการยอด</button>' : '';
         return '<tr data-student-id="' + escapeHtml(String(studentKey || '')) + '"' +
             ' data-name="' + escapeHtml((student.name || '').toLowerCase()) + '"' +
             ' data-course="' + escapeHtml(student.course || '') + '"' +
@@ -33498,7 +33552,7 @@
           '<td style="white-space:nowrap;">' + (payment ? '<span class="' + displayStatusClass + '">' + escapeHtml(displayStatus) + '</span>' : '-') + '</td>' +
           '<td><div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">' + (isSkipped
             ? '<button class="btn btn-dark" style="font-size:12px;padding:4px 10px;" type="button" onclick="restoreStudentMonthPayment(\'' + jsArg(month) + '\',\'' + jsArg(studentKey) + '\')">คืนสิทธิ์</button>'
-            : saveRowButton + '<button class="btn btn-red" style="font-size:12px;padding:4px 10px;" type="button" onclick="voidStudentMonthPayment(\'' + jsArg(month) + '\',\'' + jsArg(studentKey) + '\')">ยกเลิกยอด</button>'
+            : saveRowButton + deleteRowButton + '<button class="btn btn-red" style="font-size:12px;padding:4px 10px;" type="button" onclick="voidStudentMonthPayment(\'' + jsArg(month) + '\',\'' + jsArg(studentKey) + '\')">ยกเลิกยอด</button>'
           ) + '</div></td>' +
         '</tr>';
       }).join('') : '<tr><td colspan="8">ยังไม่มีนักเรียนที่เข้าเงื่อนไขสำหรับสร้างรายการเรียกเก็บ</td></tr>';

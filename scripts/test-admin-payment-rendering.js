@@ -448,3 +448,54 @@ test('payment export includes nickname and only the currently filtered rows', ()
   assert.equal(exported.rows[2][1], 'หญิง');
   assert.equal(exported.rows.length, 3);
 });
+
+test('monthly payment targets exclude enrollments whose course has completed', () => {
+  const completedCourse = { id: 'course-ended', courseEndStatus: 'completed_manually', status: 'closed' };
+  const activeCourse = { id: 'course-active', courseEndStatus: 'scheduled', status: 'open' };
+  const student = { id: 'student-1', name: 'นักเรียนทดสอบ', status: 'เรียนอยู่' };
+  const enrollments = [
+    { courseId: completedCourse.id, courseStatus: 'อนุมัติแล้ว', enrollmentStatus: 'active' },
+    { courseId: activeCourse.id, courseStatus: 'อนุมัติแล้ว', enrollmentStatus: 'active' }
+  ];
+  const c = {
+    students: [student],
+    getStudentCourseEnrollments: () => enrollments,
+    getCourseForEnrollment: enrollment => enrollment.courseId === completedCourse.id ? completedCourse : activeCourse
+  };
+  vm.createContext(c);
+  vm.runInContext(source('isCourseCompletedForBilling'), c);
+  vm.runInContext(source('isCourseEnrollmentBillable'), c);
+  vm.runInContext(source('getMonthlyPaymentTargetStudents'), c);
+  const targets = c.getMonthlyPaymentTargetStudents();
+  assert.deepEqual(Array.from(targets, target => target.courseId), ['course-active']);
+});
+
+test('preview deletion removes only an unlocked payment record', async () => {
+  const payment = { id: 'payment-1', student: 'นักเรียนทดสอบ', month: 'ตุลาคม 2569', status: 'รอชำระเงิน' };
+  const student = { id: 'student-1', name: 'นักเรียนทดสอบ' };
+  const calls = [];
+  const result = { textContent: '', style: {} };
+  const c = {
+    payments: [payment],
+    findStudentByIdentityKey: () => student,
+    findPaymentForStudentMonth: () => payment,
+    isPaymentRecordUpdatable: () => true,
+    confirm: () => true,
+    deleteFirebaseDocument: async (collection, record) => calls.push(['delete', collection, record.id]),
+    addActivityLog: (action, detail) => calls.push(['log', action, detail]),
+    getElement: id => id === 'paymentRecordPreviewResult' ? result : null,
+    renderPaymentRecordPreview: message => calls.push(['preview', message]),
+    renderPaymentTable: () => calls.push(['table']),
+    renderAdminDashboard: () => calls.push(['dashboard']),
+    updateStudentSelectedPaymentMonth: () => {},
+    updateStudentCourseDisplay: () => {},
+    renderDashboardPaymentSummary: () => {},
+    console: { error() {} }
+  };
+  vm.createContext(c);
+  vm.runInContext(source('deleteStudentMonthPayment'), c);
+  await c.deleteStudentMonthPayment('ตุลาคม 2569', 'student-1');
+  assert.deepEqual(Array.from(c.payments), []);
+  assert.deepEqual(calls[0], ['delete', 'payments', 'payment-1']);
+  assert.ok(calls.some(call => call[0] === 'preview'));
+});
