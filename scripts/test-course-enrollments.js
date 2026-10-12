@@ -20,6 +20,7 @@ function createContext() {
     firebaseUser: null,
     localStorage: { getItem() { return ''; }, setItem() {} },
     isCourseStatusApproved(status) { return status === 'อนุมัติแล้ว'; },
+    getThaiMonthFromDate() { return 'ตุลาคม 2569'; },
     courseFeatureEnabled() { return true; },
     escapeHtml(value) { return String(value || ''); },
     getElement() { return null; },
@@ -74,6 +75,38 @@ test('completed and cancelled enrollments are not current', () => {
   assert.equal(context.isCourseEnrollmentCurrent({ courseStatus: 'จบคอร์ส' }), false);
   assert.equal(context.isCourseEnrollmentCurrent({ courseStatus: 'ยกเลิก' }), false);
   assert.equal(context.isCourseEnrollmentCurrent({ courseStatus: 'รออนุมัติคอร์ส' }), true);
+});
+
+test('admin course choices require open course with exact student grade and center and no prior enrollment', () => {
+  const context = createContext();
+  const student = { id: 'student-1', authUid: 'uid-1', grade: 'ม.1', preferredLocation: 'ศูนย์ A' };
+  context.courses.push(
+    { id: 'available', name: 'Available', grade: 'ม.1', location: 'ศูนย์ A', status: 'open' },
+    { id: 'closed', name: 'Closed', grade: 'ม.1', location: 'ศูนย์ A', status: 'closed' },
+    { id: 'wrong-grade', name: 'Wrong grade', grade: 'ม.2', location: 'ศูนย์ A', status: 'open' },
+    { id: 'wrong-center', name: 'Wrong center', grade: 'ม.1', location: 'ศูนย์ B', status: 'open' },
+    { id: 'history', name: 'History', grade: 'ม.1', location: 'ศูนย์ A', status: 'open' }
+  );
+  context.courseEnrollments.push({ studentId: 'student-1', authUid: 'uid-1', courseId: 'history', courseStatus: 'จบคอร์ส' });
+  assert.deepEqual(Array.from(context.getAdminAvailableCoursesForStudent(student), item => item.id), ['available']);
+});
+
+test('admin enrollment builder creates independent pending payment state and approval evidence', () => {
+  const context = createContext();
+  const student = {
+    id: 'student-1', authUid: 'uid-1', memberId: 'IC001', name: 'Student',
+    grade: 'ม.1', preferredLocation: 'ศูนย์ A', paymentStatus: 'ชำระแล้ว'
+  };
+  const course = { id: 'course-new', name: 'New course', grade: 'ม.1', location: 'ศูนย์ A', access: 'Online' };
+  const approved = context.buildAdminCourseEnrollment(student, course, 'อนุมัติแล้ว', { nowMs: 1000 });
+  const pending = context.buildAdminCourseEnrollment(student, course, 'รออนุมัติคอร์ส', { nowMs: 2000 });
+  assert.equal(approved.firebaseDocId, 'student-1__course-new');
+  assert.equal(approved.paymentStatus, 'รอชำระเงิน');
+  assert.equal(approved.everApproved, true);
+  assert.equal(approved.approvedAtMs, 1000);
+  assert.equal(pending.paymentStatus, 'รอชำระเงิน');
+  assert.equal(pending.everApproved, false);
+  assert.equal(pending.approvedAtMs, 0);
 });
 
 test('approved completed enrollment keeps media access until revoked', () => {

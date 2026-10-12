@@ -6263,6 +6263,37 @@
 
             <br />
 
+            <div class="form-box">
+              <h3>สมัครคอร์สให้นักเรียน</h3>
+              <p style="margin-bottom:18px; color:#6b7280;">เพิ่มคอร์สให้นักเรียนเดิมโดยไม่กระทบคอร์สที่มีอยู่ ระบบจะแสดงเฉพาะคอร์สที่เปิดรับสมัครและตรงกับชั้นและศูนย์ของนักเรียน</p>
+              <div class="form-row">
+                <div>
+                  <label>นักเรียน</label>
+                  <select id="adminEnrollStudentSelect" onchange="syncAdminCourseEnrollmentOptions(true)">
+                    <option value="">เลือกนักเรียน</option>
+                  </select>
+                </div>
+                <div>
+                  <label>คอร์สที่สมัครเพิ่มได้</label>
+                  <select id="adminEnrollCourseSelect">
+                    <option value="">เลือกนักเรียนก่อน</option>
+                  </select>
+                </div>
+                <div>
+                  <label>สถานะเริ่มต้น</label>
+                  <select id="adminEnrollCourseStatus">
+                    <option value="อนุมัติแล้ว">อนุมัติแล้ว</option>
+                    <option value="รออนุมัติคอร์ส">รออนุมัติคอร์ส</option>
+                  </select>
+                </div>
+              </div>
+              <div id="adminEnrollExistingList" class="notice" style="margin-top:12px;">เลือกนักเรียนเพื่อดูคอร์สปัจจุบัน</div>
+              <button id="adminEnrollCourseButton" class="btn btn-green" type="button" style="margin-top:14px;" onclick="adminEnrollStudentInCourse()">สมัครคอร์สให้นักเรียน</button>
+              <p id="adminEnrollCourseResult" style="margin-top:12px; font-weight:bold;"></p>
+            </div>
+
+            <br />
+
             <div class="table-wrap">
               <table>
                 <thead>
@@ -17383,6 +17414,7 @@
         '</tr>';
       }).join('') : '<tr><td colspan="15">ยังไม่มีนักเรียนในเงื่อนไขที่เลือก</td></tr>';
       renderTablePagination('adminStudentsPagination', adminStudentCurrentPage, totalPages, filtered.length, 'changeAdminStudentsPage');
+      renderAdminCourseEnrollmentSection();
     }
 
     function changeAdminStudentsPage(direction) {
@@ -17648,30 +17680,156 @@
         return String(item.firebaseDocId || item.id || '') === docId;
       });
       if (!enrollment) {
-        enrollment = {
-          id: docId,
-          firebaseDocId: docId,
-          studentId: studentId,
-          authUid: student.authUid || '',
-          memberId: student.memberId || student.studentId || '',
-          studentName: student.name || '',
-          courseId: courseId,
-          courseName: course.name || '',
-          courseAccess: course.access || '',
-          grade: student.grade || course.grade || '',
-          location: student.preferredLocation || course.location || '',
-          courseStatus: courseStatus || 'อนุมัติแล้ว',
-          everApproved: isCourseStatusApproved(courseStatus || 'อนุมัติแล้ว'),
-          approvedAtMs: isCourseStatusApproved(courseStatus || 'อนุมัติแล้ว') ? Date.now() : 0,
-          historicalMediaStatus: 'not_applicable',
-          paymentStatus: student.paymentStatus && student.paymentStatus !== 'ยังไม่ได้สมัครคอร์ส' ? student.paymentStatus : 'รอชำระเงิน',
-          registeredCourseMonth: student.registeredCourseMonth || getThaiMonthFromDate(new Date().toISOString().slice(0, 10)),
-          enrollmentStatus: 'active'
-        };
+        enrollment = buildAdminCourseEnrollment(student, course, courseStatus || 'อนุมัติแล้ว', {
+          registeredCourseMonth: student.registeredCourseMonth || '',
+          enrollmentSource: 'admin_student_form'
+        });
         await setFirebaseDocument('courseEnrollments', enrollment);
         courseEnrollments.push(enrollment);
       }
       return enrollment;
+    }
+
+    function getAdminEnrollmentSelectedStudent() {
+      const select = getElement('adminEnrollStudentSelect');
+      const selectedId = select ? String(select.value || '') : '';
+      return (students || []).find(function(student) {
+        return getEnrollmentStudentId(student) === selectedId;
+      }) || null;
+    }
+
+    function renderAdminCourseEnrollmentSection() {
+      const studentSelect = getElement('adminEnrollStudentSelect');
+      if (!studentSelect) return;
+      const previousStudentId = String(studentSelect.value || '');
+      const activeStudents = (students || []).filter(function(student) {
+        return student && student.deleted !== true;
+      }).slice().sort(function(a, b) {
+        return String(a.name || '').localeCompare(String(b.name || ''), 'th');
+      });
+      studentSelect.innerHTML = '<option value="">เลือกนักเรียน</option>' + activeStudents.map(function(student) {
+        const id = getEnrollmentStudentId(student);
+        const label = [student.memberId || student.studentId || '-', student.name || '-', student.grade || '-', student.preferredLocation || '-'].join(' · ');
+        return '<option value="' + escapeHtml(id) + '">' + escapeHtml(label) + '</option>';
+      }).join('');
+      if (activeStudents.some(function(student) { return getEnrollmentStudentId(student) === previousStudentId; })) {
+        studentSelect.value = previousStudentId;
+      }
+      syncAdminCourseEnrollmentOptions();
+    }
+
+    function syncAdminCourseEnrollmentOptions(shouldClearResult) {
+      const student = getAdminEnrollmentSelectedStudent();
+      const courseSelect = getElement('adminEnrollCourseSelect');
+      const existingList = getElement('adminEnrollExistingList');
+      const button = getElement('adminEnrollCourseButton');
+      const result = getElement('adminEnrollCourseResult');
+      if (!courseSelect || !existingList) return;
+      if (result && shouldClearResult) result.textContent = '';
+      if (!student) {
+        courseSelect.innerHTML = '<option value="">เลือกนักเรียนก่อน</option>';
+        courseSelect.disabled = true;
+        if (button) button.disabled = true;
+        existingList.textContent = 'เลือกนักเรียนเพื่อดูคอร์สปัจจุบัน';
+        return;
+      }
+
+      const enrollments = getStudentCourseEnrollments(student);
+      const availableCourses = sortCoursesByGrade(getAdminAvailableCoursesForStudent(student));
+      existingList.innerHTML = '<strong>คอร์สที่มีอยู่:</strong> ' + (enrollments.length ? enrollments.map(function(enrollment) {
+        const course = getCourseForEnrollment(enrollment);
+        const name = course && course.name || enrollment.courseName || enrollment.courseId || '-';
+        return '<span class="tag">' + escapeHtml(name + ' · ' + (enrollment.courseStatus || '-')) + '</span>';
+      }).join(' ') : 'ยังไม่มีคอร์ส') +
+        '<br><span class="mini-muted">ชั้น ' + escapeHtml(student.grade || '-') + ' · ' + escapeHtml(student.preferredLocation || '-') + '</span>';
+
+      courseSelect.innerHTML = availableCourses.length
+        ? '<option value="">เลือกคอร์ส</option>' + availableCourses.map(function(course) {
+            const id = String(course.id || course.firebaseDocId || '');
+            return '<option value="' + escapeHtml(id) + '">' + escapeHtml((course.grade || '-') + ' · ' + (course.name || '-') + ' · ' + (course.location || '-')) + '</option>';
+          }).join('')
+        : '<option value="">ไม่มีคอร์สที่สมัครเพิ่มได้</option>';
+      courseSelect.disabled = availableCourses.length === 0;
+      if (button) button.disabled = availableCourses.length === 0;
+    }
+
+    async function adminEnrollStudentInCourse() {
+      if (!hasPermission('admin.students')) { alert('ไม่มีสิทธิ์'); return; }
+      const student = getAdminEnrollmentSelectedStudent();
+      const courseSelect = getElement('adminEnrollCourseSelect');
+      const statusSelect = getElement('adminEnrollCourseStatus');
+      const result = getElement('adminEnrollCourseResult');
+      const button = getElement('adminEnrollCourseButton');
+      const courseId = courseSelect ? String(courseSelect.value || '') : '';
+      const course = (courses || []).find(function(item) {
+        return String(item.id || item.firebaseDocId || '') === courseId;
+      });
+      const status = statusSelect && statusSelect.value === 'รออนุมัติคอร์ส' ? 'รออนุมัติคอร์ส' : 'อนุมัติแล้ว';
+
+      if (!student || !course) {
+        if (result) { result.textContent = 'กรุณาเลือกนักเรียนและคอร์ส'; result.style.color = '#dc2626'; }
+        return;
+      }
+      if (!getAdminAvailableCoursesForStudent(student).some(function(item) {
+        return String(item.id || item.firebaseDocId || '') === courseId;
+      })) {
+        if (result) { result.textContent = 'คอร์สนี้ปิดรับสมัคร ไม่ตรงชั้น/ศูนย์ หรือมีประวัติสมัครแล้ว'; result.style.color = '#dc2626'; }
+        syncAdminCourseEnrollmentOptions();
+        return;
+      }
+      if (!confirm('สมัครคอร์ส ' + (course.name || '-') + ' ให้ ' + (student.name || '-') + ' เป็นสถานะ “' + status + '” ใช่หรือไม่?')) return;
+
+      const enrollment = buildAdminCourseEnrollment(student, course, status, { enrollmentSource: 'admin_course_enrollment_section' });
+      const auditUser = getFirebaseAuditUser();
+      enrollment.registeredByUid = auditUser.uid;
+      enrollment.registeredByName = auditUser.displayName;
+      if (button) button.disabled = true;
+      if (result) { result.textContent = 'กำลังบันทึก...'; result.style.color = '#0f4cbd'; }
+      try {
+        const ref = db.collection('courseEnrollments').doc(enrollment.firebaseDocId);
+        await db.runTransaction(async function(transaction) {
+          const snapshot = await transaction.get(ref);
+          if (snapshot.exists) {
+            const duplicateError = new Error('นักเรียนมี enrollment ของคอร์สนี้แล้ว');
+            duplicateError.code = 'course-enrollment-already-exists';
+            throw duplicateError;
+          }
+          transaction.set(ref, buildFirebasePayload(enrollment, enrollment.firebaseDocId, true));
+        });
+        courseEnrollments.push(enrollment);
+
+        let studentStatusWarning = '';
+        const learningStatus = student.learningStatus || student.status || '';
+        if (learningStatus === 'จบคอร์ส') {
+          student.learningStatus = 'เรียนอยู่';
+          student.status = 'เรียนอยู่';
+          try {
+            await setFirebaseDocument('students', student);
+          } catch (studentStatusError) {
+            console.warn('course enrollment saved but student learning status update failed:', studentStatusError);
+            studentStatusWarning = ' แต่ปรับสถานะนักเรียนเป็น “เรียนอยู่” ไม่สำเร็จ';
+          }
+        }
+        await addActivityLog('สมัครคอร์สให้นักเรียน', (student.name || '-') + ' · ' + (course.name || '-') + ' · ' + status);
+        renderAdminStudents();
+        renderAdminDashboard();
+        renderMemberTable();
+        if (result) {
+          result.textContent = 'สมัครคอร์ส ' + (course.name || '-') + ' ให้ ' + (student.name || '-') + ' เรียบร้อย' + studentStatusWarning;
+          result.style.color = studentStatusWarning ? '#d97706' : '#16a34a';
+        }
+      } catch (error) {
+        console.error('adminEnrollStudentInCourse error:', error);
+        if (result) {
+          result.textContent = error && error.code === 'course-enrollment-already-exists'
+            ? 'นักเรียนมีคอร์สนี้หรือมีประวัติสมัครคอร์สนี้แล้ว'
+            : 'สมัครคอร์สไม่สำเร็จ: ' + (error.message || error.code || 'ไม่ทราบสาเหตุ');
+          result.style.color = '#dc2626';
+        }
+        syncAdminCourseEnrollmentOptions();
+      } finally {
+        if (button) button.disabled = getAdminAvailableCoursesForStudent(getAdminEnrollmentSelectedStudent()).length === 0;
+      }
     }
 
     
@@ -19369,6 +19527,51 @@
         (authUid && String(enrollment.authUid || '').trim() === authUid);
     }
 
+    function buildAdminCourseEnrollment(student, course, courseStatus, options) {
+      const opts = options || {};
+      const studentId = getEnrollmentStudentId(student);
+      const courseId = String(course && (course.id || course.firebaseDocId) || '').trim();
+      const status = courseStatus === 'รออนุมัติคอร์ส' ? 'รออนุมัติคอร์ส' : 'อนุมัติแล้ว';
+      const nowMs = Number(opts.nowMs || Date.now());
+      const approved = isCourseStatusApproved(status);
+      const docId = getCourseEnrollmentDocId(studentId, courseId);
+      return {
+        id: docId,
+        firebaseDocId: docId,
+        studentId: studentId,
+        authUid: student && student.authUid || '',
+        memberId: student && (student.memberId || student.studentId) || '',
+        studentName: student && student.name || '',
+        courseId: courseId,
+        courseName: course && course.name || '',
+        courseAccess: course && course.access || '',
+        grade: student && student.grade || course && course.grade || '',
+        location: student && student.preferredLocation || course && course.location || '',
+        courseStatus: status,
+        everApproved: approved,
+        approvedAtMs: approved ? nowMs : 0,
+        historicalMediaStatus: 'not_applicable',
+        paymentStatus: 'รอชำระเงิน',
+        registeredCourseMonth: opts.registeredCourseMonth || getThaiMonthFromDate(new Date(nowMs).toISOString().slice(0, 10)),
+        enrollmentStatus: 'active',
+        enrollmentSource: opts.enrollmentSource || 'admin'
+      };
+    }
+
+    function getAdminAvailableCoursesForStudent(student) {
+      if (!student) return [];
+      const grade = String(student.grade || '').trim();
+      const location = String(student.preferredLocation || '').trim();
+      if (!grade || !location) return [];
+      return (courses || []).filter(function(course) {
+        const courseId = String(course && (course.id || course.firebaseDocId) || '').trim();
+        return course && course.deleted !== true && course.status === 'open' && courseId &&
+          String(course.grade || '').trim() === grade &&
+          String(course.location || '').trim() === location &&
+          !getStudentCourseEnrollment(student, courseId);
+      });
+    }
+
     function isCourseEnrollmentCurrent(enrollment) {
       const status = String(enrollment && enrollment.courseStatus || '').trim();
       return !!enrollment && enrollment.deleted !== true && status !== 'ยกเลิก' && status !== 'จบคอร์ส';
@@ -20255,6 +20458,7 @@
     function renderAdminCourses() {
       const tbody = getElement('adminCourseTableBody');
       if (!tbody) return;
+      renderAdminCourseEnrollmentSection();
       if (!Array.isArray(courses) || courses.length === 0) {
         tbody.innerHTML = '<tr><td colspan="11">ยังไม่มีคอร์สในระบบ ให้เพิ่มคอร์สใหม่จากฟอร์มด้านบน</td></tr>';
         return;
