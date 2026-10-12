@@ -161,12 +161,17 @@ test('course admin markup exposes three separate subtabs and panels', () => {
 
 test('course enrollment screens expose bulk controls, filters, summaries, and guarded actions', () => {
   [
+    'adminEnrollStudentSearch', 'adminEnrollStudentGradeFilter', 'adminEnrollStudentLocationFilter',
+    'adminEnrollStudentTableBody', 'adminEnrollStudentPagination',
     'adminBulkEnrollCourse', 'adminBulkEnrollSearch', 'adminBulkEnrollStatus',
     'adminBulkEnrollSelectAll', 'adminBulkEnrollStudentList', 'adminBulkEnrollResult',
     'adminEnrollmentSummaryCards', 'adminEnrollmentListSearch', 'adminEnrollmentListCourse',
     'adminEnrollmentListGrade', 'adminEnrollmentListLocation', 'adminEnrollmentListStatus',
     'adminEnrollmentListPayment', 'adminEnrollmentListTableBody', 'adminEnrollmentListPagination'
   ].forEach(id => assert.match(html, new RegExp('id="' + id + '"')));
+  assert.match(html, /onclick="adminEnrollStudentInCourseFromRow\(this\)"/);
+  assert.match(html, /class="admin-enroll-row-course"/);
+  assert.match(html, /class="admin-enroll-row-status"/);
   assert.match(html, /function approveStudentCourse\(id, courseId\) \{\s+if \(!canManageAdminCourseEnrollments\(\)\)/);
   assert.match(html, /function cancelStudentCourse\(id, courseId\) \{\s+if \(!canManageAdminCourseEnrollments\(\)\)/);
   assert.match(html, /function adminBulkEnrollStudents\(\) \{\s+if \(!canManageAdminCourseEnrollments\(\)\)/);

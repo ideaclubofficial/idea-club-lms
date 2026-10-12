@@ -6343,31 +6343,24 @@
                   <div class="form-row">
                     <div>
                       <label>ค้นหานักเรียน</label>
-                      <input id="adminEnrollStudentSearch" type="text" placeholder="ชื่อ, Member ID หรือเบอร์โทร" oninput="renderAdminCourseEnrollmentSection()" />
+                      <input id="adminEnrollStudentSearch" type="text" placeholder="ชื่อ, Member ID หรือเบอร์โทร" oninput="resetAdminCourseEnrollmentPage()" />
                     </div>
                     <div>
-                      <label>นักเรียน</label>
-                      <select id="adminEnrollStudentSelect" onchange="syncAdminCourseEnrollmentOptions(true)">
-                        <option value="">เลือกนักเรียน</option>
-                      </select>
+                      <label>ระดับชั้น</label>
+                      <select id="adminEnrollStudentGradeFilter" onchange="resetAdminCourseEnrollmentPage()"><option value="ทั้งหมด">ทั้งหมด</option><option>ป.4</option><option>ป.5</option><option>ป.6</option><option>ม.1</option><option>ม.2</option><option>ม.3</option><option>ม.4</option><option>ม.5</option><option>ม.6</option></select>
                     </div>
                     <div>
-                      <label>คอร์สที่สมัครเพิ่มได้</label>
-                      <select id="adminEnrollCourseSelect">
-                        <option value="">เลือกนักเรียนก่อน</option>
-                      </select>
-                    </div>
-                    <div>
-                      <label>สถานะเริ่มต้น</label>
-                      <select id="adminEnrollCourseStatus">
-                        <option value="อนุมัติแล้ว">อนุมัติแล้ว</option>
-                        <option value="รออนุมัติคอร์ส">รออนุมัติคอร์ส</option>
-                      </select>
+                      <label>ศูนย์</label>
+                      <select id="adminEnrollStudentLocationFilter" onchange="resetAdminCourseEnrollmentPage()"><option value="ทั้งหมด">ทั้งหมด</option><option>IDEA CLUB ศูนย์ นครสวรรค์</option><option>IDEA CLUB ศูนย์ หนองฉาง</option></select>
                     </div>
                   </div>
-                  <div id="adminEnrollExistingList" class="notice" style="margin-top:12px;">เลือกนักเรียนเพื่อดูคอร์สปัจจุบัน</div>
-                  <button id="adminEnrollCourseButton" class="btn btn-green" type="button" style="margin-top:14px;" onclick="adminEnrollStudentInCourse()">สมัครคอร์สให้นักเรียน</button>
-                  <p id="adminEnrollCourseResult" style="margin-top:12px;font-weight:bold;"></p>
+                  <div class="table-wrap" style="margin-top:14px;">
+                    <table>
+                      <thead><tr><th>นักเรียน</th><th>ชั้น / ศูนย์</th><th>คอร์สที่มีอยู่</th><th>เลือกคอร์สใหม่</th><th>สถานะเริ่มต้น</th><th>ดำเนินการ</th></tr></thead>
+                      <tbody id="adminEnrollStudentTableBody"></tbody>
+                    </table>
+                  </div>
+                  <div id="adminEnrollStudentPagination" class="test-actions" style="margin-top:10px;"></div>
                 </div>
 
                 <div id="adminEnrollBulkPanel" class="hidden">
@@ -17153,6 +17146,9 @@
     const adminStudentPerPage = 20;
     let adminCourseSubtab = 'manage';
     let adminEnrollmentMode = 'single';
+    let adminCourseEnrollmentCurrentPage = 1;
+    const adminCourseEnrollmentPerPage = 20;
+    let adminCourseEnrollmentRowMessages = new Map();
     let adminEnrollmentListCurrentPage = 1;
     const adminEnrollmentListPerPage = 20;
     let adminBulkEnrollmentSelectedIds = new Set();
@@ -17864,14 +17860,6 @@
       else renderAdminBulkEnrollmentControls();
     }
 
-    function getAdminEnrollmentSelectedStudent() {
-      const select = getElement('adminEnrollStudentSelect');
-      const selectedId = select ? String(select.value || '') : '';
-      return (students || []).find(function(student) {
-        return getEnrollmentStudentId(student) === selectedId;
-      }) || null;
-    }
-
     function studentMatchesAdminEnrollmentSearch(student, keyword) {
       const search = String(keyword || '').trim().toLowerCase();
       if (!search) return true;
@@ -17879,58 +17867,74 @@
         .some(function(value) { return String(value || '').toLowerCase().includes(search); });
     }
 
-    function renderAdminCourseEnrollmentSection() {
-      const studentSelect = getElement('adminEnrollStudentSelect');
-      if (!studentSelect) return;
-      if (!canManageAdminCourseEnrollments()) { studentSelect.innerHTML = '<option value="">ไม่มีสิทธิ์ใช้งาน</option>'; studentSelect.disabled = true; return; }
-      studentSelect.disabled = false;
-      const previousStudentId = String(studentSelect.value || '');
+    function getFilteredAdminCourseEnrollmentStudents() {
       const keyword = getElement('adminEnrollStudentSearch') ? getElement('adminEnrollStudentSearch').value : '';
-      const activeStudents = (students || []).filter(function(student) {
-        return student && student.deleted !== true && studentMatchesAdminEnrollmentSearch(student, keyword);
+      const grade = getElement('adminEnrollStudentGradeFilter') ? getElement('adminEnrollStudentGradeFilter').value : 'ทั้งหมด';
+      const location = getElement('adminEnrollStudentLocationFilter') ? getElement('adminEnrollStudentLocationFilter').value : 'ทั้งหมด';
+      return (students || []).filter(function(student) {
+        return student && student.deleted !== true && studentMatchesAdminEnrollmentSearch(student, keyword) &&
+          (grade === 'ทั้งหมด' || String(student.grade || '') === grade) &&
+          (location === 'ทั้งหมด' || String(student.preferredLocation || '') === location);
       }).slice().sort(function(a, b) {
-        return String(a.name || '').localeCompare(String(b.name || ''), 'th');
+        const memberCompare = String(a.memberId || a.studentId || '').localeCompare(String(b.memberId || b.studentId || ''), undefined, { numeric: true });
+        return memberCompare || String(a.name || '').localeCompare(String(b.name || ''), 'th');
       });
-      studentSelect.innerHTML = '<option value="">เลือกนักเรียน</option>' + activeStudents.map(function(student) {
-        const id = getEnrollmentStudentId(student);
-        const label = [student.memberId || student.studentId || '-', student.name || '-', student.grade || '-', student.preferredLocation || '-'].join(' · ');
-        return '<option value="' + escapeHtml(id) + '">' + escapeHtml(label) + '</option>';
-      }).join('');
-      if (activeStudents.some(function(student) { return getEnrollmentStudentId(student) === previousStudentId; })) studentSelect.value = previousStudentId;
-      syncAdminCourseEnrollmentOptions();
     }
 
-    function syncAdminCourseEnrollmentOptions(shouldClearResult) {
-      const student = getAdminEnrollmentSelectedStudent();
-      const courseSelect = getElement('adminEnrollCourseSelect');
-      const existingList = getElement('adminEnrollExistingList');
-      const button = getElement('adminEnrollCourseButton');
-      const result = getElement('adminEnrollCourseResult');
-      if (!courseSelect || !existingList) return;
-      if (result && shouldClearResult) result.textContent = '';
-      if (!student) {
-        courseSelect.innerHTML = '<option value="">เลือกนักเรียนก่อน</option>';
-        courseSelect.disabled = true;
-        if (button) button.disabled = true;
-        existingList.textContent = 'เลือกนักเรียนเพื่อดูคอร์สปัจจุบัน';
+    function renderAdminCourseEnrollmentSection() {
+      const tbody = getElement('adminEnrollStudentTableBody');
+      if (!tbody) return;
+      if (!canManageAdminCourseEnrollments()) {
+        tbody.innerHTML = '<tr><td colspan="6">ไม่มีสิทธิ์สมัครคอร์สให้นักเรียน</td></tr>';
         return;
       }
-      const enrollments = getStudentCourseEnrollments(student);
-      const availableCourses = sortCoursesByGrade(getAdminAvailableCoursesForStudent(student));
-      existingList.innerHTML = '<strong>' + escapeHtml((student.memberId || student.studentId || '-') + ' · ' + (student.name || '-')) + '</strong>' +
-        '<br><span class="mini-muted">ชั้น ' + escapeHtml(student.grade || '-') + ' · ' + escapeHtml(student.preferredLocation || '-') + '</span>' +
-        '<br><strong>คอร์สที่มีอยู่:</strong> ' + (enrollments.length ? enrollments.map(function(enrollment) {
+      const filtered = getFilteredAdminCourseEnrollmentStudents();
+      const totalPages = Math.max(1, Math.ceil(filtered.length / adminCourseEnrollmentPerPage));
+      if (adminCourseEnrollmentCurrentPage > totalPages) adminCourseEnrollmentCurrentPage = totalPages;
+      const start = (adminCourseEnrollmentCurrentPage - 1) * adminCourseEnrollmentPerPage;
+      const page = filtered.slice(start, start + adminCourseEnrollmentPerPage);
+      tbody.innerHTML = page.length ? page.map(function(student) {
+        const studentId = getEnrollmentStudentId(student);
+        const enrollments = getStudentCourseEnrollments(student);
+        const availableCourses = sortCoursesByGrade(getAdminAvailableCoursesForStudent(student));
+        const existingCourses = enrollments.length ? enrollments.map(function(enrollment) {
           const course = getCourseForEnrollment(enrollment);
           return '<span class="tag">' + escapeHtml(((course && course.name) || enrollment.courseName || enrollment.courseId || '-') + ' · ' + (enrollment.courseStatus || '-')) + '</span>';
-        }).join(' ') : 'ยังไม่มีคอร์ส');
-      courseSelect.innerHTML = availableCourses.length
-        ? '<option value="">เลือกคอร์ส</option>' + availableCourses.map(function(course) {
-            const id = String(course.id || course.firebaseDocId || '');
-            return '<option value="' + escapeHtml(id) + '">' + escapeHtml((course.grade || '-') + ' · ' + (course.name || '-') + ' · ' + (course.location || '-')) + '</option>';
-          }).join('')
-        : '<option value="">ไม่มีคอร์สที่สมัครเพิ่มได้</option>';
-      courseSelect.disabled = availableCourses.length === 0;
-      if (button) button.disabled = availableCourses.length === 0;
+        }).join(' ') : '<span class="mini-muted">ยังไม่มีคอร์ส</span>';
+        const courseOptions = availableCourses.length
+          ? '<option value="">เลือกคอร์ส</option>' + availableCourses.map(function(course) {
+              const courseId = String(course.id || course.firebaseDocId || '');
+              return '<option value="' + escapeHtml(courseId) + '">' + escapeHtml(course.name || courseId) + '</option>';
+            }).join('')
+          : '<option value="">ไม่มีคอร์สที่สมัครเพิ่มได้</option>';
+        const message = adminCourseEnrollmentRowMessages.get(studentId);
+        const messageHtml = message ? '<div class="mini-muted" style="margin-top:6px;color:' + (message.ok ? '#16a34a' : '#dc2626') + ';">' + escapeHtml(message.text) + '</div>' : '';
+        return '<tr data-student-id="' + escapeHtml(studentId) + '">' +
+          '<td><strong>' + escapeHtml(student.name || '-') + '</strong><br><span class="mini-muted">' + escapeHtml(student.memberId || student.studentId || '-') + '</span></td>' +
+          '<td>' + escapeHtml((student.grade || '-') + ' · ' + (student.preferredLocation || '-')) + '</td>' +
+          '<td>' + existingCourses + '</td>' +
+          '<td><select class="admin-enroll-row-course" onchange="updateAdminEnrollRowButton(this)"' + (availableCourses.length ? '' : ' disabled') + '>' + courseOptions + '</select></td>' +
+          '<td><select class="admin-enroll-row-status"><option value="อนุมัติแล้ว">อนุมัติแล้ว</option><option value="รออนุมัติคอร์ส">รออนุมัติคอร์ส</option></select></td>' +
+          '<td><button class="btn btn-green admin-enroll-row-button" type="button" onclick="adminEnrollStudentInCourseFromRow(this)" disabled>เพิ่มคอร์ส</button>' + messageHtml + '</td></tr>';
+      }).join('') : '<tr><td colspan="6">ไม่พบนักเรียนตามตัวกรอง</td></tr>';
+      renderTablePagination('adminEnrollStudentPagination', adminCourseEnrollmentCurrentPage, totalPages, filtered.length, 'changeAdminCourseEnrollmentPage');
+    }
+
+    function resetAdminCourseEnrollmentPage() {
+      adminCourseEnrollmentCurrentPage = 1;
+      renderAdminCourseEnrollmentSection();
+    }
+
+    function changeAdminCourseEnrollmentPage(direction) {
+      const totalPages = Math.max(1, Math.ceil(getFilteredAdminCourseEnrollmentStudents().length / adminCourseEnrollmentPerPage));
+      adminCourseEnrollmentCurrentPage = Math.min(Math.max(1, adminCourseEnrollmentCurrentPage + direction), totalPages);
+      renderAdminCourseEnrollmentSection();
+    }
+
+    function updateAdminEnrollRowButton(courseSelect) {
+      const row = courseSelect && courseSelect.closest('tr');
+      const button = row && row.querySelector('.admin-enroll-row-button');
+      if (button) button.disabled = !courseSelect.value;
     }
 
     function createAdminEnrollmentError(code, message) {
@@ -17997,34 +18001,39 @@
       return messages[error && error.code] || (error && (error.message || error.code)) || 'ไม่ทราบสาเหตุ';
     }
 
-    async function adminEnrollStudentInCourse() {
+    async function adminEnrollStudentInCourseFromRow(button) {
       if (!canManageAdminCourseEnrollments()) { alert('ไม่มีสิทธิ์'); return; }
-      const student = getAdminEnrollmentSelectedStudent();
-      const courseId = getElement('adminEnrollCourseSelect') ? String(getElement('adminEnrollCourseSelect').value || '') : '';
+      const row = button && button.closest('tr');
+      const studentId = row ? String(row.getAttribute('data-student-id') || '') : '';
+      const student = (students || []).find(function(item) { return getEnrollmentStudentId(item) === studentId; }) || null;
+      const courseSelect = row && row.querySelector('.admin-enroll-row-course');
+      const statusSelect = row && row.querySelector('.admin-enroll-row-status');
+      const courseId = courseSelect ? String(courseSelect.value || '') : '';
       const course = (courses || []).find(function(item) { return String(item.id || item.firebaseDocId || '') === courseId; });
-      const status = getElement('adminEnrollCourseStatus') && getElement('adminEnrollCourseStatus').value === 'รออนุมัติคอร์ส' ? 'รออนุมัติคอร์ส' : 'อนุมัติแล้ว';
-      const result = getElement('adminEnrollCourseResult');
-      const button = getElement('adminEnrollCourseButton');
-      if (!student || !course) { if (result) { result.textContent = 'กรุณาเลือกนักเรียนและคอร์ส'; result.style.color = '#dc2626'; } return; }
+      const status = statusSelect && statusSelect.value === 'รออนุมัติคอร์ส' ? 'รออนุมัติคอร์ส' : 'อนุมัติแล้ว';
+      if (!student || !course) {
+        adminCourseEnrollmentRowMessages.set(studentId, { ok: false, text: 'กรุณาเลือกคอร์ส' });
+        renderAdminCourseEnrollmentSection();
+        return;
+      }
       if (!getAdminAvailableCoursesForStudent(student).some(function(item) { return String(item.id || item.firebaseDocId || '') === courseId; })) {
-        if (result) { result.textContent = 'คอร์สนี้ปิดรับสมัคร ไม่ตรงชั้น/ศูนย์ หรือมีประวัติสมัครแล้ว'; result.style.color = '#dc2626'; }
-        syncAdminCourseEnrollmentOptions(); return;
+        adminCourseEnrollmentRowMessages.set(studentId, { ok: false, text: 'คอร์สปิดรับสมัคร ไม่ตรงชั้น/ศูนย์ หรือมีประวัติแล้ว' });
+        renderAdminCourseEnrollmentSection();
+        return;
       }
       if (!confirm('สมัครคอร์ส ' + (course.name || '-') + ' ให้ ' + (student.name || '-') + ' เป็นสถานะ “' + status + '” ใช่หรือไม่?')) return;
       if (button) button.disabled = true;
-      if (result) { result.textContent = 'กำลังบันทึก...'; result.style.color = '#0f4cbd'; }
+      adminCourseEnrollmentRowMessages.set(studentId, { ok: true, text: 'กำลังบันทึก...' });
       try {
         await createAdminCourseEnrollmentTransaction(student, course, status, 'admin_single_enrollment');
         try { await addActivityLog('สมัครคอร์สให้นักเรียน', (student.name || '-') + ' · ' + (course.name || '-') + ' · ' + status); }
         catch (activityError) { console.warn('enrollment activity log warning:', activityError); }
+        adminCourseEnrollmentRowMessages.set(studentId, { ok: true, text: 'เพิ่ม ' + (course.name || '-') + ' เรียบร้อย' });
         refreshAdminCourseEnrollmentViews();
-        if (result) { result.textContent = 'สมัครคอร์ส ' + (course.name || '-') + ' ให้ ' + (student.name || '-') + ' เรียบร้อย'; result.style.color = '#16a34a'; }
       } catch (error) {
-        console.error('adminEnrollStudentInCourse error:', error);
-        if (result) { result.textContent = 'สมัครคอร์สไม่สำเร็จ: ' + getAdminEnrollmentErrorMessage(error); result.style.color = '#dc2626'; }
-        syncAdminCourseEnrollmentOptions();
-      } finally {
-        if (button) button.disabled = getAdminAvailableCoursesForStudent(getAdminEnrollmentSelectedStudent()).length === 0;
+        console.error('adminEnrollStudentInCourseFromRow error:', error);
+        adminCourseEnrollmentRowMessages.set(studentId, { ok: false, text: 'เพิ่มคอร์สไม่สำเร็จ: ' + getAdminEnrollmentErrorMessage(error) });
+        renderAdminCourseEnrollmentSection();
       }
     }
 
