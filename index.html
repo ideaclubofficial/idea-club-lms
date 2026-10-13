@@ -17794,7 +17794,21 @@
           registeredCourseMonth: student.registeredCourseMonth || '',
           enrollmentSource: 'admin_student_form'
         });
-        await setFirebaseDocument('courseEnrollments', enrollment);
+        const canCreatePayment = enrollment.courseStatus === 'อนุมัติแล้ว' && (hasPermission('admin.finance') || hasPermission('admin.full'));
+        const paymentResult = canCreatePayment
+          ? prepareCourseEnrollmentPayment(student, enrollment, course, enrollment.registeredCourseMonth)
+          : { payment: null, created: false };
+        if (paymentResult.payment && paymentResult.created && firebaseReady && db) {
+          const batch = db.batch();
+          const enrollmentDocId = String(enrollment.firebaseDocId || enrollment.id || docId);
+          const paymentDocId = String(paymentResult.payment.firebaseDocId || paymentResult.payment.id || '');
+          batch.set(db.collection('courseEnrollments').doc(enrollmentDocId), buildFirebasePayload(enrollment, enrollmentDocId, true), { merge: true });
+          batch.set(db.collection('payments').doc(paymentDocId), buildFirebasePayload(paymentResult.payment, paymentDocId, true), { merge: true });
+          await batch.commit();
+          if (!payments.some(function(item) { return String(item.firebaseDocId || item.id || '') === paymentDocId; })) payments.push(paymentResult.payment);
+        } else {
+          await setFirebaseDocument('courseEnrollments', enrollment);
+        }
         courseEnrollments.push(enrollment);
       }
       return enrollment;
@@ -17955,7 +17969,9 @@
       const enrollmentRef = db.collection('courseEnrollments').doc(enrollmentId);
       const auditUser = getFirebaseAuditUser();
       let savedEnrollment = null;
+      let paymentResult = { payment: null, created: false, month: '', skipped: status !== 'อนุมัติแล้ว' ? 'pending-approval' : '' };
       let restoredLearningStatus = false;
+      const canCreatePayment = hasPermission('admin.finance') || hasPermission('admin.full');
 
       await db.runTransaction(async function(transaction) {
         const studentSnap = await transaction.get(studentRef);
@@ -17976,6 +17992,15 @@
         savedEnrollment.registeredByUid = auditUser.uid;
         savedEnrollment.registeredByName = auditUser.displayName;
         transaction.set(enrollmentRef, buildFirebasePayload(savedEnrollment, enrollmentId, true));
+        if (savedEnrollment.courseStatus === 'อนุมัติแล้ว' && canCreatePayment) {
+          paymentResult = prepareCourseEnrollmentPayment(currentStudentData, savedEnrollment, currentCourseData, savedEnrollment.registeredCourseMonth);
+          if (paymentResult.payment && paymentResult.created) {
+            const paymentDocId = String(paymentResult.payment.firebaseDocId || paymentResult.payment.id || '');
+            transaction.set(db.collection('payments').doc(paymentDocId), buildFirebasePayload(paymentResult.payment, paymentDocId, true));
+          }
+        } else if (savedEnrollment.courseStatus === 'อนุมัติแล้ว') {
+          paymentResult = { payment: null, created: false, month: savedEnrollment.registeredCourseMonth || '', skipped: 'permission' };
+        }
         const learningStatus = currentStudentData.learningStatus || currentStudentData.status || '';
         restoredLearningStatus = learningStatus === 'จบคอร์ส';
         if (restoredLearningStatus) {
@@ -17987,8 +18012,11 @@
         }
       });
       if (!courseEnrollments.some(function(item) { return String(item.firebaseDocId || item.id || '') === enrollmentId; })) courseEnrollments.push(savedEnrollment);
+      if (paymentResult.payment && paymentResult.created && !payments.some(function(item) {
+        return String(item.firebaseDocId || item.id || '') === String(paymentResult.payment.firebaseDocId || paymentResult.payment.id || '');
+      })) payments.push(paymentResult.payment);
       if (restoredLearningStatus) { student.learningStatus = 'เรียนอยู่'; student.status = 'เรียนอยู่'; }
-      return savedEnrollment;
+      return { enrollment: savedEnrollment, paymentResult: paymentResult };
     }
 
     function getAdminEnrollmentErrorMessage(error) {
@@ -18025,10 +18053,12 @@
       if (button) button.disabled = true;
       adminCourseEnrollmentRowMessages.set(studentId, { ok: true, text: 'กำลังบันทึก...' });
       try {
-        await createAdminCourseEnrollmentTransaction(student, course, status, 'admin_single_enrollment');
-        try { await addActivityLog('สมัครคอร์สให้นักเรียน', (student.name || '-') + ' · ' + (course.name || '-') + ' · ' + status); }
+        const saveResult = await createAdminCourseEnrollmentTransaction(student, course, status, 'admin_single_enrollment');
+        const paymentResult = saveResult.paymentResult || {};
+        const paymentText = status !== 'อนุมัติแล้ว' ? '' : paymentResult.created ? ' · สร้างยอดแล้ว' : paymentResult.payment ? ' · ใช้ยอดเดิม' : ' · ยังไม่สร้างยอด (ไม่มีสิทธิ์การเงิน)';
+        try { await addActivityLog('สมัครคอร์สให้นักเรียน', (student.name || '-') + ' · ' + (course.name || '-') + ' · ' + status + paymentText); }
         catch (activityError) { console.warn('enrollment activity log warning:', activityError); }
-        adminCourseEnrollmentRowMessages.set(studentId, { ok: true, text: 'เพิ่ม ' + (course.name || '-') + ' เรียบร้อย' });
+        adminCourseEnrollmentRowMessages.set(studentId, { ok: true, text: 'เพิ่ม ' + (course.name || '-') + ' เรียบร้อย' + paymentText });
         refreshAdminCourseEnrollmentViews();
       } catch (error) {
         console.error('adminEnrollStudentInCourseFromRow error:', error);
@@ -18150,19 +18180,28 @@
       });
       const successes = [];
       const failures = [];
+      let paymentsCreated = 0;
+      let paymentsReused = 0;
+      let paymentsSkippedForPermission = 0;
       results.forEach(function(result, index) {
         const student = selectedStudents[index];
-        if (result.status === 'fulfilled') successes.push(student);
+        if (result.status === 'fulfilled') {
+          successes.push(student);
+          const paymentResult = result.value && result.value.paymentResult || {};
+          if (paymentResult.created) paymentsCreated++;
+          else if (paymentResult.payment) paymentsReused++;
+          else if (paymentResult.skipped === 'permission') paymentsSkippedForPermission++;
+        }
         else failures.push({ student: student, reason: getAdminEnrollmentErrorMessage(result.reason) });
       });
       adminBulkEnrollmentSelectedIds = new Set(failures.map(function(item) { return getEnrollmentStudentId(item.student); }));
       if (successes.length) {
-        try { await addActivityLog('สมัครคอร์สให้นักเรียนแบบกลุ่ม', (course.name || '-') + ' · สำเร็จ ' + successes.length + ' คน · ' + status); }
+        try { await addActivityLog('สมัครคอร์สให้นักเรียนแบบกลุ่ม', (course.name || '-') + ' · สำเร็จ ' + successes.length + ' คน · ' + status + (status === 'อนุมัติแล้ว' ? ' · สร้างยอด ' + paymentsCreated + ' · ใช้ยอดเดิม ' + paymentsReused : '')); }
         catch (activityError) { console.warn('bulk enrollment activity log warning:', activityError); }
       }
       refreshAdminCourseEnrollmentViews();
       if (resultBox) {
-        resultBox.innerHTML = '<span style="color:' + (failures.length ? '#d97706' : '#16a34a') + ';">สำเร็จ ' + successes.length + ' คน · ไม่สำเร็จ ' + failures.length + ' คน</span>' +
+        resultBox.innerHTML = '<span style="color:' + (failures.length || paymentsSkippedForPermission ? '#d97706' : '#16a34a') + ';">สำเร็จ ' + successes.length + ' คน · ไม่สำเร็จ ' + failures.length + ' คน' + (status === 'อนุมัติแล้ว' ? ' · สร้างยอด ' + paymentsCreated + ' · ใช้ยอดเดิม ' + paymentsReused + (paymentsSkippedForPermission ? ' · ยังไม่สร้างยอดเพราะไม่มีสิทธิ์การเงิน ' + paymentsSkippedForPermission : '') : '') + '</span>' +
           (failures.length ? '<ul class="course-enrollment-result-list">' + failures.map(function(item) { return '<li>' + escapeHtml((item.student.name || '-') + ': ' + item.reason) + '</li>'; }).join('') + '</ul>' : '');
       }
       if (button) button.disabled = adminBulkEnrollmentSelectedIds.size === 0;
@@ -18285,10 +18324,23 @@
       }
       const course = getCourseForEnrollment(enrollment);
       if (!confirm('อนุมัติคอร์ส ' + ((course && course.name) || enrollment.courseName || '-') + ' ให้ ' + (student.name || '-') + ' ใช่หรือไม่?')) return;
+      const canCreatePayment = hasPermission('admin.finance') || hasPermission('admin.full');
+      const paymentResult = canCreatePayment
+        ? prepareCourseEnrollmentPayment(student, enrollment, course, enrollment.registeredCourseMonth)
+        : { payment: null, created: false, skipped: 'permission' };
       if (enrollment.legacy) {
         student.courseStatus = 'อนุมัติแล้ว';
         if (!student.paymentStatus || student.paymentStatus === 'ยังไม่ได้สมัครคอร์ส') student.paymentStatus = 'รอชำระเงิน';
-        await setFirebaseDocument('students', student);
+        if (paymentResult.payment && paymentResult.created && firebaseReady && db) {
+          const batch = db.batch();
+          const studentDocId = String(student.firebaseDocId || student.id || '');
+          const paymentDocId = String(paymentResult.payment.firebaseDocId || paymentResult.payment.id || '');
+          batch.set(db.collection('students').doc(studentDocId), buildFirebasePayload(student, studentDocId, false), { merge: true });
+          batch.set(db.collection('payments').doc(paymentDocId), buildFirebasePayload(paymentResult.payment, paymentDocId, true), { merge: true });
+          await batch.commit();
+        } else {
+          await setFirebaseDocument('students', student);
+        }
       } else {
         enrollment.courseStatus = 'อนุมัติแล้ว';
         enrollment.everApproved = true;
@@ -18296,16 +18348,29 @@
         enrollment.historicalMediaStatus = 'not_applicable';
         if (!enrollment.paymentStatus || enrollment.paymentStatus === 'ยังไม่ได้สมัครคอร์ส') enrollment.paymentStatus = 'รอชำระเงิน';
         enrollment.enrollmentStatus = 'active';
-        await setFirebaseDocument('courseEnrollments', enrollment);
+        if (paymentResult.payment && paymentResult.created && firebaseReady && db) {
+          const batch = db.batch();
+          const enrollmentDocId = String(enrollment.firebaseDocId || enrollment.id || getCourseEnrollmentDocId(getEnrollmentStudentId(student), enrollment.courseId));
+          const paymentDocId = String(paymentResult.payment.firebaseDocId || paymentResult.payment.id || '');
+          batch.set(db.collection('courseEnrollments').doc(enrollmentDocId), buildFirebasePayload(enrollment, enrollmentDocId, false), { merge: true });
+          batch.set(db.collection('payments').doc(paymentDocId), buildFirebasePayload(paymentResult.payment, paymentDocId, true), { merge: true });
+          await batch.commit();
+        } else {
+          await setFirebaseDocument('courseEnrollments', enrollment);
+        }
       }
-      addActivityLog('อนุมัติคอร์ส', (student.name || '-') + ' · ' + ((course && course.name) || enrollment.courseName || '-'));
+      if (paymentResult.payment && paymentResult.created && !payments.some(function(item) {
+        return String(item.firebaseDocId || item.id || '') === String(paymentResult.payment.firebaseDocId || paymentResult.payment.id || '');
+      })) payments.push(paymentResult.payment);
+      const paymentText = paymentResult.created ? ' · สร้างยอดแล้ว' : paymentResult.payment ? ' · ใช้ยอดเดิม' : ' · ยังไม่สร้างยอด (ไม่มีสิทธิ์การเงิน)';
+      addActivityLog('อนุมัติคอร์ส', (student.name || '-') + ' · ' + ((course && course.name) || enrollment.courseName || '-') + paymentText);
       renderAdminStudents();
       renderAdminDashboard();
       if (currentStudent && String(currentStudent.id) === String(student.id)) {
         currentStudent = student;
         updateStudentCourseDisplay();
       }
-      alert('อนุมัติคอร์สเรียบร้อย');
+      alert('อนุมัติคอร์สเรียบร้อย' + paymentText);
     }
 
 
@@ -22593,6 +22658,37 @@
         createdAtText: nowText,
         updatedAtText: nowText
       };
+    }
+
+    function getCourseEnrollmentPaymentMonth(enrollment, fallbackMonth) {
+      return String((enrollment && enrollment.registeredCourseMonth) || fallbackMonth || getThaiMonthFromDate(new Date().toISOString().slice(0, 10)) || '').trim();
+    }
+
+    function findCourseEnrollmentPayment(student, enrollment, month) {
+      const courseId = String(enrollment && enrollment.courseId || '').trim();
+      const paymentMonth = String(month || '').trim();
+      if (!student || !courseId || !paymentMonth) return null;
+      return (payments || []).find(function(payment) {
+        const recordMonth = String(payment.paymentMonth || payment.month || payment.billingMonth || '').trim();
+        return isStudentPaymentRecord(student, payment) && String(payment.courseId || '').trim() === courseId && recordMonth === paymentMonth;
+      }) || null;
+    }
+
+    function prepareCourseEnrollmentPayment(student, enrollment, course, fallbackMonth) {
+      const month = getCourseEnrollmentPaymentMonth(enrollment, fallbackMonth);
+      if (!student || !enrollment || !enrollment.courseId || !month) return { payment: null, created: false, month: month };
+      const existing = findCourseEnrollmentPayment(student, enrollment, month);
+      if (existing) return { payment: existing, created: false, month: month };
+      const targetCourse = course || getCourseForEnrollment(enrollment);
+      const payment = buildStudentMonthlyPaymentRecord(student, targetCourse, month);
+      if (!payment) return { payment: null, created: false, month: month };
+      payment.courseId = String(enrollment.courseId || payment.courseId || '');
+      payment.courseName = enrollment.courseName || payment.courseName || payment.course || '';
+      payment.course = enrollment.courseName || payment.course || payment.courseName || '';
+      payment.preferredLocation = enrollment.location || payment.preferredLocation || '';
+      payment.courseLocation = (targetCourse && targetCourse.location) || enrollment.location || payment.courseLocation || '';
+      payment.paymentCenter = enrollment.location || payment.paymentCenter || payment.courseLocation || '';
+      return { payment: payment, created: true, month: month };
     }
 
     async function ensurePaymentForStudentMonth(student, month) {
@@ -36037,13 +36133,21 @@ function receiptStatusText(status) {
       let createdPaymentForUpload = false;
       if (!payment) {
         const uploadCourse = getCurrentStudentCourse();
-        payment = buildStudentMonthlyPaymentRecord(currentStudent, uploadCourse, month);
+        const uploadEnrollment = getSelectedStudentCourseEnrollment(currentStudent);
+        const hasCoursePayment = !!(uploadEnrollment && (payments || []).some(function(item) {
+          return isStudentPaymentRecord(currentStudent, item) && String(item.courseId || '') === String(uploadEnrollment.courseId || '');
+        }));
+        const paymentEnrollment = hasCoursePayment
+          ? Object.assign({}, uploadEnrollment, { registeredCourseMonth: month })
+          : uploadEnrollment;
+        const preparedPayment = prepareCourseEnrollmentPayment(currentStudent, paymentEnrollment, uploadCourse, month);
+        payment = preparedPayment.payment;
+        createdPaymentForUpload = preparedPayment.created;
         if (!payment) {
           result.textContent = 'ยังไม่มีรายการบิลสำหรับเดือนนี้ กรุณารอเจ้าหน้าที่เปิดบิลก่อนอัปโหลดสลิป';
           result.style.color = '#d97706';
           return;
         }
-        createdPaymentForUpload = true;
       }
 
       slipUploadInProgress = true;
@@ -36140,7 +36244,7 @@ function receiptStatusText(status) {
         })) {
           payments.push(payment);
         }
-        setStudentSlipResultMessage('อัปโหลดสลิปสำเร็จ รอเจ้าหน้าที่ตรวจสอบ', '#16a34a');
+        setStudentSlipResultMessage((createdPaymentForUpload ? 'สร้างยอดเดือน ' + (payment.month || month) + ' และ' : '') + 'อัปโหลดสลิปสำเร็จ รอเจ้าหน้าที่ตรวจสอบ', '#16a34a');
         if (fileInput) fileInput.value = '';
         syncStudentSlipDropzoneLabel();
         updateStudentSlipUploadControls();

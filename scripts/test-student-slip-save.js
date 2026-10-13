@@ -6,23 +6,31 @@ const test = require('node:test');
 const html = fs.readFileSync(require('node:path').join(__dirname, '../index.html'), 'utf8');
 const source = html.slice(html.indexOf('    async function uploadStudentSlipToDrive()'), html.indexOf('    async function uploadStudentSlipWithOcr()'));
 
-async function upload({ denied = false, missing = false } = {}) {
+async function upload({ denied = false, missing = false, existingCoursePayment = false, selectedMonth = 'September' } = {}) {
   const payment = { id: 'bill', firebaseDocId: 'bill', month: 'September', amount: 750, discount: 250, createdAt: { seconds: 123 }, status: 'รอชำระเงิน' };
+  const previousPayment = { id: 'previous-bill', firebaseDocId: 'previous-bill', studentId: 'student', courseId: 'course-a', month: 'September', amount: 750, status: 'ชำระแล้ว' };
   const student = { id: 'student', authUid: 'stale-uid', memberId: '001', name: 'Student', paymentStatus: 'รอชำระเงิน' };
   const calls = [];
   const result = { classList: { remove() {} }, style: {} };
-  const elements = { studentSlipResult: result, studentPaymentMonth: { value: 'September' }, studentSlipFile: { files: [{ name: 'slip.jpg', type: 'image/jpeg', size: 1 }] } };
+  const elements = { studentSlipResult: result, studentPaymentMonth: { value: selectedMonth }, studentSlipFile: { files: [{ name: 'slip.jpg', type: 'image/jpeg', size: 1 }] } };
   const context = {
     console: { error() {}, warn() {} },
-    currentStudent: student, payments: missing ? [] : [payment], firebaseUser: { uid: 'session-uid' },
+    currentStudent: student, payments: missing ? (existingCoursePayment ? [previousPayment] : []) : [payment], firebaseUser: { uid: 'session-uid' },
     firebase: { firestore: { FieldValue: { serverTimestamp: () => 'timestamp' } } },
     slipUploadInProgress: false, ENABLE_PAYMENT_SLIP_WEB_UPLOAD: true, USE_APPS_SCRIPT_DRIVE_UPLOAD: true,
     getElement: id => elements[id], isStudentLimitedAccess: () => false,
+    isStudentPaymentRecord: (target, record) => record.studentId === target.id,
     canStudentUploadSlipForMonth: () => true, isPaymentMonthVisibleByName: () => true,
     getCurrentStudentPaymentForSelectedMonth: () => missing ? null : payment,
     getCourseByStudentOrName: () => ({}), getCourseByPaymentStudentOrName: () => ({}), getCurrentStudentCourse: () => ({}),
-    getSelectedStudentCourseEnrollment: () => ({ courseId: 'course-a' }),
+    getSelectedStudentCourseEnrollment: () => ({ courseId: 'course-a', courseName: 'Course A', registeredCourseMonth: 'September' }),
     buildStudentMonthlyPaymentRecord: () => ({ id: 'new-bill', firebaseDocId: 'new-bill', month: 'September', amount: 750 }),
+    prepareCourseEnrollmentPayment: (targetStudent, enrollment, course, month) => {
+      const existing = context.payments.find(item => item.courseId === enrollment.courseId && item.month === (enrollment.registeredCourseMonth || month));
+      return existing
+        ? { payment: existing, created: false, month: existing.month }
+        : { payment: { id: 'new-bill', firebaseDocId: 'new-bill', courseId: enrollment.courseId, month: enrollment.registeredCourseMonth || month, amount: 750 }, created: true, month: enrollment.registeredCourseMonth || month };
+    },
     createFirebaseDocId: () => 'fallback-bill',
     document: { querySelectorAll: () => [] }, fileToBase64: async () => 'image',
     uploadFileToDriveViaAppsScript: async () => ({ fileId: 'drive-original', fileUrl: 'https://example.com/slip' }),
@@ -73,5 +81,17 @@ test('visible month with no bill retains lazy creation and the same Drive file',
   assert.equal(writes.length, 1);
   assert.equal(writes[0].id, 'new-bill');
   assert.equal(writes[0].data.driveFileId, 'drive-original');
+  assert.equal(writes[0].data.status, 'รอตรวจสลิป');
+  assert.equal(writes[0].data.paymentStatus, 'รอตรวจสลิป');
   assert.equal(context.payments.length, 1);
+});
+
+test('after the first course bill, a later selected month creates a separate payment', async () => {
+  const { calls, context } = await upload({ missing: true, existingCoursePayment: true, selectedMonth: 'October' });
+  const writes = calls.filter(call => call.collection === 'payments');
+  assert.equal(writes.length, 1);
+  assert.equal(writes[0].id, 'new-bill');
+  assert.equal(writes[0].data.month, 'October');
+  assert.equal(context.payments.length, 2);
+  assert.equal(context.payments[0].id, 'previous-bill');
 });
