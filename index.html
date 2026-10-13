@@ -5245,6 +5245,7 @@
               <div id="teacherPrivateLessonSummary" class="dashboard-grid"></div>
             </div>
             <br />
+            <h3 style="margin:0 0 10px;">คอร์สที่กำลังใช้งาน</h3>
             <div class="table-wrap">
               <table>
                 <thead>
@@ -6328,6 +6329,22 @@
                 <tbody id="adminCourseTableBody"></tbody>
               </table>
             </div>
+
+            <details class="form-box" style="margin-top:18px;" open>
+              <summary style="cursor:pointer;font-weight:800;color:#0f4cbd;">📦 คอร์สที่จบแล้ว <span id="adminCompletedCourseCount" class="tag">0 คอร์ส</span></summary>
+              <p class="mini-muted" style="margin:10px 0;">เก็บเป็นประวัติสำหรับดูข้อมูลเดิม และจะไม่แสดงในหน้าสมัครคอร์สทุกช่องทาง</p>
+              <div class="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>ระดับชั้น</th><th>ชื่อคอร์ส</th><th>ราคา</th><th>สิทธิ์</th><th>สถานที่เรียน</th>
+                      <th>วันเวลาเรียน</th><th>ฟังก์ชันที่เปิด</th><th>สถานะ</th><th>วันที่จบ</th><th>นักเรียน</th><th>จัดการ</th>
+                    </tr>
+                  </thead>
+                  <tbody id="adminCompletedCourseTableBody"></tbody>
+                </table>
+              </div>
+            </details>
             </div>
 
             <div id="adminCourseSubtabEnroll" class="course-subtab-panel hidden">
@@ -17120,7 +17137,7 @@
 
     function renderAdminDashboardNow() {
       const totalStudents = Array.isArray(students) ? students.filter(isActiveStudentForDashboard).length : 0;
-      const openCourses = Array.isArray(courses) ? courses.filter(function(c) { return c.status === 'open' || c.status === 'เปิดรับสมัคร'; }).length : 0;
+      const openCourses = Array.isArray(courses) ? courses.filter(isCourseOpenForEnrollment).length : 0;
       const pendingPaymentRecords = getPendingPaymentRecords();
       const pendingPaymentBundles = getPendingPaymentBundles(false);
       const overduePaymentRecords = getOverduePaymentRecords();
@@ -18007,7 +18024,7 @@
         if (String(currentStudentData.courseId || '') === courseId && String(currentStudentData.course || '') !== 'ยังไม่ได้สมัครคอร์ส') {
           throw createAdminEnrollmentError('course-enrollment-already-exists', 'นักเรียนมีประวัติคอร์สนี้แล้ว');
         }
-        if (currentCourseData.status !== 'open') throw createAdminEnrollmentError('course-closed', 'คอร์สปิดรับสมัครแล้ว');
+        if (!isCourseOpenForEnrollment(currentCourseData)) throw createAdminEnrollmentError('course-closed', 'คอร์สปิดรับสมัครหรือจบคอร์สแล้ว');
         if (String(currentStudentData.grade || '').trim() !== String(currentCourseData.grade || '').trim()) throw createAdminEnrollmentError('grade-mismatch', 'ระดับชั้นไม่ตรงกับคอร์ส');
         if (String(currentStudentData.preferredLocation || '').trim() !== String(currentCourseData.location || '').trim()) throw createAdminEnrollmentError('location-mismatch', 'ศูนย์ไม่ตรงกับคอร์ส');
         savedEnrollment = buildAdminCourseEnrollment(currentStudentData, currentCourseData, status, { enrollmentSource: source || 'admin' });
@@ -18093,7 +18110,7 @@
     }
 
     function getAdminBulkEligibleStudents(course) {
-      if (!course || course.status !== 'open') return [];
+      if (!isCourseOpenForEnrollment(course)) return [];
       return (students || []).filter(function(student) {
         return student && student.deleted !== true &&
           String(student.grade || '').trim() === String(course.grade || '').trim() &&
@@ -18108,7 +18125,7 @@
       if (!canManageAdminCourseEnrollments()) { courseSelect.innerHTML = '<option value="">ไม่มีสิทธิ์ใช้งาน</option>'; courseSelect.disabled = true; return; }
       courseSelect.disabled = false;
       const previous = String(courseSelect.value || '');
-      const openCourses = sortCoursesByGrade((courses || []).filter(function(course) { return course && course.deleted !== true && course.status === 'open'; }));
+      const openCourses = sortCoursesByGrade((courses || []).filter(isCourseOpenForEnrollment));
       courseSelect.innerHTML = '<option value="">เลือกคอร์ส</option>' + openCourses.map(function(course) {
         const id = String(course.id || course.firebaseDocId || '');
         return '<option value="' + escapeHtml(id) + '">' + escapeHtml((course.grade || '-') + ' · ' + (course.name || '-') + ' · ' + (course.location || '-')) + '</option>';
@@ -19369,14 +19386,15 @@
 
 
     function getCoursesForCenter(center) {
-      if (!center) return courses;
+      if (!center) return courses.filter(isCourseOpenForEnrollment);
       return courses.filter(function(c) {
-        return String(c.location || '') === center;
+        return isCourseOpenForEnrollment(c) && String(c.location || '') === center;
       });
     }
 
     function getCoursesForGradeAndCenter(grade, center) {
       return courses.filter(function(c) {
+        if (!isCourseOpenForEnrollment(c)) return false;
         const courseGrade = String(c.grade || '').trim();
         const courseCenter = String(c.location || '').trim();
         const gradeOk = !grade || courseGrade === grade || courseGrade.includes(grade) || grade.includes(courseGrade);
@@ -19387,8 +19405,14 @@
 
     function studentCourseOptionsHtml(selectedValue, center, grade) {
       const selectedText = String(selectedValue || '');
-      const filteredCourses = sortCoursesByGrade((grade || center) ? getCoursesForGradeAndCenter(grade || '', center || '') : courses);
+      const filteredCourses = sortCoursesByGrade((grade || center) ? getCoursesForGradeAndCenter(grade || '', center || '') : courses.filter(isCourseOpenForEnrollment));
       const options = ['<option value="">ยังไม่ได้สมัครคอร์ส</option>'];
+      const historicalSelection = (courses || []).find(function(course) {
+        return isCourseCompleted(course) && (String(course.id || course.firebaseDocId || '') === selectedText || course.name === selectedText);
+      });
+      if (historicalSelection) {
+        options.push('<option value="' + escapeHtml(historicalSelection.id || historicalSelection.firebaseDocId || '') + '" selected disabled>' + escapeHtml((historicalSelection.grade || '-') + ' · ' + (historicalSelection.name || '-') + ' (คอร์สจบแล้ว)') + '</option>');
+      }
       if (grade && center && filteredCourses.length === 0) {
         options.push('<option value="" disabled>ไม่พบคอร์สที่ตรงกับชั้นและศูนย์นี้</option>');
       } else {
@@ -20207,7 +20231,7 @@
       if (!grade || !location) return [];
       return (courses || []).filter(function(course) {
         const courseId = String(course && (course.id || course.firebaseDocId) || '').trim();
-        return course && course.deleted !== true && course.status === 'open' && courseId &&
+        return isCourseOpenForEnrollment(course) && courseId &&
           String(course.grade || '').trim() === grade &&
           String(course.location || '').trim() === location &&
           !getStudentCourseEnrollment(student, courseId);
@@ -20218,6 +20242,19 @@
       const status = String(enrollment && enrollment.courseStatus || '').trim();
       return !!enrollment && enrollment.deleted !== true &&
         !['ยังไม่ได้สมัครคอร์ส', 'ยกเลิก', 'ไม่อนุมัติ', 'จบคอร์ส'].includes(status);
+    }
+
+    function isCourseCompleted(course) {
+      if (!course) return false;
+      const endStatus = String(course.courseEndStatus || '').trim().toLowerCase();
+      const status = String(course.status || '').trim().toLowerCase();
+      return course.archived === true || endStatus === 'completed' || endStatus === 'completed_manually' ||
+        status === 'completed' || status === 'จบคอร์ส' ||
+        !!course.courseEndedAtMs || !!course.courseEndedAtText;
+    }
+
+    function isCourseOpenForEnrollment(course) {
+      return !!course && course.deleted !== true && course.status === 'open' && !isCourseCompleted(course);
     }
 
     function buildLegacyCourseEnrollment(student) {
@@ -20683,7 +20720,7 @@
       }
       const filtered = courses.filter(function(c) {
         const existing = getStudentCourseEnrollment(currentStudent, c.id || c.firebaseDocId);
-        return c.grade === grade && c.status === 'open' && isCourseInCurrentStudentCenter(c) && !existing;
+        return c.grade === grade && isCourseOpenForEnrollment(c) && isCourseInCurrentStudentCenter(c) && !existing;
       });
       list.innerHTML = filtered.length ? filtered.map(function(c) {
         const scheduleSummary = formatCourseScheduleSummary(c);
@@ -21098,22 +21135,41 @@
       }, 60000);
     }
 
+    function renderAdminCourseTableRow(c, completed) {
+      const courseId = c.id || c.firebaseDocId || '';
+      const statusText = completed
+        ? '<span class="status-absent">' + (c.archived === true && !String(c.courseEndStatus || '').startsWith('completed') ? 'เก็บถาวร' : 'จบคอร์ส') + '</span>'
+        : (c.status === 'open' ? '<span class="status-paid">เปิดรับสมัคร</span>' : '<span class="status-absent">ปิดรับสมัคร</span>');
+      const completionTargets = completed ? [] : getCourseCompletionTargets(courseId);
+      const completeDisabled = completionTargets.length ? '' : ' disabled';
+      const endCell = completed
+        ? escapeHtml(c.courseEndedAtText || c.archivedAtText || '-')
+        : renderCourseEndSchedule(c);
+      const actions = completed
+        ? '<button class="btn btn-blue" type="button" onclick="' + actionCall('editCourse', courseId) + '">ดู / แก้ไข</button>'
+        : '<button class="btn btn-blue" type="button" onclick="' + actionCall('editCourse', courseId) + '">แก้ไข</button><button class="btn btn-green" type="button" onclick="' + actionCall('completeCourseForStudents', courseId) + '"' + completeDisabled + '>จบคอร์ส</button><button class="btn btn-red" type="button" onclick="' + actionCall('deleteCourse', courseId) + '">ลบ</button>';
+      return '<tr><td>' + escapeHtml(c.grade || '-') + '</td><td>' + escapeHtml(c.name || '-') + '</td><td>' + formatPrice(c.price) + '</td><td>' + getCourseAccessLabel(c) + '</td><td>' + escapeHtml(c.location || '-') + '</td><td>' + escapeHtml(getCourseDisplaySchedule(c) || '-') + '</td><td>' + renderCourseFeatureSummary(c) + '</td><td>' + statusText + '</td><td>' + endCell + '</td><td>' + renderCourseStudentStatusSummary(c) + '</td><td>' + actions + '</td></tr>';
+    }
+
     function renderAdminCourses() {
       const tbody = getElement('adminCourseTableBody');
+      const completedTbody = getElement('adminCompletedCourseTableBody');
+      const completedCount = getElement('adminCompletedCourseCount');
       if (!tbody) return;
       renderAdminCourseEnrollmentSection();
       renderAdminBulkEnrollmentControls();
       renderAdminEnrollmentList();
-      if (!Array.isArray(courses) || courses.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="11">ยังไม่มีคอร์สในระบบ ให้เพิ่มคอร์สใหม่จากฟอร์มด้านบน</td></tr>';
-        return;
+      const activeCourses = (courses || []).filter(function(course) { return course && course.deleted !== true && !isCourseCompleted(course); });
+      const completedCourses = (courses || []).filter(function(course) { return course && course.deleted !== true && isCourseCompleted(course); });
+      tbody.innerHTML = activeCourses.length
+        ? sortRecordsForTable(activeCourses, 'courses').map(function(course) { return renderAdminCourseTableRow(course, false); }).join('')
+        : '<tr><td colspan="11">ยังไม่มีคอร์สที่กำลังใช้งาน ให้เพิ่มคอร์สใหม่จากฟอร์มด้านบน</td></tr>';
+      if (completedTbody) {
+        completedTbody.innerHTML = completedCourses.length
+          ? sortRecordsForTable(completedCourses, 'courses').map(function(course) { return renderAdminCourseTableRow(course, true); }).join('')
+          : '<tr><td colspan="11">ยังไม่มีคอร์สที่จบแล้ว</td></tr>';
       }
-      tbody.innerHTML = sortRecordsForTable(courses, 'courses').map(function(c) {
-        const statusText = c.status === 'open' ? '<span class="status-paid">เปิดรับสมัคร</span>' : '<span class="status-absent">ปิดรับสมัคร</span>';
-        const completionTargets = getCourseCompletionTargets(c.id);
-        const completeDisabled = completionTargets.length ? '' : ' disabled';
-        return '<tr><td>' + c.grade + '</td><td>' + c.name + '</td><td>' + formatPrice(c.price) + '</td><td>' + getCourseAccessLabel(c) + '</td><td>' + c.location + '</td><td>' + (getCourseDisplaySchedule(c) || '-') + '</td><td>' + renderCourseFeatureSummary(c) + '</td><td>' + statusText + '</td><td>' + renderCourseEndSchedule(c) + '</td><td>' + renderCourseStudentStatusSummary(c) + '</td><td><button class="btn btn-blue" type="button" onclick="' + actionCall('editCourse', c.id) + '">แก้ไข</button><button class="btn btn-green" type="button" onclick="' + actionCall('completeCourseForStudents', c.id) + '"' + completeDisabled + '>จบคอร์ส</button><button class="btn btn-red" type="button" onclick="' + actionCall('deleteCourse', c.id) + '">ลบ</button></td></tr>';
-      }).join('');
+      if (completedCount) completedCount.textContent = completedCourses.length + ' คอร์ส';
     }
 
     async function completeCourseForStudents(courseId, options) {
@@ -22457,7 +22513,7 @@
         alert('คอร์สนี้ไม่ตรงกับศูนย์ที่ลงทะเบียนไว้');
         return;
       }
-      if (c.status !== 'open') {
+      if (!isCourseOpenForEnrollment(c)) {
         alert('คอร์สนี้ยังไม่เปิดรับสมัคร');
         return;
       }
@@ -22500,7 +22556,7 @@
           if (snapshots[2].exists) throw new Error('course-enrollment-already-exists');
           const latestStudent = snapshots[0].data() || {};
           const latestCourse = snapshots[1].data() || {};
-          if (latestCourse.status !== 'open') throw new Error('course-closed');
+          if (!isCourseOpenForEnrollment(latestCourse)) throw new Error('course-closed');
           if (String(latestStudent.grade || '').trim() !== String(latestCourse.grade || '').trim()) throw new Error('grade-mismatch');
           if (String(latestStudent.preferredLocation || '').trim() !== String(latestCourse.location || '').trim()) throw new Error('location-mismatch');
           transaction.set(enrollmentRef, buildFirebasePayload(enrollment, enrollmentId, true));
@@ -23378,7 +23434,7 @@
     function getCoursesForProfileGrade() {
       const grade = getProfileGrade();
       return courses.filter(function(c) {
-        return c.grade === grade && c.status === 'open';
+        return c.grade === grade && isCourseOpenForEnrollment(c);
       });
     }
 
@@ -33360,12 +33416,7 @@
     }
 
     function isCourseCompletedForBilling(course) {
-      if (!course) return false;
-      const endStatus = String(course.courseEndStatus || '').trim().toLowerCase();
-      const status = String(course.status || '').trim().toLowerCase();
-      return endStatus === 'completed' || endStatus === 'completed_manually' ||
-        status === 'completed' || status === 'จบคอร์ส' ||
-        !!course.courseEndedAtMs || !!course.courseEndedAtText;
+      return isCourseCompleted(course);
     }
 
     function getBillableCourses() {

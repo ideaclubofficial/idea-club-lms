@@ -252,6 +252,15 @@ service cloud.firestore {
       return studentId + '__' + courseId;
     }
 
+    function isCourseOpenForStudentEnrollment(courseId) {
+      let courseData = get(/databases/$(database)/documents/courses/$(courseId)).data;
+      return courseData.status == 'open'
+        && (!('archived' in courseData) || courseData.archived != true)
+        && (!('courseEndStatus' in courseData) || !(courseData.courseEndStatus in ['completed', 'completed_manually']))
+        && (!('courseEndedAtMs' in courseData) || courseData.courseEndedAtMs == 0)
+        && (!('courseEndedAtText' in courseData) || courseData.courseEndedAtText == '');
+    }
+
     function ownsIncomingCourseEnrollment() {
       return signedIn()
         && request.resource.data.authUid == request.auth.uid
@@ -269,7 +278,7 @@ service cloud.firestore {
         && (!('historicalMediaStatus' in request.resource.data) || request.resource.data.historicalMediaStatus == 'not_applicable')
         && request.resource.data.deleted == false
         && exists(/databases/$(database)/documents/courses/$(request.resource.data.courseId))
-        && get(/databases/$(database)/documents/courses/$(request.resource.data.courseId)).data.status == 'open'
+        && isCourseOpenForStudentEnrollment(request.resource.data.courseId)
         && get(/databases/$(database)/documents/courses/$(request.resource.data.courseId)).data.grade == get(/databases/$(database)/documents/students/$(request.resource.data.studentId)).data.grade
         && get(/databases/$(database)/documents/courses/$(request.resource.data.courseId)).data.location == get(/databases/$(database)/documents/students/$(request.resource.data.studentId)).data.preferredLocation
         && request.resource.data.grade == get(/databases/$(database)/documents/students/$(request.resource.data.studentId)).data.grade

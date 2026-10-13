@@ -5,6 +5,7 @@ const vm = require('node:vm');
 const test = require('node:test');
 
 const html = fs.readFileSync(path.join(__dirname, '../index.html'), 'utf8');
+const firestoreRules = fs.readFileSync(path.join(__dirname, '../firestore.rules'), 'utf8');
 const start = html.indexOf('    function getCourseEnrollmentDocId(');
 const end = html.indexOf('    function studentCanReceiveIdCard(', start);
 const promotionStart = html.indexOf('    function getPromotionHistoricalMediaEnrollments(');
@@ -84,6 +85,16 @@ test('completed and cancelled enrollments are not current', () => {
   assert.equal(context.isCourseEnrollmentCurrent({ courseStatus: 'ไม่อนุมัติ' }), false);
   assert.equal(context.isCourseEnrollmentCurrent({ courseStatus: 'ยังไม่ได้สมัครคอร์ส' }), false);
   assert.equal(context.isCourseEnrollmentCurrent({ courseStatus: 'รออนุมัติคอร์ส' }), true);
+});
+
+test('completed or archived courses are never open for a new enrollment', () => {
+  const context = createContext();
+  assert.equal(context.isCourseOpenForEnrollment({ status: 'open' }), true);
+  assert.equal(context.isCourseOpenForEnrollment({ status: 'open', courseEndStatus: 'completed' }), false);
+  assert.equal(context.isCourseOpenForEnrollment({ status: 'open', courseEndStatus: 'completed_manually' }), false);
+  assert.equal(context.isCourseOpenForEnrollment({ status: 'open', courseEndedAtMs: 100 }), false);
+  assert.equal(context.isCourseOpenForEnrollment({ status: 'open', archived: true }), false);
+  assert.equal(context.isCourseOpenForEnrollment({ status: 'closed' }), false);
 });
 
 test('admin course choices require open course with exact student grade and center and no prior enrollment', () => {
@@ -191,6 +202,22 @@ test('course admin markup exposes three separate subtabs and panels', () => {
   ids.forEach(id => assert.match(html, new RegExp('id="' + id + '"')));
   assert.ok(html.indexOf('adminCourseSubtabManage') < html.indexOf('adminCourseSubtabEnroll'));
   assert.ok(html.indexOf('adminCourseSubtabEnroll') < html.indexOf('adminCourseSubtabList'));
+});
+
+test('course management separates completed courses into a historical subsection', () => {
+  assert.match(html, /id="adminCompletedCourseTableBody"/);
+  assert.match(html, /id="adminCompletedCourseCount"/);
+  assert.match(html, /คอร์สที่จบแล้ว/);
+  assert.match(html, /const activeCourses = \(courses \|\| \[\]\)\.filter\(function\(course\) \{ return course && course\.deleted !== true && !isCourseCompleted\(course\); \}\)/);
+  assert.match(html, /const completedCourses = \(courses \|\| \[\]\)\.filter\(function\(course\) \{ return course && course\.deleted !== true && isCourseCompleted\(course\); \}\)/);
+});
+
+test('all enrollment entry points use the completed-course guard', () => {
+  assert.match(html, /function getAdminBulkEligibleStudents\(course\) \{\s+if \(!isCourseOpenForEnrollment\(course\)\) return \[\]/);
+  assert.match(html, /const openCourses = sortCoursesByGrade\(\(courses \|\| \[\]\)\.filter\(isCourseOpenForEnrollment\)\)/);
+  assert.match(html, /return c\.grade === grade && isCourseOpenForEnrollment\(c\) && isCourseInCurrentStudentCenter\(c\) && !existing/);
+  assert.match(html, /if \(!isCourseOpenForEnrollment\(latestCourse\)\) throw new Error\('course-closed'\)/);
+  assert.match(firestoreRules, /isCourseOpenForStudentEnrollment\(request\.resource\.data\.courseId\)/);
 });
 
 test('course enrollment screens expose bulk controls, filters, summaries, and guarded actions', () => {
