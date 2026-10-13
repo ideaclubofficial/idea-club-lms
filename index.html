@@ -18001,20 +18001,23 @@
         } else if (savedEnrollment.courseStatus === 'อนุมัติแล้ว') {
           paymentResult = { payment: null, created: false, month: savedEnrollment.registeredCourseMonth || '', skipped: 'permission' };
         }
+        const studentMainUpdate = Object.assign({}, buildStudentMainCourseFields(savedEnrollment, currentCourseData), {
+            updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
+            updatedBy: auditUser.uid, updatedByEmail: auditUser.email, updatedByName: auditUser.displayName
+          });
         const learningStatus = currentStudentData.learningStatus || currentStudentData.status || '';
         restoredLearningStatus = learningStatus === 'จบคอร์ส';
         if (restoredLearningStatus) {
-          transaction.set(studentRef, {
-            learningStatus: 'เรียนอยู่', status: 'เรียนอยู่',
-            updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
-            updatedBy: auditUser.uid, updatedByEmail: auditUser.email, updatedByName: auditUser.displayName
-          }, { merge: true });
+          studentMainUpdate.learningStatus = 'เรียนอยู่';
+          studentMainUpdate.status = 'เรียนอยู่';
         }
+        transaction.set(studentRef, studentMainUpdate, { merge: true });
       });
       if (!courseEnrollments.some(function(item) { return String(item.firebaseDocId || item.id || '') === enrollmentId; })) courseEnrollments.push(savedEnrollment);
       if (paymentResult.payment && paymentResult.created && !payments.some(function(item) {
         return String(item.firebaseDocId || item.id || '') === String(paymentResult.payment.firebaseDocId || paymentResult.payment.id || '');
       })) payments.push(paymentResult.payment);
+      Object.assign(student, buildStudentMainCourseFields(savedEnrollment, course));
       if (restoredLearningStatus) { student.learningStatus = 'เรียนอยู่'; student.status = 'เรียนอยู่'; }
       return { enrollment: savedEnrollment, paymentResult: paymentResult };
     }
@@ -18348,12 +18351,20 @@
         enrollment.historicalMediaStatus = 'not_applicable';
         if (!enrollment.paymentStatus || enrollment.paymentStatus === 'ยังไม่ได้สมัครคอร์ส') enrollment.paymentStatus = 'รอชำระเงิน';
         enrollment.enrollmentStatus = 'active';
-        if (paymentResult.payment && paymentResult.created && firebaseReady && db) {
+        const syncsMainCourse = String(student.courseId || '') === String(enrollment.courseId || '');
+        if (syncsMainCourse) Object.assign(student, buildStudentMainCourseFields(enrollment, course));
+        if ((paymentResult.payment && paymentResult.created || syncsMainCourse) && firebaseReady && db) {
           const batch = db.batch();
           const enrollmentDocId = String(enrollment.firebaseDocId || enrollment.id || getCourseEnrollmentDocId(getEnrollmentStudentId(student), enrollment.courseId));
-          const paymentDocId = String(paymentResult.payment.firebaseDocId || paymentResult.payment.id || '');
           batch.set(db.collection('courseEnrollments').doc(enrollmentDocId), buildFirebasePayload(enrollment, enrollmentDocId, false), { merge: true });
-          batch.set(db.collection('payments').doc(paymentDocId), buildFirebasePayload(paymentResult.payment, paymentDocId, true), { merge: true });
+          if (paymentResult.payment && paymentResult.created) {
+            const paymentDocId = String(paymentResult.payment.firebaseDocId || paymentResult.payment.id || '');
+            batch.set(db.collection('payments').doc(paymentDocId), buildFirebasePayload(paymentResult.payment, paymentDocId, true), { merge: true });
+          }
+          if (syncsMainCourse) {
+            const studentDocId = getEnrollmentStudentId(student);
+            batch.set(db.collection('students').doc(studentDocId), buildStudentMainCourseFields(enrollment, course), { merge: true });
+          }
           await batch.commit();
         } else {
           await setFirebaseDocument('courseEnrollments', enrollment);
@@ -18397,18 +18408,28 @@
         delete preservedEnrollment.legacy;
         await setFirebaseDocument('courseEnrollments', preservedEnrollment);
         courseEnrollments.push(preservedEnrollment);
-        student.courseStatus = 'ยกเลิก';
-        student.paymentStatus = 'ยกเลิก';
-        student.courseId = null;
-        student.course = 'ยังไม่ได้สมัครคอร์ส';
-        student.courseAccess = '-';
+        const fallbackEnrollment = getLatestCurrentStudentEnrollment(student, preservedEnrollment.courseId);
+        Object.assign(student, buildStudentMainCourseFields(fallbackEnrollment, getCourseForEnrollment(fallbackEnrollment)));
         await setFirebaseDocument('students', student);
       } else {
         enrollment.courseStatus = 'ยกเลิก';
         enrollment.paymentStatus = 'ยกเลิก';
         enrollment.enrollmentStatus = 'cancelled';
         enrollment.cancelledAtText = new Date().toLocaleString('th-TH');
-        await setFirebaseDocument('courseEnrollments', enrollment);
+        const syncsMainCourse = String(student.courseId || '') === String(enrollment.courseId || '');
+        if (syncsMainCourse) {
+          const fallbackEnrollment = getLatestCurrentStudentEnrollment(student, enrollment.courseId);
+          const fallbackCourse = getCourseForEnrollment(fallbackEnrollment);
+          Object.assign(student, buildStudentMainCourseFields(fallbackEnrollment, fallbackCourse));
+          const enrollmentDocId = String(enrollment.firebaseDocId || enrollment.id || getCourseEnrollmentDocId(getEnrollmentStudentId(student), enrollment.courseId));
+          const studentDocId = getEnrollmentStudentId(student);
+          const batch = db.batch();
+          batch.set(db.collection('courseEnrollments').doc(enrollmentDocId), buildFirebasePayload(enrollment, enrollmentDocId, false), { merge: true });
+          batch.set(db.collection('students').doc(studentDocId), buildFirebasePayload(student, studentDocId, false), { merge: true });
+          await batch.commit();
+        } else {
+          await setFirebaseDocument('courseEnrollments', enrollment);
+        }
       }
       addActivityLog('ยกเลิกคอร์ส', (student.name || '-') + ' · เดิม: ' + oldCourse);
       renderAdminStudents();
@@ -20074,10 +20095,54 @@
         historicalMediaStatus: 'not_applicable',
         paymentStatus: 'รอชำระเงิน',
         registeredCourseMonth: opts.registeredCourseMonth || getThaiMonthFromDate(new Date(nowMs).toISOString().slice(0, 10)),
+        createdAtMs: nowMs,
         createdAtText: new Date(nowMs).toLocaleString('th-TH'),
         enrollmentStatus: 'active',
         enrollmentSource: opts.enrollmentSource || 'admin'
       };
+    }
+
+    function buildStudentMainCourseFields(enrollment, course) {
+      if (!enrollment) {
+        return {
+          courseId: null,
+          course: 'ยังไม่ได้สมัครคอร์ส',
+          courseAccess: '-',
+          courseStatus: 'ยังไม่ได้สมัครคอร์ส',
+          paymentStatus: 'ยังไม่ได้สมัครคอร์ส',
+          registeredCourseMonth: ''
+        };
+      }
+      return {
+        courseId: String(enrollment.courseId || '').trim() || null,
+        course: enrollment.courseName || (course && course.name) || 'ยังไม่ได้สมัครคอร์ส',
+        courseAccess: enrollment.courseAccess || (course && course.access) || '-',
+        courseStatus: enrollment.courseStatus || 'รออนุมัติคอร์ส',
+        paymentStatus: enrollment.paymentStatus || 'รอชำระเงิน',
+        registeredCourseMonth: enrollment.registeredCourseMonth || ''
+      };
+    }
+
+    function getCourseEnrollmentProjectionTime(enrollment) {
+      if (!enrollment) return 0;
+      const direct = Number(enrollment.createdAtMs || enrollment.registeredAtMs || 0);
+      if (direct > 0) return direct;
+      const timestamp = enrollment.createdAt || enrollment.registeredAt;
+      if (timestamp && typeof timestamp.toMillis === 'function') return timestamp.toMillis();
+      if (timestamp && typeof timestamp.seconds === 'number') return timestamp.seconds * 1000;
+      const parsed = Date.parse(enrollment.createdAtText || enrollment.registeredAtText || '');
+      return Number.isNaN(parsed) ? 0 : parsed;
+    }
+
+    function getLatestCurrentStudentEnrollment(student, excludedCourseId) {
+      const excluded = String(excludedCourseId || '').trim();
+      return getStudentCourseEnrollments(student, { currentOnly: true }).filter(function(enrollment) {
+        return !excluded || String(enrollment.courseId || '').trim() !== excluded;
+      }).sort(function(a, b) {
+        const timeDiff = getCourseEnrollmentProjectionTime(b) - getCourseEnrollmentProjectionTime(a);
+        if (timeDiff) return timeDiff;
+        return String(b.firebaseDocId || b.id || '').localeCompare(String(a.firebaseDocId || a.id || ''));
+      })[0] || null;
     }
 
     function getAdminAvailableCoursesForStudent(student) {
@@ -21035,6 +21100,11 @@
             const hasOtherCurrentEnrollment = getStudentCourseEnrollments(student, { currentOnly: true }).some(function(item) {
               return String(item.courseId || '') !== String(courseId || '');
             });
+            if (String(student.courseId || '') === String(enrollment.courseId || '')) {
+              const fallbackEnrollment = getLatestCurrentStudentEnrollment(student, enrollment.courseId);
+              const projectedEnrollment = fallbackEnrollment || enrollment;
+              Object.assign(student, buildStudentMainCourseFields(projectedEnrollment, getCourseForEnrollment(projectedEnrollment)));
+            }
             student.learningStatus = hasOtherCurrentEnrollment ? 'เรียนอยู่' : 'จบคอร์ส';
             student.status = student.learningStatus;
             student.statusChangedAtText = nowText;
@@ -22357,21 +22427,41 @@
         historicalMediaStatus: 'not_applicable',
         paymentStatus: 'รอชำระเงิน',
         registeredCourseMonth: registeredCourseMonth,
+        createdAtMs: Date.now(),
         enrollmentStatus: 'active'
       };
 
       try {
-        const ref = db.collection('courseEnrollments').doc(enrollmentId);
-        await ref.set(buildFirebasePayload(enrollment, enrollmentId, true));
+        const enrollmentRef = db.collection('courseEnrollments').doc(enrollmentId);
+        const studentRef = db.collection('students').doc(studentDocId);
+        const courseRef = db.collection('courses').doc(String(c.id));
+        await db.runTransaction(async function(transaction) {
+          const snapshots = await Promise.all([
+            transaction.get(studentRef), transaction.get(courseRef), transaction.get(enrollmentRef)
+          ]);
+          if (!snapshots[0].exists || snapshots[0].data().deleted === true) throw new Error('student-not-found');
+          if (!snapshots[1].exists || snapshots[1].data().deleted === true) throw new Error('course-not-found');
+          if (snapshots[2].exists) throw new Error('course-enrollment-already-exists');
+          const latestStudent = snapshots[0].data() || {};
+          const latestCourse = snapshots[1].data() || {};
+          if (latestCourse.status !== 'open') throw new Error('course-closed');
+          if (String(latestStudent.grade || '').trim() !== String(latestCourse.grade || '').trim()) throw new Error('grade-mismatch');
+          if (String(latestStudent.preferredLocation || '').trim() !== String(latestCourse.location || '').trim()) throw new Error('location-mismatch');
+          transaction.set(enrollmentRef, buildFirebasePayload(enrollment, enrollmentId, true));
+          transaction.set(studentRef, buildStudentMainCourseFields(enrollment, latestCourse), { merge: true });
+        });
       } catch (error) {
         console.error('apply course firebase error:', error);
         updateStudentCourseDisplay();
-        alert('บันทึกการสมัครคอร์สไม่สำเร็จ กรุณาลองใหม่หรือติดต่อเจ้าหน้าที่');
+        alert(error && error.message === 'course-enrollment-already-exists'
+          ? 'คุณเคยสมัครคอร์สนี้แล้ว กรุณาติดต่อเจ้าหน้าที่หากต้องการเรียนซ้ำ'
+          : 'บันทึกการสมัครคอร์สไม่สำเร็จ กรุณาลองใหม่หรือติดต่อเจ้าหน้าที่');
         return;
       }
       const localIndex = courseEnrollments.findIndex(function(item) { return String(item.firebaseDocId || item.id || '') === enrollmentId; });
       if (localIndex === -1) courseEnrollments.push(enrollment);
       else Object.assign(courseEnrollments[localIndex], enrollment);
+      Object.assign(activeStudent, buildStudentMainCourseFields(enrollment, c));
       currentStudentCourseId = c.id;
       try { localStorage.setItem(getStudentCourseContextStorageKey(activeStudent), String(c.id)); } catch (error) {}
       updateStudentCourseDisplay();
@@ -31518,6 +31608,7 @@
         return isStudentPaymentRecord(s, payment);
       });
       if (!student) return null;
+      const beforeSync = [student.courseId, student.course, student.courseStatus, student.paymentStatus, Array.isArray(student.overdueMonths) ? student.overdueMonths.join('|') : ''].join('::');
       const enrollment = getStudentCourseEnrollment(student, payment.courseId || '');
       if (enrollment && !enrollment.legacy) {
         enrollment.paymentStatus = status;
@@ -31529,23 +31620,26 @@
         }
         await setFirebaseDocument('courseEnrollments', enrollment);
       }
+      const syncsMainCourse = !payment.courseId || String(student.courseId || '') === String(payment.courseId || '');
+      if (syncsMainCourse && enrollment && !enrollment.legacy) {
+        Object.assign(student, buildStudentMainCourseFields(enrollment, getCourseForEnrollment(enrollment)));
+      }
       const month = payment.paymentMonth || payment.month || payment.billingMonth || '';
-      const beforeSync = [student.paymentStatus, student.courseStatus, Array.isArray(student.overdueMonths) ? student.overdueMonths.join('|') : ''].join('::');
       student.overdueMonths = Array.isArray(student.overdueMonths) ? student.overdueMonths : [];
 
       if (status === 'ค้างชำระ') {
         if (month && !student.overdueMonths.includes(month)) student.overdueMonths.push(month);
-        student.paymentStatus = 'ค้างชำระ';
+        if (syncsMainCourse) student.paymentStatus = 'ค้างชำระ';
       } else {
         if (month) student.overdueMonths = student.overdueMonths.filter(function(item) { return item !== month; });
-        student.paymentStatus = status;
+        if (syncsMainCourse) student.paymentStatus = status;
       }
 
-      if ((!enrollment || enrollment.legacy) && status === 'ชำระแล้ว' && student.courseId && String(student.courseId) === String(payment.courseId || '') && student.courseStatus === 'รออนุมัติคอร์ส') {
+      if (syncsMainCourse && (!enrollment || enrollment.legacy) && status === 'ชำระแล้ว' && student.courseId && String(student.courseId) === String(payment.courseId || '') && student.courseStatus === 'รออนุมัติคอร์ส') {
         student.courseStatus = 'อนุมัติแล้ว';
       }
 
-      const afterSync = [student.paymentStatus, student.courseStatus, Array.isArray(student.overdueMonths) ? student.overdueMonths.join('|') : ''].join('::');
+      const afterSync = [student.courseId, student.course, student.courseStatus, student.paymentStatus, Array.isArray(student.overdueMonths) ? student.overdueMonths.join('|') : ''].join('::');
       if (beforeSync !== afterSync) await setFirebaseDocument('students', student);
       if (currentStudent && isStudentPaymentRecord(currentStudent, payment)) {
         Object.assign(currentStudent, student);
@@ -31796,6 +31890,11 @@
         enrollment.approvedAtMs = Number(enrollment.approvedAtMs || Date.now());
         enrollment.historicalMediaStatus = 'not_applicable';
         await setFirebaseDocument('courseEnrollments', enrollment);
+        if (String(student.courseId || '') === String(enrollment.courseId || '')) {
+          Object.assign(student, buildStudentMainCourseFields(enrollment, getCourseForEnrollment(enrollment)));
+          await setFirebaseDocument('students', student);
+          if (currentStudent && String(currentStudent.id || currentStudent.firebaseDocId || '') === String(student.id || student.firebaseDocId || '')) Object.assign(currentStudent, student);
+        }
       } else if (student.courseId && String(student.courseId) === String(payment.courseId) && student.courseStatus === 'รออนุมัติคอร์ส') {
         student.courseStatus = 'อนุมัติแล้ว';
         await setFirebaseDocument('students', student);

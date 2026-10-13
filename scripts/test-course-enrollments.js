@@ -116,6 +116,38 @@ test('admin enrollment builder creates independent pending payment state and app
   assert.equal(pending.approvedAtMs, 0);
 });
 
+test('latest enrollment projection keeps legacy student course fields in sync', () => {
+  const context = createContext();
+  const course = { id: 'course-new', name: 'New course', access: 'Online' };
+  const enrollment = {
+    courseId: 'course-new', courseName: 'New course', courseAccess: 'Online',
+    courseStatus: 'รออนุมัติคอร์ส', paymentStatus: 'รอชำระเงิน',
+    registeredCourseMonth: 'ตุลาคม 2569'
+  };
+  assert.deepEqual(JSON.parse(JSON.stringify(context.buildStudentMainCourseFields(enrollment, course))), {
+    courseId: 'course-new', course: 'New course', courseAccess: 'Online',
+    courseStatus: 'รออนุมัติคอร์ส', paymentStatus: 'รอชำระเงิน',
+    registeredCourseMonth: 'ตุลาคม 2569'
+  });
+  assert.deepEqual(JSON.parse(JSON.stringify(context.buildStudentMainCourseFields(null, null))), {
+    courseId: null, course: 'ยังไม่ได้สมัครคอร์ส', courseAccess: '-',
+    courseStatus: 'ยังไม่ได้สมัครคอร์ส', paymentStatus: 'ยังไม่ได้สมัครคอร์ส',
+    registeredCourseMonth: ''
+  });
+});
+
+test('latest current enrollment fallback ignores ended courses and uses newest timestamp', () => {
+  const context = createContext();
+  const student = { id: 'student-1', authUid: 'uid-1' };
+  context.courseEnrollments.push(
+    { id: 'old', studentId: 'student-1', courseId: 'old', courseStatus: 'อนุมัติแล้ว', createdAtMs: 100 },
+    { id: 'new', studentId: 'student-1', courseId: 'new', courseStatus: 'รออนุมัติคอร์ส', createdAtMs: 300 },
+    { id: 'ended', studentId: 'student-1', courseId: 'ended', courseStatus: 'จบคอร์ส', createdAtMs: 500 }
+  );
+  assert.equal(context.getLatestCurrentStudentEnrollment(student).courseId, 'new');
+  assert.equal(context.getLatestCurrentStudentEnrollment(student, 'new').courseId, 'old');
+});
+
 test('bulk enrollment candidates match the selected open course and exclude every prior enrollment status', () => {
   const context = createContext();
   const course = { id: 'course-a', grade: 'ม.1', location: 'ศูนย์ A', status: 'open' };
@@ -177,6 +209,13 @@ test('course enrollment screens expose bulk controls, filters, summaries, and gu
   assert.match(html, /function approveStudentCourse\(id, courseId\) \{\s+if \(!canManageAdminCourseEnrollments\(\)\)/);
   assert.match(html, /function cancelStudentCourse\(id, courseId\) \{\s+if \(!canManageAdminCourseEnrollments\(\)\)/);
   assert.match(html, /function adminBulkEnrollStudents\(\) \{\s+if \(!canManageAdminCourseEnrollments\(\)\)/);
+});
+
+test('student and admin enrollment writes also update the main student course projection', () => {
+  assert.match(html, /studentMainUpdate = Object\.assign\(\{\}, buildStudentMainCourseFields\(savedEnrollment, currentCourseData\)/);
+  assert.match(html, /transaction\.set\(studentRef, studentMainUpdate, \{ merge: true \}\)/);
+  assert.match(html, /transaction\.set\(studentRef, buildStudentMainCourseFields\(enrollment, latestCourse\), \{ merge: true \}\)/);
+  assert.match(html, /Object\.assign\(activeStudent, buildStudentMainCourseFields\(enrollment, c\)\)/);
 });
 
 test('approved completed enrollment keeps media access until revoked', () => {

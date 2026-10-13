@@ -282,6 +282,29 @@ service cloud.firestore {
         && get(/databases/$(database)/documents/courseEnrollments/$(studentEnrollmentDocId(studentId, courseId))).data.authUid == request.auth.uid;
     }
 
+    function isOwnStudentCourseProjectionUpdate(studentDocId) {
+      let enrollmentId = studentEnrollmentDocId(studentDocId, request.resource.data.courseId);
+      let enrollmentPath = /databases/$(database)/documents/courseEnrollments/$(enrollmentId);
+      return ownsExistingDoc()
+        && ownsIncomingDoc()
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'courseId', 'course', 'courseAccess', 'courseStatus',
+          'paymentStatus', 'registeredCourseMonth'
+        ])
+        && existsAfter(enrollmentPath)
+        && getAfter(enrollmentPath).data.studentId == studentDocId
+        && getAfter(enrollmentPath).data.authUid == request.auth.uid
+        && getAfter(enrollmentPath).data.courseStatus == 'รออนุมัติคอร์ส'
+        && getAfter(enrollmentPath).data.paymentStatus == 'รอชำระเงิน'
+        && getAfter(enrollmentPath).data.enrollmentStatus == 'active'
+        && request.resource.data.courseId == getAfter(enrollmentPath).data.courseId
+        && request.resource.data.course == getAfter(enrollmentPath).data.courseName
+        && request.resource.data.courseAccess == getAfter(enrollmentPath).data.courseAccess
+        && request.resource.data.courseStatus == getAfter(enrollmentPath).data.courseStatus
+        && request.resource.data.paymentStatus == getAfter(enrollmentPath).data.paymentStatus
+        && request.resource.data.registeredCourseMonth == getAfter(enrollmentPath).data.registeredCourseMonth;
+    }
+
     function isLinkedStudentDocId(studentDocId) {
       return signedIn()
         && userProfileExists()
@@ -577,7 +600,8 @@ service cloud.firestore {
                     || isTeacher()
                     || (ownsExistingDoc() && ownsIncomingDoc()
                         && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['pickupStatus', 'pickupDate'])
-                        && !request.resource.data.diff(resource.data).affectedKeys().hasAny(protectedStudentCourseFields()));
+                        && !request.resource.data.diff(resource.data).affectedKeys().hasAny(protectedStudentCourseFields()))
+                    || isOwnStudentCourseProjectionUpdate(docId);
       allow delete: if isAdmin();
     }
 

@@ -86,6 +86,16 @@ function createAdminTransactionContext(status) {
         registeredCourseMonth: 'ตุลาคม 2569'
       };
     },
+    buildStudentMainCourseFields(enrollment) {
+      return {
+        courseId: enrollment.courseId,
+        course: enrollment.courseName,
+        courseAccess: enrollment.courseAccess || '-',
+        courseStatus: enrollment.courseStatus,
+        paymentStatus: enrollment.paymentStatus || 'รอชำระเงิน',
+        registeredCourseMonth: enrollment.registeredCourseMonth || ''
+      };
+    },
     prepareCourseEnrollmentPayment(student, enrollment) {
       return {
         created: true,
@@ -127,7 +137,8 @@ test('admin approved enrollment creates its first payment in the same transactio
     'อนุมัติแล้ว',
     'admin_single_enrollment'
   );
-  assert.deepEqual(writes.map(write => write.ref.collection), ['courseEnrollments', 'payments']);
+  assert.deepEqual(writes.map(write => write.ref.collection), ['courseEnrollments', 'payments', 'students']);
+  assert.equal(writes[2].data.courseId, 'course-1');
   assert.equal(result.paymentResult.created, true);
   assert.equal(context.payments.length, 1);
 });
@@ -140,7 +151,8 @@ test('admin pending enrollment does not create a payment before approval', async
     'รออนุมัติคอร์ส',
     'admin_single_enrollment'
   );
-  assert.deepEqual(writes.map(write => write.ref.collection), ['courseEnrollments']);
+  assert.deepEqual(writes.map(write => write.ref.collection), ['courseEnrollments', 'students']);
+  assert.equal(writes[1].data.courseStatus, 'รออนุมัติคอร์ส');
   assert.equal(result.paymentResult.skipped, 'pending-approval');
   assert.equal(context.payments.length, 0);
 });
