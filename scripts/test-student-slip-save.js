@@ -11,6 +11,7 @@ async function upload({ denied = false, missing = false, existingCoursePayment =
   const previousPayment = { id: 'previous-bill', firebaseDocId: 'previous-bill', studentId: 'student', courseId: 'course-a', month: 'September', amount: 750, status: 'ชำระแล้ว' };
   const student = { id: 'student', authUid: 'stale-uid', memberId: '001', name: 'Student', paymentStatus: 'รอชำระเงิน' };
   const calls = [];
+  const driveCalls = [];
   const result = { classList: { remove() {} }, style: {} };
   const elements = { studentSlipResult: result, studentPaymentMonth: { value: selectedMonth }, studentSlipFile: { files: [{ name: 'slip.jpg', type: 'image/jpeg', size: 1 }] } };
   const context = {
@@ -33,7 +34,10 @@ async function upload({ denied = false, missing = false, existingCoursePayment =
     },
     createFirebaseDocId: () => 'fallback-bill',
     document: { querySelectorAll: () => [] }, fileToBase64: async () => 'image',
-    uploadFileToDriveViaAppsScript: async () => ({ fileId: 'drive-original', fileUrl: 'https://example.com/slip' }),
+    uploadFileToDriveViaAppsScript: async options => {
+      driveCalls.push(options);
+      return { fileId: 'drive-original', fileUrl: 'https://example.com/slip' };
+    },
     getPaymentUploadCenterText: () => 'Center', getPaymentSlipUploadStudentName: () => 'Student',
     getStudentRecordDocId: () => 'student', getActiveProfileDisplayInfo: () => ({ displayName: 'Student' }),
     buildFirebasePayload: (data, id) => ({ ...data, firebaseDocId: id, deleted: false, updatedAt: 'timestamp' }),
@@ -49,7 +53,7 @@ async function upload({ denied = false, missing = false, existingCoursePayment =
   for (const name of ['syncStudentSlipDropzoneLabel', 'updateStudentSlipUploadControls', 'updateStudentCourseDisplay', 'renderPaymentTable', 'updatePaymentSummary', 'renderAdminDashboard', 'scheduleAdminPaymentDataRefresh']) context[name] = () => {};
   vm.createContext(context);
   await vm.runInContext(source + '\nuploadStudentSlipToDrive()', context);
-  return { calls, payment, student, context, result };
+  return { calls, driveCalls, payment, student, context, result };
 }
 
 test('existing bill receives only slip fields; original amount and timestamps stay intact', async () => {
@@ -86,7 +90,7 @@ test('visible month with no bill retains lazy creation and the same Drive file',
   assert.equal(context.payments.length, 1);
 });
 
-test('after the first course bill, a later selected month creates a separate payment', async () => {
+test('a selected month with no bill creates a separate payment for that month', async () => {
   const { calls, context } = await upload({ missing: true, existingCoursePayment: true, selectedMonth: 'October' });
   const writes = calls.filter(call => call.collection === 'payments');
   assert.equal(writes.length, 1);
@@ -94,4 +98,11 @@ test('after the first course bill, a later selected month creates a separate pay
   assert.equal(writes[0].data.month, 'October');
   assert.equal(context.payments.length, 2);
   assert.equal(context.payments[0].id, 'previous-bill');
+});
+
+test('Drive folder month follows the month selected for slip upload', async () => {
+  const { calls, driveCalls } = await upload({ missing: true, selectedMonth: 'October' });
+  assert.equal(driveCalls.length, 1);
+  assert.equal(driveCalls[0].month, 'October');
+  assert.equal(calls.find(call => call.collection === 'payments').data.month, 'October');
 });
