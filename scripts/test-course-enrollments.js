@@ -81,6 +81,8 @@ test('completed and cancelled enrollments are not current', () => {
   const context = createContext();
   assert.equal(context.isCourseEnrollmentCurrent({ courseStatus: 'จบคอร์ส' }), false);
   assert.equal(context.isCourseEnrollmentCurrent({ courseStatus: 'ยกเลิก' }), false);
+  assert.equal(context.isCourseEnrollmentCurrent({ courseStatus: 'ไม่อนุมัติ' }), false);
+  assert.equal(context.isCourseEnrollmentCurrent({ courseStatus: 'ยังไม่ได้สมัครคอร์ส' }), false);
   assert.equal(context.isCourseEnrollmentCurrent({ courseStatus: 'รออนุมัติคอร์ส' }), true);
 });
 
@@ -216,6 +218,40 @@ test('student and admin enrollment writes also update the main student course pr
   assert.match(html, /transaction\.set\(studentRef, studentMainUpdate, \{ merge: true \}\)/);
   assert.match(html, /transaction\.set\(studentRef, buildStudentMainCourseFields\(enrollment, latestCourse\), \{ merge: true \}\)/);
   assert.match(html, /Object\.assign\(activeStudent, buildStudentMainCourseFields\(enrollment, c\)\)/);
+});
+
+test('editing a student can reactivate an existing cancelled enrollment', async () => {
+  const writes = [];
+  const enrollment = {
+    id: 'student-1__course-1', firebaseDocId: 'student-1__course-1',
+    studentId: 'student-1', courseId: 'course-1', courseName: 'Course 1',
+    courseStatus: 'ยกเลิก', paymentStatus: 'ยกเลิก', enrollmentStatus: 'cancelled'
+  };
+  const context = {
+    courseEnrollments: [enrollment], payments: [], firebaseReady: false, db: null,
+    getEnrollmentStudentId: student => student.id,
+    getCourseEnrollmentDocId: (studentId, courseId) => studentId + '__' + courseId,
+    isCourseStatusApproved: status => status === 'อนุมัติแล้ว',
+    hasPermission: () => false,
+    setFirebaseDocument: async (collection, value) => writes.push({ collection, value: { ...value } })
+  };
+  vm.createContext(context);
+  const helperStart = html.indexOf('    function buildStudentMainCourseFields(');
+  const helperEnd = html.indexOf('    function getCourseEnrollmentProjectionTime(', helperStart);
+  vm.runInContext(html.slice(helperStart, helperEnd), context);
+  const ensureStart = html.indexOf('    async function ensureAdminCourseEnrollment(');
+  const ensureEnd = html.indexOf('    function canManageAdminCourseEnrollments(', ensureStart);
+  vm.runInContext(html.slice(ensureStart, ensureEnd), context);
+  await context.ensureAdminCourseEnrollment(
+    { id: 'student-1', registeredCourseMonth: 'ตุลาคม 2569' },
+    { id: 'course-1', name: 'Course 1', access: 'Online' },
+    'อนุมัติแล้ว'
+  );
+  assert.equal(enrollment.courseStatus, 'อนุมัติแล้ว');
+  assert.equal(enrollment.enrollmentStatus, 'active');
+  assert.equal(enrollment.paymentStatus, 'รอชำระเงิน');
+  assert.equal(enrollment.everApproved, true);
+  assert.equal(writes.some(write => write.collection === 'courseEnrollments'), true);
 });
 
 test('approved completed enrollment keeps media access until revoked', () => {
