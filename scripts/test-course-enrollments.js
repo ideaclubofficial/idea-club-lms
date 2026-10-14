@@ -12,10 +12,12 @@ const promotionStart = html.indexOf('    function getPromotionHistoricalMediaEnr
 const promotionEnd = html.indexOf('    async function confirmGradePromotionRound(', promotionStart);
 const bulkEligibilityStart = html.indexOf('    function getAdminBulkEligibleStudents(');
 const bulkEligibilityEnd = html.indexOf('    function renderAdminBulkEnrollmentControls(', bulkEligibilityStart);
+const courseLocationsStart = html.indexOf('    function getCourseLocations(');
+const courseLocationsEnd = html.indexOf('    function subjectOptionsHtml(', courseLocationsStart);
 const concurrencyStart = html.indexOf('    async function runAdminEnrollmentTasksWithConcurrency(');
 const concurrencyEnd = html.indexOf('    async function adminBulkEnrollStudents(', concurrencyStart);
 const source = html.slice(start, end) + '\n' + html.slice(promotionStart, promotionEnd) + '\n' +
-  html.slice(bulkEligibilityStart, bulkEligibilityEnd) + '\n' + html.slice(concurrencyStart, concurrencyEnd);
+  html.slice(courseLocationsStart, courseLocationsEnd) + '\n' + html.slice(bulkEligibilityStart, bulkEligibilityEnd) + '\n' + html.slice(concurrencyStart, concurrencyEnd);
 
 function createContext() {
   const context = {
@@ -109,6 +111,33 @@ test('admin course choices require open course with exact student grade and cent
   );
   context.courseEnrollments.push({ studentId: 'student-1', authUid: 'uid-1', courseId: 'history', courseStatus: 'จบคอร์ส' });
   assert.deepEqual(Array.from(context.getAdminAvailableCoursesForStudent(student), item => item.id), ['available']);
+});
+
+test('course can accept enrollment from both configured centers while legacy single-center courses still work', () => {
+  const context = createContext();
+  const dualCenterCourse = {
+    id: 'dual', grade: 'ม.1', status: 'open', location: 'ศูนย์ A', locations: ['ศูนย์ A', 'ศูนย์ B']
+  };
+  const legacyCourse = { id: 'legacy', grade: 'ม.1', status: 'open', location: 'ศูนย์ A' };
+  assert.equal(context.courseMatchesLocation(dualCenterCourse, 'ศูนย์ A'), true);
+  assert.equal(context.courseMatchesLocation(dualCenterCourse, 'ศูนย์ B'), true);
+  assert.equal(context.courseMatchesLocation(dualCenterCourse, 'ศูนย์ C'), false);
+  assert.equal(context.courseMatchesLocation(legacyCourse, 'ศูนย์ A'), true);
+  assert.equal(context.courseMatchesLocation(legacyCourse, 'ศูนย์ B'), false);
+
+  context.courses.push(dualCenterCourse, legacyCourse);
+  const centerBStudent = { id: 'student-b', grade: 'ม.1', preferredLocation: 'ศูนย์ B' };
+  assert.deepEqual(Array.from(context.getAdminAvailableCoursesForStudent(centerBStudent), item => item.id), ['dual']);
+  context.students.push(centerBStudent);
+  assert.deepEqual(Array.from(context.getAdminBulkEligibleStudents(dualCenterCourse), item => item.id), ['student-b']);
+});
+
+test('course admin exposes two-center controls and rules accept locations array', () => {
+  assert.match(html, /id="adminCourseLocationNakhonSawan"/);
+  assert.match(html, /id="adminCourseLocationNongChang"/);
+  assert.match(html, /locations: locations/);
+  assert.match(firestoreRules, /studentLocation in courseData\.locations/);
+  assert.match(firestoreRules, /courseAcceptsStudentLocation\(request\.resource\.data\.courseId, request\.resource\.data\.studentId\)/);
 });
 
 test('admin enrollment builder creates independent pending payment state and approval evidence', () => {

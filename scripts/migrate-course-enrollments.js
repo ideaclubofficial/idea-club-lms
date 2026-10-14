@@ -40,7 +40,9 @@ function resolveLegacyCourseId(item, student, courses) {
   const matches = Array.from(courses.values()).filter((course) => {
     if (normalize(course.name || course.title) !== name) return false;
     if (grade && normalize(course.grade) !== grade) return false;
-    if (location && normalize(course.location) !== location) return false;
+    const courseLocations = (Array.isArray(course.locations) ? course.locations : []).concat(course.location || '')
+      .map(normalize).filter(Boolean);
+    if (location && !courseLocations.includes(location)) return false;
     return true;
   });
   return matches.length === 1 ? String(matches[0].id || '') : '';

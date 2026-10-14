@@ -75,6 +75,7 @@ function createAdminTransactionContext(status) {
     getEnrollmentStudentId: student => student.id,
     getCourseEnrollmentDocId: (studentId, courseId) => studentId + '__' + courseId,
     isCourseOpenForEnrollment: course => !!course && course.status === 'open' && !course.courseEndStatus && !course.courseEndedAtMs && !course.archived,
+    courseMatchesLocation: (course, location) => (Array.isArray(course.locations) ? course.locations : [course.location]).includes(location),
     getFirebaseAuditUser: () => ({ uid: 'admin-1', email: 'admin@example.com', displayName: 'Admin' }),
     buildAdminCourseEnrollment(student, course, enrollmentStatus) {
       return {

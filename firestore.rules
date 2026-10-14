@@ -261,6 +261,13 @@ service cloud.firestore {
         && (!('courseEndedAtText' in courseData) || courseData.courseEndedAtText == '');
     }
 
+    function courseAcceptsStudentLocation(courseId, studentId) {
+      let courseData = get(/databases/$(database)/documents/courses/$(courseId)).data;
+      let studentLocation = get(/databases/$(database)/documents/students/$(studentId)).data.preferredLocation;
+      return (('locations' in courseData) && courseData.locations is list && studentLocation in courseData.locations)
+        || courseData.location == studentLocation;
+    }
+
     function ownsIncomingCourseEnrollment() {
       return signedIn()
         && request.resource.data.authUid == request.auth.uid
@@ -280,7 +287,7 @@ service cloud.firestore {
         && exists(/databases/$(database)/documents/courses/$(request.resource.data.courseId))
         && isCourseOpenForStudentEnrollment(request.resource.data.courseId)
         && get(/databases/$(database)/documents/courses/$(request.resource.data.courseId)).data.grade == get(/databases/$(database)/documents/students/$(request.resource.data.studentId)).data.grade
-        && get(/databases/$(database)/documents/courses/$(request.resource.data.courseId)).data.location == get(/databases/$(database)/documents/students/$(request.resource.data.studentId)).data.preferredLocation
+        && courseAcceptsStudentLocation(request.resource.data.courseId, request.resource.data.studentId)
         && request.resource.data.grade == get(/databases/$(database)/documents/students/$(request.resource.data.studentId)).data.grade
         && request.resource.data.location == get(/databases/$(database)/documents/students/$(request.resource.data.studentId)).data.preferredLocation;
     }

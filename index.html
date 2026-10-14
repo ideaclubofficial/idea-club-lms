@@ -6244,11 +6244,12 @@
 
               <div class="form-row">
                 <div>
-                  <label>สถานที่เรียน</label>
-                  <select id="adminCourseLocation">
-                    <option>IDEA CLUB ศูนย์ นครสวรรค์</option>
-                    <option>IDEA CLUB ศูนย์ หนองฉาง</option>
-                  </select>
+                  <label>ศูนย์ที่เปิดรับสมัคร</label>
+                  <div class="permission-panel" style="margin:0;padding:12px 14px;">
+                    <label style="display:block;margin:0 0 8px;"><input id="adminCourseLocationNakhonSawan" class="admin-course-location" type="checkbox" value="IDEA CLUB ศูนย์ นครสวรรค์" checked /> IDEA CLUB ศูนย์ นครสวรรค์</label>
+                    <label style="display:block;margin:0;"><input id="adminCourseLocationNongChang" class="admin-course-location" type="checkbox" value="IDEA CLUB ศูนย์ หนองฉาง" /> IDEA CLUB ศูนย์ หนองฉาง</label>
+                  </div>
+                  <p class="mini-muted" style="margin:6px 0 0;">เลือกได้ทั้ง 2 ศูนย์ นักเรียนของแต่ละศูนย์จะสมัครคอร์สเดียวกันได้</p>
                 </div>
                 <div>
                   <p class="mini-muted" style="margin:4px 0 0;">วันและเวลาเรียนจะแสดงจากการตั้งค่าในส่วน <strong>เวลาเรียนของคอร์ส</strong> ด้านล่าง</p>
@@ -18026,7 +18027,7 @@
         }
         if (!isCourseOpenForEnrollment(currentCourseData)) throw createAdminEnrollmentError('course-closed', 'คอร์สปิดรับสมัครหรือจบคอร์สแล้ว');
         if (String(currentStudentData.grade || '').trim() !== String(currentCourseData.grade || '').trim()) throw createAdminEnrollmentError('grade-mismatch', 'ระดับชั้นไม่ตรงกับคอร์ส');
-        if (String(currentStudentData.preferredLocation || '').trim() !== String(currentCourseData.location || '').trim()) throw createAdminEnrollmentError('location-mismatch', 'ศูนย์ไม่ตรงกับคอร์ส');
+        if (!courseMatchesLocation(currentCourseData, currentStudentData.preferredLocation)) throw createAdminEnrollmentError('location-mismatch', 'ศูนย์ไม่ตรงกับคอร์ส');
         savedEnrollment = buildAdminCourseEnrollment(currentStudentData, currentCourseData, status, { enrollmentSource: source || 'admin' });
         savedEnrollment.registeredByUid = auditUser.uid;
         savedEnrollment.registeredByName = auditUser.displayName;
@@ -18114,7 +18115,7 @@
       return (students || []).filter(function(student) {
         return student && student.deleted !== true &&
           String(student.grade || '').trim() === String(course.grade || '').trim() &&
-          String(student.preferredLocation || '').trim() === String(course.location || '').trim() &&
+          courseMatchesLocation(course, student.preferredLocation) &&
           !getStudentCourseEnrollment(student, course.id || course.firebaseDocId);
       });
     }
@@ -18128,7 +18129,7 @@
       const openCourses = sortCoursesByGrade((courses || []).filter(isCourseOpenForEnrollment));
       courseSelect.innerHTML = '<option value="">เลือกคอร์ส</option>' + openCourses.map(function(course) {
         const id = String(course.id || course.firebaseDocId || '');
-        return '<option value="' + escapeHtml(id) + '">' + escapeHtml((course.grade || '-') + ' · ' + (course.name || '-') + ' · ' + (course.location || '-')) + '</option>';
+        return '<option value="' + escapeHtml(id) + '">' + escapeHtml((course.grade || '-') + ' · ' + (course.name || '-') + ' · ' + getCourseLocationsText(course)) + '</option>';
       }).join('');
       if (openCourses.some(function(course) { return String(course.id || course.firebaseDocId || '') === previous; })) courseSelect.value = previous;
       renderAdminBulkEnrollmentStudents();
@@ -18538,7 +18539,7 @@
         '<textarea id="bubbleStudentAddress" rows="3" autocomplete="street-address">' + escapeHtml(s.address || '') + '</textarea>' +
         '<div class="form-row">' +
           '<div><label>คอร์สที่ลงเรียน</label><select id="bubbleStudentCourseId">' + studentCourseOptionsHtml(s.courseId || s.course, s.preferredLocation || '', s.grade || '') + '</select>' +
-          (function() { var sc = courses.find(function(c) { return String(c.id) === String(s.courseId || ''); }); var centerMismatch = sc && s.preferredLocation && sc.location && sc.location !== s.preferredLocation; var gradeMismatch = sc && s.grade && sc.grade && sc.grade !== s.grade; var mismatch = centerMismatch || gradeMismatch; return '<span id="bubbleStudentCourseCenterWarning"' + (mismatch ? '' : ' class="hidden"') + ' style="color:#dc2626;font-size:0.85em">' + (mismatch ? ' คอร์สเดิมไม่ตรงกับชั้น/ศูนย์ที่เลือก กรุณาเลือกคอร์สใหม่' : '') + '</span>'; })() +
+          (function() { var sc = courses.find(function(c) { return String(c.id) === String(s.courseId || ''); }); var centerMismatch = sc && s.preferredLocation && !courseMatchesLocation(sc, s.preferredLocation); var gradeMismatch = sc && s.grade && sc.grade && sc.grade !== s.grade; var mismatch = centerMismatch || gradeMismatch; return '<span id="bubbleStudentCourseCenterWarning"' + (mismatch ? '' : ' class="hidden"') + ' style="color:#dc2626;font-size:0.85em">' + (mismatch ? ' คอร์สเดิมไม่ตรงกับชั้น/ศูนย์ที่เลือก กรุณาเลือกคอร์สใหม่' : '') + '</span>'; })() +
           '</div>' +
           '<div><label>สถานะคอร์ส</label><select id="bubbleStudentCourseStatus">' +
             '<option' + ((s.courseStatus || 'ยังไม่ได้สมัครคอร์ส') === 'ยังไม่ได้สมัครคอร์ส' ? ' selected' : '') + '>ยังไม่ได้สมัครคอร์ส</option>' +
@@ -19364,11 +19365,36 @@
 
     function locationOptionsHtml(selected) {
       const defaults = ['IDEA CLUB ศูนย์ นครสวรรค์', 'IDEA CLUB ศูนย์ หนองฉาง'];
-      const locations = defaults.concat((courses || []).map(function(c) { return String(c.location || '').trim(); }))
+      const locations = defaults.concat((courses || []).reduce(function(all, course) { return all.concat(getCourseLocations(course)); }, []))
         .filter(function(location, index, arr) { return location && arr.indexOf(location) === index; });
       return locations.map(function(location) {
         return '<option value="' + escapeHtml(location) + '"' + (location === selected ? ' selected' : '') + '>' + escapeHtml(location) + '</option>';
       }).join('');
+    }
+
+    function getCourseLocations(course) {
+      const values = course && Array.isArray(course.locations) ? course.locations.slice() : [];
+      if (course && course.location) values.push(course.location);
+      return values.map(function(location) { return String(location || '').trim(); })
+        .filter(function(location, index, all) { return location && all.indexOf(location) === index; });
+    }
+
+    function courseMatchesLocation(course, location) {
+      const normalizeLocation = function(value) { return String(value || '').trim().replace(/\s+/g, ' '); };
+      const target = normalizeLocation(location);
+      return !!target && getCourseLocations(course).some(function(courseLocation) {
+        return normalizeLocation(courseLocation) === target;
+      });
+    }
+
+    function getCourseLocationsText(course) {
+      const locations = getCourseLocations(course);
+      return locations.length ? locations.join(' + ') : '-';
+    }
+
+    function getSelectedCourseLocations(selector) {
+      return Array.from(document.querySelectorAll(selector)).filter(function(input) { return input.checked; })
+        .map(function(input) { return String(input.value || '').trim(); }).filter(Boolean);
     }
 
     function subjectOptionsHtml(selected) {
@@ -19388,7 +19414,7 @@
     function getCoursesForCenter(center) {
       if (!center) return courses.filter(isCourseOpenForEnrollment);
       return courses.filter(function(c) {
-        return isCourseOpenForEnrollment(c) && String(c.location || '') === center;
+        return isCourseOpenForEnrollment(c) && courseMatchesLocation(c, center);
       });
     }
 
@@ -19396,9 +19422,8 @@
       return courses.filter(function(c) {
         if (!isCourseOpenForEnrollment(c)) return false;
         const courseGrade = String(c.grade || '').trim();
-        const courseCenter = String(c.location || '').trim();
         const gradeOk = !grade || courseGrade === grade || courseGrade.includes(grade) || grade.includes(courseGrade);
-        const centerOk = !center || courseCenter === center;
+        const centerOk = !center || courseMatchesLocation(c, center);
         return gradeOk && centerOk;
       });
     }
@@ -20233,7 +20258,7 @@
         const courseId = String(course && (course.id || course.firebaseDocId) || '').trim();
         return isCourseOpenForEnrollment(course) && courseId &&
           String(course.grade || '').trim() === grade &&
-          String(course.location || '').trim() === location &&
+          courseMatchesLocation(course, location) &&
           !getStudentCourseEnrollment(student, courseId);
       });
     }
@@ -20371,8 +20396,7 @@
 
     function isCourseInCurrentStudentCenter(course) {
       const studentLocation = getCurrentStudentPreferredLocation();
-      const courseLocation = String((course && course.location) || '').trim();
-      return !!studentLocation && !!courseLocation && normalizeTextValue(courseLocation) === normalizeTextValue(studentLocation);
+      return courseMatchesLocation(course, studentLocation);
     }
 
     function getStudentAppliedCourseId(student) {
@@ -20724,7 +20748,7 @@
       });
       list.innerHTML = filtered.length ? filtered.map(function(c) {
         const scheduleSummary = formatCourseScheduleSummary(c);
-        return '<div class="card"><span class="tag">' + c.grade + ' · ' + getStudentCourseTag(c) + '</span><h3>' + c.name + '</h3><p>' + c.desc + '</p>' + renderStudentCompletedCourseBadge(c) + renderCourseFeatureBadges(c) + '<p><strong>สถานที่เรียน:</strong> ' + c.location + '</p><p><strong>วันเวลาเรียน:</strong> ' + (getCourseDisplaySchedule(c) || '-') + '</p>' + '<p class="price">' + formatPrice(getCourseMonthlyPrice(c)) + ' / เดือน</p>' + renderStudentCourseApplyState(c) + '</div>';
+        return '<div class="card"><span class="tag">' + c.grade + ' · ' + getStudentCourseTag(c) + '</span><h3>' + c.name + '</h3><p>' + c.desc + '</p>' + renderStudentCompletedCourseBadge(c) + renderCourseFeatureBadges(c) + '<p><strong>ศูนย์ที่สมัครได้:</strong> ' + escapeHtml(getCourseLocationsText(c)) + '</p><p><strong>วันเวลาเรียน:</strong> ' + (getCourseDisplaySchedule(c) || '-') + '</p>' + '<p class="price">' + formatPrice(getCourseMonthlyPrice(c)) + ' / เดือน</p>' + renderStudentCourseApplyState(c) + '</div>';
       }).join('') : '<div class="card"><h3>ยังไม่มีคอร์สใหม่ที่สมัครเพิ่มได้</h3><p>ระดับชั้น ' + grade + ' ที่ ' + studentLocation + ' ยังไม่มีคอร์สเปิดรับสมัครเพิ่มเติมในขณะนี้</p></div>';
     }
 
@@ -21148,7 +21172,7 @@
       const actions = completed
         ? '<button class="btn btn-blue" type="button" onclick="' + actionCall('editCourse', courseId) + '">ดู / แก้ไข</button>'
         : '<button class="btn btn-blue" type="button" onclick="' + actionCall('editCourse', courseId) + '">แก้ไข</button><button class="btn btn-green" type="button" onclick="' + actionCall('completeCourseForStudents', courseId) + '"' + completeDisabled + '>จบคอร์ส</button><button class="btn btn-red" type="button" onclick="' + actionCall('deleteCourse', courseId) + '">ลบ</button>';
-      return '<tr><td>' + escapeHtml(c.grade || '-') + '</td><td>' + escapeHtml(c.name || '-') + '</td><td>' + formatPrice(c.price) + '</td><td>' + getCourseAccessLabel(c) + '</td><td>' + escapeHtml(c.location || '-') + '</td><td>' + escapeHtml(getCourseDisplaySchedule(c) || '-') + '</td><td>' + renderCourseFeatureSummary(c) + '</td><td>' + statusText + '</td><td>' + endCell + '</td><td>' + renderCourseStudentStatusSummary(c) + '</td><td>' + actions + '</td></tr>';
+      return '<tr><td>' + escapeHtml(c.grade || '-') + '</td><td>' + escapeHtml(c.name || '-') + '</td><td>' + formatPrice(c.price) + '</td><td>' + getCourseAccessLabel(c) + '</td><td>' + escapeHtml(getCourseLocationsText(c)) + '</td><td>' + escapeHtml(getCourseDisplaySchedule(c) || '-') + '</td><td>' + renderCourseFeatureSummary(c) + '</td><td>' + statusText + '</td><td>' + endCell + '</td><td>' + renderCourseStudentStatusSummary(c) + '</td><td>' + actions + '</td></tr>';
     }
 
     function renderAdminCourses() {
@@ -21296,8 +21320,9 @@
         if (!c || c.deleted) return false;
         if (!onlineClassHasAccess(c)) return false;
         if (!center) return true;
-        const loc = String(c.location || '').trim();
-        return loc === center || loc.indexOf(center) !== -1 || center.indexOf(loc) !== -1;
+        return courseMatchesLocation(c, center) || getCourseLocations(c).some(function(location) {
+          return location.indexOf(center) !== -1 || center.indexOf(location) !== -1;
+        });
       });
     }
 
@@ -22276,7 +22301,7 @@
       const grade = getElement('adminCourseGrade').value;
       const price = Number(getElement('adminCoursePrice').value || 0);
       const access = getElement('adminCourseAccess').value;
-      const location = getElement('adminCourseLocation').value;
+      const locations = getSelectedCourseLocations('.admin-course-location');
       const scheduleDefaults = readCourseScheduleRows();
       const mergedDays = getCourseScheduleDays(scheduleDefaults);
       const status = getElement('adminCourseStatus').value;
@@ -22284,8 +22309,8 @@
       const desc = getElement('adminCourseDesc').value.trim();
       const endSchedule = getCourseEndScheduleFromInputs('admin');
       const result = getElement('courseSaveResult');
-      if (!name || !price) {
-        result.textContent = 'กรุณากรอกชื่อคอร์สและราคา';
+      if (!name || !price || !locations.length) {
+        result.textContent = !locations.length ? 'กรุณาเลือกศูนย์ที่เปิดรับสมัครอย่างน้อย 1 ศูนย์' : 'กรุณากรอกชื่อคอร์สและราคา';
         result.style.color = '#dc2626';
         return;
       }
@@ -22297,7 +22322,8 @@
       if (editingId) {
         const c = courses.find(function(item) { return String(item.id) === String(editingId); });
         if (c) {
-          Object.assign(c, { name: name, grade: grade, price: price, monthlyPrice: price, access: access, location: location, days: mergedDays, scheduleDefaults: scheduleDefaults, status: status, features: features, desc: desc || 'ไม่มีรายละเอียดเพิ่มเติม' }, endSchedule);
+          const primaryLocation = locations.includes(c.location) ? c.location : locations[0];
+          Object.assign(c, { name: name, grade: grade, price: price, monthlyPrice: price, access: access, location: primaryLocation, locations: locations, days: mergedDays, scheduleDefaults: scheduleDefaults, status: status, features: features, desc: desc || 'ไม่มีรายละเอียดเพิ่มเติม' }, endSchedule);
           try {
             await setFirebaseDocument('courses', c);
           } catch (error) {
@@ -22309,7 +22335,7 @@
         result.textContent = 'แก้ไขคอร์สเรียบร้อย และบันทึกลง Firebase แล้ว';
       } else {
         const newId = createFirebaseDocId('courses');
-        const newCourse = Object.assign({ id: newId, firebaseDocId: newId, grade: grade, name: name, price: price, monthlyPrice: price, access: access, location: location, days: mergedDays, scheduleDefaults: scheduleDefaults, status: status, features: features, onlineLink: '', onlineClassDay: '', onlineClassTime: '', roomId: '', roomPassword: '', onDemandSubject: guessSubjectFromCourse(name), onDemandGrade: grade, onDemandTitle: '', onDemandLink: '', desc: desc || 'ไม่มีรายละเอียดเพิ่มเติม' }, endSchedule);
+        const newCourse = Object.assign({ id: newId, firebaseDocId: newId, grade: grade, name: name, price: price, monthlyPrice: price, access: access, location: locations[0], locations: locations, days: mergedDays, scheduleDefaults: scheduleDefaults, status: status, features: features, onlineLink: '', onlineClassDay: '', onlineClassTime: '', roomId: '', roomPassword: '', onDemandSubject: guessSubjectFromCourse(name), onDemandGrade: grade, onDemandTitle: '', onDemandLink: '', desc: desc || 'ไม่มีรายละเอียดเพิ่มเติม' }, endSchedule);
         courses.push(newCourse);
         try {
           await setFirebaseDocument('courses', newCourse);
@@ -22351,7 +22377,7 @@
           '<div><label>สิทธิ์ที่แถมในคอร์ส</label><select id="bubbleCourseAccess" onchange="updateBubbleCourseFeatureDefaultsFromAccess()"><option' + (c.access === 'Online' ? ' selected' : '') + '>Online</option><option' + (c.access === 'On-demand' ? ' selected' : '') + '>On-demand</option><option' + (c.access === 'Online + On-demand' ? ' selected' : '') + '>Online + On-demand</option><option' + (c.access === 'ไม่มีแถม' ? ' selected' : '') + '>ไม่มีแถม</option></select></div>' +
         '</div>' +
         '<div class="form-row">' +
-          '<div><label>สถานที่เรียน</label><select id="bubbleCourseLocation"><option' + (c.location === 'IDEA CLUB ศูนย์ นครสวรรค์' ? ' selected' : '') + '>IDEA CLUB ศูนย์ นครสวรรค์</option><option' + (c.location === 'IDEA CLUB ศูนย์ หนองฉาง' ? ' selected' : '') + '>IDEA CLUB ศูนย์ หนองฉาง</option></select></div>' +
+          '<div><label>ศูนย์ที่เปิดรับสมัคร</label><div class="permission-panel" style="margin:0;padding:12px 14px;"><label style="display:block;margin:0 0 8px;"><input class="bubble-course-location" type="checkbox" value="IDEA CLUB ศูนย์ นครสวรรค์"' + (courseMatchesLocation(c, 'IDEA CLUB ศูนย์ นครสวรรค์') ? ' checked' : '') + '> IDEA CLUB ศูนย์ นครสวรรค์</label><label style="display:block;margin:0;"><input class="bubble-course-location" type="checkbox" value="IDEA CLUB ศูนย์ หนองฉาง"' + (courseMatchesLocation(c, 'IDEA CLUB ศูนย์ หนองฉาง') ? ' checked' : '') + '> IDEA CLUB ศูนย์ หนองฉาง</label></div><p class="mini-muted">เลือกได้ทั้ง 2 ศูนย์</p></div>' +
           '<div><label>สถานะคอร์ส</label><select id="bubbleCourseStatus"><option value="open"' + (c.status === 'open' ? ' selected' : '') + '>เปิดรับสมัคร</option><option value="closed"' + (c.status === 'closed' ? ' selected' : '') + '>ปิดรับสมัคร</option></select></div>' +
         '</div>' +
         '<div class="form-row">' +
@@ -22365,8 +22391,9 @@
         function() {
           const name = bubbleValue('bubbleCourseName');
           const price = Number(bubbleValue('bubbleCoursePrice') || 0);
-          if (!name || !price) {
-            getElement('editBubbleResult').textContent = 'กรุณากรอกชื่อคอร์สและราคา';
+          const locations = getSelectedCourseLocations('.bubble-course-location');
+          if (!name || !price || !locations.length) {
+            getElement('editBubbleResult').textContent = !locations.length ? 'กรุณาเลือกศูนย์ที่เปิดรับสมัครอย่างน้อย 1 ศูนย์' : 'กรุณากรอกชื่อคอร์สและราคา';
             getElement('editBubbleResult').style.color = '#dc2626';
             return;
           }
@@ -22383,7 +22410,8 @@
             price: price,
             monthlyPrice: price,
             access: bubbleSelectValue('bubbleCourseAccess'),
-            location: bubbleSelectValue('bubbleCourseLocation'),
+            location: locations.includes(c.location) ? c.location : locations[0],
+            locations: locations,
             days: getCourseScheduleDays(scheduleDefaults),
             scheduleDefaults: scheduleDefaults,
             status: bubbleSelectValue('bubbleCourseStatus'),
@@ -22455,7 +22483,8 @@
       getElement('adminCourseGrade').value = 'ป.4';
       getElement('adminCoursePrice').value = '';
       getElement('adminCourseAccess').value = 'Online';
-      getElement('adminCourseLocation').value = 'IDEA CLUB ศูนย์ นครสวรรค์';
+      getElement('adminCourseLocationNakhonSawan').checked = true;
+      getElement('adminCourseLocationNongChang').checked = false;
       renderCourseScheduleRows(null);
       getElement('adminCourseStatus').value = 'open';
       getElement('adminCourseEndEnabled').checked = false;
@@ -22558,7 +22587,7 @@
           const latestCourse = snapshots[1].data() || {};
           if (!isCourseOpenForEnrollment(latestCourse)) throw new Error('course-closed');
           if (String(latestStudent.grade || '').trim() !== String(latestCourse.grade || '').trim()) throw new Error('grade-mismatch');
-          if (String(latestStudent.preferredLocation || '').trim() !== String(latestCourse.location || '').trim()) throw new Error('location-mismatch');
+          if (!courseMatchesLocation(latestCourse, latestStudent.preferredLocation)) throw new Error('location-mismatch');
           transaction.set(enrollmentRef, buildFirebasePayload(enrollment, enrollmentId, true));
           transaction.set(studentRef, buildStudentMainCourseFields(enrollment, latestCourse), { merge: true });
         });
@@ -23639,7 +23668,7 @@
 
       setStudentMobileText('studentMobileCourseName', selectedCourse ? selectedCourse.name : 'ยังไม่มีคอร์ส');
       setStudentMobileText('studentMobileCourseMeta', selectedCourse
-        ? ((student.grade || selectedCourse.grade || '-') + ' · ' + (selectedCourse.location || student.preferredLocation || '-') + ' · ' + (courseStatus || 'รอสมัคร'))
+        ? ((student.grade || selectedCourse.grade || '-') + ' · ' + (student.preferredLocation || selectedCourse.location || '-') + ' · ' + (courseStatus || 'รอสมัคร'))
         : 'สมัครคอร์สก่อนเพื่อเข้าเรียนและชำระเงิน'
       );
 
@@ -41018,7 +41047,7 @@ function receiptStatusText(status) {
         const currentGeneratorCourse = generatorCourseSelect.value;
         const selectedGeneratorCenter = getElement('monthlyPlanGeneratorCenter') ? String(getElement('monthlyPlanGeneratorCenter').value || '').trim() : '';
         const generatorCourses = selectedGeneratorCenter
-          ? activeCourses.filter(function(course) { return String(course.location || '').trim() === selectedGeneratorCenter; })
+          ? activeCourses.filter(function(course) { return courseMatchesLocation(course, selectedGeneratorCenter); })
           : activeCourses;
         generatorCourseSelect.innerHTML = '<option value="">เลือกคอร์ส</option>' + generatorCourses.map(function(course) {
           const id = String(course.id || course.firebaseDocId || '');
@@ -53103,7 +53132,7 @@ function receiptStatusText(status) {
     }
 
     function tfCourseMatchesCenter(course, selectedCenter) {
-      return tfCenterTextMatches(tfGetCourseCenterText(course), selectedCenter);
+      return courseMatchesLocation(course, selectedCenter) || tfCenterTextMatches(tfGetCourseCenterText(course), selectedCenter);
     }
 
     function tfIsNongchangCenter(centerText) {
