@@ -40259,9 +40259,18 @@ function receiptStatusText(status) {
     }
 
     function getStudentScheduleMonthOptions(sessions) {
-      return Array.from(new Set((sessions || []).map(function(session) {
+      const currentMonth = getLocalDateString().slice(0, 7);
+      return Array.from(new Set([currentMonth].concat((sessions || []).map(function(session) {
         return getMonthlySessionMonthKey(session);
-      }).filter(Boolean))).sort();
+      }).filter(Boolean)))).sort();
+    }
+
+    function getCalendarSelectedDate(monthKey, selectedDate) {
+      const today = getLocalDateString();
+      const currentMonth = today.slice(0, 7);
+      const safeMonth = /^\d{4}-\d{2}$/.test(String(monthKey || '')) ? String(monthKey) : currentMonth;
+      if (selectedDate && String(selectedDate).slice(0, 7) === safeMonth) return String(selectedDate);
+      return safeMonth === currentMonth ? today : safeMonth + '-01';
     }
 
     function getSessionDisplaySubject(session) {
@@ -40318,12 +40327,7 @@ function receiptStatusText(status) {
 
     function renderStudentScheduleCalendar(monthKey, sessions) {
       const selectedCourse = getCurrentStudentCourse();
-      const today = getLocalDateString();
-      const sessionDates = sessions.map(function(s) { return getMonthlySessionDate(s); }).filter(Boolean).sort();
-      const initDate = sessionDates.includes(today) ? today : (sessionDates[0] || today);
-      if (!studentCalSelectedDate || !sessionDates.includes(studentCalSelectedDate)) {
-        studentCalSelectedDate = initDate;
-      }
+      studentCalSelectedDate = getCalendarSelectedDate(monthKey, studentCalSelectedDate);
       const studentHolidayContext = getStudentHolidayCalendarContext(selectedCourse);
       const miniCal = renderTeacherMiniCalendar(monthKey, sessions, studentCalSelectedDate, 'selectStudentCalendarDay', studentHolidayContext);
       const agendaSessions = sessions.filter(function(s) {
@@ -40520,7 +40524,7 @@ function receiptStatusText(status) {
               }).join('') + '</div>'
             : '';
           const holidayHtml = holiday ? '<div class="teacher-mini-cal-holiday-label">วันหยุด</div>' : '';
-          html += '<td><div class="' + cls + '" data-date="' + dk + '" onclick="' + ((dots.length || holiday) ? onclickFn + '(\'' + dk + '\')' : '') + '">' +
+          html += '<td><div class="' + cls + '" data-date="' + dk + '" onclick="' + onclickFn + '(\'' + dk + '\')">' +
             date.getDate() + holidayHtml + dotHtml + '</div></td>';
         });
         html += '</tr>';
@@ -40544,13 +40548,7 @@ function receiptStatusText(status) {
     }
 
     function renderTeacherScheduleCalendar(monthKey, sessions) {
-      // pick initial selected date: today if has sessions, else first session day
-      const today = getLocalDateString();
-      const sessionDates = sessions.map(function(s) { return getMonthlySessionDate(s); }).filter(Boolean).sort();
-      const initDate = sessionDates.includes(today) ? today : (sessionDates[0] || today);
-      if (!teacherCalSelectedDate || !sessionDates.includes(teacherCalSelectedDate)) {
-        teacherCalSelectedDate = initDate;
-      }
+      teacherCalSelectedDate = getCalendarSelectedDate(monthKey, teacherCalSelectedDate);
       const teacherHolidayContext = getTeacherHolidayCalendarContext();
       const miniCal = renderTeacherMiniCalendar(monthKey, sessions, teacherCalSelectedDate, 'selectTeacherCalendarDay', teacherHolidayContext);
       // agenda for selected date
@@ -40588,7 +40586,7 @@ function receiptStatusText(status) {
       months.sort();
       const currentMonthKey = getLocalDateString().slice(0, 7);
       if (!teacherCalViewMonth) {
-        teacherCalViewMonth = months.includes(currentMonthKey) ? currentMonthKey : (months[0] || currentMonthKey);
+        teacherCalViewMonth = currentMonthKey;
       }
       const effectiveMonth = teacherCalViewMonth;
       const monthLabel = getElement('teacherCalMonthLabel');
