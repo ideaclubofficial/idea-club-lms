@@ -426,6 +426,24 @@ test('overdue filter runs against status before table pagination', () => {
   assert.equal(h.c.getFilteredPaymentsForTable().length, 3);
 });
 
+test('cancelled payments are removed from active finance lists and expected totals', () => {
+  const c = {
+    payments: [
+      { id: 'active', month: 'ตุลาคม 2569', amount: 3000, status: 'รอชำระเงิน' },
+      { id: 'cancelled', month: 'ตุลาคม 2569', amount: 3000, status: 'ยกเลิก', paymentStatus: 'ยกเลิก', slipStatus: 'cancelled' }
+    ],
+    getPaymentDashboardFilterScope: () => ({ month: 'ทั้งหมด', location: 'ทั้งหมด', grade: 'ทั้งหมด', status: 'ทั้งหมด', keyword: '' }),
+    paymentMatchesDashboardScope: () => true,
+    getPaymentFinalAmount: payment => payment.amount
+  };
+  vm.createContext(c);
+  vm.runInContext(source('isCoursePaymentCancelled'), c);
+  vm.runInContext(source('getDashboardScopedPayments'), c);
+  vm.runInContext(source('getExpectedMonthlyIncome'), c);
+  assert.deepEqual(Array.from(c.getDashboardScopedPayments(true), payment => payment.id), ['active']);
+  assert.equal(c.getExpectedMonthlyIncome('ตุลาคม 2569'), 3000);
+});
+
 test('payment export includes nickname and only the currently filtered rows', () => {
   let exported;
   const c = {
