@@ -3971,6 +3971,9 @@
     .course-bulk-student-item { display:flex; align-items:flex-start; gap:10px; padding:10px 12px; border:1px solid #e5e7eb; border-radius:10px; background:#fff; }
     .course-bulk-student-item input { margin-top:3px; }
     .course-enrollment-result-list { margin:8px 0 0; padding-left:20px; }
+    .course-enrollment-existing-list { display:flex; flex-direction:column; align-items:flex-start; gap:7px; min-width:230px; }
+    .course-enrollment-existing-item { display:flex; align-items:center; gap:6px; flex-wrap:wrap; }
+    .course-enrollment-existing-item .btn { padding:5px 9px; font-size:11px; white-space:nowrap; }
 
     /* ── CHANGE D: Compact payment action buttons ── */
     .payment-actions-wrap { display: flex; flex-wrap: wrap; gap: 5px; align-items: center; min-width: 320px; }
@@ -6352,6 +6355,7 @@
               <div class="form-box">
                 <h3>สมัครคอร์สให้นักเรียน</h3>
                 <p style="margin-bottom:14px;color:#6b7280;">ระบบจะแสดงเฉพาะคอร์สเปิดรับสมัครที่ตรงชั้นและศูนย์ และจะไม่สร้าง enrollment ทับประวัติเดิม</p>
+                <div class="notice" style="margin-bottom:14px;">ลงคอร์สผิด: กดปุ่ม <strong>ยกเลิกคอร์ส</strong> สีแดงข้างคอร์สเดิมของนักเรียน ระบบจะตรวจและยกเลิกยอดเดือนที่สมัครพร้อมกัน</div>
                 <div class="course-enrollment-mode-nav">
                   <button id="adminEnrollModeSingleButton" class="btn btn-blue active" type="button" onclick="switchAdminEnrollmentMode('single')">สมัครรายคน</button>
                   <button id="adminEnrollModeBulkButton" class="btn btn-dark" type="button" onclick="switchAdminEnrollmentMode('bulk')">สมัครแบบกลุ่ม</button>
@@ -17955,8 +17959,12 @@
         const availableCourses = sortCoursesByGrade(getAdminAvailableCoursesForStudent(student));
         const existingCourses = enrollments.length ? enrollments.map(function(enrollment) {
           const course = getCourseForEnrollment(enrollment);
-          return '<span class="tag">' + escapeHtml(((course && course.name) || enrollment.courseName || enrollment.courseId || '-') + ' · ' + (enrollment.courseStatus || '-')) + '</span>';
-        }).join(' ') : '<span class="mini-muted">ยังไม่มีคอร์ส</span>';
+          const courseId = String(enrollment.courseId || '');
+          const cancelButton = isCourseEnrollmentCurrent(enrollment)
+            ? '<button class="btn btn-red" type="button" onclick="' + actionCall('cancelStudentCourse', studentId, courseId) + '">ยกเลิกคอร์ส</button>'
+            : '';
+          return '<span class="course-enrollment-existing-item"><span class="tag">' + escapeHtml(((course && course.name) || enrollment.courseName || enrollment.courseId || '-') + ' · ' + (enrollment.courseStatus || '-')) + '</span>' + cancelButton + '</span>';
+        }).join('') : '<span class="mini-muted">ยังไม่มีคอร์ส</span>';
         const courseOptions = availableCourses.length
           ? '<option value="">เลือกคอร์ส</option>' + availableCourses.map(function(course) {
               const courseId = String(course.id || course.firebaseDocId || '');
@@ -17968,7 +17976,7 @@
         return '<tr data-student-id="' + escapeHtml(studentId) + '">' +
           '<td><strong>' + escapeHtml(student.name || '-') + '</strong><br><span class="mini-muted">ชื่อเล่น: ' + escapeHtml(student.nickname || '-') + '</span><br><span class="mini-muted">' + escapeHtml(student.memberId || student.studentId || '-') + '</span></td>' +
           '<td>' + escapeHtml((student.grade || '-') + ' · ' + (student.preferredLocation || '-')) + '</td>' +
-          '<td>' + existingCourses + '</td>' +
+          '<td><span class="course-enrollment-existing-list">' + existingCourses + '</span></td>' +
           '<td><select class="admin-enroll-row-course" onchange="updateAdminEnrollRowButton(this)"' + (availableCourses.length ? '' : ' disabled') + '>' + courseOptions + '</select></td>' +
           '<td><select class="admin-enroll-row-status"><option value="อนุมัติแล้ว">อนุมัติแล้ว</option><option value="รออนุมัติคอร์ส">รออนุมัติคอร์ส</option></select></td>' +
           '<td><button class="btn btn-green admin-enroll-row-button" type="button" onclick="adminEnrollStudentInCourseFromRow(this)" disabled>เพิ่มคอร์ส</button>' + messageHtml + '</td></tr>';
@@ -18657,6 +18665,7 @@
       addActivityLog('ยกเลิกคอร์สพร้อมยอดชำระ', (student.name || '-') + ' · ' + oldCourse + (financials.payment ? ' · ' + (financials.month || '-') + ' · ' + formatPrice(getPaymentFinalAmount(financials.payment)) : ' · ไม่พบยอด'));
       refreshAdminCourseEnrollmentViews();
       renderAdminCourses();
+      renderAdminCourseEnrollmentSection();
       renderAdminEnrollmentList();
       safeRun(renderPaymentTable, 'cancel-enrollment-payment-table');
       safeRun(updatePaymentSummary, 'cancel-enrollment-payment-summary');

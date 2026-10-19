@@ -119,3 +119,11 @@ test('cancelled receipts remain distinct from manually hidden receipts', () => {
   assert.equal(context.normalizeReceiptStatus('cancelled'), 'cancelled');
   assert.equal(context.normalizeReceiptStatus('hidden'), 'hidden');
 });
+
+test('single-student enrollment screen exposes cancellation beside every current course', () => {
+  const renderSource = functionSource('renderAdminCourseEnrollmentSection');
+  assert.match(renderSource, /isCourseEnrollmentCurrent\(enrollment\)/);
+  assert.match(renderSource, /actionCall\('cancelStudentCourse', studentId, courseId\)/);
+  assert.match(renderSource, />ยกเลิกคอร์ส<\/button>/);
+  assert.match(html, /ลงคอร์สผิด:[\s\S]*ยกเลิกยอดเดือนที่สมัครพร้อมกัน/);
+});
