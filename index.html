@@ -6919,6 +6919,7 @@
                 <div class="stat"><h4>ใบเสร็จรอตรวจ</h4><p id="receiptDraftCount">0 ใบ</p></div>
                 <div class="stat"><h4>แสดงแล้ว</h4><p id="receiptPublishedCount">0 ใบ</p></div>
                 <div class="stat"><h4>ซ่อนไว้</h4><p id="receiptHiddenCount">0 ใบ</p></div>
+                <div class="stat"><h4>ยกเลิกแล้ว</h4><p id="receiptCancelledCount">0 ใบ</p></div>
               </div>
               <br />
               <div class="form-row">
@@ -6929,6 +6930,7 @@
                     <option value="draft">รอตรวจ</option>
                     <option value="published">แสดงแล้ว</option>
                     <option value="hidden">ซ่อนไว้</option>
+                    <option value="cancelled">ยกเลิกแล้ว</option>
                   </select>
                 </div>
                 <div>
@@ -18425,57 +18427,244 @@
     }
 
 
+    function getCourseCancellationPaymentMonth(payment) {
+      return String(payment && (payment.paymentMonth || payment.month || payment.billingMonth || payment.studentSelectedMonth) || '').trim();
+    }
+
+    function courseCancellationPaymentMatchesStudent(payment, student) {
+      if (!payment || !student) return false;
+      const paymentIds = [payment.studentId, payment.memberId, payment.authUid, payment.studentAuthUid]
+        .map(function(value) { return String(value || '').trim(); }).filter(Boolean);
+      const studentIds = [student.id, student.firebaseDocId, student.studentId, student.memberId, student.authUid]
+        .map(function(value) { return String(value || '').trim(); }).filter(Boolean);
+      if (paymentIds.length) return paymentIds.some(function(value) { return studentIds.includes(value); });
+      return normalizeTextValue(payment.student || payment.studentName) === normalizeTextValue(student.name);
+    }
+
+    function courseCancellationPaymentMatchesCourse(payment, enrollment, course) {
+      if (!payment || !enrollment) return false;
+      const enrollmentCourseId = String(enrollment.courseId || '').trim();
+      const paymentCourseId = String(payment.courseId || '').trim();
+      if (paymentCourseId) return !!enrollmentCourseId && paymentCourseId === enrollmentCourseId;
+      const expectedName = normalizeTextValue((course && course.name) || enrollment.courseName || enrollment.course || '');
+      const paymentName = normalizeTextValue(payment.courseName || payment.course || '');
+      return !!expectedName && paymentName === expectedName;
+    }
+
+    function getCourseCancellationRegisteredMonth(enrollment, student) {
+      const legacyStudentMonth = enrollment && enrollment.legacy ? (student && student.registeredCourseMonth) : '';
+      const direct = String((enrollment && enrollment.registeredCourseMonth) || legacyStudentMonth || '').trim();
+      if (direct) return direct;
+      const date = parseRecordDate(enrollment && (enrollment.createdAt || enrollment.registeredAt || enrollment.createdAtMs || enrollment.registeredAtMs || enrollment.createdAtText || enrollment.registeredAtText));
+      return date && !isNaN(date.getTime()) ? getThaiMonthFromDate(date.toISOString().slice(0, 10)) : '';
+    }
+
+    function resolveCourseCancellationFinancials(student, enrollment, course) {
+      const coursePayments = (payments || []).filter(function(payment) {
+        return payment && payment.deleted !== true &&
+          courseCancellationPaymentMatchesStudent(payment, student) &&
+          courseCancellationPaymentMatchesCourse(payment, enrollment, course);
+      });
+      let month = getCourseCancellationRegisteredMonth(enrollment, student);
+      let matches = month ? coursePayments.filter(function(payment) {
+        return getCourseCancellationPaymentMonth(payment) === month;
+      }) : coursePayments.slice();
+      if (!month && matches.length === 1) month = getCourseCancellationPaymentMonth(matches[0]);
+      if (!month && matches.length > 1) {
+        return { error: 'ambiguous-month', message: 'ไม่พบเดือนสมัครที่แน่ชัด และพบยอดของคอร์สนี้มากกว่า 1 รายการ กรุณาให้ฝ่ายการเงินตรวจสอบก่อน' };
+      }
+      if (matches.length > 1) {
+        return { error: 'duplicate-payment', message: 'พบยอดซ้ำของเดือนสมัครมากกว่า 1 รายการ กรุณาให้ฝ่ายการเงินตรวจสอบก่อน' };
+      }
+      const payment = matches[0] || null;
+      const bundle = payment ? getPaymentBundleForPayment(payment) : null;
+      if (bundle && getPaymentBundleDisplayStatus(bundle) !== 'ยกเลิก') {
+        return { error: 'active-bundle', message: 'ยอดเดือนสมัครอยู่ในยอดรวมที่ยังใช้งาน กรุณาให้ฝ่ายการเงินแยกหรือยกเลิกยอดรวมก่อน', month: month, payment: payment, bundle: bundle };
+      }
+      return {
+        error: '', message: '', month: month,
+        payment: payment,
+        receipt: payment ? findReceiptLinkedToPayment(payment) : null,
+        bundle: bundle
+      };
+    }
+
+    function getCourseCancellationConfirmation(student, enrollment, course, financials) {
+      const courseName = (course && course.name) || enrollment.courseName || enrollment.course || '-';
+      const lines = [
+        'ยืนยันยกเลิกการลงทะเบียน',
+        '- นักเรียน: ' + (student.name || '-'),
+        '- คอร์ส: ' + courseName,
+        '- เดือนสมัคร: ' + (financials.month || enrollment.registeredCourseMonth || '-')
+      ];
+      if (financials.payment) {
+        lines.push('- ยอดที่จะยกเลิก: ' + formatPrice(getPaymentFinalAmount(financials.payment)));
+        lines.push('- สถานะยอดเดิม: ' + getPaymentDisplayStatus(financials.payment));
+        lines.push('- ใบเสร็จ: ' + (financials.receipt ? (financials.receipt.receiptNo || 'มีใบเสร็จ') + ' (จะเปลี่ยนเป็นยกเลิก)' : 'ไม่มี'));
+        lines.push('', 'สลิปและหลักฐานเดิมจะยังถูกเก็บไว้ การยกเลิกในระบบไม่ใช่การคืนเงินจริง');
+      } else {
+        lines.push('- ไม่พบยอดชำระของเดือนสมัคร');
+      }
+      return lines.join('\n');
+    }
+
+
     async function cancelStudentCourse(id, courseId) {
       if (!canManageAdminCourseEnrollments()) { alert('ไม่มีสิทธิ์'); return; }
       const student = findStudentById(id);
       if (!student) return;
       const enrollment = getStudentCourseEnrollment(student, courseId || student.courseId);
       if (!enrollment) return;
+      if (String(enrollment.courseStatus || '') === 'ยกเลิก' || String(enrollment.enrollmentStatus || '') === 'cancelled') {
+        alert('รายการลงทะเบียนนี้ถูกยกเลิกแล้ว');
+        return;
+      }
       const course = getCourseForEnrollment(enrollment);
       const oldCourse = (course && course.name) || enrollment.courseName || student.course || '-';
-      if (!confirm('ยกเลิกคอร์ส ' + oldCourse + ' ของ ' + (student.name || '-') + ' ใช่หรือไม่?')) return;
-      if (enrollment.legacy) {
-        const preservedEnrollment = Object.assign({}, enrollment, {
-          courseStatus: 'ยกเลิก',
-          paymentStatus: 'ยกเลิก',
-          enrollmentStatus: 'cancelled',
-          everApproved: enrollment.everApproved === true || isCourseStatusApproved(enrollment.courseStatus),
-          historicalMediaStatus: 'not_applicable',
-          cancelledAtText: new Date().toLocaleString('th-TH'),
-          createdAtText: enrollment.createdAtText || new Date().toLocaleString('th-TH'),
-          enrollmentSource: 'legacy_admin_cancel'
-        });
-        delete preservedEnrollment.legacy;
-        await setFirebaseDocument('courseEnrollments', preservedEnrollment);
-        courseEnrollments.push(preservedEnrollment);
-        const fallbackEnrollment = getLatestCurrentStudentEnrollment(student, preservedEnrollment.courseId);
-        Object.assign(student, buildStudentMainCourseFields(fallbackEnrollment, getCourseForEnrollment(fallbackEnrollment)));
-        await setFirebaseDocument('students', student);
-      } else {
-        enrollment.courseStatus = 'ยกเลิก';
-        enrollment.paymentStatus = 'ยกเลิก';
-        enrollment.enrollmentStatus = 'cancelled';
-        enrollment.cancelledAtText = new Date().toLocaleString('th-TH');
-        const syncsMainCourse = String(student.courseId || '') === String(enrollment.courseId || '');
-        if (syncsMainCourse) {
-          const fallbackEnrollment = getLatestCurrentStudentEnrollment(student, enrollment.courseId);
-          const fallbackCourse = getCourseForEnrollment(fallbackEnrollment);
-          Object.assign(student, buildStudentMainCourseFields(fallbackEnrollment, fallbackCourse));
-          const enrollmentDocId = String(enrollment.firebaseDocId || enrollment.id || getCourseEnrollmentDocId(getEnrollmentStudentId(student), enrollment.courseId));
-          const studentDocId = getEnrollmentStudentId(student);
-          const batch = db.batch();
-          batch.set(db.collection('courseEnrollments').doc(enrollmentDocId), buildFirebasePayload(enrollment, enrollmentDocId, false), { merge: true });
-          batch.set(db.collection('students').doc(studentDocId), buildFirebasePayload(student, studentDocId, false), { merge: true });
-          await batch.commit();
-        } else {
-          await setFirebaseDocument('courseEnrollments', enrollment);
-        }
+      const financials = resolveCourseCancellationFinancials(student, enrollment, course);
+      if (financials.error) { alert(financials.message); return; }
+      if (financials.payment && !hasPermission('admin.finance') && !hasPermission('admin.full')) {
+        alert('รายการนี้มียอดชำระ ผู้ยกเลิกต้องมีสิทธิ์จัดการนักเรียนและสิทธิ์การเงิน เพื่อยกเลิกคอร์สกับยอดพร้อมกัน');
+        return;
       }
-      addActivityLog('ยกเลิกคอร์ส', (student.name || '-') + ' · เดิม: ' + oldCourse);
-      renderAdminStudents();
-      renderAdminDashboard();
+      if (!firebaseReady || !db) { alert('Firebase ยังไม่พร้อมใช้งาน กรุณาลองใหม่'); return; }
+      if (!confirm(getCourseCancellationConfirmation(student, enrollment, course, financials))) return;
+
+      const studentDocId = getEnrollmentStudentId(student);
+      const enrollmentDocId = String(enrollment.firebaseDocId || enrollment.id || getCourseEnrollmentDocId(studentDocId, enrollment.courseId));
+      const paymentDocId = financials.payment ? String(financials.payment.firebaseDocId || financials.payment.id || '') : '';
+      const receiptDocId = financials.receipt ? String(financials.receipt.firebaseDocId || financials.receipt.id || '') : '';
+      if (!studentDocId || !enrollmentDocId || (financials.payment && !paymentDocId) || (financials.receipt && !receiptDocId)) {
+        alert('ข้อมูลอ้างอิงไม่ครบ กรุณาให้ฝ่ายการเงินตรวจสอบก่อนยกเลิก');
+        return;
+      }
+
+      const auditUser = getFirebaseAuditUser();
+      const nowMs = Date.now();
+      const nowText = new Date(nowMs).toLocaleString('th-TH');
+      const fallbackEnrollment = getLatestCurrentStudentEnrollment(student, enrollment.courseId);
+      const fallbackCourse = getCourseForEnrollment(fallbackEnrollment);
+      const syncsMainCourse = enrollment.legacy || String(student.courseId || '') === String(enrollment.courseId || '');
+      let cancelledEnrollment = null;
+      let cancelledPayment = null;
+      let cancelledReceipt = null;
+      let nextStudentFields = null;
+
+      try {
+        await db.runTransaction(async function(transaction) {
+          const enrollmentRef = db.collection('courseEnrollments').doc(enrollmentDocId);
+          const studentRef = db.collection('students').doc(studentDocId);
+          const paymentRef = paymentDocId ? db.collection('payments').doc(paymentDocId) : null;
+          const receiptRef = receiptDocId ? db.collection('receipts').doc(receiptDocId) : null;
+          const refs = [enrollmentRef, studentRef];
+          if (paymentRef) refs.push(paymentRef);
+          if (receiptRef) refs.push(receiptRef);
+          const snapshots = await Promise.all(refs.map(function(ref) { return transaction.get(ref); }));
+          const enrollmentSnap = snapshots[0];
+          const studentSnap = snapshots[1];
+          let snapshotIndex = 2;
+          const paymentSnap = paymentRef ? snapshots[snapshotIndex++] : null;
+          const receiptSnap = receiptRef ? snapshots[snapshotIndex++] : null;
+          if (!studentSnap.exists) throw new Error('student-not-found');
+          if (!enrollment.legacy && !enrollmentSnap.exists) throw new Error('course-enrollment-not-found');
+          const latestEnrollment = Object.assign({}, enrollment, enrollmentSnap.exists ? enrollmentSnap.data() : {});
+          if (String(latestEnrollment.courseStatus || '') === 'ยกเลิก' || String(latestEnrollment.enrollmentStatus || '') === 'cancelled') {
+            throw new Error('course-enrollment-already-cancelled');
+          }
+          if (paymentRef && !paymentSnap.exists) throw new Error('payment-not-found');
+
+          cancelledEnrollment = Object.assign({}, latestEnrollment, {
+            id: enrollmentDocId,
+            firebaseDocId: enrollmentDocId,
+            courseStatus: 'ยกเลิก',
+            paymentStatus: 'ยกเลิก',
+            enrollmentStatus: 'cancelled',
+            everApproved: latestEnrollment.everApproved === true || isCourseStatusApproved(latestEnrollment.courseStatus),
+            historicalMediaStatus: 'not_applicable',
+            cancellationReason: 'wrong_course_enrollment',
+            cancelledAtMs: nowMs,
+            cancelledAtText: nowText,
+            cancelledByUid: auditUser.uid,
+            cancelledByName: auditUser.displayName,
+            createdAtText: latestEnrollment.createdAtText || nowText,
+            enrollmentSource: enrollment.legacy ? 'legacy_admin_cancel' : (latestEnrollment.enrollmentSource || '')
+          });
+          delete cancelledEnrollment.legacy;
+          transaction.set(enrollmentRef, buildFirebasePayload(cancelledEnrollment, enrollmentDocId, !enrollmentSnap.exists), { merge: true });
+
+          if (paymentRef) {
+            cancelledPayment = Object.assign({}, paymentSnap.data(), {
+              id: (financials.payment && financials.payment.id) || paymentDocId,
+              firebaseDocId: paymentDocId,
+              status: 'ยกเลิก',
+              paymentStatus: 'ยกเลิก',
+              slipStatus: 'cancelled',
+              adminReviewStatus: 'cancelled',
+              receiptStatus: 'cancelled',
+              cancellationReason: 'wrong_course_enrollment',
+              cancelledEnrollmentId: enrollmentDocId,
+              cancelledAtMs: nowMs,
+              cancelledAtText: nowText,
+              cancelledByUid: auditUser.uid,
+              cancelledByName: auditUser.displayName
+            });
+            transaction.set(paymentRef, buildFirebasePayload(cancelledPayment, paymentDocId, false), { merge: true });
+          }
+
+          if (receiptRef && receiptSnap && receiptSnap.exists) {
+            cancelledReceipt = Object.assign({}, receiptSnap.data(), {
+              id: (financials.receipt && financials.receipt.id) || receiptDocId,
+              firebaseDocId: receiptDocId,
+              status: 'cancelled',
+              cancellationReason: 'wrong_course_enrollment',
+              cancelledEnrollmentId: enrollmentDocId,
+              cancelledPaymentId: paymentDocId,
+              cancelledAtMs: nowMs,
+              cancelledAtText: nowText,
+              cancelledByUid: auditUser.uid,
+              cancelledByName: auditUser.displayName
+            });
+            transaction.set(receiptRef, buildFirebasePayload(cancelledReceipt, receiptDocId, false), { merge: true });
+          }
+
+          if (syncsMainCourse) {
+            nextStudentFields = buildStudentMainCourseFields(fallbackEnrollment, fallbackCourse);
+            transaction.set(studentRef, Object.assign({}, nextStudentFields, {
+              updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
+              updatedBy: auditUser.uid,
+              updatedByName: auditUser.displayName
+            }), { merge: true });
+          }
+        });
+      } catch (error) {
+        console.error('cancelStudentCourse error:', error);
+        if (error && error.message === 'course-enrollment-already-cancelled') alert('รายการลงทะเบียนนี้ถูกยกเลิกแล้ว');
+        else if (error && error.message === 'payment-not-found') alert('ยอดชำระมีการเปลี่ยนแปลงหรือถูกลบ กรุณารีเฟรชแล้วตรวจสอบใหม่');
+        else alert('ยกเลิกการลงทะเบียนไม่สำเร็จ ข้อมูลทั้งหมดไม่ได้ถูกเปลี่ยน: ' + ((error && (error.message || error.code)) || 'ไม่ทราบสาเหตุ'));
+        return;
+      }
+
+      if (enrollment.legacy) {
+        if (!(courseEnrollments || []).some(function(item) { return String(item.firebaseDocId || item.id || '') === enrollmentDocId; })) courseEnrollments.push(cancelledEnrollment);
+      } else {
+        Object.assign(enrollment, cancelledEnrollment);
+      }
+      if (cancelledPayment) Object.assign(financials.payment, cancelledPayment);
+      if (cancelledReceipt) Object.assign(financials.receipt, cancelledReceipt);
+      if (nextStudentFields) Object.assign(student, nextStudentFields);
+      if (currentStudent && getEnrollmentStudentId(currentStudent) === studentDocId) Object.assign(currentStudent, student);
+
+      addActivityLog('ยกเลิกคอร์สพร้อมยอดชำระ', (student.name || '-') + ' · ' + oldCourse + (financials.payment ? ' · ' + (financials.month || '-') + ' · ' + formatPrice(getPaymentFinalAmount(financials.payment)) : ' · ไม่พบยอด'));
+      refreshAdminCourseEnrollmentViews();
+      renderAdminCourses();
+      renderAdminEnrollmentList();
+      safeRun(renderPaymentTable, 'cancel-enrollment-payment-table');
+      safeRun(updatePaymentSummary, 'cancel-enrollment-payment-summary');
+      safeRun(renderDashboardPaymentSummary, 'cancel-enrollment-dashboard-payment');
+      safeRun(renderAdminReceipts, 'cancel-enrollment-admin-receipts');
+      safeRun(renderStudentReceipts, 'cancel-enrollment-student-receipts');
       updateStudentCourseDisplay();
-      alert('ยกเลิกคอร์สเรียบร้อย นักเรียนสามารถสมัครคอร์สใหม่ได้');
+      alert('ยกเลิกคอร์สเรียบร้อย' + (financials.payment ? ' และยกเลิกยอดเดือน ' + (financials.month || '-') + ' แล้ว' : ' โดยไม่พบยอดที่ต้องยกเลิก') + '\nนักเรียนสามารถสมัครคอร์สใหม่ได้');
     }
 
     function renderPendingCourseApprovalList() {
@@ -20340,9 +20529,14 @@
 
     function getEnrollmentPaymentStatus(enrollment, student) {
       if (!enrollment) return '-';
-      const matched = (payments || []).filter(function(payment) {
+      const allMatched = (payments || []).filter(function(payment) {
         return isStudentPaymentRecord(student || currentStudent, payment) && String(payment.courseId || '') === String(enrollment.courseId || '');
-      }).slice().sort(compareStudentVisiblePaymentPriority);
+      });
+      const registeredMonth = String(enrollment.registeredCourseMonth || '').trim();
+      const monthMatched = registeredMonth ? allMatched.filter(function(payment) {
+        return getCourseCancellationPaymentMonth(payment) === registeredMonth;
+      }) : [];
+      const matched = (monthMatched.length ? monthMatched : allMatched).slice().sort(compareStudentVisiblePaymentPriority);
       return matched.length ? getPaymentDisplayStatus(matched[0]) : (enrollment.paymentStatus || 'รอชำระเงิน');
     }
 
@@ -31316,6 +31510,7 @@
       const p = paymentId ? (payments || []).find(function(px) { return String(px.id || '') === String(paymentId) || String(px.firebaseDocId || '') === String(paymentId); }) : null;
       const displayStatus = p ? getPaymentDisplayStatus(p) : status;
       const isPaid = displayStatus === 'ชำระแล้ว';
+      const isCancelled = displayStatus === 'ยกเลิก';
       const rowIdScript = 'openSlipReviewModal(this.closest(\'[data-payment-id]\').dataset.paymentId)';
       const bundle = getPaymentBundleForPayment(p);
       if (bundle && bundle.status !== 'ยกเลิก' && bundle.status !== 'cancelled') {
@@ -31331,6 +31526,13 @@
       const isOverdue = displayStatus === 'ค้างชำระ';
       const overdueNoticeBtn = isOverdue && paymentId ? '<button class="btn btn-orange" type="button" onclick="' + actionCall('printOverdueNotice', paymentId) + '">ใบแจ้งหนี้</button>' : '';
       const adjustAmountBtn = p && canEditPaymentAmount(p) ? '<button class="btn btn-blue" type="button" onclick="editPaymentAmountDiscount(this)">แก้ยอด</button>' : '';
+      if (isCancelled) {
+        return '<div class="payment-actions-wrap">' +
+          '<button class="btn btn-blue" type="button" onclick="showPaymentDetail(this)">ดูข้อมูล</button>' +
+          ocrBtn +
+          '<button class="btn btn-dark" type="button" onclick="editPaymentAdminNote(this)">หมายเหตุ</button>' +
+        '</div>';
+      }
       if (isPaid) {
         return '<div class="payment-actions-wrap">' +
           '<button class="btn btn-blue" type="button" onclick="' + rowIdScript + '">ตรวจสลิป</button>' +
@@ -34456,6 +34658,7 @@
 
     function getPaymentDisplayStatus(payment) {
       if (!payment) return 'รอชำระเงิน';
+      if (payment.status === 'ยกเลิก' || payment.paymentStatus === 'ยกเลิก' || payment.slipStatus === 'cancelled' || payment.slipStatus === 'canceled') return 'ยกเลิก';
       if (payment.status === 'ชำระแล้ว' || payment.paymentStatus === 'ชำระแล้ว' || payment.slipStatus === 'approved') return 'ชำระแล้ว';
       if (payment.status === 'รอตรวจสลิป' || payment.paymentStatus === 'รอตรวจสลิป' || payment.slipStatus === 'waiting_admin_review') return 'รอตรวจสลิป';
       if (payment.slipStatus === 'rejected' || payment.status === 'rejected' || payment.status === 'ไม่ผ่าน') return 'สลิปไม่ผ่าน';
@@ -35303,7 +35506,8 @@
       const value = String(status || '').trim().toLowerCase();
       if (!value || value === 'draft' || value === 'รอตรวจ') return 'draft';
       if (value === 'published' || value === 'issued' || value === 'approved' || value === 'แสดงแล้ว') return 'published';
-      if (value === 'hidden' || value === 'void' || value === 'cancelled' || value === 'canceled' || value === 'ซ่อนไว้') return 'hidden';
+      if (value === 'cancelled' || value === 'canceled' || value === 'ยกเลิก') return 'cancelled';
+      if (value === 'hidden' || value === 'void' || value === 'ซ่อนไว้') return 'hidden';
       return value;
     }
 
@@ -35329,6 +35533,7 @@ function receiptStatusText(status) {
       const normalized = normalizeReceiptStatus(status);
       if (normalized === 'published') return '<span class="status-paid">แสดงแล้ว</span>';
       if (normalized === 'hidden') return '<span class="status-absent">ซ่อนไว้</span>';
+      if (normalized === 'cancelled') return '<span class="status-absent">ยกเลิกแล้ว</span>';
       return '<span class="status-waiting">รอตรวจ</span>';
     }
 
@@ -35695,6 +35900,7 @@ function receiptStatusText(status) {
     async function publishReceipt(id) {
       const receipt = receipts.find(function(r) { return String(r.id) === String(id); });
       if (!receipt) return;
+      if (normalizeReceiptStatus(receipt.status) === 'cancelled') { alert('ใบเสร็จนี้ถูกยกเลิกแล้ว ไม่สามารถนำกลับมาแสดงได้'); return; }
       receipt.status = 'published';
       await setFirebaseDocument('receipts', receipt);
       renderAdminReceipts();
@@ -35705,6 +35911,7 @@ function receiptStatusText(status) {
     async function hideReceipt(id) {
       const receipt = receipts.find(function(r) { return String(r.id) === String(id); });
       if (!receipt) return;
+      if (normalizeReceiptStatus(receipt.status) === 'cancelled') { alert('ใบเสร็จนี้ถูกยกเลิกแล้ว'); return; }
       receipt.status = 'hidden';
       await setFirebaseDocument('receipts', receipt);
       renderAdminReceipts();
@@ -35716,6 +35923,7 @@ function receiptStatusText(status) {
       const index = receipts.findIndex(function(r) { return String(r.id) === String(id); });
       if (index === -1) return;
       const receipt = receipts[index];
+      if (normalizeReceiptStatus(receipt.status) === 'cancelled') { alert('ใบเสร็จที่ยกเลิกแล้วต้องเก็บไว้เป็นประวัติ ไม่สามารถลบได้'); return; }
       if (!confirm('ต้องการลบใบเสร็จ ' + (receipt.receiptNo || '-') + ' ออกจากระบบใช่หรือไม่?')) return;
       try {
         await deleteFirebaseDocument('receipts', receipt);
@@ -35729,6 +35937,17 @@ function receiptStatusText(status) {
         console.error('delete receipt firebase error:', error);
         alert('ลบใบเสร็จไม่สำเร็จ: ' + (error.message || error.code || 'ไม่ทราบสาเหตุ'));
       }
+    }
+
+    function renderAdminReceiptActions(receipt) {
+      const receiptId = receipt && receipt.id || '';
+      const base = '<button class="btn btn-blue" type="button" onclick="' + actionCall('openReceiptAdmin', receiptId) + '">ดูตัวอย่าง</button>' +
+        '<button class="btn btn-blue" type="button" onclick="' + actionCall('downloadReceiptPdf', receiptId) + '">ดาวน์โหลด PDF</button>';
+      if (normalizeReceiptStatus(receipt && receipt.status) === 'cancelled') return base;
+      return base +
+        '<button class="btn btn-green" type="button" onclick="' + actionCall('publishReceipt', receiptId) + '">แสดง</button>' +
+        '<button class="btn btn-dark" type="button" onclick="' + actionCall('hideReceipt', receiptId) + '">ซ่อน</button>' +
+        '<button class="btn btn-red" type="button" onclick="' + actionCall('deleteReceipt', receiptId) + '">ลบ</button>';
     }
 
     function renderAdminReceipts() {
@@ -35754,16 +35973,18 @@ function receiptStatusText(status) {
       const arStart = (adminReceiptsCurrentPage - 1) * LIST_PAGE_SIZE;
       const arItems = filtered.slice(arStart, arStart + LIST_PAGE_SIZE);
       tbody.innerHTML = arItems.length ? arItems.map(function(r) {
-        return '<tr><td>' + (r.receiptNo || '-') + '</td><td>' + (r.student || '-') + '</td><td>' + (r.course || '-') + '</td><td>' + getReceiptMonth(r) + '</td><td>' + formatPrice(getReceiptDisplayTotal(r)) + '</td><td>' + receiptStatusText(r.status) + '</td><td><button class="btn btn-blue" type="button" onclick="' + actionCall('openReceiptAdmin', r.id) + '">ดูตัวอย่าง</button><button class="btn btn-blue" type="button" onclick="' + actionCall('downloadReceiptPdf', r.id) + '">ดาวน์โหลด PDF</button><button class="btn btn-green" type="button" onclick="' + actionCall('publishReceipt', r.id) + '">แสดง</button><button class="btn btn-dark" type="button" onclick="' + actionCall('hideReceipt', r.id) + '">ซ่อน</button><button class="btn btn-red" type="button" onclick="' + actionCall('deleteReceipt', r.id) + '">ลบ</button></td></tr>';
+        return '<tr><td>' + (r.receiptNo || '-') + '</td><td>' + (r.student || '-') + '</td><td>' + (r.course || '-') + '</td><td>' + getReceiptMonth(r) + '</td><td>' + formatPrice(getReceiptDisplayTotal(r)) + '</td><td>' + receiptStatusText(r.status) + '</td><td>' + renderAdminReceiptActions(r) + '</td></tr>';
       }).join('') : '<tr><td colspan="7">ยังไม่มีใบเสร็จตามเงื่อนไขที่เลือก</td></tr>';
       renderTablePagination('adminReceiptsPagination', adminReceiptsCurrentPage, arTotalPages, filtered.length, 'changeAdminReceiptsPage');
 
       const draftCount = (receipts || []).filter(function(r) { return normalizeReceiptStatus(r.status) === 'draft'; }).length;
       const publishedCount = (receipts || []).filter(function(r) { return normalizeReceiptStatus(r.status) === 'published'; }).length;
       const hiddenCount = (receipts || []).filter(function(r) { return normalizeReceiptStatus(r.status) === 'hidden'; }).length;
+      const cancelledCount = (receipts || []).filter(function(r) { return normalizeReceiptStatus(r.status) === 'cancelled'; }).length;
       if (getElement('receiptDraftCount')) getElement('receiptDraftCount').textContent = draftCount + ' ใบ';
       if (getElement('receiptPublishedCount')) getElement('receiptPublishedCount').textContent = publishedCount + ' ใบ';
       if (getElement('receiptHiddenCount')) getElement('receiptHiddenCount').textContent = hiddenCount + ' ใบ';
+      if (getElement('receiptCancelledCount')) getElement('receiptCancelledCount').textContent = cancelledCount + ' ใบ';
     }
 
     function changeAdminReceiptsPage(direction) {
@@ -45972,9 +46193,9 @@ function receiptStatusText(status) {
         const receipt = (receipts || []).find(function(r) { return r.receiptNo === receiptNo; });
         if (!receipt) return;
         const status = normalizeReceiptStatus(receipt.status);
-        row.children[5].innerHTML = '<span class="' + (status === 'published' ? 'status-paid' : status === 'hidden' ? 'status-absent' : 'status-waiting') + '">' + receiptStatusThai(status) + '</span>';
+        row.children[5].innerHTML = '<span class="' + (status === 'published' ? 'status-paid' : status === 'hidden' || status === 'cancelled' ? 'status-absent' : 'status-waiting') + '">' + receiptStatusThai(status) + '</span>';
         const actionCell = row.children[6];
-        if (actionCell && actionCell.getAttribute('data-receipt-final') !== '1') {
+        if (status !== 'cancelled' && actionCell && actionCell.getAttribute('data-receipt-final') !== '1') {
           actionCell.setAttribute('data-receipt-final','1');
           actionCell.innerHTML += '<button class="btn btn-red" type="button" onclick="cancelReceiptByNo(\'' + jsArg(receiptNo) + '\')">ยกเลิกใบเสร็จ</button>';
         }
