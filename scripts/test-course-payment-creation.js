@@ -28,7 +28,7 @@ test('shared enrollment payment path prefers registered month and normal payment
     }
   };
   vm.createContext(context);
-  for (const name of ['getCourseEnrollmentPaymentMonth', 'findCourseEnrollmentPayment', 'prepareCourseEnrollmentPayment']) {
+  for (const name of ['isCoursePaymentCancelled', 'getCourseEnrollmentPaymentMonth', 'findCourseEnrollmentPayment', 'prepareCourseEnrollmentPayment']) {
     vm.runInContext(source(name), context);
   }
   const prepared = context.prepareCourseEnrollmentPayment(student, enrollment, course, 'พฤศจิกายน 2569');
@@ -49,7 +49,7 @@ test('shared enrollment payment path reuses the existing student course month re
     buildStudentMonthlyPaymentRecord: () => { throw new Error('must not build a duplicate'); }
   };
   vm.createContext(context);
-  for (const name of ['getCourseEnrollmentPaymentMonth', 'findCourseEnrollmentPayment', 'prepareCourseEnrollmentPayment']) {
+  for (const name of ['isCoursePaymentCancelled', 'getCourseEnrollmentPaymentMonth', 'findCourseEnrollmentPayment', 'prepareCourseEnrollmentPayment']) {
     vm.runInContext(source(name), context);
   }
   const prepared = context.prepareCourseEnrollmentPayment(
@@ -62,11 +62,40 @@ test('shared enrollment payment path reuses the existing student course month re
   assert.equal(prepared.payment, existing);
 });
 
-function createAdminTransactionContext(status) {
+test('re-enrollment creates a new bill instead of reviving a cancelled payment', () => {
+  const cancelled = {
+    id: 'cancelled-payment', studentId: 'student-1', courseId: 'course-1', month: 'ตุลาคม 2569',
+    status: 'ยกเลิก', paymentStatus: 'ยกเลิก', slipStatus: 'cancelled'
+  };
+  const fresh = { id: 'fresh-payment', studentId: 'student-1', courseId: 'course-1', month: 'ตุลาคม 2569' };
+  const context = {
+    payments: [cancelled],
+    getThaiMonthFromDate: () => 'ตุลาคม 2569',
+    isStudentPaymentRecord: (student, payment) => payment.studentId === student.id,
+    getCourseForEnrollment: () => ({ id: 'course-1', name: 'Course A' }),
+    buildStudentMonthlyPaymentRecord: () => ({ ...fresh })
+  };
+  vm.createContext(context);
+  for (const name of ['isCoursePaymentCancelled', 'getCourseEnrollmentPaymentMonth', 'findCourseEnrollmentPayment', 'prepareCourseEnrollmentPayment']) {
+    vm.runInContext(source(name), context);
+  }
+  const prepared = context.prepareCourseEnrollmentPayment(
+    { id: 'student-1' },
+    { courseId: 'course-1', courseName: 'Course A', registeredCourseMonth: 'ตุลาคม 2569' },
+    { id: 'course-1', name: 'Course A' },
+    ''
+  );
+  assert.equal(prepared.created, true);
+  assert.equal(prepared.payment.id, 'fresh-payment');
+  assert.equal(cancelled.status, 'ยกเลิก');
+});
+
+function createAdminTransactionContext(status, options = {}) {
   const writes = [];
   const refs = {};
+  const existingEnrollment = options.existingEnrollment || null;
   const context = {
-    courseEnrollments: [],
+    courseEnrollments: existingEnrollment ? [{ ...existingEnrollment }] : [],
     payments: [],
     firebaseReady: true,
     firebase: { firestore: { FieldValue: { serverTimestamp: () => 'timestamp' } } },
@@ -85,6 +114,9 @@ function createAdminTransactionContext(status) {
         courseId: course.id,
         courseName: course.name,
         courseStatus: enrollmentStatus,
+        enrollmentStatus: 'active',
+        paymentStatus: 'รอชำระเงิน',
+        everApproved: enrollmentStatus === 'อนุมัติแล้ว',
         registeredCourseMonth: 'ตุลาคม 2569'
       };
     },
@@ -115,6 +147,7 @@ function createAdminTransactionContext(status) {
           async get(ref) {
             if (ref.collection === 'students') return { exists: true, data: () => ({ grade: 'ม.1', preferredLocation: 'Center A' }) };
             if (ref.collection === 'courses') return { exists: true, data: () => ({ status: 'open', grade: 'ม.1', location: 'Center A' }) };
+            if (ref.collection === 'courseEnrollments' && existingEnrollment) return { exists: true, data: () => ({ ...existingEnrollment }) };
             return { exists: false, data: () => ({}) };
           },
           set(ref, data) { writes.push({ ref, data }); }
@@ -125,11 +158,36 @@ function createAdminTransactionContext(status) {
   };
   vm.createContext(context);
   vm.runInContext(source('createAdminEnrollmentError'), context);
+  vm.runInContext(source('isCourseEnrollmentReenrollable'), context);
+  vm.runInContext(source('buildReactivatedCourseEnrollment'), context);
   const start = html.indexOf('    async function createAdminCourseEnrollmentTransaction(');
   const end = html.indexOf('    function getAdminEnrollmentErrorMessage(', start);
   vm.runInContext(html.slice(start, end), context);
   return { context, writes, status };
 }
+
+test('admin can reactivate a cancelled enrollment while preserving cancellation audit', async () => {
+  const existingEnrollment = {
+    id: 'student-1__course-1', firebaseDocId: 'student-1__course-1', studentId: 'student-1', courseId: 'course-1',
+    courseName: 'Course A', courseStatus: 'ยกเลิก', enrollmentStatus: 'cancelled', paymentStatus: 'ยกเลิก',
+    registeredCourseMonth: 'กันยายน 2569', cancelledAtMs: 100, cancelledAtText: 'เดิม', cancellationReason: 'wrong_course_enrollment'
+  };
+  const { context, writes } = createAdminTransactionContext('อนุมัติแล้ว', { existingEnrollment });
+  const result = await context.createAdminCourseEnrollmentTransaction(
+    { id: 'student-1', grade: 'ม.1', preferredLocation: 'Center A', courseId: null, course: 'ยังไม่ได้สมัครคอร์ส' },
+    { id: 'course-1', name: 'Course A', grade: 'ม.1', location: 'Center A', status: 'open' },
+    'อนุมัติแล้ว',
+    'admin_single_enrollment'
+  );
+  assert.equal(result.enrollment.courseStatus, 'อนุมัติแล้ว');
+  assert.equal(result.enrollment.enrollmentStatus, 'active');
+  assert.equal(result.enrollment.cancellationHistory.length, 1);
+  assert.equal(result.enrollment.cancellationHistory[0].cancelledAtMs, 100);
+  assert.equal(result.enrollment.reactivationCount, 1);
+  assert.equal(result.paymentResult.created, true);
+  assert.equal(writes[0].ref.collection, 'courseEnrollments');
+  assert.equal(context.courseEnrollments[0].courseStatus, 'อนุมัติแล้ว');
+});
 
 test('admin approved enrollment creates its first payment in the same transaction', async () => {
   const { context, writes } = createAdminTransactionContext('อนุมัติแล้ว');

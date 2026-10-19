@@ -17968,7 +17968,9 @@
         const courseOptions = availableCourses.length
           ? '<option value="">เลือกคอร์ส</option>' + availableCourses.map(function(course) {
               const courseId = String(course.id || course.firebaseDocId || '');
-              return '<option value="' + escapeHtml(courseId) + '">' + escapeHtml(course.name || courseId) + '</option>';
+              const previousEnrollment = getStudentCourseEnrollment(student, courseId);
+              const reapplyText = isCourseEnrollmentReenrollable(previousEnrollment) ? ' · สมัครใหม่หลังยกเลิก' : '';
+              return '<option value="' + escapeHtml(courseId) + '">' + escapeHtml((course.name || courseId) + reapplyText) + '</option>';
             }).join('')
           : '<option value="">ไม่มีคอร์สที่สมัครเพิ่มได้</option>';
         const message = adminCourseEnrollmentRowMessages.get(studentId);
@@ -18029,19 +18031,25 @@
         const enrollmentSnap = await transaction.get(enrollmentRef);
         if (!studentSnap.exists || studentSnap.data().deleted === true) throw createAdminEnrollmentError('student-not-found', 'ไม่พบข้อมูลนักเรียน');
         if (!courseSnap.exists || courseSnap.data().deleted === true) throw createAdminEnrollmentError('course-not-found', 'ไม่พบข้อมูลคอร์ส');
-        if (enrollmentSnap.exists) throw createAdminEnrollmentError('course-enrollment-already-exists', 'นักเรียนมี enrollment ของคอร์สนี้แล้ว');
+        const previousEnrollment = enrollmentSnap.exists ? enrollmentSnap.data() : null;
+        const reactivatingCancelledEnrollment = isCourseEnrollmentReenrollable(previousEnrollment);
+        if (enrollmentSnap.exists && !reactivatingCancelledEnrollment) throw createAdminEnrollmentError('course-enrollment-already-exists', 'นักเรียนมี enrollment ของคอร์สนี้แล้ว');
         const currentStudentData = Object.assign({}, student, studentSnap.data(), { id: studentId, firebaseDocId: studentId });
         const currentCourseData = Object.assign({}, course, courseSnap.data(), { id: courseId, firebaseDocId: courseId });
-        if (String(currentStudentData.courseId || '') === courseId && String(currentStudentData.course || '') !== 'ยังไม่ได้สมัครคอร์ส') {
+        if (!reactivatingCancelledEnrollment && String(currentStudentData.courseId || '') === courseId && String(currentStudentData.course || '') !== 'ยังไม่ได้สมัครคอร์ส') {
           throw createAdminEnrollmentError('course-enrollment-already-exists', 'นักเรียนมีประวัติคอร์สนี้แล้ว');
         }
         if (!isCourseOpenForEnrollment(currentCourseData)) throw createAdminEnrollmentError('course-closed', 'คอร์สปิดรับสมัครหรือจบคอร์สแล้ว');
         if (String(currentStudentData.grade || '').trim() !== String(currentCourseData.grade || '').trim()) throw createAdminEnrollmentError('grade-mismatch', 'ระดับชั้นไม่ตรงกับคอร์ส');
         if (!courseMatchesLocation(currentCourseData, currentStudentData.preferredLocation)) throw createAdminEnrollmentError('location-mismatch', 'ศูนย์ไม่ตรงกับคอร์ส');
         savedEnrollment = buildAdminCourseEnrollment(currentStudentData, currentCourseData, status, { enrollmentSource: source || 'admin' });
+        if (reactivatingCancelledEnrollment) {
+          savedEnrollment = buildReactivatedCourseEnrollment(previousEnrollment, savedEnrollment, auditUser, Date.now());
+        }
         savedEnrollment.registeredByUid = auditUser.uid;
         savedEnrollment.registeredByName = auditUser.displayName;
-        transaction.set(enrollmentRef, buildFirebasePayload(savedEnrollment, enrollmentId, true));
+        if (enrollmentSnap.exists) transaction.set(enrollmentRef, buildFirebasePayload(savedEnrollment, enrollmentId, false), { merge: true });
+        else transaction.set(enrollmentRef, buildFirebasePayload(savedEnrollment, enrollmentId, true));
         if (savedEnrollment.courseStatus === 'อนุมัติแล้ว' && canCreatePayment) {
           paymentResult = prepareCourseEnrollmentPayment(currentStudentData, savedEnrollment, currentCourseData, savedEnrollment.registeredCourseMonth);
           if (paymentResult.payment && paymentResult.created) {
@@ -18063,7 +18071,9 @@
         }
         transaction.set(studentRef, studentMainUpdate, { merge: true });
       });
-      if (!courseEnrollments.some(function(item) { return String(item.firebaseDocId || item.id || '') === enrollmentId; })) courseEnrollments.push(savedEnrollment);
+      const localEnrollment = courseEnrollments.find(function(item) { return String(item.firebaseDocId || item.id || '') === enrollmentId; });
+      if (localEnrollment) Object.assign(localEnrollment, savedEnrollment);
+      else courseEnrollments.push(savedEnrollment);
       if (paymentResult.payment && paymentResult.created && !payments.some(function(item) {
         return String(item.firebaseDocId || item.id || '') === String(paymentResult.payment.firebaseDocId || paymentResult.payment.id || '');
       })) payments.push(paymentResult.payment);
@@ -18123,10 +18133,11 @@
     function getAdminBulkEligibleStudents(course) {
       if (!isCourseOpenForEnrollment(course)) return [];
       return (students || []).filter(function(student) {
-        return student && student.deleted !== true &&
-          String(student.grade || '').trim() === String(course.grade || '').trim() &&
+        if (!student || student.deleted === true) return false;
+        const existingEnrollment = getStudentCourseEnrollment(student, course.id || course.firebaseDocId);
+        return String(student.grade || '').trim() === String(course.grade || '').trim() &&
           courseMatchesLocation(course, student.preferredLocation) &&
-          !getStudentCourseEnrollment(student, course.id || course.firebaseDocId);
+          (!existingEnrollment || isCourseEnrollmentReenrollable(existingEnrollment));
       });
     }
 
@@ -18439,6 +18450,12 @@
       return String(payment && (payment.paymentMonth || payment.month || payment.billingMonth || payment.studentSelectedMonth) || '').trim();
     }
 
+    function isCoursePaymentCancelled(payment) {
+      const status = String(payment && (payment.status || payment.paymentStatus) || '').trim().toLowerCase();
+      const slipStatus = String(payment && payment.slipStatus || '').trim().toLowerCase();
+      return status === 'ยกเลิก' || status === 'cancelled' || status === 'canceled' || slipStatus === 'cancelled' || slipStatus === 'canceled';
+    }
+
     function courseCancellationPaymentMatchesStudent(payment, student) {
       if (!payment || !student) return false;
       const paymentIds = [payment.studentId, payment.memberId, payment.authUid, payment.studentAuthUid]
@@ -18469,7 +18486,7 @@
 
     function resolveCourseCancellationFinancials(student, enrollment, course) {
       const coursePayments = (payments || []).filter(function(payment) {
-        return payment && payment.deleted !== true &&
+        return payment && payment.deleted !== true && !isCoursePaymentCancelled(payment) &&
           courseCancellationPaymentMatchesStudent(payment, student) &&
           courseCancellationPaymentMatchesCourse(payment, enrollment, course);
       });
@@ -20454,10 +20471,11 @@
       if (!grade || !location) return [];
       return (courses || []).filter(function(course) {
         const courseId = String(course && (course.id || course.firebaseDocId) || '').trim();
+        const existingEnrollment = getStudentCourseEnrollment(student, courseId);
         return isCourseOpenForEnrollment(course) && courseId &&
           String(course.grade || '').trim() === grade &&
           courseMatchesLocation(course, location) &&
-          !getStudentCourseEnrollment(student, courseId);
+          (!existingEnrollment || isCourseEnrollmentReenrollable(existingEnrollment));
       });
     }
 
@@ -20465,6 +20483,48 @@
       const status = String(enrollment && enrollment.courseStatus || '').trim();
       return !!enrollment && enrollment.deleted !== true &&
         !['ยังไม่ได้สมัครคอร์ส', 'ยกเลิก', 'ไม่อนุมัติ', 'จบคอร์ส'].includes(status);
+    }
+
+    function isCourseEnrollmentReenrollable(enrollment) {
+      if (!enrollment || enrollment.deleted === true) return false;
+      const courseStatus = String(enrollment.courseStatus || '').trim().toLowerCase();
+      const enrollmentStatus = String(enrollment.enrollmentStatus || '').trim().toLowerCase();
+      return courseStatus === 'ยกเลิก' || enrollmentStatus === 'cancelled' || enrollmentStatus === 'canceled';
+    }
+
+    function buildReactivatedCourseEnrollment(previousEnrollment, nextEnrollment, auditUser, nowMs) {
+      const previous = previousEnrollment || {};
+      const next = nextEnrollment || {};
+      const timestamp = Number(nowMs || Date.now());
+      const history = Array.isArray(previous.cancellationHistory) ? previous.cancellationHistory.slice() : [];
+      const cancellationAudit = {
+        courseStatus: previous.courseStatus || 'ยกเลิก',
+        paymentStatus: previous.paymentStatus || 'ยกเลิก',
+        registeredCourseMonth: previous.registeredCourseMonth || '',
+        cancellationReason: previous.cancellationReason || '',
+        cancelledAtMs: Number(previous.cancelledAtMs || 0),
+        cancelledAtText: previous.cancelledAtText || '',
+        cancelledByUid: previous.cancelledByUid || '',
+        cancelledByName: previous.cancelledByName || ''
+      };
+      const alreadyArchived = history.some(function(item) {
+        return Number(item && item.cancelledAtMs || 0) === cancellationAudit.cancelledAtMs &&
+          String(item && item.registeredCourseMonth || '') === cancellationAudit.registeredCourseMonth;
+      });
+      if (!alreadyArchived) history.push(cancellationAudit);
+      return Object.assign({}, previous, next, {
+        cancellationHistory: history,
+        reactivationCount: Number(previous.reactivationCount || 0) + 1,
+        reactivatedAtMs: timestamp,
+        reactivatedAtText: new Date(timestamp).toLocaleString('th-TH'),
+        reactivatedByUid: auditUser && auditUser.uid || '',
+        reactivatedByName: auditUser && auditUser.displayName || '',
+        cancellationReason: '',
+        cancelledAtMs: 0,
+        cancelledAtText: '',
+        cancelledByUid: '',
+        cancelledByName: ''
+      });
     }
 
     function isCourseCompleted(course) {
@@ -23104,7 +23164,7 @@
       if (!student || !courseId || !paymentMonth) return null;
       return (payments || []).find(function(payment) {
         const recordMonth = String(payment.paymentMonth || payment.month || payment.billingMonth || '').trim();
-        return isStudentPaymentRecord(student, payment) && String(payment.courseId || '').trim() === courseId && recordMonth === paymentMonth;
+        return !isCoursePaymentCancelled(payment) && isStudentPaymentRecord(student, payment) && String(payment.courseId || '').trim() === courseId && recordMonth === paymentMonth;
       }) || null;
     }
 

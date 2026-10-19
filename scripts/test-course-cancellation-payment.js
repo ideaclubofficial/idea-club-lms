@@ -25,6 +25,7 @@ function createContext() {
   vm.createContext(context);
   [
     'getCourseCancellationPaymentMonth',
+    'isCoursePaymentCancelled',
     'courseCancellationPaymentMatchesStudent',
     'courseCancellationPaymentMatchesCourse',
     'getCourseCancellationRegisteredMonth',
@@ -97,6 +98,19 @@ test('active payment bundle blocks cancellation without selecting a payment for 
   const result = context.resolveCourseCancellationFinancials(student, enrollment, { id: 'course-a', name: 'Course A' });
   assert.equal(result.error, 'active-bundle');
   assert.equal(result.bundle.id, 'bundle-1');
+});
+
+test('a second cancellation ignores the preserved payment from the previous cancelled attempt', () => {
+  const context = createContext();
+  const student = { id: 'student-1', name: 'Student' };
+  const enrollment = { courseId: 'course-a', courseName: 'Course A', registeredCourseMonth: 'ตุลาคม 2569' };
+  context.payments.push(
+    { id: 'old-cancelled', studentId: 'student-1', courseId: 'course-a', month: 'ตุลาคม 2569', status: 'ยกเลิก', slipStatus: 'cancelled' },
+    { id: 'new-active', studentId: 'student-1', courseId: 'course-a', month: 'ตุลาคม 2569', status: 'รอชำระเงิน' }
+  );
+  const result = context.resolveCourseCancellationFinancials(student, enrollment, { id: 'course-a', name: 'Course A' });
+  assert.equal(result.error, '');
+  assert.equal(result.payment.id, 'new-active');
 });
 
 test('cancellation implementation is atomic, permission guarded, and preserves cancelled audit records', () => {

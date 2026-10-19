@@ -99,7 +99,7 @@ test('completed or archived courses are never open for a new enrollment', () => 
   assert.equal(context.isCourseOpenForEnrollment({ status: 'closed' }), false);
 });
 
-test('admin course choices require open course with exact student grade and center and no prior enrollment', () => {
+test('admin course choices allow cancelled enrollment again but still block completed history', () => {
   const context = createContext();
   const student = { id: 'student-1', authUid: 'uid-1', grade: 'ม.1', preferredLocation: 'ศูนย์ A' };
   context.courses.push(
@@ -107,10 +107,14 @@ test('admin course choices require open course with exact student grade and cent
     { id: 'closed', name: 'Closed', grade: 'ม.1', location: 'ศูนย์ A', status: 'closed' },
     { id: 'wrong-grade', name: 'Wrong grade', grade: 'ม.2', location: 'ศูนย์ A', status: 'open' },
     { id: 'wrong-center', name: 'Wrong center', grade: 'ม.1', location: 'ศูนย์ B', status: 'open' },
-    { id: 'history', name: 'History', grade: 'ม.1', location: 'ศูนย์ A', status: 'open' }
+    { id: 'history', name: 'History', grade: 'ม.1', location: 'ศูนย์ A', status: 'open' },
+    { id: 'cancelled', name: 'Cancelled', grade: 'ม.1', location: 'ศูนย์ A', status: 'open' }
   );
-  context.courseEnrollments.push({ studentId: 'student-1', authUid: 'uid-1', courseId: 'history', courseStatus: 'จบคอร์ส' });
-  assert.deepEqual(Array.from(context.getAdminAvailableCoursesForStudent(student), item => item.id), ['available']);
+  context.courseEnrollments.push(
+    { studentId: 'student-1', authUid: 'uid-1', courseId: 'history', courseStatus: 'จบคอร์ส' },
+    { studentId: 'student-1', authUid: 'uid-1', courseId: 'cancelled', courseStatus: 'ยกเลิก', enrollmentStatus: 'cancelled' }
+  );
+  assert.deepEqual(Array.from(context.getAdminAvailableCoursesForStudent(student), item => item.id), ['available', 'cancelled']);
 });
 
 test('course can accept enrollment from both configured centers while legacy single-center courses still work', () => {
@@ -190,7 +194,7 @@ test('latest current enrollment fallback ignores ended courses and uses newest t
   assert.equal(context.getLatestCurrentStudentEnrollment(student, 'new').courseId, 'old');
 });
 
-test('bulk enrollment candidates match the selected open course and exclude every prior enrollment status', () => {
+test('bulk enrollment candidates include cancelled enrollment for reactivation', () => {
   const context = createContext();
   const course = { id: 'course-a', grade: 'ม.1', location: 'ศูนย์ A', status: 'open' };
   context.students.push(
@@ -200,7 +204,7 @@ test('bulk enrollment candidates match the selected open course and exclude ever
     { id: 'history', name: 'History', grade: 'ม.1', preferredLocation: 'ศูนย์ A' }
   );
   context.courseEnrollments.push({ studentId: 'history', courseId: 'course-a', courseStatus: 'ยกเลิก' });
-  assert.deepEqual(Array.from(context.getAdminBulkEligibleStudents(course), student => student.id), ['eligible']);
+  assert.deepEqual(Array.from(context.getAdminBulkEligibleStudents(course), student => student.id), ['eligible', 'history']);
   course.status = 'closed';
   assert.equal(context.getAdminBulkEligibleStudents(course).length, 0);
 });
