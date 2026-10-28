@@ -582,6 +582,20 @@ test('bulk tuition PDF renders exactly one A4 page per notice group', async () =
   assert.equal(calls.saved, 'notices.pdf');
 });
 
+test('tuition notice image wait decodes an already loaded first-page QR before capture', async () => {
+  let decoded = false;
+  const image = {
+    complete: true,
+    naturalWidth: 900,
+    decode: async () => { decoded = true; }
+  };
+  const c = { Array, Promise };
+  vm.createContext(c);
+  vm.runInContext(source('waitForTuitionNoticeImages'), c);
+  await c.waitForTuitionNoticeImages({ querySelectorAll: () => [image] });
+  assert.equal(decoded, true);
+});
+
 test('tuition notice download requires finance permission and a selected month', () => {
   const alerts = [];
   let allowed = false;
