@@ -548,7 +548,7 @@ test('tuition notice summary counts students once across centers and marks missi
 });
 
 test('payment toolbar exposes the bulk tuition notice action', () => {
-  assert.match(html, /onclick="openTuitionNoticePrintPreview\(\)"[^>]*>พิมพ์ใบแจ้งยอดค่าเรียน</);
+  assert.match(html, /onclick="downloadFilteredTuitionNoticesPdf\(\)"[^>]*>ดาวน์โหลด PDF ใบแจ้งยอดค่าเรียน</);
 });
 
 test('bulk tuition PDF renders exactly one A4 page per notice group', async () => {
@@ -582,7 +582,7 @@ test('bulk tuition PDF renders exactly one A4 page per notice group', async () =
   assert.equal(calls.saved, 'notices.pdf');
 });
 
-test('tuition notice preview requires finance permission and a selected month', () => {
+test('tuition notice download requires finance permission and a selected month', () => {
   const alerts = [];
   let allowed = false;
   let month = 'ตุลาคม 2569';
@@ -594,16 +594,34 @@ test('tuition notice preview requires finance permission and a selected month', 
     buildTuitionNoticeGroups: () => { builds++; return []; }
   };
   vm.createContext(c);
-  vm.runInContext('let tempTuitionNoticeGroups = [];', c);
-  vm.runInContext(source('openTuitionNoticePrintPreview'), c);
-  c.openTuitionNoticePrintPreview();
+  vm.runInContext(source('downloadFilteredTuitionNoticesPdf'), c);
+  c.downloadFilteredTuitionNoticesPdf();
   assert.equal(builds, 0);
   assert.equal(alerts.pop(), 'ไม่มีสิทธิ์');
   allowed = true;
   month = 'ทั้งหมด';
-  c.openTuitionNoticePrintPreview();
+  c.downloadFilteredTuitionNoticesPdf();
   assert.equal(builds, 0);
-  assert.equal(alerts.pop(), 'กรุณาเลือกเดือนที่ต้องการพิมพ์ใบแจ้งยอดก่อน');
+  assert.equal(alerts.pop(), 'กรุณาเลือกเดือนที่ต้องการดาวน์โหลดใบแจ้งยอดก่อน');
+});
+
+test('tuition notice toolbar downloads the filtered groups without opening a preview', async () => {
+  const groups = [{ key: 's1|center-a' }];
+  let downloaded;
+  const c = {
+    hasPermission: () => true,
+    alert() {},
+    getElement: () => ({ value: 'ตุลาคม 2569' }),
+    buildTuitionNoticeGroups: () => groups,
+    getTuitionNoticePreviewSummary: () => ({ missingQr: 0 }),
+    getSafeFileName: value => value,
+    downloadTuitionNoticesPdf: async (items, filename) => { downloaded = { items, filename }; }
+  };
+  vm.createContext(c);
+  vm.runInContext(source('downloadFilteredTuitionNoticesPdf'), c);
+  await c.downloadFilteredTuitionNoticesPdf();
+  assert.equal(downloaded.items, groups);
+  assert.equal(downloaded.filename, 'tuition-notices-ตุลาคม 2569.pdf');
 });
 
 test('monthly payment targets exclude enrollments whose course has completed', () => {

@@ -6807,7 +6807,7 @@
                 <button id="adminPaymentRefreshBtn" class="btn btn-dark" type="button" onclick="refreshAdminPaymentData()">รีเฟรชข้อมูล</button>
                 <button class="btn btn-green" type="button" onclick="openSlipDriveFolder()">Google Drive สลิป</button>
                 <button class="btn btn-blue" type="button" onclick="exportPaymentsCsv()">ส่งออกการเงิน CSV</button>
-                <button class="btn btn-orange" type="button" onclick="openTuitionNoticePrintPreview()">พิมพ์ใบแจ้งยอดค่าเรียน</button>
+                <button class="btn btn-orange" type="button" onclick="downloadFilteredTuitionNoticesPdf()">ดาวน์โหลด PDF ใบแจ้งยอดค่าเรียน</button>
               </div>
             </div>
 
@@ -12107,7 +12107,6 @@
     const receipts = [];
     let receiptRunningNumber = 1;
     let tempPaymentDetail = null;
-    let tempTuitionNoticeGroups = [];
     let studentReceiptCurrentPage = 1;
     const studentReceiptPerPage = 20;
 
@@ -35489,11 +35488,11 @@
       return { noticeCount: groups.length, studentCount: uniqueStudents.size, totalAmount: totalAmount, missingQr: missingQr };
     }
 
-    function openTuitionNoticePrintPreview() {
+    function downloadFilteredTuitionNoticesPdf() {
       if (!hasPermission('admin.finance')) { alert('ไม่มีสิทธิ์'); return; }
       const month = getElement('paymentStatusMonthFilter') ? getElement('paymentStatusMonthFilter').value : 'ทั้งหมด';
       if (!month || month === 'ทั้งหมด') {
-        alert('กรุณาเลือกเดือนที่ต้องการพิมพ์ใบแจ้งยอดก่อน');
+        alert('กรุณาเลือกเดือนที่ต้องการดาวน์โหลดใบแจ้งยอดก่อน');
         return;
       }
       const groups = buildTuitionNoticeGroups();
@@ -35501,21 +35500,11 @@
         alert('ไม่พบรายการที่ยังไม่ชำระตามตัวกรองที่เลือก');
         return;
       }
-      tempTuitionNoticeGroups = groups;
       const summary = getTuitionNoticePreviewSummary(groups);
-      const warning = summary.missingQr
-        ? '<p style="color:#d97706;font-weight:700;margin:10px 0;">⚠️ มี ' + summary.missingQr + ' ใบที่ยังไม่มี QR Code ระบบจะแสดงข้อความให้ติดต่อเจ้าหน้าที่แทน</p>'
-        : '';
-      openViewBubble('พรีวิวใบแจ้งยอดชำระค่าเรียน',
-        '<div class="dashboard-grid" style="margin-bottom:14px;">' +
-          '<div class="stat"><h4>จำนวนใบ</h4><p>' + summary.noticeCount + ' ใบ</p></div>' +
-          '<div class="stat"><h4>จำนวนนักเรียน</h4><p>' + summary.studentCount + ' คน</p></div>' +
-          '<div class="stat"><h4>ยอดรวม</h4><p>' + escapeHtml(formatPrice(summary.totalAmount)) + '</p></div>' +
-        '</div>' + warning +
-        '<p class="mini-muted" style="margin-bottom:10px;">ตัวอย่างใบแรกจากทั้งหมด ' + summary.noticeCount + ' ใบ · PDF จะเรียงตามระดับชั้นและ Member ID</p>' +
-        '<div style="max-height:58vh;overflow:auto;background:#e5e7eb;padding:12px;border-radius:12px;">' + tuitionNoticeHtml(groups[0]) + '</div>' +
-        '<div class="test-actions" style="margin-top:14px;"><button class="btn btn-orange" type="button" onclick="downloadCurrentTuitionNoticesPdf()">ดาวน์โหลด PDF สำหรับพิมพ์</button><button class="btn btn-dark" type="button" onclick="closeEditBubble()">ปิด</button></div>'
-      );
+      if (summary.missingQr) {
+        alert('มี ' + summary.missingQr + ' ใบที่ยังไม่มี QR Code ระบบจะแสดงข้อความให้ติดต่อเจ้าหน้าที่แทน');
+      }
+      return downloadTuitionNoticesPdf(groups, 'tuition-notices-' + getSafeFileName(month) + '.pdf');
     }
 
     function waitForTuitionNoticeImages(element) {
@@ -35572,16 +35561,6 @@
         console.error('download tuition notices pdf error:', error);
         alert('ดาวน์โหลด PDF ไม่สำเร็จ: ' + (error.message || error.code || 'ไม่ทราบสาเหตุ'));
       }
-    }
-
-    function downloadCurrentTuitionNoticesPdf() {
-      if (!hasPermission('admin.finance')) { alert('ไม่มีสิทธิ์'); return; }
-      if (!tempTuitionNoticeGroups.length) {
-        alert('ไม่พบข้อมูลใบแจ้งยอด กรุณาเปิดพรีวิวใหม่');
-        return;
-      }
-      const month = getElement('paymentStatusMonthFilter') ? getElement('paymentStatusMonthFilter').value : '';
-      return downloadTuitionNoticesPdf(tempTuitionNoticeGroups, 'tuition-notices-' + getSafeFileName(month || 'monthly') + '.pdf');
     }
 
     function overdueNoticeHtml(paymentId) {
