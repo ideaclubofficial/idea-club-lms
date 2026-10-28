@@ -467,6 +467,145 @@ test('payment export includes nickname and only the currently filtered rows', ()
   assert.equal(exported.rows.length, 3);
 });
 
+function setupTuitionNotices() {
+  const students = [
+    { id: 's1', authUid: 'u1', memberId: '001', name: 'สมชาย', grade: 'ป.4' },
+    { id: 's2', authUid: 'u2', memberId: '002', name: 'สมหญิง', grade: 'ป.5' }
+  ];
+  const c = {
+    students,
+    systemSettings: { instituteName: 'IDEA CLUB', phone: '0812345678' },
+    getFilteredPaymentsForTable: () => c.payments,
+    getPaymentDisplayStatus: payment => payment.status || 'รอชำระเงิน',
+    isCoursePaymentCancelled: payment => payment.status === 'ยกเลิก',
+    getPaymentStudentRecord: payment => students.find(student => student.id === payment.studentId) || null,
+    getUniqueStudentRecordByPaymentName: payment => {
+      const matches = students.filter(student => student.name === payment.student);
+      return matches.length === 1 ? matches[0] : null;
+    },
+    getCourseByPaymentStudentOrName: payment => ({ location: payment.center || '' }),
+    getPaymentCenterTextForQr: payment => payment.center || '',
+    getPaymentCenterKey: value => String(value || '').includes('หนองฉาง') ? 'nongchang' : String(value || '').includes('นครสวรรค์') ? 'nakhonsawan' : '',
+    getPaymentQrImageSrcForContext: payment => payment.qr || '',
+    getPaymentFinalAmount: payment => payment.finalAmount ?? payment.amount ?? 0,
+    normalizeText: value => String(value || '').trim().replace(/\s+/g, ' '),
+    gradeOrder: grade => ['ป.4', 'ป.5'].indexOf(grade),
+    escapeHtml: value => String(value ?? ''),
+    formatPrice: value => Number(value).toLocaleString('th-TH') + ' บาท',
+    getPrintableLogoHtml: () => '<div>LOGO</div>',
+    Set,
+    Date
+  };
+  vm.createContext(c);
+  for (const name of ['getTuitionNoticeIdentityKeys','isTuitionNoticePrintablePayment','buildTuitionNoticeGroups','getTuitionNoticePreviewSummary','tuitionNoticeHtml']) {
+    vm.runInContext(source(name), c);
+  }
+  return c;
+}
+
+test('tuition notices include only unpaid states and group one student per center', () => {
+  const c = setupTuitionNotices();
+  c.payments = [
+    { id: 'p1', studentId: 's1', student: 'สมชาย', center: 'IDEA CLUB ศูนย์ นครสวรรค์', course: 'Math', month: 'ตุลาคม 2569', amount: 1200, status: 'รอชำระเงิน', qr: 'qr-a' },
+    { id: 'p2', studentId: 's1', student: 'สมชาย', center: 'IDEA CLUB ศูนย์ นครสวรรค์', course: 'Science', month: 'ตุลาคม 2569', finalAmount: 900, amount: 1500, status: 'สลิปไม่ผ่าน', qr: 'qr-a' },
+    { id: 'p3', studentId: 's1', student: 'สมชาย', center: 'IDEA CLUB ศูนย์ หนองฉาง', course: 'English', month: 'ตุลาคม 2569', amount: 800, status: 'ค้างชำระ', qr: 'qr-b' },
+    { id: 'paid', studentId: 's1', center: 'IDEA CLUB ศูนย์ นครสวรรค์', amount: 500, status: 'ชำระแล้ว' },
+    { id: 'review', studentId: 's1', center: 'IDEA CLUB ศูนย์ นครสวรรค์', amount: 500, status: 'รอตรวจสลิป' },
+    { id: 'deleted', studentId: 's1', center: 'IDEA CLUB ศูนย์ นครสวรรค์', amount: 500, status: 'รอชำระเงิน', deleted: true }
+  ];
+  const groups = c.buildTuitionNoticeGroups();
+  assert.equal(groups.length, 2);
+  assert.deepEqual(Array.from(groups, group => group.payments.length), [2, 1]);
+  assert.deepEqual(Array.from(groups, group => group.totalAmount), [2100, 800]);
+  assert.deepEqual(Array.from(groups, group => group.qrSrc), ['qr-a', 'qr-b']);
+});
+
+test('tuition notices use unique legacy names but never merge ambiguous nameless identities', () => {
+  const c = setupTuitionNotices();
+  c.students.push({ id: 's3', name: 'ชื่อซ้ำ', grade: 'ป.4' }, { id: 's4', name: 'ชื่อซ้ำ', grade: 'ป.4' });
+  c.payments = [
+    { id: 'legacy-1', student: 'สมหญิง', center: 'IDEA CLUB ศูนย์ นครสวรรค์', amount: 1000, status: 'รอชำระเงิน' },
+    { id: 'legacy-2', student: 'สมหญิง', center: 'IDEA CLUB ศูนย์ นครสวรรค์', amount: 900, status: 'ค้างชำระ' },
+    { id: 'duplicate-1', student: 'ชื่อซ้ำ', center: 'IDEA CLUB ศูนย์ นครสวรรค์', amount: 800, status: 'รอชำระเงิน' },
+    { id: 'duplicate-2', student: 'ชื่อซ้ำ', center: 'IDEA CLUB ศูนย์ นครสวรรค์', amount: 700, status: 'รอชำระเงิน' }
+  ];
+  const groups = c.buildTuitionNoticeGroups();
+  assert.equal(groups.length, 3);
+  assert.equal(groups.find(group => group.studentName === 'สมหญิง').payments.length, 2);
+  assert.equal(groups.filter(group => group.studentName === 'ชื่อซ้ำ').length, 2);
+});
+
+test('tuition notice summary counts students once across centers and marks missing QR', () => {
+  const c = setupTuitionNotices();
+  c.payments = [
+    { id: 'a', studentId: 's1', student: 'สมชาย', center: 'IDEA CLUB ศูนย์ นครสวรรค์', course: 'Math', amount: 1000, status: 'รอชำระเงิน', qr: 'qr-a' },
+    { id: 'b', studentId: 's1', student: 'สมชาย', center: 'IDEA CLUB ศูนย์ หนองฉาง', course: 'Science', amount: 500, status: 'ค้างชำระ' }
+  ];
+  const groups = c.buildTuitionNoticeGroups();
+  const summary = c.getTuitionNoticePreviewSummary(groups);
+  assert.deepEqual({ ...summary }, { noticeCount: 2, studentCount: 1, totalAmount: 1500, missingQr: 1 });
+  assert.match(c.tuitionNoticeHtml(groups[1]), /ยังไม่ได้ตั้งค่า QR Code/);
+});
+
+test('payment toolbar exposes the bulk tuition notice action', () => {
+  assert.match(html, /onclick="openTuitionNoticePrintPreview\(\)"[^>]*>พิมพ์ใบแจ้งยอดค่าเรียน</);
+});
+
+test('bulk tuition PDF renders exactly one A4 page per notice group', async () => {
+  const calls = { addPage: 0, addImage: 0, saved: '' };
+  class FakePdf {
+    addPage() { calls.addPage++; }
+    addImage() { calls.addImage++; }
+    save(name) { calls.saved = name; }
+  }
+  const target = { offsetWidth: 794, offsetHeight: 1123, scrollHeight: 1123 };
+  const element = { querySelectorAll: () => [], querySelector: () => target };
+  const c = {
+    ensureExportLibraries: async () => true,
+    window: {
+      html2canvas: async () => ({ width: 1588, height: 2246, toDataURL: () => 'data:image/jpeg;base64,test' }),
+      jspdf: { jsPDF: FakePdf }
+    },
+    document: { body: { appendChild() {}, removeChild() {} } },
+    buildPdfDocumentElement: () => element,
+    tuitionNoticeHtml: group => group.html,
+    waitForTuitionNoticeImages: async () => [],
+    pdfFileName: name => name,
+    alert() {},
+    console
+  };
+  vm.createContext(c);
+  vm.runInContext(source('downloadTuitionNoticesPdf'), c);
+  await c.downloadTuitionNoticesPdf([{ html: 'first' }, { html: 'second' }], 'notices.pdf');
+  assert.equal(calls.addImage, 2);
+  assert.equal(calls.addPage, 1);
+  assert.equal(calls.saved, 'notices.pdf');
+});
+
+test('tuition notice preview requires finance permission and a selected month', () => {
+  const alerts = [];
+  let allowed = false;
+  let month = 'ตุลาคม 2569';
+  let builds = 0;
+  const c = {
+    hasPermission: () => allowed,
+    alert: message => alerts.push(message),
+    getElement: () => ({ value: month }),
+    buildTuitionNoticeGroups: () => { builds++; return []; }
+  };
+  vm.createContext(c);
+  vm.runInContext('let tempTuitionNoticeGroups = [];', c);
+  vm.runInContext(source('openTuitionNoticePrintPreview'), c);
+  c.openTuitionNoticePrintPreview();
+  assert.equal(builds, 0);
+  assert.equal(alerts.pop(), 'ไม่มีสิทธิ์');
+  allowed = true;
+  month = 'ทั้งหมด';
+  c.openTuitionNoticePrintPreview();
+  assert.equal(builds, 0);
+  assert.equal(alerts.pop(), 'กรุณาเลือกเดือนที่ต้องการพิมพ์ใบแจ้งยอดก่อน');
+});
+
 test('monthly payment targets exclude enrollments whose course has completed', () => {
   const completedCourse = { id: 'course-ended', courseEndStatus: 'completed_manually', status: 'closed' };
   const activeCourse = { id: 'course-active', courseEndStatus: 'scheduled', status: 'open' };

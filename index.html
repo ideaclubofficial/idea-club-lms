@@ -6807,6 +6807,7 @@
                 <button id="adminPaymentRefreshBtn" class="btn btn-dark" type="button" onclick="refreshAdminPaymentData()">รีเฟรชข้อมูล</button>
                 <button class="btn btn-green" type="button" onclick="openSlipDriveFolder()">Google Drive สลิป</button>
                 <button class="btn btn-blue" type="button" onclick="exportPaymentsCsv()">ส่งออกการเงิน CSV</button>
+                <button class="btn btn-orange" type="button" onclick="openTuitionNoticePrintPreview()">พิมพ์ใบแจ้งยอดค่าเรียน</button>
               </div>
             </div>
 
@@ -12106,6 +12107,7 @@
     const receipts = [];
     let receiptRunningNumber = 1;
     let tempPaymentDetail = null;
+    let tempTuitionNoticeGroups = [];
     let studentReceiptCurrentPage = 1;
     const studentReceiptPerPage = 20;
 
@@ -35349,6 +35351,237 @@
       const selectedCourse = getCurrentStudentCourse ? getCurrentStudentCourse() : null;
       const selectedPayment = getStudentPaymentForSelectedMonth ? getStudentPaymentForSelectedMonth() : null;
       return getPaymentQrImageSrcForContext(selectedPayment, currentStudent, selectedCourse);
+    }
+
+    function getTuitionNoticeIdentityKeys(payment, student) {
+      const values = [
+        ['student', student && (student.firebaseDocId || student.id)],
+        ['auth', student && student.authUid],
+        ['member', student && (student.memberId || student.studentId)],
+        ['student', payment && payment.studentId],
+        ['auth', payment && (payment.studentAuthUid || payment.authUid)],
+        ['member', payment && payment.memberId]
+      ];
+      return values.map(function(entry) {
+        const value = String(entry[1] || '').trim();
+        return value ? entry[0] + ':' + value : '';
+      }).filter(function(value, index, list) {
+        return value && list.indexOf(value) === index;
+      });
+    }
+
+    function isTuitionNoticePrintablePayment(payment) {
+      const status = getPaymentDisplayStatus(payment);
+      return status === 'รอชำระเงิน' || status === 'สลิปไม่ผ่าน' || status === 'ค้างชำระ';
+    }
+
+    function buildTuitionNoticeGroups(sourcePayments) {
+      const source = Array.isArray(sourcePayments) ? sourcePayments : getFilteredPaymentsForTable();
+      const groups = [];
+      source.filter(function(payment) {
+        return payment && payment.deleted !== true && !isCoursePaymentCancelled(payment) && isTuitionNoticePrintablePayment(payment);
+      }).forEach(function(payment) {
+        const student = getPaymentStudentRecord(payment) || getUniqueStudentRecordByPaymentName(payment) || {};
+        const course = getCourseByPaymentStudentOrName(payment, student, payment.course || payment.courseName || '');
+        const centerText = getPaymentCenterTextForQr(payment, student, course);
+        const normalizedCenter = normalizeText(centerText).toLowerCase();
+        const centerKey = getPaymentCenterKey(centerText) || (normalizedCenter ? 'center:' + normalizedCenter : 'center:unknown');
+        const identityKeys = getTuitionNoticeIdentityKeys(payment, student);
+        let group = groups.find(function(item) {
+          return item.centerKey === centerKey && identityKeys.some(function(key) { return item.identityKeys.includes(key); });
+        });
+        if (!group) {
+          const fallbackId = String(payment.id || payment.firebaseDocId || groups.length + 1);
+          group = {
+            key: (identityKeys[0] || 'payment:' + fallbackId) + '|' + centerKey,
+            identityKeys: identityKeys.length ? identityKeys.slice() : ['payment:' + fallbackId],
+            student: student,
+            studentName: student.name || payment.student || payment.studentName || '-',
+            grade: student.grade || payment.studentGrade || payment.grade || '',
+            memberId: student.memberId || student.studentId || payment.memberId || '',
+            centerKey: centerKey,
+            centerText: centerText || '-',
+            payments: [],
+            totalAmount: 0,
+            qrSrc: getPaymentQrImageSrcForContext(payment, student, course)
+          };
+          groups.push(group);
+        } else {
+          identityKeys.forEach(function(key) {
+            if (!group.identityKeys.includes(key)) group.identityKeys.push(key);
+          });
+        }
+        group.payments.push(payment);
+        group.totalAmount += Number(getPaymentFinalAmount(payment)) || 0;
+      });
+
+      groups.forEach(function(group) {
+        group.payments.sort(function(a, b) {
+          const courseA = String(a.course || a.courseName || '');
+          const courseB = String(b.course || b.courseName || '');
+          return courseA.localeCompare(courseB, 'th');
+        });
+      });
+      return groups.sort(function(a, b) {
+        const gradeDiff = gradeOrder(a.grade) - gradeOrder(b.grade);
+        if (gradeDiff !== 0) return gradeDiff;
+        const memberDiff = String(a.memberId || '').localeCompare(String(b.memberId || ''), 'th', { numeric: true });
+        if (memberDiff !== 0) return memberDiff;
+        const nameDiff = String(a.studentName || '').localeCompare(String(b.studentName || ''), 'th');
+        return nameDiff || String(a.centerText || '').localeCompare(String(b.centerText || ''), 'th');
+      });
+    }
+
+    function tuitionNoticeHtml(group) {
+      if (!group) return '<p>ไม่พบข้อมูลใบแจ้งยอด</p>';
+      const instituteName = (systemSettings && systemSettings.instituteName) || 'IDEA CLUB';
+      const phone = (systemSettings && systemSettings.phone) || '';
+      const lineId = (systemSettings && systemSettings.lineOfficial) || '';
+      const today = new Date().toLocaleDateString('th-TH', { year: 'numeric', month: 'long', day: 'numeric' });
+      const rows = group.payments.map(function(payment, index) {
+        return '<tr style="' + (index % 2 === 0 ? 'background:#f8fafc;' : 'background:#fff;') + '">' +
+          '<td>' + escapeHtml(payment.course || payment.courseName || '-') + '</td>' +
+          '<td>' + escapeHtml(payment.month || payment.paymentMonth || '-') + '</td>' +
+          '<td>' + escapeHtml(getPaymentDisplayStatus(payment)) + '</td>' +
+          '<td class="amount">' + escapeHtml(formatPrice(getPaymentFinalAmount(payment))) + '</td>' +
+        '</tr>';
+      }).join('');
+      const contacts = [];
+      if (phone) contacts.push('โทรศัพท์: ' + escapeHtml(phone));
+      if (lineId) contacts.push('LINE: ' + escapeHtml(lineId));
+      const qrHtml = group.qrSrc
+        ? '<div class="tuition-qr"><div><strong>สแกน QR Code เพื่อชำระค่าเรียน</strong><span>หลังชำระเงินแล้ว กรุณาอัปโหลดสลิปผ่านระบบ</span></div><img src="' + escapeHtml(group.qrSrc) + '" alt="QR Code สำหรับชำระเงิน"></div>'
+        : '<div class="tuition-qr tuition-qr-missing"><strong>ยังไม่ได้ตั้งค่า QR Code ของศูนย์นี้</strong><span>กรุณาติดต่อเจ้าหน้าที่เพื่อรับช่องทางชำระเงิน</span></div>';
+      return '<style>' +
+        '.tuition-notice *{box-sizing:border-box;font-family:\'Sarabun\',\'Noto Sans Thai\',Tahoma,Arial,sans-serif;}' +
+        '.tuition-notice{width:100%;min-height:1010px;border:2px solid #0f4cbd;border-radius:14px;padding:28px;background:#fff;color:#1f2937;}' +
+        '.tuition-header{display:grid;grid-template-columns:110px minmax(0,1fr) 150px;gap:16px;align-items:start;border-bottom:2px solid #dbeafe;padding-bottom:16px;margin-bottom:18px;}' +
+        '.tuition-header h1{font-size:22px;color:#0f4cbd;margin:0 0 3px;}.tuition-header p{margin:0;color:#64748b;font-size:13px;}.tuition-date{text-align:right;font-size:12px;color:#64748b;}' +
+        '.tuition-student{display:grid;grid-template-columns:1.5fr .7fr 1fr;gap:12px;background:#eff6ff;border:1px solid #bfdbfe;border-radius:10px;padding:13px 16px;margin-bottom:18px;font-size:13px;}' +
+        '.tuition-student strong{display:block;color:#1e3a8a;margin-bottom:3px;}' +
+        '.tuition-notice table{width:100%;table-layout:fixed;border-collapse:collapse;border:1px solid #dbeafe;}.tuition-notice th{background:#0f4cbd;color:#fff;padding:10px;font-size:13px;text-align:left;}.tuition-notice td{padding:10px;border-bottom:1px solid #e5e7eb;font-size:13px;overflow-wrap:anywhere;}.tuition-notice th:nth-child(2),.tuition-notice td:nth-child(2){width:130px}.tuition-notice th:nth-child(3),.tuition-notice td:nth-child(3){width:120px}.tuition-notice th:last-child,.tuition-notice td.amount{width:120px;text-align:right;}' +
+        '.tuition-total{display:flex;justify-content:flex-end;align-items:center;gap:22px;background:#eff6ff;color:#0f4cbd;border:1px solid #bfdbfe;border-top:0;padding:13px 16px;font-size:18px;font-weight:800;}' +
+        '.tuition-qr{display:flex;align-items:center;justify-content:space-between;gap:18px;margin-top:20px;padding:15px 18px;border:1px solid #bfdbfe;border-radius:10px;background:#f8fafc;color:#1e3a8a;}.tuition-qr div{display:flex;flex-direction:column;gap:5px}.tuition-qr span{font-size:12px;color:#64748b}.tuition-qr img{width:170px;height:170px;object-fit:contain;background:#fff;border:1px solid #dbeafe;border-radius:8px;padding:6px}.tuition-qr-missing{display:flex;flex-direction:column;text-align:center;justify-content:center;min-height:92px;}' +
+        '.tuition-contact{margin-top:16px;padding:11px 14px;border-radius:8px;background:#f8fafc;color:#475569;font-size:12px}.tuition-note{font-size:13px;line-height:1.7;margin:18px 0 0;color:#475569}.tuition-signature{text-align:right;margin-top:24px;font-size:13px;}' +
+      '</style>' +
+      '<div class="tuition-notice">' +
+        '<div class="tuition-header"><div>' + getPrintableLogoHtml() + '</div><div><h1>' + escapeHtml(instituteName) + '</h1><p>ใบแจ้งยอดชำระค่าเรียน</p></div><div class="tuition-date"><strong>วันที่ออกเอกสาร</strong><br>' + escapeHtml(today) + '</div></div>' +
+        '<div class="tuition-student"><div><strong>นักเรียน</strong>' + escapeHtml(group.studentName) + '</div><div><strong>ระดับชั้น</strong>' + escapeHtml(group.grade || '-') + '</div><div><strong>Member ID</strong>' + escapeHtml(group.memberId || '-') + '</div><div style="grid-column:1/-1"><strong>ศูนย์</strong>' + escapeHtml(group.centerText || '-') + '</div></div>' +
+        '<p style="font-size:13px;margin:0 0 12px;color:#475569;">เรียน คุณผู้ปกครอง ทางสถาบันฯ ขอแจ้งยอดชำระค่าเรียนประจำเดือนตามรายการดังต่อไปนี้</p>' +
+        '<table><thead><tr><th>คอร์ส</th><th>เดือน</th><th>สถานะ</th><th>ยอดชำระ</th></tr></thead><tbody>' + rows + '</tbody></table>' +
+        '<div class="tuition-total"><span>ยอดชำระรวม</span><span>' + escapeHtml(formatPrice(group.totalAmount)) + '</span></div>' +
+        qrHtml +
+        '<p class="tuition-note">กรุณาตรวจสอบรายละเอียดก่อนชำระเงิน หากได้ชำระหรือส่งหลักฐานแล้ว กรุณาติดต่อเจ้าหน้าที่เพื่อตรวจสอบสถานะ</p>' +
+        (contacts.length ? '<div class="tuition-contact"><strong>ติดต่อสอบถาม:</strong> ' + contacts.join(' &nbsp;·&nbsp; ') + '</div>' : '') +
+        '<div class="tuition-signature">ขอแสดงความนับถือ<br><strong>' + escapeHtml(instituteName) + '</strong></div>' +
+      '</div>';
+    }
+
+    function getTuitionNoticePreviewSummary(groups) {
+      const uniqueStudents = new Set();
+      let totalAmount = 0;
+      let missingQr = 0;
+      (groups || []).forEach(function(group) {
+        uniqueStudents.add(group.identityKeys[0] || group.key);
+        totalAmount += Number(group.totalAmount) || 0;
+        if (!group.qrSrc) missingQr++;
+      });
+      return { noticeCount: groups.length, studentCount: uniqueStudents.size, totalAmount: totalAmount, missingQr: missingQr };
+    }
+
+    function openTuitionNoticePrintPreview() {
+      if (!hasPermission('admin.finance')) { alert('ไม่มีสิทธิ์'); return; }
+      const month = getElement('paymentStatusMonthFilter') ? getElement('paymentStatusMonthFilter').value : 'ทั้งหมด';
+      if (!month || month === 'ทั้งหมด') {
+        alert('กรุณาเลือกเดือนที่ต้องการพิมพ์ใบแจ้งยอดก่อน');
+        return;
+      }
+      const groups = buildTuitionNoticeGroups();
+      if (!groups.length) {
+        alert('ไม่พบรายการที่ยังไม่ชำระตามตัวกรองที่เลือก');
+        return;
+      }
+      tempTuitionNoticeGroups = groups;
+      const summary = getTuitionNoticePreviewSummary(groups);
+      const warning = summary.missingQr
+        ? '<p style="color:#d97706;font-weight:700;margin:10px 0;">⚠️ มี ' + summary.missingQr + ' ใบที่ยังไม่มี QR Code ระบบจะแสดงข้อความให้ติดต่อเจ้าหน้าที่แทน</p>'
+        : '';
+      openViewBubble('พรีวิวใบแจ้งยอดชำระค่าเรียน',
+        '<div class="dashboard-grid" style="margin-bottom:14px;">' +
+          '<div class="stat"><h4>จำนวนใบ</h4><p>' + summary.noticeCount + ' ใบ</p></div>' +
+          '<div class="stat"><h4>จำนวนนักเรียน</h4><p>' + summary.studentCount + ' คน</p></div>' +
+          '<div class="stat"><h4>ยอดรวม</h4><p>' + escapeHtml(formatPrice(summary.totalAmount)) + '</p></div>' +
+        '</div>' + warning +
+        '<p class="mini-muted" style="margin-bottom:10px;">ตัวอย่างใบแรกจากทั้งหมด ' + summary.noticeCount + ' ใบ · PDF จะเรียงตามระดับชั้นและ Member ID</p>' +
+        '<div style="max-height:58vh;overflow:auto;background:#e5e7eb;padding:12px;border-radius:12px;">' + tuitionNoticeHtml(groups[0]) + '</div>' +
+        '<div class="test-actions" style="margin-top:14px;"><button class="btn btn-orange" type="button" onclick="downloadCurrentTuitionNoticesPdf()">ดาวน์โหลด PDF สำหรับพิมพ์</button><button class="btn btn-dark" type="button" onclick="closeEditBubble()">ปิด</button></div>'
+      );
+    }
+
+    function waitForTuitionNoticeImages(element) {
+      const images = Array.from(element.querySelectorAll('img'));
+      return Promise.all(images.map(function(img) {
+        if (img.complete) return Promise.resolve();
+        return new Promise(function(resolve) {
+          img.onload = resolve;
+          img.onerror = resolve;
+        });
+      }));
+    }
+
+    async function downloadTuitionNoticesPdf(groups, fileName) {
+      const exportToolsReady = await ensureExportLibraries(true);
+      const html2canvasLib = window.html2canvas;
+      const JsPdfClass = window.jspdf && window.jspdf.jsPDF;
+      if (!exportToolsReady || !html2canvasLib || !JsPdfClass) {
+        alert('ไม่สามารถสร้าง PDF ได้ เพราะโหลดเครื่องมือ PDF ไม่ครบ กรุณาตรวจสอบอินเทอร์เน็ตแล้วกดลองใหม่');
+        return;
+      }
+      const pdf = new JsPdfClass({ unit: 'mm', format: 'a4', orientation: 'portrait' });
+      try {
+        for (let index = 0; index < groups.length; index++) {
+          const element = buildPdfDocumentElement('ใบแจ้งยอดชำระค่าเรียน', tuitionNoticeHtml(groups[index]));
+          document.body.appendChild(element);
+          try {
+            await waitForTuitionNoticeImages(element);
+            const target = element.querySelector('.pdf-document');
+            const canvas = await html2canvasLib(target, {
+              scale: 2,
+              useCORS: true,
+              backgroundColor: '#ffffff',
+              width: target.offsetWidth,
+              height: target.scrollHeight,
+              windowWidth: target.offsetWidth,
+              windowHeight: target.scrollHeight
+            });
+            if (index > 0) pdf.addPage();
+            const pageWidth = 210;
+            const pageHeight = 297;
+            const renderedHeight = Math.min(pageHeight, canvas.height * pageWidth / canvas.width);
+            const renderedWidth = Math.min(pageWidth, canvas.width * pageHeight / canvas.height);
+            const useHeightLimit = canvas.height * pageWidth / canvas.width > pageHeight;
+            const width = useHeightLimit ? renderedWidth : pageWidth;
+            const height = useHeightLimit ? pageHeight : renderedHeight;
+            pdf.addImage(canvas.toDataURL('image/jpeg', 0.98), 'JPEG', (pageWidth - width) / 2, 0, width, height);
+          } finally {
+            document.body.removeChild(element);
+          }
+        }
+        pdf.save(pdfFileName(fileName || 'tuition-notices.pdf'));
+      } catch (error) {
+        console.error('download tuition notices pdf error:', error);
+        alert('ดาวน์โหลด PDF ไม่สำเร็จ: ' + (error.message || error.code || 'ไม่ทราบสาเหตุ'));
+      }
+    }
+
+    function downloadCurrentTuitionNoticesPdf() {
+      if (!hasPermission('admin.finance')) { alert('ไม่มีสิทธิ์'); return; }
+      if (!tempTuitionNoticeGroups.length) {
+        alert('ไม่พบข้อมูลใบแจ้งยอด กรุณาเปิดพรีวิวใหม่');
+        return;
+      }
+      const month = getElement('paymentStatusMonthFilter') ? getElement('paymentStatusMonthFilter').value : '';
+      return downloadTuitionNoticesPdf(tempTuitionNoticeGroups, 'tuition-notices-' + getSafeFileName(month || 'monthly') + '.pdf');
     }
 
     function overdueNoticeHtml(paymentId) {
