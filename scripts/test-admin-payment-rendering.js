@@ -547,6 +547,17 @@ test('tuition notice summary counts students once across centers and marks missi
   assert.match(c.tuitionNoticeHtml(groups[1]), /ยังไม่ได้ตั้งค่า QR Code/);
 });
 
+test('tuition notice PDF table omits the payment status column', () => {
+  const c = setupTuitionNotices();
+  c.payments = [
+    { id: 'a', studentId: 's1', student: 'สมชาย', center: 'IDEA CLUB ศูนย์ นครสวรรค์', course: 'Math', month: 'ตุลาคม 2569', amount: 1000, status: 'ค้างชำระ', qr: 'qr-a' }
+  ];
+  const documentHtml = c.tuitionNoticeHtml(c.buildTuitionNoticeGroups()[0]);
+  assert.doesNotMatch(documentHtml, /<th>สถานะ<\/th>/);
+  assert.doesNotMatch(documentHtml, />ค้างชำระ<\/td>/);
+  assert.match(documentHtml, /<th>คอร์ส<\/th><th>เดือน<\/th><th>ยอดชำระ<\/th>/);
+});
+
 test('payment toolbar exposes the bulk tuition notice action', () => {
   assert.match(html, /onclick="downloadFilteredTuitionNoticesPdf\(\)"[^>]*>ดาวน์โหลด PDF ใบแจ้งยอดค่าเรียน</);
 });
