@@ -21429,13 +21429,13 @@
         ? '<span class="status-absent">' + (c.archived === true && !String(c.courseEndStatus || '').startsWith('completed') ? 'เก็บถาวร' : 'จบคอร์ส') + '</span>'
         : (c.status === 'open' ? '<span class="status-paid">เปิดรับสมัคร</span>' : '<span class="status-absent">ปิดรับสมัคร</span>');
       const completionTargets = completed ? [] : getCourseCompletionTargets(courseId);
-      const completeDisabled = completionTargets.length ? '' : ' disabled';
+      const completeActionLabel = completionTargets.length ? 'จบคอร์ส' : 'ปิดคอร์ส';
       const endCell = completed
         ? escapeHtml(c.courseEndedAtText || c.archivedAtText || '-')
         : renderCourseEndSchedule(c);
       const actions = completed
         ? '<button class="btn btn-blue" type="button" onclick="' + actionCall('editCourse', courseId) + '">ดู / แก้ไข</button>'
-        : '<button class="btn btn-blue" type="button" onclick="' + actionCall('editCourse', courseId) + '">แก้ไข</button><button class="btn btn-green" type="button" onclick="' + actionCall('completeCourseForStudents', courseId) + '"' + completeDisabled + '>จบคอร์ส</button><button class="btn btn-red" type="button" onclick="' + actionCall('deleteCourse', courseId) + '">ลบ</button>';
+        : '<button class="btn btn-blue" type="button" onclick="' + actionCall('editCourse', courseId) + '">แก้ไข</button><button class="btn btn-green" type="button" onclick="' + actionCall('completeCourseForStudents', courseId) + '">' + completeActionLabel + '</button><button class="btn btn-red" type="button" onclick="' + actionCall('deleteCourse', courseId) + '">ลบ</button>';
       return '<tr><td>' + escapeHtml(c.grade || '-') + '</td><td>' + escapeHtml(c.name || '-') + '</td><td>' + formatPrice(c.price) + '</td><td>' + getCourseAccessLabel(c) + '</td><td>' + escapeHtml(getCourseLocationsText(c)) + '</td><td>' + escapeHtml(getCourseDisplaySchedule(c) || '-') + '</td><td>' + renderCourseFeatureSummary(c) + '</td><td>' + statusText + '</td><td>' + endCell + '</td><td>' + renderCourseStudentStatusSummary(c) + '</td><td>' + actions + '</td></tr>';
     }
 
@@ -21463,22 +21463,27 @@
     async function completeCourseForStudents(courseId, options) {
       const opts = options || {};
       const automatic = opts.automatic === true;
-      if (!hasPermission('admin.students')) {
-        if (!automatic) alert('ไม่มีสิทธิ์แก้ไขสถานะนักเรียน');
-        return false;
-      }
       const course = (courses || []).find(function(item) { return String(item.id) === String(courseId); });
       if (!course) {
         if (!automatic) alert('ไม่พบข้อมูลคอร์ส');
         return false;
       }
       const targets = getCourseCompletionTargets(courseId);
-      if (!targets.length && !automatic) {
-        alert('ไม่มีนักเรียนที่ต้องจบคอร์สในคอร์สนี้');
+      const canManageStudents = hasPermission('admin.students') || hasPermission('admin.full');
+      const canManageCourses = hasPermission('admin.courses') || hasPermission('admin.full');
+      if ((targets.length || automatic) && !canManageStudents) {
+        if (!automatic) alert('ไม่มีสิทธิ์แก้ไขสถานะนักเรียน');
+        return false;
+      }
+      if (!targets.length && !automatic && !canManageCourses) {
+        alert('ไม่มีสิทธิ์ปิดคอร์ส');
         return false;
       }
       const courseTitle = (course.grade ? course.grade + ' · ' : '') + (course.name || '-');
-      if (!automatic && !confirm('ต้องการจบคอร์ส "' + courseTitle + '" ให้กับนักเรียน ' + targets.length + ' คน ใช่หรือไม่?\n\nระบบจะเปลี่ยนสถานะนักเรียนเป็นจบคอร์สและเปิดให้สมัครคอร์สใหม่ได้ทันที')) return false;
+      const confirmationText = targets.length
+        ? 'ต้องการจบคอร์ส "' + courseTitle + '" ให้กับนักเรียน ' + targets.length + ' คน ใช่หรือไม่?\n\nระบบจะเปลี่ยนสถานะนักเรียนเป็นจบคอร์สและเปิดให้สมัครคอร์สใหม่ได้ทันที'
+        : 'คอร์ส "' + courseTitle + '" ยังไม่มีนักเรียน\n\nต้องการปิดคอร์สและย้ายไปไว้ในรายการคอร์สที่จบแล้วใช่หรือไม่? คอร์สนี้จะไม่แสดงในหน้าสมัครคอร์ส';
+      if (!automatic && !confirm(confirmationText)) return false;
       const nowText = new Date().toLocaleString('th-TH');
       const nowMonth = getThaiMonthFromDate(new Date().toISOString().slice(0, 10));
       const actor = automatic ? 'system:course_end_browser_fallback' : (getElement('profileName') ? getElement('profileName').textContent : '');
@@ -21553,8 +21558,10 @@
         course.courseEndedAtText = nowText;
         course.courseEndedAtMs = Date.now();
         course.courseEndedBy = actor;
+        course.courseClosureReason = targets.length ? 'students_completed' : 'no_students';
         await setFirebaseDocument('courses', course);
-        await addActivityLog(automatic ? 'จบคอร์สอัตโนมัติ' : 'จบคอร์ส', courseTitle + ' · นักเรียน ' + targets.length + ' คน');
+        const activityAction = automatic ? 'จบคอร์สอัตโนมัติ' : (targets.length ? 'จบคอร์ส' : 'ปิดคอร์สไม่มีนักเรียน');
+        await addActivityLog(activityAction, courseTitle + ' · นักเรียน ' + targets.length + ' คน');
         renderAdminCourses();
         renderAdminStudents();
         renderAdminDashboard();
@@ -21563,10 +21570,12 @@
         updateStudentCourseDisplay();
         const result = getElement('courseSaveResult');
         if (result) {
-          result.textContent = 'จบคอร์ส ' + courseTitle + ' ให้นักเรียน ' + targets.length + ' คนเรียบร้อย';
+          result.textContent = targets.length
+            ? 'จบคอร์ส ' + courseTitle + ' ให้นักเรียน ' + targets.length + ' คนเรียบร้อย'
+            : 'ปิดคอร์ส ' + courseTitle + ' เรียบร้อย (ไม่มีนักเรียนในคอร์ส)';
           result.style.color = '#16a34a';
         }
-        if (!automatic) alert('จบคอร์สเรียบร้อย ' + targets.length + ' คน');
+        if (!automatic) alert(targets.length ? 'จบคอร์สเรียบร้อย ' + targets.length + ' คน' : 'ปิดคอร์สเรียบร้อย');
         return true;
       } catch (error) {
         console.error('completeCourseForStudents error:', error);
