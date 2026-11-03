@@ -254,6 +254,19 @@ test('course schedule and feature columns open compact detail bubbles', () => {
   assert.match(html, /function openAdminCourseFeatureBubble\(courseId\)[\s\S]*openViewBubble\('ฟังก์ชันของคอร์ส'/);
 });
 
+test('course management student column opens a permission-guarded student list bubble', () => {
+  assert.match(html, /actionCall\('openAdminCourseStudentsBubble', courseId\)/);
+  assert.match(html, />ดูนักเรียน \(' \+ summary\.total \+ '\)<\/button>/);
+  assert.match(html, /function openAdminCourseStudentsBubble\(courseId\) \{\s+if \(!canManageAdminCourseEnrollments\(\)\)/);
+  assert.match(html, /function getAdminCourseStudentRows\(course\)/);
+  assert.match(html, /getStudentCompletedCourseHistoryRecord\(student, courseId\)/);
+  assert.match(html, /ชื่อเล่น:/);
+  assert.match(html, /Member ID:/);
+  assert.match(html, /เดือนที่สมัคร:/);
+  assert.match(html, /สถานะชำระเงิน:/);
+  assert.match(html, /openViewBubble\('นักเรียนในคอร์ส \(' \+ rows\.length \+ '\)'/);
+});
+
 test('all enrollment entry points use the completed-course guard', () => {
   assert.match(html, /function getAdminBulkEligibleStudents\(course\) \{\s+if \(!isCourseOpenForEnrollment\(course\)\) return \[\]/);
   assert.match(html, /const openCourses = sortCoursesByGrade\(\(courses \|\| \[\]\)\.filter\(isCourseOpenForEnrollment\)\)/);

@@ -21738,7 +21738,7 @@
     }
 
     function getCourseStudentStatusSummary(course) {
-      const courseId = String((course && course.id) || '').trim();
+      const courseId = String((course && (course.id || course.firebaseDocId)) || '').trim();
       const summary = { total: 0, active: 0, pending: 0, completed: 0, current: 0 };
       if (!courseId || !Array.isArray(students)) return summary;
       students.forEach(function(student) {
@@ -21758,13 +21758,95 @@
 
     function renderCourseStudentStatusSummary(course) {
       const summary = getCourseStudentStatusSummary(course);
-      if (!summary.total) return '<span class="mini-muted">ยังไม่มีนักเรียน</span>';
-      return '<div style="white-space:nowrap;line-height:1.7;">' +
-        '<span class="status-paid">เรียนอยู่ ' + summary.active + '</span><br>' +
-        '<span class="status-waiting">รออนุมัติ ' + summary.pending + '</span><br>' +
-        '<span class="status-parent">จบคอร์ส ' + summary.completed + '</span><br>' +
-        '<span class="mini-muted">รวม ' + summary.total + ' คน</span>' +
-      '</div>';
+      const courseId = String((course && (course.id || course.firebaseDocId)) || '');
+      const summaryHtml = summary.total
+        ? '<span class="status-paid">เรียนอยู่ ' + summary.active + '</span><br>' +
+          '<span class="status-waiting">รออนุมัติ ' + summary.pending + '</span><br>' +
+          '<span class="status-parent">จบคอร์ส ' + summary.completed + '</span><br>' +
+          '<span class="mini-muted">รวม ' + summary.total + ' คน</span>'
+        : '<span class="mini-muted">ยังไม่มีนักเรียน</span>';
+      const viewButton = canManageAdminCourseEnrollments()
+        ? '<br><button class="btn btn-blue" type="button" style="margin-top:7px;white-space:nowrap;" onclick="' + actionCall('openAdminCourseStudentsBubble', courseId) + '">ดูนักเรียน (' + summary.total + ')</button>'
+        : '';
+      return '<div style="white-space:nowrap;line-height:1.7;">' + summaryHtml + viewButton + '</div>';
+    }
+
+    function getStudentCompletedCourseHistoryRecord(student, courseId) {
+      const targetId = String(courseId || '').trim();
+      if (!student || !targetId) return null;
+      const history = Array.isArray(student.courseCompletionHistory) ? student.courseCompletionHistory : [];
+      const matched = history.find(function(item) {
+        return String((item && (item.courseId || item.id)) || '').trim() === targetId;
+      });
+      if (matched) return matched;
+      if (String(student.completedCourseId || '').trim() !== targetId) return null;
+      return {
+        courseId: targetId,
+        courseName: student.completedCourse || '',
+        courseStatus: 'จบคอร์ส',
+        paymentStatus: student.completedCoursePaymentStatus || '',
+        grade: student.grade || '',
+        location: student.preferredLocation || '',
+        completedAtText: student.completedAtText || ''
+      };
+    }
+
+    function getAdminCourseStudentRows(course) {
+      const courseId = String((course && (course.id || course.firebaseDocId)) || '').trim();
+      if (!courseId) return [];
+      return (students || []).filter(function(student) {
+        return student && student.deleted !== true;
+      }).map(function(student) {
+        const enrollment = getStudentCourseEnrollment(student, courseId);
+        const history = enrollment ? null : getStudentCompletedCourseHistoryRecord(student, courseId);
+        if (!enrollment && !history) return null;
+        const record = enrollment || Object.assign({ courseId: courseId, courseStatus: 'จบคอร์ส' }, history);
+        return { student: student, enrollment: record };
+      }).filter(Boolean).sort(function(a, b) {
+        const rank = function(row) {
+          const status = String(row.enrollment && row.enrollment.courseStatus || '');
+          if (status === 'อนุมัติแล้ว') return 0;
+          if (status === 'รออนุมัติคอร์ส') return 1;
+          if (status === 'จบคอร์ส') return 2;
+          return 3;
+        };
+        const rankDiff = rank(a) - rank(b);
+        if (rankDiff) return rankDiff;
+        return String(a.student.memberId || a.student.studentId || '').localeCompare(String(b.student.memberId || b.student.studentId || ''), undefined, { numeric: true });
+      });
+    }
+
+    function openAdminCourseStudentsBubble(courseId) {
+      if (!canManageAdminCourseEnrollments()) { alert('ไม่มีสิทธิ์ดูรายชื่อนักเรียนในคอร์ส'); return; }
+      const course = getAdminCourseForDetail(courseId);
+      if (!course) { alert('ไม่พบข้อมูลคอร์ส'); return; }
+      const rows = getAdminCourseStudentRows(course);
+      const summary = getCourseStudentStatusSummary(course);
+      let bodyHtml = '<div class="notice"><strong>' + escapeHtml((course.grade || '-') + ' · ' + (course.name || '-')) + '</strong>' +
+        '<p style="margin-top:6px;">สถานที่เรียน: ' + escapeHtml(getCourseLocationsText(course)) + '</p>' +
+        '<p style="margin-top:6px;">เรียนอยู่ ' + summary.active + ' · รออนุมัติ ' + summary.pending + ' · จบคอร์ส ' + summary.completed + ' · รวม ' + summary.total + ' คน</p></div>';
+      if (!rows.length) {
+        bodyHtml += '<div class="notice" style="margin-top:14px;">ยังไม่มีนักเรียนในคอร์สนี้</div>';
+      } else {
+        bodyHtml += '<div class="course-enrollment-bubble-list" style="margin-top:14px;">' + rows.map(function(row) {
+          const student = row.student;
+          const enrollment = row.enrollment;
+          const status = enrollment.courseStatus || '-';
+          const paymentStatus = getEnrollmentPaymentStatus(enrollment, student);
+          return '<article class="course-enrollment-bubble-item">' +
+            '<div class="course-enrollment-bubble-header"><h4 class="course-enrollment-bubble-title">' + escapeHtml(student.name || '-') + '</h4>' +
+            '<span class="' + getAdminEnrollmentStatusClass(status) + '">' + escapeHtml(status) + '</span></div>' +
+            '<div class="course-enrollment-bubble-meta">' +
+            '<span><strong>ชื่อเล่น:</strong> ' + escapeHtml(student.nickname || '-') + '</span>' +
+            '<span><strong>Member ID:</strong> ' + escapeHtml(student.memberId || student.studentId || '-') + '</span>' +
+            '<span><strong>ชั้น / ศูนย์:</strong> ' + escapeHtml((enrollment.grade || student.grade || course.grade || '-') + ' · ' + (enrollment.location || student.preferredLocation || '-')) + '</span>' +
+            '<span><strong>เดือนที่สมัคร:</strong> ' + escapeHtml(enrollment.registeredCourseMonth || '-') + '</span>' +
+            '<span><strong>สถานะชำระเงิน:</strong> ' + escapeHtml(paymentStatus || '-') + '</span>' +
+            (enrollment.completedAtText ? '<span><strong>วันที่จบ:</strong> ' + escapeHtml(enrollment.completedAtText) + '</span>' : '') +
+            '</div></article>';
+        }).join('') + '</div>';
+      }
+      openViewBubble('นักเรียนในคอร์ส (' + rows.length + ')', bodyHtml);
     }
 
     function getCourseCompletionTargets(courseId) {
