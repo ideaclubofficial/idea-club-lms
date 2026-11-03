@@ -253,6 +253,15 @@ test('all enrollment entry points use the completed-course guard', () => {
   assert.match(firestoreRules, /isCourseOpenForStudentEnrollment\(request\.resource\.data\.courseId\)/);
 });
 
+test('student enrollment transaction fails fast instead of reading all documents in parallel', () => {
+  const applyStart = html.indexOf('    async function applyCourse(');
+  const applyEnd = html.indexOf('    function getCurrentStudentCourse(', applyStart);
+  const applySource = html.slice(applyStart, applyEnd);
+  assert.match(applySource, /const studentSnap = await transaction\.get\(studentRef\)[\s\S]*const courseSnap = await transaction\.get\(courseRef\)[\s\S]*const enrollmentSnap = await transaction\.get\(enrollmentRef\)/);
+  assert.doesNotMatch(applySource, /Promise\.all\([\s\S]*transaction\.get/);
+  assert.match(applySource, /markFirestoreQuotaExceeded\(error\)/);
+});
+
 test('course enrollment screens expose bulk controls, filters, summaries, and guarded actions', () => {
   [
     'adminEnrollStudentSearch', 'adminEnrollStudentGradeFilter', 'adminEnrollStudentLocationFilter',

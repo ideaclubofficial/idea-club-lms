@@ -122,6 +122,8 @@ test('cancellation implementation is atomic, permission guarded, and preserves c
   assert.match(cancelSource, /status: 'cancelled'/);
   assert.match(cancelSource, /cancellationReason: 'wrong_course_enrollment'/);
   assert.match(cancelSource, /course-enrollment-already-cancelled/);
+  assert.match(cancelSource, /const enrollmentSnap = await transaction\.get\(enrollmentRef\)[\s\S]*const studentSnap = await transaction\.get\(studentRef\)[\s\S]*const paymentSnap = paymentRef \? await transaction\.get\(paymentRef\)/);
+  assert.doesNotMatch(cancelSource, /Promise\.all\([\s\S]*transaction\.get/);
   assert.doesNotMatch(cancelSource, /deleteFirebaseDocument\('payments'/);
   assert.doesNotMatch(cancelSource, /deleteFirebaseDocument\('receipts'/);
 });

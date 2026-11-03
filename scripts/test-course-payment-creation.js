@@ -49,6 +49,7 @@ test('admin enrollment detects and explains Firestore quota exhaustion', () => {
   assert.equal(context.isFirestoreQuotaExceededError(quotaError), true);
   assert.match(context.getAdminEnrollmentErrorMessage(quotaError), /โควตา Firestore/);
   assert.equal(context.isFirestoreQuotaExceededError({ code: 'permission-denied', message: 'Missing permissions' }), false);
+  assert.equal(context.isFirestoreQuotaExceededError({ code: 'resource-exhausted', message: 'Regional capacity temporarily unavailable' }), false);
 });
 
 test('shared enrollment payment path reuses the existing student course month record', () => {
@@ -109,7 +110,7 @@ function createAdminTransactionContext(status, options = {}) {
   const context = {
     courseEnrollments: existingEnrollment ? [{ ...existingEnrollment }] : [],
     payments: [],
-    adminEnrollmentQuotaBlocked: false,
+    firestoreQuotaBlocked: false,
     firebaseReady: true,
     firebase: { firestore: { FieldValue: { serverTimestamp: () => 'timestamp' } } },
     canManageAdminCourseEnrollments: () => true,

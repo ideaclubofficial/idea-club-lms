@@ -9370,6 +9370,8 @@
     let studentRealtimeRefreshTimer = null;
     let adminRealtimeSession = null;
     let adminPaymentDataRefreshTimer = null;
+    let firestoreQuotaBlocked = false;
+    const firebaseKnownDocumentKeys = new Set();
     let authSessionRoutingDone = false;
     const SESSION_DURATION_MS = 24 * 60 * 60 * 1000; // 24 hours
 
@@ -9428,8 +9430,10 @@
         if (user) {
           try {
             const profileDoc = await db.collection('users').doc(user.uid).get();
+            if (profileDoc.exists) rememberFirebaseDocument('users', profileDoc.id);
             firebaseUserProfile = profileDoc.exists ? profileDoc.data() : null;
           } catch (error) {
+            markFirestoreQuotaExceeded(error);
             console.error('load user profile error:', error);
           }
           if (!authSessionRoutingDone) {
@@ -9587,10 +9591,12 @@
         snapshot = await query.get();
       } catch (error) {
         if (loadStatus) loadStatus.failed = true;
+        markFirestoreQuotaExceeded(error);
         console.warn('skip firebase collection:', collectionName, error);
         return [];
       }
       return snapshot.docs.map(function(docSnap) {
+        rememberFirebaseDocument(collectionName, docSnap.id);
         const data = docSnap.data();
         return Object.assign({ firebaseDocId: docSnap.id }, data);
       }).filter(function(item) {
@@ -9612,6 +9618,7 @@
       const snapshots = await Promise.all(pendingQueries.map(function(query) {
         return query.get().catch(function(error) {
           if (loadStatus) loadStatus.failed = true;
+          markFirestoreQuotaExceeded(error);
           console.warn('skip pending payment query:', error);
           return null;
         });
@@ -9640,6 +9647,21 @@
 
     function getStudentRecordDocId(student) {
       return String(student && (student.firebaseDocId || student.id || student.studentId || '') || '').trim();
+    }
+
+    function getFirebaseKnownDocumentKey(collectionName, docId) {
+      return String(collectionName || '') + '/' + String(docId || '');
+    }
+
+    function rememberFirebaseDocument(collectionName, docId) {
+      if (!collectionName || !docId) return;
+      firebaseKnownDocumentKeys.add(getFirebaseKnownDocumentKey(collectionName, docId));
+    }
+
+    function rememberFirebaseDocumentSnapshot(docSnapshot) {
+      if (!docSnapshot || !docSnapshot.id) return;
+      const collectionName = docSnapshot.ref && docSnapshot.ref.parent && docSnapshot.ref.parent.id;
+      if (collectionName) rememberFirebaseDocument(collectionName, docSnapshot.id);
     }
 
     function normalizeStudentRecordForSession(studentRecord) {
@@ -9682,16 +9704,18 @@
 
       const lookupTasks = candidates.map(function(docId) {
         return db.collection('students').doc(docId).get().then(function(doc) {
-          if (doc.exists) addStudentRecord(doc.id, doc.data());
+          if (doc.exists) { rememberFirebaseDocument('students', doc.id); addStudentRecord(doc.id, doc.data()); }
         }).catch(function(error) {
           if (loadStatus) loadStatus.failed = true;
+          markFirestoreQuotaExceeded(error);
           console.warn('student owned doc lookup skipped:', docId, error);
         });
       });
       lookupTasks.push(db.collection('students').where('authUid', '==', uid).get().then(function(snapshot) {
-        snapshot.docs.forEach(function(doc) { addStudentRecord(doc.id, doc.data()); });
+        snapshot.docs.forEach(function(doc) { rememberFirebaseDocument('students', doc.id); addStudentRecord(doc.id, doc.data()); });
       }).catch(function(error) {
           if (loadStatus) loadStatus.failed = true;
+        markFirestoreQuotaExceeded(error);
         console.warn('student authUid query skipped:', error);
       }));
       await Promise.all(lookupTasks);
@@ -9816,8 +9840,10 @@
         const onError = function(error) {
           if (!group.active || !isCurrent()) return;
           group.failed = true;
+          markFirestoreQuotaExceeded(error);
           console.warn('realtime collection query failed:', spec.key || spec.label, error);
           settle(index);
+          if (isFirestoreQuotaExceededError(error)) group.stop();
         };
         try {
           const unsubscribe = spec.query.onSnapshot({ includeMetadataChanges: true }, function(snapshot) {
@@ -9827,6 +9853,7 @@
             const wasInitialized = group.initialized;
             memberships[index] = new Set(snapshot.docs.map(function(doc) { return doc.id; }));
             snapshot.docs.forEach(function(doc) {
+              rememberFirebaseDocumentSnapshot(doc);
               if (!records.has(doc.id) || !settled[index] || skippedPending[index]) {
                 const data = Object.assign({ firebaseDocId: doc.id }, doc.data());
                 const existing = records.get(doc.id);
@@ -10552,7 +10579,9 @@
         root.prepend(notice);
       }
       notice.innerHTML = status === 'error'
-        ? '<strong>โหลดข้อมูลหน้านี้ไม่ครบ</strong><p>กรุณาลองใหม่เพื่อดูข้อมูลล่าสุด</p><button class="btn btn-blue" type="button" onclick="requestStaffTabData(\'' + tabId + '\')">ลองใหม่</button>'
+        ? (firestoreQuotaBlocked
+          ? '<strong>โควตา Firestore เต็ม</strong><p>' + escapeHtml(getFirestoreQuotaExceededMessage()) + ' หลังโควตาพร้อมแล้วให้รีโหลดหน้านี้</p>'
+          : '<strong>โหลดข้อมูลหน้านี้ไม่ครบ</strong><p>กรุณาลองใหม่เพื่อดูข้อมูลล่าสุด</p><button class="btn btn-blue" type="button" onclick="requestStaffTabData(\'' + tabId + '\')">ลองใหม่</button>')
         : '<strong>กำลังโหลดข้อมูลหน้านี้...</strong>';
     }
 
@@ -10570,6 +10599,10 @@
       if (!Object.prototype.hasOwnProperty.call(STAFF_TAB_DATA, tabId)) return Promise.resolve(false);
       const allowed = tabId.indexOf('teacher-') === 0 ? canOpenTeacherTab(tabId) : (canOpenAdminTab(tabId) || canOpenTeacherTool(tabId));
       if (!allowed || !firebaseUser || isCurrentStudentSession()) return Promise.resolve(false);
+      if (firestoreQuotaBlocked) {
+        setStaffTabLoadStatus(tabId, 'error');
+        return Promise.resolve(false);
+      }
       if (staffTabLoadPromises[tabId]) return staffTabLoadPromises[tabId];
       // Initialize the session before registering the tab promise (collection loading shares it).
       if (staffDataSessionUid !== firebaseUser.uid) { resetStaffDataSession(); staffDataSessionUid = firebaseUser.uid; }
@@ -10994,10 +11027,27 @@
       if (collectionName === 'students' && item) {
         item = sanitizeStudentProfile(item);
       }
-      const docSnap = await ref.get();
-      const cleanItem = buildFirebasePayload(item, docId, !docSnap.exists);
+      const knownKey = getFirebaseKnownDocumentKey(collectionName, docId);
+      let isNewDoc = false;
+      if (!firebaseKnownDocumentKeys.has(knownKey)) {
+        try {
+          const docSnap = await ref.get();
+          isNewDoc = !docSnap.exists;
+          if (docSnap.exists) rememberFirebaseDocument(collectionName, docId);
+        } catch (error) {
+          markFirestoreQuotaExceeded(error);
+          throw error;
+        }
+      }
+      const cleanItem = buildFirebasePayload(item, docId, isNewDoc);
 
-      await ref.set(cleanItem, { merge: true });
+      try {
+        await ref.set(cleanItem, { merge: true });
+      } catch (error) {
+        markFirestoreQuotaExceeded(error);
+        throw error;
+      }
+      rememberFirebaseDocument(collectionName, docId);
       item.firebaseDocId = docId;
       item.deleted = cleanItem.deleted;
       if (collectionName === 'students' && item.authUid && !isCurrentStudentSession()) {
@@ -17259,7 +17309,6 @@
     let adminCourseEnrollmentCurrentPage = 1;
     const adminCourseEnrollmentPerPage = 20;
     let adminCourseEnrollmentRowMessages = new Map();
-    let adminEnrollmentQuotaBlocked = false;
     let adminEnrollmentListCurrentPage = 1;
     const adminEnrollmentListPerPage = 20;
     let adminBulkEnrollmentSelectedIds = new Set();
@@ -18069,8 +18118,8 @@
           '<td><strong>' + escapeHtml(student.name || '-') + '</strong><br><span class="mini-muted">ชื่อเล่น: ' + escapeHtml(student.nickname || '-') + '</span><br><span class="mini-muted">' + escapeHtml(student.memberId || student.studentId || '-') + '</span></td>' +
           '<td>' + escapeHtml((student.grade || '-') + ' · ' + (student.preferredLocation || '-')) + '</td>' +
           '<td><span class="course-enrollment-existing-list">' + existingCourses + '</span></td>' +
-          '<td><select class="admin-enroll-row-course" onchange="updateAdminEnrollRowButton(this)"' + (availableCourses.length && !adminEnrollmentQuotaBlocked ? '' : ' disabled') + '>' + courseOptions + '</select></td>' +
-          '<td><select class="admin-enroll-row-status"' + (adminEnrollmentQuotaBlocked ? ' disabled' : '') + '><option value="อนุมัติแล้ว">อนุมัติแล้ว</option><option value="รออนุมัติคอร์ส">รออนุมัติคอร์ส</option></select></td>' +
+          '<td><select class="admin-enroll-row-course" onchange="updateAdminEnrollRowButton(this)"' + (availableCourses.length && !firestoreQuotaBlocked ? '' : ' disabled') + '>' + courseOptions + '</select></td>' +
+          '<td><select class="admin-enroll-row-status"' + (firestoreQuotaBlocked ? ' disabled' : '') + '><option value="อนุมัติแล้ว">อนุมัติแล้ว</option><option value="รออนุมัติคอร์ส">รออนุมัติคอร์ส</option></select></td>' +
           '<td><button class="btn btn-green admin-enroll-row-button" type="button" onclick="adminEnrollStudentInCourseFromRow(this)" disabled>เพิ่มคอร์ส</button>' + messageHtml + '</td></tr>';
       }).join('') : '<tr><td colspan="6">ไม่พบนักเรียนตามตัวกรอง</td></tr>';
       renderTablePagination('adminEnrollStudentPagination', adminCourseEnrollmentCurrentPage, totalPages, filtered.length, 'changeAdminCourseEnrollmentPage');
@@ -18090,7 +18139,7 @@
     function updateAdminEnrollRowButton(courseSelect) {
       const row = courseSelect && courseSelect.closest('tr');
       const button = row && row.querySelector('.admin-enroll-row-button');
-      if (button) button.disabled = adminEnrollmentQuotaBlocked || !courseSelect.value;
+      if (button) button.disabled = firestoreQuotaBlocked || !courseSelect.value;
     }
 
     function createAdminEnrollmentError(code, message) {
@@ -18102,26 +18151,43 @@
     function isFirestoreQuotaExceededError(error) {
       const code = String(error && error.code || '').toLowerCase();
       const message = String(error && error.message || '').toLowerCase();
-      return code === 'resource-exhausted' || code.includes('resource-exhausted') ||
-        (message.includes('resource-exhausted') && message.includes('quota')) || message.includes('quota exceeded');
+      return message.includes('quota exceeded') ||
+        ((code === 'resource-exhausted' || code.includes('resource-exhausted') || message.includes('resource-exhausted')) && message.includes('quota'));
     }
 
     function getFirestoreQuotaExceededMessage() {
       return 'โควตา Firestore ของโปรเจกต์เต็ม ระบบยังไม่ได้บันทึกคอร์ส กรุณารอให้โควตารีเซ็ตช่วงประมาณ 14:00–15:00 น. ตามเวลาไทย หรือเปิด Billing ใน Firebase แล้วลองใหม่';
     }
 
-    function markAdminEnrollmentQuotaExceeded(error) {
+    function markFirestoreQuotaExceeded(error) {
       if (!isFirestoreQuotaExceededError(error)) return false;
-      adminEnrollmentQuotaBlocked = true;
+      firestoreQuotaBlocked = true;
+      renderFirestoreQuotaGlobalNotice();
       renderAdminEnrollmentQuotaNotice();
       return true;
+    }
+
+    function renderFirestoreQuotaGlobalNotice() {
+      let notice = document.getElementById('firestoreQuotaGlobalNotice');
+      if (!firestoreQuotaBlocked) {
+        if (notice) notice.remove();
+        return;
+      }
+      if (!notice && document.body) {
+        notice = document.createElement('div');
+        notice.id = 'firestoreQuotaGlobalNotice';
+        notice.setAttribute('role', 'alert');
+        notice.style.cssText = 'position:fixed;z-index:99999;left:12px;right:12px;top:12px;padding:14px 18px;border-radius:12px;background:#fff7ed;border:2px solid #f59e0b;color:#92400e;box-shadow:0 8px 28px rgba(0,0,0,.18);font-weight:700;';
+        document.body.appendChild(notice);
+      }
+      if (notice) notice.textContent = 'Firestore ใช้งานเกินโควตา ระบบหยุดการโหลดและบันทึกซ้ำในหน้านี้ ข้อมูลที่ทำรายการไม่สำเร็จจะไม่ถูกบันทึก กรุณารอให้โควตาพร้อมหรือเปิด Billing แล้วรีโหลดหน้า';
     }
 
     function renderAdminEnrollmentQuotaNotice() {
       const notice = getElement('adminEnrollmentQuotaNotice');
       if (!notice) return;
-      notice.classList.toggle('hidden', !adminEnrollmentQuotaBlocked);
-      notice.innerHTML = adminEnrollmentQuotaBlocked
+      notice.classList.toggle('hidden', !firestoreQuotaBlocked);
+      notice.innerHTML = firestoreQuotaBlocked
         ? '<strong>ไม่สามารถบันทึกได้ชั่วคราว:</strong> ' + escapeHtml(getFirestoreQuotaExceededMessage()) + ' หน้านี้หยุดส่งคำขอเพิ่มเพื่อไม่ให้เกิดการลองซ้ำต่อเนื่อง'
         : '';
     }
@@ -18129,7 +18195,7 @@
     async function createAdminCourseEnrollmentTransaction(student, course, status, source) {
       if (!canManageAdminCourseEnrollments()) throw createAdminEnrollmentError('permission-denied', 'ไม่มีสิทธิ์จัดการการสมัครคอร์ส');
       if (!firebaseReady || !db) throw createAdminEnrollmentError('firebase-not-ready', 'Firebase ยังไม่พร้อมใช้งาน');
-      if (adminEnrollmentQuotaBlocked) throw createAdminEnrollmentError('firestore-quota-exceeded', getFirestoreQuotaExceededMessage());
+      if (firestoreQuotaBlocked) throw createAdminEnrollmentError('firestore-quota-exceeded', getFirestoreQuotaExceededMessage());
       const studentId = getEnrollmentStudentId(student);
       const courseId = String(course && (course.id || course.firebaseDocId) || '').trim();
       if (!studentId || !courseId) throw createAdminEnrollmentError('invalid-enrollment-target', 'ข้อมูลนักเรียนหรือคอร์สไม่ครบ');
@@ -18244,7 +18310,7 @@
         refreshAdminCourseEnrollmentViews();
       } catch (error) {
         console.error('adminEnrollStudentInCourseFromRow error:', error);
-        markAdminEnrollmentQuotaExceeded(error);
+        markFirestoreQuotaExceeded(error);
         adminCourseEnrollmentRowMessages.set(studentId, { ok: false, text: 'เพิ่มคอร์สไม่สำเร็จ: ' + getAdminEnrollmentErrorMessage(error) });
         renderAdminCourseEnrollmentSection();
       }
@@ -18266,7 +18332,7 @@
       if (!courseSelect) return;
       renderAdminEnrollmentQuotaNotice();
       if (!canManageAdminCourseEnrollments()) { courseSelect.innerHTML = '<option value="">ไม่มีสิทธิ์ใช้งาน</option>'; courseSelect.disabled = true; return; }
-      courseSelect.disabled = adminEnrollmentQuotaBlocked;
+      courseSelect.disabled = firestoreQuotaBlocked;
       const previous = String(courseSelect.value || '');
       const openCourses = sortCoursesByGrade((courses || []).filter(isCourseOpenForEnrollment));
       courseSelect.innerHTML = '<option value="">เลือกคอร์ส</option>' + openCourses.map(function(course) {
@@ -18322,7 +18388,7 @@
         : Array.from(document.querySelectorAll('#adminBulkEnrollStudentList input[type="checkbox"]')).map(function(box) { return String(box.value); });
       const selectedVisible = visibleIds.filter(function(id) { return adminBulkEnrollmentSelectedIds.has(id); }).length;
       if (summary) summary.textContent = 'เลือก ' + adminBulkEnrollmentSelectedIds.size + ' คน';
-      if (button) button.disabled = adminEnrollmentQuotaBlocked || adminBulkEnrollmentSelectedIds.size === 0;
+      if (button) button.disabled = firestoreQuotaBlocked || adminBulkEnrollmentSelectedIds.size === 0;
       if (selectAll) {
         selectAll.checked = visibleIds.length > 0 && selectedVisible === visibleIds.length;
         selectAll.indeterminate = selectedVisible > 0 && selectedVisible < visibleIds.length;
@@ -18348,7 +18414,7 @@
 
     async function adminBulkEnrollStudents() {
       if (!canManageAdminCourseEnrollments()) { alert('ไม่มีสิทธิ์'); return; }
-      if (adminEnrollmentQuotaBlocked) {
+      if (firestoreQuotaBlocked) {
         const blockedResult = getElement('adminBulkEnrollResult');
         if (blockedResult) blockedResult.innerHTML = '<span style="color:#dc2626;">' + escapeHtml(getFirestoreQuotaExceededMessage()) + '</span>';
         return;
@@ -18366,7 +18432,7 @@
       let completed = 0;
       const results = await runAdminEnrollmentTasksWithConcurrency(selectedStudents, 5, async function(student) {
         try { return await createAdminCourseEnrollmentTransaction(student, course, status, 'admin_bulk_enrollment'); }
-        catch (error) { markAdminEnrollmentQuotaExceeded(error); throw error; }
+        catch (error) { markFirestoreQuotaExceeded(error); throw error; }
         finally { completed++; if (resultBox) resultBox.innerHTML = '<span style="color:#0f4cbd;">กำลังบันทึก ' + completed + ' / ' + selectedStudents.length + ' คน...</span>'; }
       });
       const successes = [];
@@ -18395,7 +18461,7 @@
         resultBox.innerHTML = '<span style="color:' + (failures.length || paymentsSkippedForPermission ? '#d97706' : '#16a34a') + ';">สำเร็จ ' + successes.length + ' คน · ไม่สำเร็จ ' + failures.length + ' คน' + (status === 'อนุมัติแล้ว' ? ' · สร้างยอด ' + paymentsCreated + ' · ใช้ยอดเดิม ' + paymentsReused + (paymentsSkippedForPermission ? ' · ยังไม่สร้างยอดเพราะไม่มีสิทธิ์การเงิน ' + paymentsSkippedForPermission : '') : '') + '</span>' +
           (failures.length ? '<ul class="course-enrollment-result-list">' + failures.map(function(item) { return '<li>' + escapeHtml((item.student.name || '-') + ': ' + item.reason) + '</li>'; }).join('') + '</ul>' : '');
       }
-      if (button) button.disabled = adminEnrollmentQuotaBlocked || adminBulkEnrollmentSelectedIds.size === 0;
+      if (button) button.disabled = firestoreQuotaBlocked || adminBulkEnrollmentSelectedIds.size === 0;
     }
 
     function refreshAdminCourseEnrollmentViews() {
@@ -18663,6 +18729,7 @@
 
     async function cancelStudentCourse(id, courseId) {
       if (!canManageAdminCourseEnrollments()) { alert('ไม่มีสิทธิ์'); return; }
+      if (firestoreQuotaBlocked) { alert(getFirestoreQuotaExceededMessage()); return; }
       const student = findStudentById(id);
       if (!student) return;
       const enrollment = getStudentCourseEnrollment(student, courseId || student.courseId);
@@ -18708,15 +18775,11 @@
           const studentRef = db.collection('students').doc(studentDocId);
           const paymentRef = paymentDocId ? db.collection('payments').doc(paymentDocId) : null;
           const receiptRef = receiptDocId ? db.collection('receipts').doc(receiptDocId) : null;
-          const refs = [enrollmentRef, studentRef];
-          if (paymentRef) refs.push(paymentRef);
-          if (receiptRef) refs.push(receiptRef);
-          const snapshots = await Promise.all(refs.map(function(ref) { return transaction.get(ref); }));
-          const enrollmentSnap = snapshots[0];
-          const studentSnap = snapshots[1];
-          let snapshotIndex = 2;
-          const paymentSnap = paymentRef ? snapshots[snapshotIndex++] : null;
-          const receiptSnap = receiptRef ? snapshots[snapshotIndex++] : null;
+          // Read sequentially so a quota failure stops before requesting the remaining documents.
+          const enrollmentSnap = await transaction.get(enrollmentRef);
+          const studentSnap = await transaction.get(studentRef);
+          const paymentSnap = paymentRef ? await transaction.get(paymentRef) : null;
+          const receiptSnap = receiptRef ? await transaction.get(receiptRef) : null;
           if (!studentSnap.exists) throw new Error('student-not-found');
           if (!enrollment.legacy && !enrollmentSnap.exists) throw new Error('course-enrollment-not-found');
           const latestEnrollment = Object.assign({}, enrollment, enrollmentSnap.exists ? enrollmentSnap.data() : {});
@@ -18790,8 +18853,10 @@
         });
       } catch (error) {
         console.error('cancelStudentCourse error:', error);
+        markFirestoreQuotaExceeded(error);
         if (error && error.message === 'course-enrollment-already-cancelled') alert('รายการลงทะเบียนนี้ถูกยกเลิกแล้ว');
         else if (error && error.message === 'payment-not-found') alert('ยอดชำระมีการเปลี่ยนแปลงหรือถูกลบ กรุณารีเฟรชแล้วตรวจสอบใหม่');
+        else if (isFirestoreQuotaExceededError(error)) alert(getFirestoreQuotaExceededMessage() + ' ข้อมูลทั้งหมดไม่ได้ถูกเปลี่ยน');
         else alert('ยกเลิกการลงทะเบียนไม่สำเร็จ ข้อมูลทั้งหมดไม่ได้ถูกเปลี่ยน: ' + ((error && (error.message || error.code)) || 'ไม่ทราบสาเหตุ'));
         return;
       }
@@ -22907,6 +22972,7 @@
     }
 
     async function applyCourse(id) {
+      if (firestoreQuotaBlocked) { alert(getFirestoreQuotaExceededMessage()); return; }
       const c = courses.find(function(item) { return String(item.id) === String(id); });
       if (!c) return;
 
@@ -22976,14 +23042,15 @@
         const studentRef = db.collection('students').doc(studentDocId);
         const courseRef = db.collection('courses').doc(String(c.id));
         await db.runTransaction(async function(transaction) {
-          const snapshots = await Promise.all([
-            transaction.get(studentRef), transaction.get(courseRef), transaction.get(enrollmentRef)
-          ]);
-          if (!snapshots[0].exists || snapshots[0].data().deleted === true) throw new Error('student-not-found');
-          if (!snapshots[1].exists || snapshots[1].data().deleted === true) throw new Error('course-not-found');
-          if (snapshots[2].exists) throw new Error('course-enrollment-already-exists');
-          const latestStudent = snapshots[0].data() || {};
-          const latestCourse = snapshots[1].data() || {};
+          // Read sequentially so a quota failure stops before requesting the remaining documents.
+          const studentSnap = await transaction.get(studentRef);
+          const courseSnap = await transaction.get(courseRef);
+          const enrollmentSnap = await transaction.get(enrollmentRef);
+          if (!studentSnap.exists || studentSnap.data().deleted === true) throw new Error('student-not-found');
+          if (!courseSnap.exists || courseSnap.data().deleted === true) throw new Error('course-not-found');
+          if (enrollmentSnap.exists) throw new Error('course-enrollment-already-exists');
+          const latestStudent = studentSnap.data() || {};
+          const latestCourse = courseSnap.data() || {};
           if (!isCourseOpenForEnrollment(latestCourse)) throw new Error('course-closed');
           if (String(latestStudent.grade || '').trim() !== String(latestCourse.grade || '').trim()) throw new Error('grade-mismatch');
           if (!courseMatchesLocation(latestCourse, latestStudent.preferredLocation)) throw new Error('location-mismatch');
@@ -22992,8 +23059,11 @@
         });
       } catch (error) {
         console.error('apply course firebase error:', error);
+        markFirestoreQuotaExceeded(error);
         updateStudentCourseDisplay();
-        alert(error && error.message === 'course-enrollment-already-exists'
+        alert(isFirestoreQuotaExceededError(error)
+          ? getFirestoreQuotaExceededMessage()
+          : error && error.message === 'course-enrollment-already-exists'
           ? 'คุณเคยสมัครคอร์สนี้แล้ว กรุณาติดต่อเจ้าหน้าที่หากต้องการเรียนซ้ำ'
           : 'บันทึกการสมัครคอร์สไม่สำเร็จ กรุณาลองใหม่หรือติดต่อเจ้าหน้าที่');
         return;
