@@ -245,6 +245,15 @@ test('course management separates completed courses into a historical subsection
   assert.match(html, /const completedCourses = \(courses \|\| \[\]\)\.filter\(function\(course\) \{ return course && course\.deleted !== true && isCourseCompleted\(course\); \}\)/);
 });
 
+test('course schedule and feature columns open compact detail bubbles', () => {
+  assert.match(html, /actionCall\('openAdminCourseScheduleBubble', courseId\)/);
+  assert.match(html, /actionCall\('openAdminCourseFeatureBubble', courseId\)/);
+  assert.match(html, />ดูเวลาเรียน<\/button>/);
+  assert.match(html, />ดูฟังก์ชัน<\/button>/);
+  assert.match(html, /function openAdminCourseScheduleBubble\(courseId\)[\s\S]*openViewBubble\('วันเวลาเรียน'/);
+  assert.match(html, /function openAdminCourseFeatureBubble\(courseId\)[\s\S]*openViewBubble\('ฟังก์ชันของคอร์ส'/);
+});
+
 test('all enrollment entry points use the completed-course guard', () => {
   assert.match(html, /function getAdminBulkEligibleStudents\(course\) \{\s+if \(!isCourseOpenForEnrollment\(course\)\) return \[\]/);
   assert.match(html, /const openCourses = sortCoursesByGrade\(\(courses \|\| \[\]\)\.filter\(isCourseOpenForEnrollment\)\)/);

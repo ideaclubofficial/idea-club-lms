@@ -21627,7 +21627,57 @@
       const actions = completed
         ? '<button class="btn btn-blue" type="button" onclick="' + actionCall('editCourse', courseId) + '">ดู / แก้ไข</button>'
         : '<button class="btn btn-blue" type="button" onclick="' + actionCall('editCourse', courseId) + '">แก้ไข</button><button class="btn btn-green" type="button" onclick="' + actionCall('completeCourseForStudents', courseId) + '">' + completeActionLabel + '</button><button class="btn btn-red" type="button" onclick="' + actionCall('deleteCourse', courseId) + '">ลบ</button>';
-      return '<tr><td>' + escapeHtml(c.grade || '-') + '</td><td>' + escapeHtml(c.name || '-') + '</td><td>' + formatPrice(c.price) + '</td><td>' + getCourseAccessLabel(c) + '</td><td>' + escapeHtml(getCourseLocationsText(c)) + '</td><td>' + escapeHtml(getCourseDisplaySchedule(c) || '-') + '</td><td>' + renderCourseFeatureSummary(c) + '</td><td>' + statusText + '</td><td>' + endCell + '</td><td>' + renderCourseStudentStatusSummary(c) + '</td><td>' + actions + '</td></tr>';
+      const scheduleButton = '<button class="btn btn-blue" type="button" style="white-space:nowrap;" onclick="' + actionCall('openAdminCourseScheduleBubble', courseId) + '">ดูเวลาเรียน</button>';
+      const featureButton = '<button class="btn btn-dark" type="button" style="white-space:nowrap;" onclick="' + actionCall('openAdminCourseFeatureBubble', courseId) + '">ดูฟังก์ชัน</button>';
+      return '<tr><td>' + escapeHtml(c.grade || '-') + '</td><td>' + escapeHtml(c.name || '-') + '</td><td>' + formatPrice(c.price) + '</td><td>' + getCourseAccessLabel(c) + '</td><td>' + escapeHtml(getCourseLocationsText(c)) + '</td><td>' + scheduleButton + '</td><td>' + featureButton + '</td><td>' + statusText + '</td><td>' + endCell + '</td><td>' + renderCourseStudentStatusSummary(c) + '</td><td>' + actions + '</td></tr>';
+    }
+
+    function getAdminCourseForDetail(courseId) {
+      return (courses || []).find(function(course) {
+        return String(course && (course.id || course.firebaseDocId) || '') === String(courseId || '');
+      }) || null;
+    }
+
+    function openAdminCourseScheduleBubble(courseId) {
+      const course = getAdminCourseForDetail(courseId);
+      if (!course) { alert('ไม่พบข้อมูลคอร์ส'); return; }
+      const schedule = getCourseScheduleDefaults(course);
+      const rows = [];
+      schedule.onsiteSlots.forEach(function(slot) {
+        rows.push({ type: 'Onsite', day: getCourseScheduleDayText(slot.day), time: slot.startTime + '-' + slot.endTime });
+      });
+      schedule.onlineSlots.forEach(function(slot) {
+        rows.push({ type: 'Online', day: getCourseScheduleDayText(slot.day), time: slot.startTime + '-' + slot.endTime });
+      });
+      schedule.ondemandSlots.forEach(function(slot) {
+        rows.push({ type: 'On-demand', day: getCourseScheduleDayText(slot.day), time: slot.publishTime ? 'ปล่อยเวลา ' + slot.publishTime : '-' });
+      });
+      let bodyHtml = '<div class="notice"><strong>' + escapeHtml((course.grade || '-') + ' · ' + (course.name || '-')) + '</strong><p style="margin-top:6px;">สถานที่เรียน: ' + escapeHtml(getCourseLocationsText(course)) + '</p></div>';
+      if (rows.length) {
+        bodyHtml += '<div style="display:grid;gap:10px;margin-top:14px;">' + rows.map(function(row) {
+          return '<div class="status-display-row"><span><strong>' + escapeHtml(row.type) + '</strong><br><span class="mini-muted">' + escapeHtml(row.day || '-') + '</span></span><strong>' + escapeHtml(row.time || '-') + '</strong></div>';
+        }).join('') + '</div>';
+      } else {
+        bodyHtml += '<div class="notice" style="margin-top:14px;">' + escapeHtml(getCourseDisplaySchedule(course) || 'ยังไม่ได้กำหนดเวลาเรียน') + '</div>';
+      }
+      openViewBubble('วันเวลาเรียน', bodyHtml);
+    }
+
+    function openAdminCourseFeatureBubble(courseId) {
+      const course = getAdminCourseForDetail(courseId);
+      if (!course) { alert('ไม่พบข้อมูลคอร์ส'); return; }
+      const state = normalizeCourseFeatures(course);
+      const enabled = COURSE_FEATURES.filter(function(item) { return state[item.key] !== false; });
+      const disabled = COURSE_FEATURES.filter(function(item) { return state[item.key] === false; });
+      const featureRows = function(items, enabledState) {
+        return items.map(function(item) {
+          return '<div class="status-display-row"><span><strong>' + escapeHtml(item.title) + '</strong><br><span class="mini-muted">' + escapeHtml(item.desc || '') + '</span></span><span class="' + (enabledState ? 'status-paid' : 'status-absent') + '">' + (enabledState ? 'เปิด' : 'ปิด') + '</span></div>';
+        }).join('');
+      };
+      let bodyHtml = '<div class="notice"><strong>' + escapeHtml((course.grade || '-') + ' · ' + (course.name || '-')) + '</strong><p style="margin-top:6px;">สิทธิ์คอร์ส: ' + escapeHtml(getCourseAccessLabel(course)) + '</p></div>';
+      bodyHtml += '<h4 style="margin:16px 0 8px;color:#15803d;">ฟังก์ชันที่เปิด (' + enabled.length + ')</h4>' + (enabled.length ? featureRows(enabled, true) : '<div class="notice">ไม่มีฟังก์ชันที่เปิด</div>');
+      if (disabled.length) bodyHtml += '<details style="margin-top:14px;"><summary style="cursor:pointer;font-weight:700;color:#6b7280;">ฟังก์ชันที่ปิด (' + disabled.length + ')</summary><div style="margin-top:8px;">' + featureRows(disabled, false) + '</div></details>';
+      openViewBubble('ฟังก์ชันของคอร์ส', bodyHtml);
     }
 
     function renderAdminCourses() {
