@@ -6356,6 +6356,7 @@
                 <h3>สมัครคอร์สให้นักเรียน</h3>
                 <p style="margin-bottom:14px;color:#6b7280;">ระบบจะแสดงเฉพาะคอร์สเปิดรับสมัครที่ตรงชั้นและศูนย์ และจะไม่สร้าง enrollment ทับประวัติเดิม</p>
                 <div class="notice" style="margin-bottom:14px;">ลงคอร์สผิด: กดปุ่ม <strong>ยกเลิกคอร์ส</strong> สีแดงข้างคอร์สเดิมของนักเรียน ระบบจะตรวจและยกเลิกยอดเดือนที่สมัครพร้อมกัน</div>
+                <div id="adminEnrollmentQuotaNotice" class="notice hidden" style="margin-bottom:14px;color:#b45309;border-color:#f59e0b;background:#fffbeb;"></div>
                 <div class="course-enrollment-mode-nav">
                   <button id="adminEnrollModeSingleButton" class="btn btn-blue active" type="button" onclick="switchAdminEnrollmentMode('single')">สมัครรายคน</button>
                   <button id="adminEnrollModeBulkButton" class="btn btn-dark" type="button" onclick="switchAdminEnrollmentMode('bulk')">สมัครแบบกลุ่ม</button>
@@ -17258,6 +17259,7 @@
     let adminCourseEnrollmentCurrentPage = 1;
     const adminCourseEnrollmentPerPage = 20;
     let adminCourseEnrollmentRowMessages = new Map();
+    let adminEnrollmentQuotaBlocked = false;
     let adminEnrollmentListCurrentPage = 1;
     const adminEnrollmentListPerPage = 20;
     let adminBulkEnrollmentSelectedIds = new Set();
@@ -18031,6 +18033,7 @@
     function renderAdminCourseEnrollmentSection() {
       const tbody = getElement('adminEnrollStudentTableBody');
       if (!tbody) return;
+      renderAdminEnrollmentQuotaNotice();
       if (!canManageAdminCourseEnrollments()) {
         tbody.innerHTML = '<tr><td colspan="6">ไม่มีสิทธิ์สมัครคอร์สให้นักเรียน</td></tr>';
         return;
@@ -18066,8 +18069,8 @@
           '<td><strong>' + escapeHtml(student.name || '-') + '</strong><br><span class="mini-muted">ชื่อเล่น: ' + escapeHtml(student.nickname || '-') + '</span><br><span class="mini-muted">' + escapeHtml(student.memberId || student.studentId || '-') + '</span></td>' +
           '<td>' + escapeHtml((student.grade || '-') + ' · ' + (student.preferredLocation || '-')) + '</td>' +
           '<td><span class="course-enrollment-existing-list">' + existingCourses + '</span></td>' +
-          '<td><select class="admin-enroll-row-course" onchange="updateAdminEnrollRowButton(this)"' + (availableCourses.length ? '' : ' disabled') + '>' + courseOptions + '</select></td>' +
-          '<td><select class="admin-enroll-row-status"><option value="อนุมัติแล้ว">อนุมัติแล้ว</option><option value="รออนุมัติคอร์ส">รออนุมัติคอร์ส</option></select></td>' +
+          '<td><select class="admin-enroll-row-course" onchange="updateAdminEnrollRowButton(this)"' + (availableCourses.length && !adminEnrollmentQuotaBlocked ? '' : ' disabled') + '>' + courseOptions + '</select></td>' +
+          '<td><select class="admin-enroll-row-status"' + (adminEnrollmentQuotaBlocked ? ' disabled' : '') + '><option value="อนุมัติแล้ว">อนุมัติแล้ว</option><option value="รออนุมัติคอร์ส">รออนุมัติคอร์ส</option></select></td>' +
           '<td><button class="btn btn-green admin-enroll-row-button" type="button" onclick="adminEnrollStudentInCourseFromRow(this)" disabled>เพิ่มคอร์ส</button>' + messageHtml + '</td></tr>';
       }).join('') : '<tr><td colspan="6">ไม่พบนักเรียนตามตัวกรอง</td></tr>';
       renderTablePagination('adminEnrollStudentPagination', adminCourseEnrollmentCurrentPage, totalPages, filtered.length, 'changeAdminCourseEnrollmentPage');
@@ -18087,7 +18090,7 @@
     function updateAdminEnrollRowButton(courseSelect) {
       const row = courseSelect && courseSelect.closest('tr');
       const button = row && row.querySelector('.admin-enroll-row-button');
-      if (button) button.disabled = !courseSelect.value;
+      if (button) button.disabled = adminEnrollmentQuotaBlocked || !courseSelect.value;
     }
 
     function createAdminEnrollmentError(code, message) {
@@ -18096,9 +18099,37 @@
       return error;
     }
 
+    function isFirestoreQuotaExceededError(error) {
+      const code = String(error && error.code || '').toLowerCase();
+      const message = String(error && error.message || '').toLowerCase();
+      return code === 'resource-exhausted' || code.includes('resource-exhausted') ||
+        (message.includes('resource-exhausted') && message.includes('quota')) || message.includes('quota exceeded');
+    }
+
+    function getFirestoreQuotaExceededMessage() {
+      return 'โควตา Firestore ของโปรเจกต์เต็ม ระบบยังไม่ได้บันทึกคอร์ส กรุณารอให้โควตารีเซ็ตช่วงประมาณ 14:00–15:00 น. ตามเวลาไทย หรือเปิด Billing ใน Firebase แล้วลองใหม่';
+    }
+
+    function markAdminEnrollmentQuotaExceeded(error) {
+      if (!isFirestoreQuotaExceededError(error)) return false;
+      adminEnrollmentQuotaBlocked = true;
+      renderAdminEnrollmentQuotaNotice();
+      return true;
+    }
+
+    function renderAdminEnrollmentQuotaNotice() {
+      const notice = getElement('adminEnrollmentQuotaNotice');
+      if (!notice) return;
+      notice.classList.toggle('hidden', !adminEnrollmentQuotaBlocked);
+      notice.innerHTML = adminEnrollmentQuotaBlocked
+        ? '<strong>ไม่สามารถบันทึกได้ชั่วคราว:</strong> ' + escapeHtml(getFirestoreQuotaExceededMessage()) + ' หน้านี้หยุดส่งคำขอเพิ่มเพื่อไม่ให้เกิดการลองซ้ำต่อเนื่อง'
+        : '';
+    }
+
     async function createAdminCourseEnrollmentTransaction(student, course, status, source) {
       if (!canManageAdminCourseEnrollments()) throw createAdminEnrollmentError('permission-denied', 'ไม่มีสิทธิ์จัดการการสมัครคอร์ส');
       if (!firebaseReady || !db) throw createAdminEnrollmentError('firebase-not-ready', 'Firebase ยังไม่พร้อมใช้งาน');
+      if (adminEnrollmentQuotaBlocked) throw createAdminEnrollmentError('firestore-quota-exceeded', getFirestoreQuotaExceededMessage());
       const studentId = getEnrollmentStudentId(student);
       const courseId = String(course && (course.id || course.firebaseDocId) || '').trim();
       if (!studentId || !courseId) throw createAdminEnrollmentError('invalid-enrollment-target', 'ข้อมูลนักเรียนหรือคอร์สไม่ครบ');
@@ -18170,6 +18201,7 @@
     }
 
     function getAdminEnrollmentErrorMessage(error) {
+      if (isFirestoreQuotaExceededError(error) || error && error.code === 'firestore-quota-exceeded') return getFirestoreQuotaExceededMessage();
       const messages = {
         'course-enrollment-already-exists': 'มีคอร์สนี้หรือมีประวัติสมัครแล้ว',
         'course-closed': 'คอร์สปิดรับสมัครแล้ว', 'grade-mismatch': 'ระดับชั้นไม่ตรงกับคอร์ส',
@@ -18212,6 +18244,7 @@
         refreshAdminCourseEnrollmentViews();
       } catch (error) {
         console.error('adminEnrollStudentInCourseFromRow error:', error);
+        markAdminEnrollmentQuotaExceeded(error);
         adminCourseEnrollmentRowMessages.set(studentId, { ok: false, text: 'เพิ่มคอร์สไม่สำเร็จ: ' + getAdminEnrollmentErrorMessage(error) });
         renderAdminCourseEnrollmentSection();
       }
@@ -18231,8 +18264,9 @@
     function renderAdminBulkEnrollmentControls() {
       const courseSelect = getElement('adminBulkEnrollCourse');
       if (!courseSelect) return;
+      renderAdminEnrollmentQuotaNotice();
       if (!canManageAdminCourseEnrollments()) { courseSelect.innerHTML = '<option value="">ไม่มีสิทธิ์ใช้งาน</option>'; courseSelect.disabled = true; return; }
-      courseSelect.disabled = false;
+      courseSelect.disabled = adminEnrollmentQuotaBlocked;
       const previous = String(courseSelect.value || '');
       const openCourses = sortCoursesByGrade((courses || []).filter(isCourseOpenForEnrollment));
       courseSelect.innerHTML = '<option value="">เลือกคอร์ส</option>' + openCourses.map(function(course) {
@@ -18288,7 +18322,7 @@
         : Array.from(document.querySelectorAll('#adminBulkEnrollStudentList input[type="checkbox"]')).map(function(box) { return String(box.value); });
       const selectedVisible = visibleIds.filter(function(id) { return adminBulkEnrollmentSelectedIds.has(id); }).length;
       if (summary) summary.textContent = 'เลือก ' + adminBulkEnrollmentSelectedIds.size + ' คน';
-      if (button) button.disabled = adminBulkEnrollmentSelectedIds.size === 0;
+      if (button) button.disabled = adminEnrollmentQuotaBlocked || adminBulkEnrollmentSelectedIds.size === 0;
       if (selectAll) {
         selectAll.checked = visibleIds.length > 0 && selectedVisible === visibleIds.length;
         selectAll.indeterminate = selectedVisible > 0 && selectedVisible < visibleIds.length;
@@ -18314,6 +18348,11 @@
 
     async function adminBulkEnrollStudents() {
       if (!canManageAdminCourseEnrollments()) { alert('ไม่มีสิทธิ์'); return; }
+      if (adminEnrollmentQuotaBlocked) {
+        const blockedResult = getElement('adminBulkEnrollResult');
+        if (blockedResult) blockedResult.innerHTML = '<span style="color:#dc2626;">' + escapeHtml(getFirestoreQuotaExceededMessage()) + '</span>';
+        return;
+      }
       const courseId = getElement('adminBulkEnrollCourse') ? String(getElement('adminBulkEnrollCourse').value || '') : '';
       const course = (courses || []).find(function(item) { return String(item.id || item.firebaseDocId || '') === courseId; });
       const status = getElement('adminBulkEnrollStatus') && getElement('adminBulkEnrollStatus').value === 'รออนุมัติคอร์ส' ? 'รออนุมัติคอร์ส' : 'อนุมัติแล้ว';
@@ -18327,6 +18366,7 @@
       let completed = 0;
       const results = await runAdminEnrollmentTasksWithConcurrency(selectedStudents, 5, async function(student) {
         try { return await createAdminCourseEnrollmentTransaction(student, course, status, 'admin_bulk_enrollment'); }
+        catch (error) { markAdminEnrollmentQuotaExceeded(error); throw error; }
         finally { completed++; if (resultBox) resultBox.innerHTML = '<span style="color:#0f4cbd;">กำลังบันทึก ' + completed + ' / ' + selectedStudents.length + ' คน...</span>'; }
       });
       const successes = [];
@@ -18355,7 +18395,7 @@
         resultBox.innerHTML = '<span style="color:' + (failures.length || paymentsSkippedForPermission ? '#d97706' : '#16a34a') + ';">สำเร็จ ' + successes.length + ' คน · ไม่สำเร็จ ' + failures.length + ' คน' + (status === 'อนุมัติแล้ว' ? ' · สร้างยอด ' + paymentsCreated + ' · ใช้ยอดเดิม ' + paymentsReused + (paymentsSkippedForPermission ? ' · ยังไม่สร้างยอดเพราะไม่มีสิทธิ์การเงิน ' + paymentsSkippedForPermission : '') : '') + '</span>' +
           (failures.length ? '<ul class="course-enrollment-result-list">' + failures.map(function(item) { return '<li>' + escapeHtml((item.student.name || '-') + ': ' + item.reason) + '</li>'; }).join('') + '</ul>' : '');
       }
-      if (button) button.disabled = adminBulkEnrollmentSelectedIds.size === 0;
+      if (button) button.disabled = adminEnrollmentQuotaBlocked || adminBulkEnrollmentSelectedIds.size === 0;
     }
 
     function refreshAdminCourseEnrollmentViews() {

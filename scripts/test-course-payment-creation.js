@@ -39,6 +39,18 @@ test('shared enrollment payment path prefers registered month and normal payment
   assert.equal(prepared.payment.paymentCenter, 'Center A');
 });
 
+test('admin enrollment detects and explains Firestore quota exhaustion', () => {
+  const context = {};
+  vm.createContext(context);
+  for (const name of ['isFirestoreQuotaExceededError', 'getFirestoreQuotaExceededMessage', 'getAdminEnrollmentErrorMessage']) {
+    vm.runInContext(source(name), context);
+  }
+  const quotaError = { code: 'resource-exhausted', message: 'Quota exceeded.' };
+  assert.equal(context.isFirestoreQuotaExceededError(quotaError), true);
+  assert.match(context.getAdminEnrollmentErrorMessage(quotaError), /โควตา Firestore/);
+  assert.equal(context.isFirestoreQuotaExceededError({ code: 'permission-denied', message: 'Missing permissions' }), false);
+});
+
 test('shared enrollment payment path reuses the existing student course month record', () => {
   const existing = { id: 'existing', studentId: 'student-1', courseId: 'course-1', month: 'ตุลาคม 2569' };
   const context = {
@@ -97,6 +109,7 @@ function createAdminTransactionContext(status, options = {}) {
   const context = {
     courseEnrollments: existingEnrollment ? [{ ...existingEnrollment }] : [],
     payments: [],
+    adminEnrollmentQuotaBlocked: false,
     firebaseReady: true,
     firebase: { firestore: { FieldValue: { serverTimestamp: () => 'timestamp' } } },
     canManageAdminCourseEnrollments: () => true,
