@@ -32,6 +32,9 @@ function setup() {
     isActiveStudentForDashboard: () => true, getPendingPaymentRecords: () => [], getPendingPaymentBundles: () => [],
     getOverduePaymentRecords: () => [], getPendingCourseStudents: () => [] };
   for (const name of ['applyPaymentRepairsSync','renderTablePagination','updatePaymentBundleSelectionHint','updatePaymentPreviewSelectionSummary','renderAdminTodoList','renderNewMemberNotificationBox','renderAdminDataQualityBox']) c[name] = () => {};
+  c.renderTuitionNoticeStudentTable = () => {};
+  c.renderTuitionNoticeStudentTableNow = () => {};
+  c.renderTuitionNoticeMonthFilter = () => {};
   vm.createContext(c);
   const queueStart = html.indexOf('    const adminPaymentRenderDirty = ');
   if (queueStart !== -1) vm.runInContext(html.slice(queueStart, html.indexOf('    function scheduleAdminPaymentDataRefresh(', queueStart)), c);
@@ -474,6 +477,7 @@ function setupTuitionNotices() {
   ];
   const c = {
     students,
+    payments: [],
     systemSettings: { instituteName: 'IDEA CLUB', phone: '0812345678' },
     getFilteredPaymentsForTable: () => c.payments,
     getPaymentDisplayStatus: payment => payment.status || 'รอชำระเงิน',
@@ -488,6 +492,11 @@ function setupTuitionNotices() {
     getPaymentCenterKey: value => String(value || '').includes('หนองฉาง') ? 'nongchang' : String(value || '').includes('นครสวรรค์') ? 'nakhonsawan' : '',
     getPaymentQrImageSrcForContext: payment => payment.qr || '',
     getPaymentFinalAmount: payment => payment.finalAmount ?? payment.amount ?? 0,
+    getPaymentRecordCourseAndStudent: payment => ({ student: students.find(student => student.id === payment.studentId) || null, course: { location: payment.center || '' } }),
+    compareThaiMonthYear: (a, b) => {
+      const order = { 'กันยายน 2569': 1, 'ตุลาคม 2569': 2, 'พฤศจิกายน 2569': 3 };
+      return (order[a] || 0) - (order[b] || 0);
+    },
     normalizeText: value => String(value || '').trim().replace(/\s+/g, ' '),
     gradeOrder: grade => ['ป.4', 'ป.5'].indexOf(grade),
     escapeHtml: value => String(value ?? ''),
@@ -497,7 +506,7 @@ function setupTuitionNotices() {
     Date
   };
   vm.createContext(c);
-  for (const name of ['getTuitionNoticeIdentityKeys','isTuitionNoticePrintablePayment','buildTuitionNoticeGroups','getTuitionNoticePreviewSummary','tuitionNoticeHtml']) {
+  for (const name of ['getTuitionNoticeIdentityKeys','isTuitionNoticePrintablePayment','buildTuitionNoticeStudentRows','getTuitionNoticeRowCenters','getTuitionNoticeRowMonths','tuitionNoticeDetailRowsHtml','buildTuitionNoticeGroups','getTuitionNoticePreviewSummary','tuitionNoticeHtml']) {
     vm.runInContext(source(name), c);
   }
   return c;
@@ -558,8 +567,11 @@ test('tuition notice PDF table omits the payment status column', () => {
   assert.match(documentHtml, /<th>คอร์ส<\/th><th>เดือน<\/th><th>ยอดชำระ<\/th>/);
 });
 
-test('payment toolbar exposes the bulk tuition notice action', () => {
-  assert.match(html, /onclick="downloadFilteredTuitionNoticesPdf\(\)"[^>]*>ดาวน์โหลด PDF ใบแจ้งยอดค่าเรียน</);
+test('finance navigation exposes a separate tuition notice student tab', () => {
+  assert.match(html, /id="admin-tuition-notices"/);
+  assert.match(html, /onclick="downloadSelectedTuitionNoticesPdf\(\)"[^>]*>ดาวน์โหลด PDF ที่เลือก</);
+  const paymentSection = html.slice(html.indexOf('<section id="admin-payment"'), html.indexOf('<section id="admin-tuition-notices"'));
+  assert.doesNotMatch(paymentSection, /downloadFilteredTuitionNoticesPdf/);
 });
 
 test('bulk tuition PDF renders exactly one A4 page per notice group', async () => {
@@ -607,46 +619,101 @@ test('tuition notice image wait decodes an already loaded first-page QR before c
   assert.equal(decoded, true);
 });
 
-test('tuition notice download requires finance permission and a selected month', () => {
+test('tuition notice student rows combine months and centers while preserving every payment', () => {
+  const c = setupTuitionNotices();
+  c.payments = [
+    { id: 'sep', studentId: 's1', student: 'สมชาย', center: 'IDEA CLUB ศูนย์ นครสวรรค์', course: 'Math', month: 'กันยายน 2569', amount: 1000, status: 'ค้างชำระ' },
+    { id: 'oct-a', studentId: 's1', student: 'สมชาย', center: 'IDEA CLUB ศูนย์ นครสวรรค์', course: 'Science', month: 'ตุลาคม 2569', amount: 1200, status: 'รอชำระเงิน' },
+    { id: 'oct-b', studentId: 's1', student: 'สมชาย', center: 'IDEA CLUB ศูนย์ หนองฉาง', course: 'English', month: 'ตุลาคม 2569', amount: 800, status: 'สลิปไม่ผ่าน' }
+  ];
+  const rows = c.buildTuitionNoticeStudentRows(c.payments);
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].payments.length, 3);
+  assert.equal(rows[0].totalAmount, 3000);
+  assert.deepEqual(Array.from(c.getTuitionNoticeRowMonths(rows[0])), ['กันยายน 2569', 'ตุลาคม 2569']);
+  assert.equal(c.getTuitionNoticeRowCenters(rows[0]).length, 2);
+  assert.deepEqual(Array.from(rows[0].payments, payment => payment.id), ['sep', 'oct-b', 'oct-a']);
+});
+
+test('tuition notice filters keep only payable records inside the selected scope', () => {
+  const c = {
+    payments: [
+      { id: 'pending', month: 'ตุลาคม 2569', status: 'รอชำระเงิน' },
+      { id: 'overdue', month: 'กันยายน 2569', status: 'ค้างชำระ' },
+      { id: 'paid', month: 'ตุลาคม 2569', status: 'ชำระแล้ว' },
+      { id: 'review', month: 'ตุลาคม 2569', status: 'รอตรวจสลิป' },
+      { id: 'deleted', month: 'ตุลาคม 2569', status: 'รอชำระเงิน', deleted: true }
+    ],
+    getTuitionNoticeFilterScope: () => ({ month: 'ตุลาคม 2569' }),
+    getPaymentDisplayStatus: payment => payment.status,
+    isCoursePaymentCancelled: payment => payment.status === 'ยกเลิก',
+    paymentMatchesDashboardScope: (payment, scope) => payment.month === scope.month
+  };
+  vm.createContext(c);
+  vm.runInContext(source('isTuitionNoticePrintablePayment'), c);
+  vm.runInContext(source('getFilteredTuitionNoticePayments'), c);
+  assert.deepEqual(Array.from(c.getFilteredTuitionNoticePayments(), payment => payment.id), ['pending']);
+});
+
+test('changing tuition notice filters clears hidden selections and resets pagination', () => {
+  const c = { Set };
+  vm.createContext(c);
+  vm.runInContext('let tuitionNoticeCurrentPage = 4; let tuitionNoticeSelectedStudentKeys = new Set(["student:s1"]); let tuitionNoticeRenderCount = 0; function renderTuitionNoticeStudentTable(){ tuitionNoticeRenderCount++; }', c);
+  vm.runInContext(source('applyTuitionNoticeFilters'), c);
+  c.applyTuitionNoticeFilters();
+  const state = vm.runInContext('({ page: tuitionNoticeCurrentPage, selected: tuitionNoticeSelectedStudentKeys.size, renders: tuitionNoticeRenderCount })', c);
+  assert.deepEqual({ ...state }, { page: 1, selected: 0, renders: 1 });
+});
+
+test('tuition notice detail shows status and center while PDF still omits status', () => {
+  const c = setupTuitionNotices();
+  const payment = { id: 'p1', studentId: 's1', student: 'สมชาย', center: 'IDEA CLUB ศูนย์ นครสวรรค์', course: 'Math', month: 'ตุลาคม 2569', amount: 1000, status: 'ค้างชำระ', qr: 'qr-a' };
+  const row = c.buildTuitionNoticeStudentRows([payment])[0];
+  const detail = c.tuitionNoticeDetailRowsHtml(row);
+  assert.match(detail, /ค้างชำระ/);
+  assert.match(detail, /IDEA CLUB ศูนย์ นครสวรรค์/);
+  const documentHtml = c.tuitionNoticeHtml(c.buildTuitionNoticeGroups([payment])[0]);
+  assert.doesNotMatch(documentHtml, /<th>สถานะ<\/th>/);
+});
+
+test('tuition notice per-student download requires finance permission', () => {
   const alerts = [];
   let allowed = false;
-  let month = 'ตุลาคม 2569';
-  let builds = 0;
   const c = {
     hasPermission: () => allowed,
     alert: message => alerts.push(message),
-    getElement: () => ({ value: month }),
-    buildTuitionNoticeGroups: () => { builds++; return []; }
+    getFilteredTuitionNoticeStudentRow: () => null
   };
   vm.createContext(c);
-  vm.runInContext(source('downloadFilteredTuitionNoticesPdf'), c);
-  c.downloadFilteredTuitionNoticesPdf();
-  assert.equal(builds, 0);
+  vm.runInContext(source('downloadTuitionNoticeStudentPdf'), c);
+  c.downloadTuitionNoticeStudentPdf('student:s1');
   assert.equal(alerts.pop(), 'ไม่มีสิทธิ์');
   allowed = true;
-  month = 'ทั้งหมด';
-  c.downloadFilteredTuitionNoticesPdf();
-  assert.equal(builds, 0);
-  assert.equal(alerts.pop(), 'กรุณาเลือกเดือนที่ต้องการดาวน์โหลดใบแจ้งยอดก่อน');
+  c.downloadTuitionNoticeStudentPdf('missing');
+  assert.equal(alerts.pop(), 'ไม่พบข้อมูลนักเรียนตามตัวกรองปัจจุบัน');
 });
 
-test('tuition notice toolbar downloads the filtered groups without opening a preview', async () => {
-  const groups = [{ key: 's1|center-a' }];
+test('selected tuition notice download exports all selected student-center pages', async () => {
+  const rows = [
+    { key: 'student:s1', payments: [{ id: 'a' }, { id: 'b' }] },
+    { key: 'student:s2', payments: [{ id: 'c' }] }
+  ];
   let downloaded;
   const c = {
     hasPermission: () => true,
     alert() {},
-    getElement: () => ({ value: 'ตุลาคม 2569' }),
-    buildTuitionNoticeGroups: () => groups,
-    getTuitionNoticePreviewSummary: () => ({ missingQr: 0 }),
-    getSafeFileName: value => value,
+    buildTuitionNoticeStudentRows: () => rows,
+    buildTuitionNoticeGroups: payments => payments.map(payment => ({ key: payment.id })),
+    warnMissingTuitionNoticeQr() {},
+    getLocalDateString: () => '2026-11-03',
     downloadTuitionNoticesPdf: async (items, filename) => { downloaded = { items, filename }; }
   };
   vm.createContext(c);
-  vm.runInContext(source('downloadFilteredTuitionNoticesPdf'), c);
-  await c.downloadFilteredTuitionNoticesPdf();
-  assert.equal(downloaded.items, groups);
-  assert.equal(downloaded.filename, 'tuition-notices-ตุลาคม 2569.pdf');
+  vm.runInContext('let tuitionNoticeSelectedStudentKeys = new Set(["student:s1", "student:s2"]);', c);
+  vm.runInContext(source('downloadSelectedTuitionNoticesPdf'), c);
+  await c.downloadSelectedTuitionNoticesPdf();
+  assert.deepEqual(Array.from(downloaded.items, item => item.key), ['a', 'b', 'c']);
+  assert.equal(downloaded.filename, 'tuition-notices-selected-2026-11-03.pdf');
 });
 
 test('monthly payment targets exclude enrollments whose course has completed', () => {
