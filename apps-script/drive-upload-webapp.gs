@@ -79,8 +79,10 @@ function getTargetFolder(baseFolder, data) {
 
   const monthName = sanitizeName(data.month || "ไม่ระบุเดือน");
   const courseName = sanitizeName(data.courseName || data.courseId || "ไม่ระบุคอร์ส");
+  const gradeName = sanitizeName(String(data.grade || "").trim() || "ไม่ระบุระดับชั้น");
   const monthFolder = getOrCreateFolder(baseFolder, monthName);
-  return getOrCreateFolder(monthFolder, courseName);
+  const courseFolder = getOrCreateFolder(monthFolder, courseName);
+  return getOrCreateFolder(courseFolder, gradeName);
 }
 
 function getOrCreateFolder(parent, name) {
