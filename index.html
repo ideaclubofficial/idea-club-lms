@@ -17998,6 +17998,156 @@
       return enrollment;
     }
 
+    function getEditedStudentUserProfilePatch(student) {
+      return {
+        name: student.name || '',
+        nickname: student.nickname || '',
+        parentName: student.parentName || '',
+        phone: student.phone || '',
+        lineId: student.lineId || '',
+        school: student.school || '',
+        address: student.address || '',
+        grade: student.grade || '',
+        preferredLocation: student.preferredLocation || '',
+        role: 'student',
+        accountType: 'student',
+        permissions: [],
+        updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+      };
+    }
+
+    function getEditedStudentEnrollmentPaymentDocId(enrollment, month) {
+      const enrollmentId = String(enrollment && (enrollment.firebaseDocId || enrollment.id) || '').trim();
+      const reactivation = Number(enrollment && enrollment.reactivationCount || 0);
+      const monthKey = encodeURIComponent(String(month || '').trim()).replace(/%/g, '_');
+      return enrollmentId + '__initial-payment-' + reactivation + '__' + monthKey;
+    }
+
+    async function saveEditedStudentWithCourseTransaction(student, draftStudent, selectedCourse, requestedStatus) {
+      if (!firebaseReady || !db) throw createAdminEnrollmentError('firebase-not-ready', 'Firebase ยังไม่พร้อมใช้งาน');
+      if (firestoreQuotaBlocked) throw createAdminEnrollmentError('firestore-quota-exceeded', getFirestoreQuotaExceededMessage());
+      const studentId = getEnrollmentStudentId(student);
+      if (!studentId) throw createAdminEnrollmentError('student-not-found', 'ไม่พบข้อมูลนักเรียน');
+      const courseId = String(selectedCourse && (selectedCourse.id || selectedCourse.firebaseDocId) || '').trim();
+      if (courseId && !canManageAdminCourseEnrollments()) throw createAdminEnrollmentError('permission-denied', 'ไม่มีสิทธิ์จัดการการสมัครคอร์ส');
+      const targetStatus = requestedStatus === 'รออนุมัติคอร์ส' ? 'รออนุมัติคอร์ส' : 'อนุมัติแล้ว';
+      const studentRef = db.collection('students').doc(studentId);
+      const courseRef = courseId ? db.collection('courses').doc(courseId) : null;
+      const enrollmentId = courseId ? getCourseEnrollmentDocId(studentId, courseId) : '';
+      const enrollmentRef = enrollmentId ? db.collection('courseEnrollments').doc(enrollmentId) : null;
+      const auditUser = getFirebaseAuditUser();
+      const canCreatePayment = hasPermission('admin.finance') || hasPermission('admin.full');
+      let savedStudent = null;
+      let savedEnrollment = null;
+      let savedPayment = null;
+      let paymentCreated = false;
+
+      await db.runTransaction(async function(transaction) {
+        const studentSnap = await transaction.get(studentRef);
+        if (!studentSnap.exists || studentSnap.data().deleted === true) throw createAdminEnrollmentError('student-not-found', 'ไม่พบข้อมูลนักเรียน');
+        let courseSnap = null;
+        let enrollmentSnap = null;
+        if (courseRef) {
+          courseSnap = await transaction.get(courseRef);
+          enrollmentSnap = await transaction.get(enrollmentRef);
+        }
+
+        const currentStudentData = Object.assign({}, studentSnap.data(), draftStudent, {
+          id: studentId,
+          firebaseDocId: studentId
+        });
+        savedStudent = currentStudentData;
+
+        let paymentRef = null;
+        let paymentSnap = null;
+        let pendingPayment = null;
+        if (courseRef) {
+          if (!courseSnap.exists || courseSnap.data().deleted === true) throw createAdminEnrollmentError('course-not-found', 'ไม่พบข้อมูลคอร์ส');
+          const currentCourseData = Object.assign({}, selectedCourse, courseSnap.data(), { id: courseId, firebaseDocId: courseId });
+          if (!isCourseOpenForEnrollment(currentCourseData)) throw createAdminEnrollmentError('course-closed', 'คอร์สปิดรับสมัครหรือจบคอร์สแล้ว');
+          if (String(currentStudentData.grade || '').trim() !== String(currentCourseData.grade || '').trim()) throw createAdminEnrollmentError('grade-mismatch', 'ระดับชั้นไม่ตรงกับคอร์ส');
+          if (!courseMatchesLocation(currentCourseData, currentStudentData.preferredLocation)) throw createAdminEnrollmentError('location-mismatch', 'ศูนย์ไม่ตรงกับคอร์ส');
+
+          const previousEnrollment = enrollmentSnap.exists ? Object.assign({}, enrollmentSnap.data()) : null;
+          const previousStatus = String(previousEnrollment && previousEnrollment.courseStatus || '');
+          if (previousEnrollment && (previousStatus === 'จบคอร์ส' || String(previousEnrollment.enrollmentStatus || '') === 'completed')) {
+            throw createAdminEnrollmentError('course-enrollment-completed', 'คอร์สนี้จบแล้วและไม่สามารถสมัครทับได้');
+          }
+          if (previousEnrollment && isCourseStatusApproved(previousStatus) && targetStatus === 'รออนุมัติคอร์ส') {
+            throw createAdminEnrollmentError('approved-enrollment-cannot-downgrade', 'คอร์สที่อนุมัติแล้วไม่สามารถลดกลับเป็นรออนุมัติได้');
+          }
+
+          const nextBase = buildAdminCourseEnrollment(currentStudentData, currentCourseData, targetStatus, {
+            registeredCourseMonth: previousEnrollment && previousEnrollment.registeredCourseMonth || currentStudentData.registeredCourseMonth || '',
+            enrollmentSource: previousEnrollment && previousEnrollment.enrollmentSource || 'admin_student_edit'
+          });
+          if (previousEnrollment && isCourseEnrollmentReenrollable(previousEnrollment)) {
+            savedEnrollment = buildReactivatedCourseEnrollment(previousEnrollment, nextBase, auditUser, Date.now());
+          } else if (previousEnrollment) {
+            savedEnrollment = Object.assign({}, previousEnrollment);
+            applyAdminCourseEnrollmentStatus(savedEnrollment, targetStatus);
+          } else {
+            savedEnrollment = nextBase;
+          }
+          Object.assign(savedEnrollment, {
+            id: enrollmentId,
+            firebaseDocId: enrollmentId,
+            studentId: studentId,
+            authUid: currentStudentData.authUid || savedEnrollment.authUid || '',
+            memberId: currentStudentData.memberId || currentStudentData.studentId || savedEnrollment.memberId || '',
+            studentName: currentStudentData.name || savedEnrollment.studentName || '',
+            courseId: courseId,
+            courseName: currentCourseData.name || savedEnrollment.courseName || '',
+            courseAccess: currentCourseData.access || savedEnrollment.courseAccess || '',
+            grade: currentStudentData.grade || currentCourseData.grade || '',
+            location: currentStudentData.preferredLocation || currentCourseData.location || '',
+            enrollmentStatus: 'active'
+          });
+
+          if (savedEnrollment.courseStatus === 'อนุมัติแล้ว' && canCreatePayment) {
+            const prepared = prepareCourseEnrollmentPayment(currentStudentData, savedEnrollment, currentCourseData, savedEnrollment.registeredCourseMonth);
+            if (prepared.payment) {
+              pendingPayment = Object.assign({}, prepared.payment);
+              const paymentDocId = prepared.created
+                ? getEditedStudentEnrollmentPaymentDocId(savedEnrollment, prepared.month)
+                : String(pendingPayment.firebaseDocId || pendingPayment.id || '');
+              if (paymentDocId) {
+                pendingPayment.id = paymentDocId;
+                pendingPayment.firebaseDocId = paymentDocId;
+                paymentRef = db.collection('payments').doc(paymentDocId);
+                paymentSnap = await transaction.get(paymentRef);
+                if (paymentSnap.exists && !isCoursePaymentCancelled(paymentSnap.data())) {
+                  savedPayment = Object.assign({ id: paymentDocId, firebaseDocId: paymentDocId }, paymentSnap.data());
+                  paymentCreated = false;
+                } else {
+                  savedPayment = pendingPayment;
+                  paymentCreated = true;
+                }
+                const existingPaymentStatus = savedPayment.paymentStatus || savedPayment.status || '';
+                if (existingPaymentStatus) savedEnrollment.paymentStatus = existingPaymentStatus;
+              }
+            }
+          }
+
+          savedStudent = Object.assign({}, currentStudentData, buildStudentMainCourseFields(savedEnrollment, currentCourseData));
+        }
+
+        transaction.set(studentRef, buildFirebasePayload(savedStudent, studentId, false), { merge: true });
+        if (savedEnrollment) transaction.set(enrollmentRef, buildFirebasePayload(savedEnrollment, enrollmentId, !enrollmentSnap.exists), { merge: true });
+        if (paymentRef && savedPayment && paymentCreated) transaction.set(paymentRef, buildFirebasePayload(savedPayment, savedPayment.firebaseDocId, true), { merge: true });
+        if (savedStudent.authUid) {
+          transaction.set(db.collection('users').doc(String(savedStudent.authUid)), getEditedStudentUserProfilePatch(savedStudent), { merge: true });
+        }
+      });
+
+      return {
+        student: savedStudent,
+        enrollment: savedEnrollment,
+        payment: savedPayment,
+        paymentCreated: paymentCreated
+      };
+    }
+
     function canManageAdminCourseEnrollments() {
       return hasPermission('admin.students');
     }
@@ -18270,6 +18420,8 @@
       if (isFirestoreQuotaExceededError(error) || error && error.code === 'firestore-quota-exceeded') return getFirestoreQuotaExceededMessage();
       const messages = {
         'course-enrollment-already-exists': 'มีคอร์สนี้หรือมีประวัติสมัครแล้ว',
+        'course-enrollment-completed': 'คอร์สนี้จบแล้วและไม่สามารถสมัครทับได้',
+        'approved-enrollment-cannot-downgrade': 'คอร์สที่อนุมัติแล้วไม่สามารถลดกลับเป็นรออนุมัติได้ กรุณาใช้ปุ่มยกเลิกคอร์สหากลงผิด',
         'course-closed': 'คอร์สปิดรับสมัครแล้ว', 'grade-mismatch': 'ระดับชั้นไม่ตรงกับคอร์ส',
         'location-mismatch': 'ศูนย์ไม่ตรงกับคอร์ส', 'student-not-found': 'ไม่พบข้อมูลนักเรียน',
         'course-not-found': 'ไม่พบข้อมูลคอร์ส', 'permission-denied': 'ไม่มีสิทธิ์จัดการการสมัครคอร์ส'
@@ -18944,17 +19096,20 @@
         '</div>' +
         '<label for="bubbleStudentAddress">ที่อยู่</label>' +
         '<textarea id="bubbleStudentAddress" rows="3" autocomplete="street-address">' + escapeHtml(s.address || '') + '</textarea>' +
+        '<div class="notice"><strong>คอร์สที่มีอยู่</strong><p style="margin-top:6px;">' + (function() {
+          const currentEnrollments = getStudentCourseEnrollments(s, { currentOnly: true });
+          return currentEnrollments.length ? currentEnrollments.map(function(enrollment) {
+            const course = getCourseForEnrollment(enrollment);
+            return escapeHtml(((course && course.name) || enrollment.courseName || '-') + ' · ' + (enrollment.courseStatus || '-'));
+          }).join('<br>') : 'ยังไม่มีคอร์สที่ใช้งาน';
+        })() + '</p><span class="mini-muted">การเลือกด้านล่างจะเพิ่มหรือเลือกเป็นคอร์สหลักล่าสุด โดยไม่ยกเลิกคอร์สเดิม</span></div>' +
         '<div class="form-row">' +
-          '<div><label>คอร์สที่ลงเรียน</label><select id="bubbleStudentCourseId">' + studentCourseOptionsHtml(s.courseId || s.course, s.preferredLocation || '', s.grade || '') + '</select>' +
+          '<div><label>เพิ่ม / เลือกคอร์สหลักล่าสุด</label><select id="bubbleStudentCourseId" data-student-id="' + escapeHtml(getEnrollmentStudentId(s)) + '" onchange="updateBubbleStudentCourseStatusState()">' + studentCourseOptionsHtml('', s.preferredLocation || '', s.grade || '', 'ไม่เพิ่มคอร์ส') + '</select>' +
           (function() { var sc = courses.find(function(c) { return String(c.id) === String(s.courseId || ''); }); var centerMismatch = sc && s.preferredLocation && !courseMatchesLocation(sc, s.preferredLocation); var gradeMismatch = sc && s.grade && sc.grade && sc.grade !== s.grade; var mismatch = centerMismatch || gradeMismatch; return '<span id="bubbleStudentCourseCenterWarning"' + (mismatch ? '' : ' class="hidden"') + ' style="color:#dc2626;font-size:0.85em">' + (mismatch ? ' คอร์สเดิมไม่ตรงกับชั้น/ศูนย์ที่เลือก กรุณาเลือกคอร์สใหม่' : '') + '</span>'; })() +
           '</div>' +
-          '<div><label>สถานะคอร์ส</label><select id="bubbleStudentCourseStatus">' +
-            '<option' + ((s.courseStatus || 'ยังไม่ได้สมัครคอร์ส') === 'ยังไม่ได้สมัครคอร์ส' ? ' selected' : '') + '>ยังไม่ได้สมัครคอร์ส</option>' +
-            '<option' + ((s.courseStatus || '') === 'รออนุมัติคอร์ส' ? ' selected' : '') + '>รออนุมัติคอร์ส</option>' +
-            '<option' + ((s.courseStatus || '') === 'อนุมัติแล้ว' ? ' selected' : '') + '>อนุมัติแล้ว</option>' +
-            '<option' + ((s.courseStatus || '') === 'จบคอร์ส' ? ' selected' : '') + '>จบคอร์ส</option>' +
-            '<option' + ((s.courseStatus || '') === 'ยกเลิก' ? ' selected' : '') + '>ยกเลิก</option>' +
-            '<option' + ((s.courseStatus || '') === 'ไม่อนุมัติ' ? ' selected' : '') + '>ไม่อนุมัติ</option>' +
+          '<div><label>สถานะคอร์สที่เพิ่ม</label><select id="bubbleStudentCourseStatus" disabled>' +
+            '<option value="อนุมัติแล้ว">อนุมัติแล้ว</option>' +
+            '<option value="รออนุมัติคอร์ส">รออนุมัติคอร์ส</option>' +
           '</select></div>' +
           '<div><label>สถานะการเรียน</label><select id="bubbleStudentLearningStatus"><option value="เรียนอยู่"' + ((s.learningStatus || s.status || 'เรียนอยู่') === 'เรียนอยู่' ? ' selected' : '') + '>เรียนอยู่</option><option value="พักเรียน"' + ((s.learningStatus || s.status) === 'พักเรียน' ? ' selected' : '') + '>พักเรียน</option><option value="ลาออก"' + ((s.learningStatus || s.status) === 'ลาออก' ? ' selected' : '') + '>ลาออก</option><option value="จบคอร์ส"' + ((s.learningStatus || s.status) === 'จบคอร์ส' ? ' selected' : '') + '>จบคอร์ส</option></select></div>' +
         '</div>' +
@@ -18999,7 +19154,7 @@
           const selectedCourseId = bubbleSelectValue('bubbleStudentCourseId');
           const selectedCourse = courses.find(function(c) { return String(c.id) === String(selectedCourseId); });
           const bubbleCenter = bubbleSelectValue('bubbleStudentPreferredLocation');
-          if (selectedCourse && bubbleCenter && selectedCourse.location && selectedCourse.location !== bubbleCenter) {
+          if (selectedCourse && bubbleCenter && !courseMatchesLocation(selectedCourse, bubbleCenter)) {
             getElement('editBubbleResult').textContent = 'คอร์สที่เลือกไม่ตรงกับศูนย์ กรุณาเลือกคอร์สใหม่';
             getElement('editBubbleResult').style.color = '#dc2626';
             return;
@@ -19015,7 +19170,7 @@
           const privateLessonTeacherId = bubbleSelectValue('bubbleStudentPrivateLessonTeacher');
           const previousLearningStatus = getStudentLearningStatus(s);
           const nextLearningStatus = bubbleSelectValue('bubbleStudentLearningStatus');
-          Object.assign(s, {
+          const draftStudent = Object.assign({}, s, {
             name: name,
             nickname: nickname,
             parentName: parentName,
@@ -19025,11 +19180,6 @@
             school: bubbleValue('bubbleStudentSchool'),
             address: bubbleValue('bubbleStudentAddress'),
             preferredLocation: bubbleSelectValue('bubbleStudentPreferredLocation'),
-            course: selectedCourse ? selectedCourse.name : 'ยังไม่ได้สมัครคอร์ส',
-            courseId: selectedCourse ? selectedCourse.id : null,
-            courseAccess: selectedCourse ? selectedCourse.access : '-',
-            courseStatus: selectedCourse ? bubbleSelectValue('bubbleStudentCourseStatus') : 'ยังไม่ได้สมัครคอร์ส',
-            paymentStatus: !selectedCourse ? 'ยังไม่ได้สมัครคอร์ส' : (s.paymentStatus || 'รอชำระเงิน'),
             learningStatus: nextLearningStatus,
             status: nextLearningStatus,
             billingStartMonth: (function() {
@@ -19049,36 +19199,43 @@
             privateLessonNote: bubbleValue('bubbleStudentPrivateLessonNote'),
             role: 'student'
           });
-          applyStudentLearningStatusAuditFields(s, nextLearningStatus, previousLearningStatus);
+          applyStudentLearningStatusAuditFields(draftStudent, nextLearningStatus, previousLearningStatus);
           try {
-            await setFirebaseDocument('students', s);
-            if (selectedCourse) await ensureAdminCourseEnrollment(s, selectedCourse, bubbleSelectValue('bubbleStudentCourseStatus') || 'อนุมัติแล้ว');
-            if (s.authUid && db) {
-              await db.collection('users').doc(s.authUid).set({
-                name: s.name,
-                nickname: s.nickname,
-                parentName: s.parentName,
-                phone: s.phone,
-                lineId: s.lineId || '',
-                school: s.school || '',
-                address: s.address || '',
-                grade: s.grade || '',
-                preferredLocation: s.preferredLocation || '',
-                role: 'student',
-                accountType: 'student',
-                permissions: [],
-                updatedAt: firebase.firestore.FieldValue.serverTimestamp()
-              }, { merge: true });
+            const saveResult = await saveEditedStudentWithCourseTransaction(
+              s,
+              draftStudent,
+              selectedCourse,
+              bubbleSelectValue('bubbleStudentCourseStatus') || 'อนุมัติแล้ว'
+            );
+            Object.assign(s, saveResult.student || draftStudent);
+            if (saveResult.enrollment) {
+              const enrollmentId = String(saveResult.enrollment.firebaseDocId || saveResult.enrollment.id || '');
+              const localEnrollment = courseEnrollments.find(function(item) { return String(item.firebaseDocId || item.id || '') === enrollmentId; });
+              if (localEnrollment) Object.assign(localEnrollment, saveResult.enrollment);
+              else courseEnrollments.push(saveResult.enrollment);
+            }
+            if (saveResult.payment) {
+              const paymentId = String(saveResult.payment.firebaseDocId || saveResult.payment.id || '');
+              const localPayment = payments.find(function(item) { return String(item.firebaseDocId || item.id || '') === paymentId; });
+              if (localPayment) Object.assign(localPayment, saveResult.payment);
+              else payments.push(saveResult.payment);
             }
             renderAdminStudents();
+            renderAdminCourseEnrollmentSection();
+            renderAdminEnrollmentList();
             renderPrivateStudents();
             renderTeacherStudents();
             renderAdminDashboard();
             updateStudentCourseDisplay();
-            addActivityLog('แก้ไขข้อมูลนักเรียน', s.name || '-');
+            try {
+              await addActivityLog('แก้ไขข้อมูลนักเรียน', (s.name || '-') + (selectedCourse ? ' · เพิ่ม/เลือกคอร์ส ' + (selectedCourse.name || '-') : ' · ไม่เพิ่มคอร์ส'));
+            } catch (activityError) {
+              console.warn('edit student activity log warning:', activityError);
+            }
             closeEditBubble();
           } catch (error) {
-            getElement('editBubbleResult').textContent = 'บันทึกไม่สำเร็จ: ' + (error.message || error.code || 'ไม่ทราบสาเหตุ');
+            markFirestoreQuotaExceeded(error);
+            getElement('editBubbleResult').textContent = 'บันทึกไม่สำเร็จ: ' + getAdminEnrollmentErrorMessage(error);
             getElement('editBubbleResult').style.color = '#dc2626';
           }
         }
@@ -19091,6 +19248,7 @@
         }
       }, 0);
       updateBubblePrivateLessonFields();
+      updateBubbleStudentCourseStatusState();
     }
 
     function clearBillingStartMonthPicker() {
@@ -19835,10 +19993,10 @@
       });
     }
 
-    function studentCourseOptionsHtml(selectedValue, center, grade) {
+    function studentCourseOptionsHtml(selectedValue, center, grade, emptyLabel) {
       const selectedText = String(selectedValue || '');
       const filteredCourses = sortCoursesByGrade((grade || center) ? getCoursesForGradeAndCenter(grade || '', center || '') : courses.filter(isCourseOpenForEnrollment));
-      const options = ['<option value="">ยังไม่ได้สมัครคอร์ส</option>'];
+      const options = ['<option value="">' + escapeHtml(emptyLabel || 'ยังไม่ได้สมัครคอร์ส') + '</option>'];
       const historicalSelection = (courses || []).find(function(course) {
         return isCourseCompleted(course) && (String(course.id || course.firebaseDocId || '') === selectedText || course.name === selectedText);
       });
@@ -19887,12 +20045,26 @@
       if (!courseSelect) return;
       const prev = courseSelect.value;
       const valid = getCoursesForGradeAndCenter(grade || '', center || '').some(function(c) { return String(c.id) === prev; });
-      courseSelect.innerHTML = studentCourseOptionsHtml(valid ? prev : '', center, grade);
+      courseSelect.innerHTML = studentCourseOptionsHtml(valid ? prev : '', center, grade, 'ไม่เพิ่มคอร์ส');
       const w = getElement('bubbleStudentCourseCenterWarning');
       if (w) {
         if (!valid && prev) { w.textContent = 'คอร์สเดิมไม่ตรงกับชั้น/ศูนย์ที่เลือก กรุณาเลือกคอร์สใหม่'; w.classList.remove('hidden'); }
         else { w.textContent = ''; w.classList.add('hidden'); }
       }
+      updateBubbleStudentCourseStatusState();
+    }
+
+    function updateBubbleStudentCourseStatusState() {
+      const courseSelect = getElement('bubbleStudentCourseId');
+      const statusSelect = getElement('bubbleStudentCourseStatus');
+      if (!statusSelect) return;
+      const courseId = courseSelect ? String(courseSelect.value || '') : '';
+      statusSelect.disabled = !courseId;
+      if (!courseId) { statusSelect.value = 'อนุมัติแล้ว'; return; }
+      const studentId = courseSelect ? String(courseSelect.getAttribute('data-student-id') || '') : '';
+      const student = studentId ? findStudentById(studentId) : null;
+      const enrollment = student ? getStudentCourseEnrollment(student, courseId) : null;
+      statusSelect.value = enrollment && enrollment.courseStatus === 'รออนุมัติคอร์ส' ? 'รออนุมัติคอร์ส' : 'อนุมัติแล้ว';
     }
 
     function onBubbleStudentCenterChange() {
