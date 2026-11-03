@@ -665,15 +665,16 @@ test('changing tuition notice filters clears hidden selections and resets pagina
   assert.deepEqual({ ...state }, { page: 1, selected: 0, renders: 1 });
 });
 
-test('tuition notice detail shows status and center while PDF still omits status', () => {
+test('tuition notice detail and PDF omit payment status', () => {
   const c = setupTuitionNotices();
   const payment = { id: 'p1', studentId: 's1', student: 'สมชาย', center: 'IDEA CLUB ศูนย์ นครสวรรค์', course: 'Math', month: 'ตุลาคม 2569', amount: 1000, status: 'ค้างชำระ', qr: 'qr-a' };
   const row = c.buildTuitionNoticeStudentRows([payment])[0];
   const detail = c.tuitionNoticeDetailRowsHtml(row);
-  assert.match(detail, /ค้างชำระ/);
+  assert.doesNotMatch(detail, /ค้างชำระ/);
   assert.match(detail, /IDEA CLUB ศูนย์ นครสวรรค์/);
   const documentHtml = c.tuitionNoticeHtml(c.buildTuitionNoticeGroups([payment])[0]);
   assert.doesNotMatch(documentHtml, /<th>สถานะ<\/th>/);
+  assert.doesNotMatch(documentHtml, /ตรวจสอบสถานะ/);
 });
 
 test('tuition notice per-student download requires finance permission', () => {
