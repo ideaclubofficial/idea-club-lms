@@ -136,10 +136,15 @@ test('cancelled receipts remain distinct from manually hidden receipts', () => {
   assert.equal(context.normalizeReceiptStatus('hidden'), 'hidden');
 });
 
-test('single-student enrollment screen exposes cancellation beside every current course', () => {
+test('single-student enrollment screen moves current-course cancellation into the detail bubble', () => {
   const renderSource = functionSource('renderAdminCourseEnrollmentSection');
-  assert.match(renderSource, /isCourseEnrollmentCurrent\(enrollment\)/);
-  assert.match(renderSource, /actionCall\('cancelStudentCourse', studentId, courseId\)/);
-  assert.match(renderSource, />ยกเลิกคอร์ส<\/button>/);
+  const bubbleSource = functionSource('openAdminStudentCoursesBubble');
+  const cancelFromBubbleSource = functionSource('cancelStudentCourseFromBubble');
+  assert.match(renderSource, /actionCall\('openAdminStudentCoursesBubble', studentId\)/);
+  assert.doesNotMatch(renderSource, /actionCall\('cancelStudentCourse'/);
+  assert.match(bubbleSource, /isCourseEnrollmentCurrent\(enrollment\)/);
+  assert.match(bubbleSource, /actionCall\('cancelStudentCourseFromBubble', id, courseId\)/);
+  assert.match(bubbleSource, />ยกเลิกคอร์ส<\/button>/);
+  assert.match(cancelFromBubbleSource, /closeEditBubble\(\);[\s\S]*cancelStudentCourse\(id, courseId\)/);
   assert.match(html, /ลงคอร์สผิด:[\s\S]*ยกเลิกยอดเดือนที่สมัครพร้อมกัน/);
 });

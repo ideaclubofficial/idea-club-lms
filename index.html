@@ -3971,9 +3971,52 @@
     .course-bulk-student-item { display:flex; align-items:flex-start; gap:10px; padding:10px 12px; border:1px solid #e5e7eb; border-radius:10px; background:#fff; }
     .course-bulk-student-item input { margin-top:3px; }
     .course-enrollment-result-list { margin:8px 0 0; padding-left:20px; }
-    .course-enrollment-existing-list { display:flex; flex-direction:column; align-items:flex-start; gap:7px; min-width:230px; }
-    .course-enrollment-existing-item { display:flex; align-items:center; gap:6px; flex-wrap:wrap; }
-    .course-enrollment-existing-item .btn { padding:5px 9px; font-size:11px; white-space:nowrap; }
+    .course-enrollment-view-button { white-space:nowrap; }
+    .course-enrollment-bubble-summary {
+      display:flex;
+      flex-wrap:wrap;
+      gap:6px 16px;
+      margin-bottom:14px;
+      padding:12px 14px;
+      border-radius:12px;
+      background:#f8fafc;
+      color:#475569;
+    }
+    .course-enrollment-bubble-list { display:grid; gap:12px; }
+    .course-enrollment-bubble-item {
+      min-width:0;
+      padding:14px;
+      border:1px solid #dbe4f0;
+      border-radius:14px;
+      background:#fff;
+    }
+    .course-enrollment-bubble-header {
+      display:flex;
+      align-items:flex-start;
+      justify-content:space-between;
+      gap:10px;
+      margin-bottom:10px;
+    }
+    .course-enrollment-bubble-title {
+      min-width:0;
+      margin:0;
+      color:#0f4cbd;
+      overflow-wrap:anywhere;
+    }
+    .course-enrollment-bubble-meta {
+      display:grid;
+      grid-template-columns:repeat(2, minmax(0, 1fr));
+      gap:8px 16px;
+      color:#475569;
+      font-size:14px;
+    }
+    .course-enrollment-bubble-meta strong { color:#1f2937; }
+    .course-enrollment-bubble-actions { margin-top:12px; }
+    @media (max-width: 600px) {
+      .course-enrollment-bubble-header { flex-direction:column; }
+      .course-enrollment-bubble-meta { grid-template-columns:1fr; }
+      .course-enrollment-bubble-actions .btn { width:100%; }
+    }
 
     /* ── CHANGE D: Compact payment action buttons ── */
     .payment-actions-wrap { display: flex; flex-wrap: wrap; gap: 5px; align-items: center; min-width: 320px; }
@@ -18246,14 +18289,9 @@
         const studentId = getEnrollmentStudentId(student);
         const enrollments = getStudentCourseEnrollments(student);
         const availableCourses = sortCoursesByGrade(getAdminAvailableCoursesForStudent(student));
-        const existingCourses = enrollments.length ? enrollments.map(function(enrollment) {
-          const course = getCourseForEnrollment(enrollment);
-          const courseId = String(enrollment.courseId || '');
-          const cancelButton = isCourseEnrollmentCurrent(enrollment)
-            ? '<button class="btn btn-red" type="button" onclick="' + actionCall('cancelStudentCourse', studentId, courseId) + '">ยกเลิกคอร์ส</button>'
-            : '';
-          return '<span class="course-enrollment-existing-item"><span class="tag">' + escapeHtml(((course && course.name) || enrollment.courseName || enrollment.courseId || '-') + ' · ' + (enrollment.courseStatus || '-')) + '</span>' + cancelButton + '</span>';
-        }).join('') : '<span class="mini-muted">ยังไม่มีคอร์ส</span>';
+        const existingCourses = enrollments.length
+          ? '<button class="btn btn-blue course-enrollment-view-button" type="button" onclick="' + actionCall('openAdminStudentCoursesBubble', studentId) + '">ดูคอร์ส (' + enrollments.length + ')</button>'
+          : '<span class="mini-muted">ยังไม่มีคอร์ส</span>';
         const courseOptions = availableCourses.length
           ? '<option value="">เลือกคอร์ส</option>' + availableCourses.map(function(course) {
               const courseId = String(course.id || course.firebaseDocId || '');
@@ -18267,12 +18305,56 @@
         return '<tr data-student-id="' + escapeHtml(studentId) + '">' +
           '<td><strong>' + escapeHtml(student.name || '-') + '</strong><br><span class="mini-muted">ชื่อเล่น: ' + escapeHtml(student.nickname || '-') + '</span><br><span class="mini-muted">' + escapeHtml(student.memberId || student.studentId || '-') + '</span></td>' +
           '<td>' + escapeHtml((student.grade || '-') + ' · ' + (student.preferredLocation || '-')) + '</td>' +
-          '<td><span class="course-enrollment-existing-list">' + existingCourses + '</span></td>' +
+          '<td>' + existingCourses + '</td>' +
           '<td><select class="admin-enroll-row-course" onchange="updateAdminEnrollRowButton(this)"' + (availableCourses.length && !firestoreQuotaBlocked ? '' : ' disabled') + '>' + courseOptions + '</select></td>' +
           '<td><select class="admin-enroll-row-status"' + (firestoreQuotaBlocked ? ' disabled' : '') + '><option value="อนุมัติแล้ว">อนุมัติแล้ว</option><option value="รออนุมัติคอร์ส">รออนุมัติคอร์ส</option></select></td>' +
           '<td><button class="btn btn-green admin-enroll-row-button" type="button" onclick="adminEnrollStudentInCourseFromRow(this)" disabled>เพิ่มคอร์ส</button>' + messageHtml + '</td></tr>';
       }).join('') : '<tr><td colspan="6">ไม่พบนักเรียนตามตัวกรอง</td></tr>';
       renderTablePagination('adminEnrollStudentPagination', adminCourseEnrollmentCurrentPage, totalPages, filtered.length, 'changeAdminCourseEnrollmentPage');
+    }
+
+    function getAdminEnrollmentStatusClass(status) {
+      if (status === 'อนุมัติแล้ว') return 'status-paid';
+      if (status === 'รออนุมัติคอร์ส') return 'status-waiting';
+      return 'status-absent';
+    }
+
+    function openAdminStudentCoursesBubble(id) {
+      if (!canManageAdminCourseEnrollments()) { alert('ไม่มีสิทธิ์'); return; }
+      const student = findStudentById(id);
+      if (!student) { alert('ไม่พบข้อมูลนักเรียน'); return; }
+      const enrollments = getStudentCourseEnrollments(student);
+      const summary = '<div class="course-enrollment-bubble-summary">' +
+        '<span><strong>นักเรียน:</strong> ' + escapeHtml(student.name || '-') + '</span>' +
+        '<span><strong>ชื่อเล่น:</strong> ' + escapeHtml(student.nickname || '-') + '</span>' +
+        '<span><strong>Member ID:</strong> ' + escapeHtml(student.memberId || student.studentId || '-') + '</span>' +
+        '<span><strong>ชั้น / ศูนย์:</strong> ' + escapeHtml((student.grade || '-') + ' · ' + (student.preferredLocation || '-')) + '</span>' +
+        '</div>';
+      const items = enrollments.length ? enrollments.map(function(enrollment) {
+        const course = getCourseForEnrollment(enrollment);
+        const courseId = String(enrollment.courseId || '');
+        const courseName = (course && course.name) || enrollment.courseName || enrollment.course || enrollment.courseId || '-';
+        const courseStatus = enrollment.courseStatus || '-';
+        const paymentStatus = getEnrollmentPaymentStatus(enrollment, student);
+        const cancelButton = isCourseEnrollmentCurrent(enrollment)
+          ? '<div class="course-enrollment-bubble-actions"><button class="btn btn-red" type="button" onclick="' + actionCall('cancelStudentCourseFromBubble', id, courseId) + '">ยกเลิกคอร์ส</button></div>'
+          : '';
+        return '<article class="course-enrollment-bubble-item">' +
+          '<div class="course-enrollment-bubble-header"><h4 class="course-enrollment-bubble-title">' + escapeHtml(courseName) + '</h4>' +
+          '<span class="' + getAdminEnrollmentStatusClass(courseStatus) + '">' + escapeHtml(courseStatus) + '</span></div>' +
+          '<div class="course-enrollment-bubble-meta">' +
+          '<span><strong>ชั้น / ศูนย์:</strong> ' + escapeHtml((enrollment.grade || (course && course.grade) || student.grade || '-') + ' · ' + (enrollment.location || (course && course.location) || student.preferredLocation || '-')) + '</span>' +
+          '<span><strong>เดือนที่สมัคร:</strong> ' + escapeHtml(enrollment.registeredCourseMonth || '-') + '</span>' +
+          '<span><strong>สถานะคอร์ส:</strong> ' + escapeHtml(courseStatus) + '</span>' +
+          '<span><strong>สถานะชำระเงิน:</strong> ' + escapeHtml(paymentStatus || '-') + '</span>' +
+          '</div>' + cancelButton + '</article>';
+      }).join('') : '<p class="mini-muted">ยังไม่มีคอร์ส</p>';
+      openViewBubble('คอร์สที่มีอยู่ (' + enrollments.length + ')', summary + '<div class="course-enrollment-bubble-list">' + items + '</div>');
+    }
+
+    function cancelStudentCourseFromBubble(id, courseId) {
+      closeEditBubble();
+      return cancelStudentCourse(id, courseId);
     }
 
     function resetAdminCourseEnrollmentPage() {

@@ -291,6 +291,26 @@ test('course enrollment screens expose bulk controls, filters, summaries, and gu
   assert.match(html, /function adminBulkEnrollStudents\(\) \{\s+if \(!canManageAdminCourseEnrollments\(\)\)/);
 });
 
+test('single enrollment table opens existing courses in a detail bubble', () => {
+  const renderStart = html.indexOf('    function renderAdminCourseEnrollmentSection()');
+  const renderEnd = html.indexOf('    function getAdminEnrollmentStatusClass(', renderStart);
+  const renderSource = html.slice(renderStart, renderEnd);
+  const bubbleStart = renderEnd;
+  const bubbleEnd = html.indexOf('    function resetAdminCourseEnrollmentPage()', bubbleStart);
+  const bubbleSource = html.slice(bubbleStart, bubbleEnd);
+
+  assert.match(renderSource, /actionCall\('openAdminStudentCoursesBubble', studentId\)/);
+  assert.match(renderSource, /ดูคอร์ส \(' \+ enrollments\.length \+ '\)/);
+  assert.doesNotMatch(renderSource, /actionCall\('cancelStudentCourse'/);
+  assert.match(bubbleSource, /function openAdminStudentCoursesBubble\(id\)/);
+  assert.match(bubbleSource, /getStudentCourseEnrollments\(student\)/);
+  assert.match(bubbleSource, /เดือนที่สมัคร:/);
+  assert.match(bubbleSource, /สถานะชำระเงิน:/);
+  assert.match(bubbleSource, /isCourseEnrollmentCurrent\(enrollment\)/);
+  assert.match(bubbleSource, /actionCall\('cancelStudentCourseFromBubble', id, courseId\)/);
+  assert.match(bubbleSource, /function cancelStudentCourseFromBubble\(id, courseId\) \{\s+closeEditBubble\(\);\s+return cancelStudentCourse\(id, courseId\);/);
+});
+
 test('student and admin enrollment writes also update the main student course projection', () => {
   assert.match(html, /studentMainUpdate = Object\.assign\(\{\}, buildStudentMainCourseFields\(savedEnrollment, currentCourseData\)/);
   assert.match(html, /transaction\.set\(studentRef, studentMainUpdate, \{ merge: true \}\)/);
