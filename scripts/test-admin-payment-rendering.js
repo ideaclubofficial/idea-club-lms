@@ -24,7 +24,8 @@ function setup() {
   const c = { console: { log() {} }, getElement: id => elements[id] || null, payments: [], students: [], courses: [],
     paymentCurrentPage: 1, LIST_PAGE_SIZE: 20, adminPaymentDataRefreshTimer: null,
     window: { setTimeout(fn) { const id = ++nextTimer; timers.set(id, fn); return id; } }, clearTimeout: id => timers.delete(id),
-    safeRun: fn => fn(), getFilteredPaymentsForTable: () => [], getScopedPaymentBundles: () => [],
+    safeRun: fn => { try { return fn(); } catch (_) { return undefined; } }, getFilteredPaymentsForTable: () => [], getScopedPaymentBundles: () => [],
+    isQuotaOptimizedLoadingEnabled: () => false,
     getDashboardScopedPayments: () => c.payments, getDashboardScopedPaymentBundles: () => [],
     getPaymentDisplayStatus: p => p.status, getPaymentBundleDisplayStatus: p => p.status,
     getPaymentDashboardAmountTotals: () => ({ scope: {}, paidAmount: c.payments.filter(p => p.status === 'ชำระแล้ว').reduce((n,p) => n+p.amount,0), expectedAmount: c.payments.reduce((n,p) => n+p.amount,0) }),
@@ -731,6 +732,7 @@ test('monthly payment targets exclude enrollments whose course has completed', (
     getCourseForEnrollment: enrollment => enrollment.courseId === completedCourse.id ? completedCourse : activeCourse
   };
   vm.createContext(c);
+  vm.runInContext(source('isCourseCompleted'), c);
   vm.runInContext(source('isCourseCompletedForBilling'), c);
   vm.runInContext(source('isCourseEnrollmentBillable'), c);
   vm.runInContext(source('getMonthlyPaymentTargetStudents'), c);

@@ -1,5 +1,6 @@
 const { onCall, HttpsError } = require("firebase-functions/v2/https");
 const { onSchedule } = require("firebase-functions/v2/scheduler");
+const { onDocumentWritten } = require("firebase-functions/v2/firestore");
 const { setGlobalOptions } = require("firebase-functions/v2");
 const admin = require("firebase-admin");
 const { google } = require("googleapis");
@@ -12,6 +13,10 @@ const {
   isCourseEndDue,
   isCurrentApprovedEnrollment,
 } = require("./course-end-helpers");
+const {
+  buildStudentSearchIndex,
+  getEnrollmentSearchText,
+} = require("./student-search-index");
 
 setGlobalOptions({
   region: "asia-southeast1",
@@ -1221,6 +1226,79 @@ exports.resetStudentPasswordToDefault = onCall(async (request) => {
   });
 
   return { ok: true };
+});
+
+// ============================================================
+// Quota-efficient student search index
+// ============================================================
+
+function studentSearchProjection(data) {
+  const value = data || {};
+  return JSON.stringify([
+    value.name, value.nickname, value.parentName, value.phone, value.lineId,
+    value.school, value.preferredLocation, value.memberId, value.studentId,
+    value.grade, value.course, value.courseStatus, value.paymentStatus,
+    value.learningStatus, value.status, value.authUid, value.deleted,
+  ]);
+}
+
+exports.syncStudentSearchIndex = onDocumentWritten("students/{studentId}", async (event) => {
+  const studentId = event.params.studentId;
+  const before = event.data.before.exists ? event.data.before.data() || {} : null;
+  const after = event.data.after.exists ? event.data.after.data() || {} : null;
+  if (before && after && studentSearchProjection(before) === studentSearchProjection(after)) return;
+  const indexRef = db.collection("studentSearchIndex").doc(studentId);
+  if (!after) {
+    await indexRef.delete();
+    return;
+  }
+  const indexDoc = await indexRef.get();
+  const enrollmentTexts = indexDoc.exists ? indexDoc.data().enrollmentTexts || {} : {};
+  await indexRef.set({
+    ...buildStudentSearchIndex(studentId, after, enrollmentTexts),
+    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+  }, { merge: true });
+});
+
+async function updateEnrollmentSearchIndex(studentId, enrollmentId, enrollment) {
+  if (!studentId) return;
+  const indexRef = db.collection("studentSearchIndex").doc(String(studentId));
+  const studentRef = db.collection("students").doc(String(studentId));
+  await db.runTransaction(async (transaction) => {
+    const [studentDoc, indexDoc] = await Promise.all([
+      transaction.get(studentRef),
+      transaction.get(indexRef),
+    ]);
+    if (!studentDoc.exists) {
+      if (indexDoc.exists) transaction.delete(indexRef);
+      return;
+    }
+    const enrollmentTexts = indexDoc.exists && indexDoc.data().enrollmentTexts
+      ? { ...indexDoc.data().enrollmentTexts }
+      : {};
+    const text = getEnrollmentSearchText(enrollment);
+    if (text) enrollmentTexts[enrollmentId] = text;
+    else delete enrollmentTexts[enrollmentId];
+    transaction.set(indexRef, {
+      ...buildStudentSearchIndex(studentId, studentDoc.data() || {}, enrollmentTexts),
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    }, { merge: true });
+  });
+}
+
+exports.syncStudentEnrollmentSearchIndex = onDocumentWritten("courseEnrollments/{enrollmentId}", async (event) => {
+  const enrollmentId = event.params.enrollmentId;
+  const before = event.data.before.exists ? event.data.before.data() || {} : null;
+  const after = event.data.after.exists ? event.data.after.data() || {} : null;
+  const beforeStudentId = String(before && before.studentId || "");
+  const afterStudentId = String(after && after.studentId || "");
+  const beforeText = getEnrollmentSearchText(before);
+  const afterText = getEnrollmentSearchText(after);
+  if (beforeStudentId === afterStudentId && beforeText === afterText) return;
+  if (beforeStudentId && beforeStudentId !== afterStudentId) {
+    await updateEnrollmentSearchIndex(beforeStudentId, enrollmentId, null);
+  }
+  if (afterStudentId) await updateEnrollmentSearchIndex(afterStudentId, enrollmentId, after);
 });
 
 // ============================================================

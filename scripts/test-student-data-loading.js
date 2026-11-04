@@ -15,9 +15,11 @@ function setup() {
   const query = { where() { return this; }, orderBy() { return this; }, limit() { return this; }, get: async () => ({ docs: [] }),
     onSnapshot(options, next) { Promise.resolve().then(() => next({ docs: [], docChanges: () => [] })); return () => {}; } };
   const c = {
-    STUDENT_HOME_REALTIME_COLLECTIONS: ['courses','courseEnrollments','payments','receipts','paymentBundles','studentGamificationProfiles','studentGamificationEvents','studentPersonalQuests'],
+    STUDENT_HOME_REALTIME_COLLECTIONS: ['courseEnrollments','payments','receipts','paymentBundles'],
     resetStaffDataSession() {}, getElement: () => null, onlineExamCoursesLoadSeq: 0, safeRun: fn => fn(), triggerDailyLoginQuestIfNeeded() {},
     firebaseReady: true, firebaseUser: { uid: 'A' }, db: { collection: () => query },
+    systemSettings: { quotaOptimizedLoadingVersion: 0 }, markFirestoreQuotaExceeded() {}, rememberFirebaseDocumentSnapshot() {},
+    isFirestoreQuotaExceededError: () => false,
     console: { log() {}, warn() {} }, currentStudent: null,
     studentDataLoadedForUid: '', studentDataLoadingPromise: null,
     studentDataLoadingForUid: '', studentDataSessionUid: '', studentDataSessionVersion: 0,
@@ -55,8 +57,8 @@ test('concurrent loads including force share one request; completed data is reus
   assert.equal(h.loads.length, 1);
   assert.deepEqual(h.listeners, ['A']);
   const refresh = h.load(true);
-  assert.equal(h.loads.length, 2);
-  h.finish(1); await refresh;
+  assert.equal(h.loads.length, 1, 'forced refresh reuses the restored student record');
+  await refresh;
 });
 
 test('failed load can retry', async () => {
@@ -113,7 +115,7 @@ test('missing student and Firebase not ready do not become cached successes', as
   assert.equal(h.c.studentDataLoadedForUid, 'A');
 });
 
-for (const failingCollection of ['courses', 'payments', 'adminScoreRecords']) {
+for (const failingCollection of ['courses', 'payments', 'announcements']) {
   test(`partial ${failingCollection} failure is not cached and can retry`, async () => {
     const h = setup();
     let fail = true;
@@ -139,17 +141,17 @@ for (const failingCollection of ['courses', 'payments', 'adminScoreRecords']) {
     const first = h.load(); h.finish(0); await first;
     assert.equal(h.c.studentDataLoadedForUid, '');
     fail = false;
-    const retry = h.load(); assert.equal(h.loads.length, 2);
-    h.finish(1); await retry;
+    const retry = h.load(); assert.equal(h.loads.length, 1, 'retry reuses the cached owned student record');
+    await retry;
     assert.equal(h.c.studentDataLoadedForUid, 'A');
   });
 }
 
-test('student initial load uses listeners instead of one-off owned collection reads', async () => {
+test('student initial load keeps only four owned financial/enrollment listeners', async () => {
   const h = setup();
   h.c.loadStudentOwnCollection = () => { throw new Error('Duplicate owned collection read'); };
   const first = h.load(); h.finish(0); await first;
-  assert.equal(Object.keys(h.c.studentRealtimeSession.groups).length, 8);
+  assert.equal(Object.keys(h.c.studentRealtimeSession.groups).length, 4);
   assert.equal(h.c.studentDataLoadedForUid, 'A');
 });
 
@@ -158,7 +160,7 @@ test('listener failure after initial success invalidates cached load on next req
   const previous = h.c.studentRealtimeSession;
   const oldGroup = previous.groups.payments;
   oldGroup.failed = true;
-  const retry = h.load(); assert.equal(h.loads.length, 2); h.finish(1); await retry;
+  const retry = h.load(); assert.equal(h.loads.length, 1, 'listener retry does not repeat student ownership lookups'); await retry;
   assert.notEqual(h.c.studentRealtimeSession.groups.payments, oldGroup);
   assert.equal(oldGroup.active, false);
   assert.equal(h.c.studentDataLoadedForUid, 'A');
@@ -169,7 +171,8 @@ test('home load never requests deferred clips, exam bank, reward shop or wheel d
   h.c.getFirebaseCollectionQuiet=async name=>{reads.push(name);return [];};
   const first=h.load();h.finish(0);await first;
   for(const name of ['onDemandClips','monthlyExamLinks','gamificationRewards','prizeWheelItems','prizeWheelSettings'])assert.ok(!reads.includes(name),name);
-  assert.ok(!reads.includes('courses'),'courses');
-  for(const name of ['announcements','scoreReports','paymentMonths','lineGroups','monthlyPlanSessions'])assert.ok(reads.includes(name),name);
-  assert.equal(Object.keys(h.c.studentRealtimeSession.groups).length,8);
+  assert.ok(reads.includes('courses'),'courses fallback');
+  for(const name of ['announcements','paymentMonths','lineGroups','monthlyPlanSessions'])assert.ok(reads.includes(name),name);
+  assert.ok(!reads.includes('scoreReports'),'scoreReports is deferred');
+  assert.equal(Object.keys(h.c.studentRealtimeSession.groups).length,4);
 });

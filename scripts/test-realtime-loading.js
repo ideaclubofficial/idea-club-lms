@@ -27,9 +27,12 @@ function setup() {
   const c = { firebaseReady: true, firebaseUser: { uid: 'A' }, db: { collection: query },
     studentDataSessionVersion: 0, studentRealtimeSession: null, studentRealtimeRefreshTimer: null,
     adminRealtimeSession: null, adminPaymentDataRefreshTimer: null, prizeWheelSpinning: false,
+    adminPendingPaymentRecords: [], adminDashboardQuotaSummary: null,
     courseEndScheduleTimer: null, courseEndScheduleProcessing: false,
     COLLECTION_FETCH_LIMITS: { payments: { limit: 600 }, receipts: { limit: 600 }, paymentBundles: { limit: 300 } },
     console: { warn() {}, log() {} }, hasPermission: () => true,
+    rememberFirebaseDocumentSnapshot() {}, markFirestoreQuotaExceeded() {}, isFirestoreQuotaExceededError: () => false,
+    isQuotaOptimizedLoadingEnabled: () => false, firestoreQuotaBlocked: false,
     replaceArray: (a, b) => a.splice(0, a.length, ...b), safeRun: fn => fn(),
     window: { setTimeout(fn) { const id = ++timerId; timers.set(id, fn); return id; } },
     clearTimeout: id => timers.delete(id), scheduleAdminPaymentDataRefresh() {},
@@ -77,15 +80,16 @@ test('pending-write metadata transition initializes and stop settles pending rea
   pending.stop(); assert.equal(await pending.ready,false);
 });
 
-test('admin re-entry reuses six listeners; errors can restart and old callbacks are ignored', async () => {
+test('admin re-entry reuses one canonical pending-payment listener; errors can restart it', async () => {
   const h = setup(), first = h.c.startAdminPaymentDataListeners();
-  assert.equal(h.c.startAdminPaymentDataListeners(), first); assert.equal(h.subscriptions.length,6);
+  assert.equal(h.c.startAdminPaymentDataListeners(), first); assert.equal(h.subscriptions.length,1);
   h.subscriptions[0].error(new Error('permission-denied'));
-  for (const sub of h.subscriptions.slice(1)) h.emit(sub,[]);
   assert.equal(await first.groups.payments.ready,false);
   const second = h.c.startAdminPaymentDataListeners(); assert.notEqual(first,second);
-  assert.ok(h.subscriptions.slice(0,6).every(s=>s.stopped));
+  assert.ok(h.subscriptions[0].stopped);
   h.emit(h.subscriptions[0],[{id:'late'}]); assert.equal(h.c.payments.length,0);
+  h.emit(h.subscriptions[1],[{id:'p1',slipStatus:'waiting_admin_review'}]);
+  assert.equal(await second.groups.payments.ready,true); assert.equal(h.c.payments.length,1);
   h.c.stopAdminPaymentDataListeners(); assert.ok(h.subscriptions.every(s=>s.stopped));
 });
 
@@ -105,7 +109,7 @@ test('student modern and legacy identities stay covered; repeated starts reuse l
   h.emit(h.subscriptions[0],[{id:'late'}]); h.flush(); assert.equal(h.renders.length,6);
 });
 
-test('admin finance tab loads from listeners without duplicate financial get calls', async () => {
+test('admin finance tab uses bounded one-off financial loads plus one canonical listener', async () => {
   const h = setup();
   const staffSource = html.slice(html.indexOf('    const STAFF_DATA_GROUPS ='), html.indexOf('    async function ensureCoreDataLoaded('));
   for (const name of source('getStaffCollectionTargets').match(/return \{([\s\S]*?)\};/)[1].match(/\b\w+\b/g)) if (!h.c[name]) h.c[name]=[];
@@ -113,14 +117,16 @@ test('admin finance tab loads from listeners without duplicate financial get cal
   h.c.systemSettings={}; h.c.safeRun=()=>{}; h.c.applySystemSettingsToPage=()=>{};
   h.c.clearInterval=()=>{}; h.c.startCourseEndScheduleChecks=()=>{};
   h.c.getFirebaseCollection=async name=>{h.reads.push(name);return [];};
-  h.c.getFirebasePaymentCollection=async()=>{throw new Error('Duplicate payment get');};
+  h.c.getFirebasePaymentCollection=async()=>{h.reads.push('payments');return [{id:'base',amount:900}];};
   h.c.rebuildStudentLookupMap=()=>{};
   vm.runInContext(staffSource,h.c);
   const loading=h.c.ensureStaffCollections(h.c.getStaffTabCollections('admin-payment'));
-  for(const sub of h.subscriptions) h.emit(sub,sub.collection==='payments'?[{id:'p1',amount:1200}]:[]);
+  await new Promise(resolve=>setImmediate(resolve));
+  for(const sub of h.subscriptions) h.emit(sub,[{id:'p1',amount:1200,slipStatus:'waiting_admin_review'}]);
   await loading;
-  for(const name of ['payments','receipts','paymentBundles'])assert.ok(!h.reads.includes(name),name);
-  assert.equal(h.c.payments[0].amount,1200);
+  for(const name of ['payments','receipts','paymentBundles'])assert.ok(h.reads.includes(name),name);
+  assert.equal(h.subscriptions.length,1);
+  assert.equal(h.c.payments.some(p=>p.amount===1200),true);
 });
 
 test('confirmed metadata-only snapshot applies a previously skipped write and preserves record references', async () => {
@@ -139,7 +145,7 @@ test('manual admin refresh restarts listeners without adding a get() path', asyn
   h.c.alert=message=>{throw new Error(message);};
   vm.runInContext(source('refreshAdminPaymentData'),h.c);
   const task=h.c.refreshAdminPaymentData();
-  assert.ok(h.subscriptions.slice(0,6).every(s=>s.stopped));
-  for(const sub of h.subscriptions.slice(6))h.emit(sub,[]);
+  assert.ok(h.subscriptions[0].stopped);
+  for(const sub of h.subscriptions.slice(1))h.emit(sub,[]);
   await task; assert.equal(h.reads.length,0); assert.equal(button.disabled,false);
 });

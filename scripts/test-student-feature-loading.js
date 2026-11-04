@@ -35,7 +35,7 @@ function setup() {
   };
   function query(name) { return {where(){return this;},orderBy(){return this;},limit(){return this;},get:async()=>{reads.push(name);return {docs:[{id:name,data:()=>({id:name})}]};}}; }
   c.db={collection:query};
-  for(const name of ['onDemandClips','monthlyExamLinks','leaderboardProfiles','gamificationRewards','specialVoucherActivities','prizeWheelItems','prizeWheelSpins','avatarBattleQuestions','gamificationRedemptions'])c[name]=[];
+  for(const name of ['onDemandClips','monthlyExamLinks','scoreReports','adminScoreRecords','leaderboardProfiles','gamificationRewards','specialVoucherActivities','prizeWheelItems','prizeWheelSpins','avatarBattleQuestions','gamificationRedemptions'])c[name]=[];
   for(const name of ['renderStudentOnlineClasses','renderStudentOnDemandClasses','renderStudentMobileLearning','renderStudentExamFilters','renderScoreHistoryByMonth','renderStudentMobileExam','renderOnlineExamCourseGrid','updateStudentInWebExamUx','renderStudentGamificationPanel']) c[name]=()=>renders.push(name);
   vm.createContext(c);vm.runInContext(featureSource,c);
   return {c,reads,renders,liveStarts,roots,get observer(){return observer;}};
@@ -78,12 +78,14 @@ test('account change discards old feature result and never renders it',async()=>
   assert.equal(h.c.onDemandClips.length,0);assert.equal(h.renders.length,0);
 });
 
-test('games share exam dependency and add only the two deferred realtime groups',async()=>{
+test('games share exam dependency and load owned redemption data once',async()=>{
   const h=setup();await Promise.all([h.c.ensureStudentFeatureData('games'),h.c.ensureStudentFeatureData('exams')]);
   assert.equal(h.reads.filter(x=>x==='onlineExamCourses').length,2);
   assert.equal(h.reads.filter(x=>x==='monthlyExamLinks').length,1);
   assert.ok(!h.reads.includes('onDemandClips'));
-  assert.deepEqual(h.liveStarts,['gamificationRedemptions','prizeWheelSpins']);
+  assert.deepEqual(h.liveStarts,[]);
+  assert.ok(h.reads.includes('gamificationRedemptions'));
+  assert.ok(h.reads.includes('prizeWheelSpins'));
   assert.equal(h.c.onlineExamCourseCache.length,1);
   assert.equal(h.c.isStudentFeatureReady('games'),true);
 });

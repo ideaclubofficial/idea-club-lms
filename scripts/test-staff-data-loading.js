@@ -12,6 +12,7 @@ function setup(){
  function element(){return {style:{},parentElement:null,hidden:false,attrs:{},children:[],classList:{hidden:false,contains(k){return k==='hidden'&&this.hidden;}},setAttribute(k,v){this.attrs[k]=v;},querySelector(){return this.children[0]||null;},prepend(n){n.parent=this;this.children.unshift(n);},remove(){this.parent.children=[];}};}
  for(const id of ['admin-video','admin-courses','admin-dashboard','admin-settings','teacher-dashboard','teacher-attendance'])roots[id]=element();
  const c={firebaseReady:true,db:{},firebaseUser:{uid:'A'},studentDataSessionVersion:1,coreDataLoaded:false,PRODUCTION_MODE:true,
+   firestoreQuotaBlocked:false,isQuotaOptimizedLoadingEnabled:()=>false,
    adminRealtimeSession:null,isCurrentStudentSession:()=>false,startAdminPaymentDataListeners:()=>null,
    courseEndScheduleTimer:null,courseEndScheduleProcessing:false,clearInterval(){},startCourseEndScheduleChecks(){},
    getFirebaseCollection:async(name,deleted,status)=>{reads.push(name);return [{id:name}];},getFirebasePaymentCollection:async()=>{reads.push('payments');return [{id:'bill'}];},
@@ -29,6 +30,14 @@ test('staff core requests only the five base collections and never repairs recor
  const h=setup();await h.c.loadCoreDataFromFirebase();
  assert.deepEqual(h.reads.sort(),['courseEnrollments','courses','settings','students','teachers']);assert.equal(h.c.coreDataLoaded,true);
  assert.ok(!source('loadCoreDataFromFirebase').includes('repair'));
+});
+
+test('quota optimized staff startup reads settings only and defers tab datasets',async()=>{
+ const h=setup();h.c.isQuotaOptimizedLoadingEnabled=()=>true;await h.c.loadCoreDataFromFirebase();
+ assert.deepEqual(h.reads,['settings']);
+ assert.deepEqual(Array.from(h.c.getStaffTabCollections('admin-dashboard')),['settings']);
+ assert.ok(h.c.getStaffTabCollections('admin-students').includes('courses'));
+ assert.ok(!h.c.getStaffTabCollections('admin-students').includes('payments'));
 });
 
 test('teacher home loads schedules but not finance, scores, clips, games or expenses',async()=>{
@@ -84,7 +93,7 @@ test('embedded teacher tool obeys visible parent and financial summary declares 
 
 test('backup waits for all datasets and refuses to download after a read failure',async()=>{
  const h=setup();let downloaded=false,message='';
- h.c.ensureStaffCollections=async()=>{throw new Error('offline');};h.c.alert=text=>message=text;
+ h.c.getFirebaseCollection=async()=>{throw new Error('offline');};h.c.alert=text=>message=text;h.c.confirm=()=>true;
  h.c.Blob=function(){downloaded=true;};vm.runInContext(source('exportAllDataBackup'),h.c);
  await h.c.exportAllDataBackup();assert.equal(downloaded,false);assert.match(message,/ข้อมูลสำรองไม่ครบ/);
 });
