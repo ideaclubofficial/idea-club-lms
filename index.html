@@ -6657,13 +6657,32 @@
                 </div>
 
                 <div class="form-row">
-                  <div>
+                  <div style="flex:1 1 100%;">
                     <label>วันเรียน Online</label>
-                    <input id="adminOnlineClassDay" type="text" placeholder="เช่น จันทร์ / พุธ หรือ เสาร์" />
+                    <div style="display:flex;flex-wrap:wrap;gap:8px 16px;padding:12px;border:1px solid #d1d5db;border-radius:10px;background:#fff;">
+                      <label style="display:flex;align-items:center;gap:6px;font-weight:normal;"><input class="admin-online-class-day" type="checkbox" value="จันทร์" onchange="markOnlineClassScheduleChanged('day')" style="width:auto;" /> จันทร์</label>
+                      <label style="display:flex;align-items:center;gap:6px;font-weight:normal;"><input class="admin-online-class-day" type="checkbox" value="อังคาร" onchange="markOnlineClassScheduleChanged('day')" style="width:auto;" /> อังคาร</label>
+                      <label style="display:flex;align-items:center;gap:6px;font-weight:normal;"><input class="admin-online-class-day" type="checkbox" value="พุธ" onchange="markOnlineClassScheduleChanged('day')" style="width:auto;" /> พุธ</label>
+                      <label style="display:flex;align-items:center;gap:6px;font-weight:normal;"><input class="admin-online-class-day" type="checkbox" value="พฤหัสบดี" onchange="markOnlineClassScheduleChanged('day')" style="width:auto;" /> พฤหัสบดี</label>
+                      <label style="display:flex;align-items:center;gap:6px;font-weight:normal;"><input class="admin-online-class-day" type="checkbox" value="ศุกร์" onchange="markOnlineClassScheduleChanged('day')" style="width:auto;" /> ศุกร์</label>
+                      <label style="display:flex;align-items:center;gap:6px;font-weight:normal;"><input class="admin-online-class-day" type="checkbox" value="เสาร์" onchange="markOnlineClassScheduleChanged('day')" style="width:auto;" /> เสาร์</label>
+                      <label style="display:flex;align-items:center;gap:6px;font-weight:normal;"><input class="admin-online-class-day" type="checkbox" value="อาทิตย์" onchange="markOnlineClassScheduleChanged('day')" style="width:auto;" /> อาทิตย์</label>
+                    </div>
+                    <input id="adminOnlineClassLegacyDay" type="hidden" />
+                    <p id="adminOnlineClassLegacyDayNotice" class="mini-muted hidden" style="margin-top:6px;"></p>
+                  </div>
+                </div>
+
+                <div class="form-row">
+                  <div>
+                    <label>เวลาเริ่ม Online</label>
+                    <input id="adminOnlineClassTimeStart" type="time" onchange="markOnlineClassScheduleChanged('time')" />
                   </div>
                   <div>
-                    <label>เวลาเรียน Online</label>
-                    <input id="adminOnlineClassTime" type="text" placeholder="เช่น 16:00–18:30 น." />
+                    <label>เวลาจบ Online</label>
+                    <input id="adminOnlineClassTimeEnd" type="time" onchange="markOnlineClassScheduleChanged('time')" />
+                    <input id="adminOnlineClassLegacyTime" type="hidden" />
+                    <p id="adminOnlineClassLegacyTimeNotice" class="mini-muted hidden" style="margin-top:6px;"></p>
                   </div>
                   <div>
                     <label>สถานะห้อง</label>
@@ -22784,6 +22803,91 @@
 
     function onlineClassCenterChange() { onlineClassGradeChange(); }
 
+    const ONLINE_CLASS_DAY_NAMES = ['จันทร์', 'อังคาร', 'พุธ', 'พฤหัสบดี', 'ศุกร์', 'เสาร์', 'อาทิตย์'];
+
+    function parseOnlineClassDaySelection(value) {
+      const text = String(value || '');
+      return ONLINE_CLASS_DAY_NAMES.filter(function(day) { return text.indexOf(day) !== -1; });
+    }
+
+    function formatOnlineClassDaySelection(days) {
+      return ONLINE_CLASS_DAY_NAMES.filter(function(day) { return (days || []).includes(day); }).join(' / ');
+    }
+
+    function parseOnlineClassTimeRange(value) {
+      const match = String(value || '').match(/(?:^|\s)(\d{1,2}):(\d{2})\s*(?:-|–|—|ถึง)\s*(\d{1,2}):(\d{2})(?:\s|น\.|$)/);
+      if (!match) return null;
+      const startHour = Number(match[1]), startMinute = Number(match[2]);
+      const endHour = Number(match[3]), endMinute = Number(match[4]);
+      if (startHour > 23 || endHour > 23 || startMinute > 59 || endMinute > 59) return null;
+      return {
+        start: String(startHour).padStart(2, '0') + ':' + String(startMinute).padStart(2, '0'),
+        end: String(endHour).padStart(2, '0') + ':' + String(endMinute).padStart(2, '0')
+      };
+    }
+
+    function formatOnlineClassTimeRange(start, end) {
+      return start && end ? start + '–' + end + ' น.' : '';
+    }
+
+    function validateOnlineClassTimeRange(start, end) {
+      if (!start && !end) return { valid: true, value: '' };
+      if (!start || !end) return { valid: false, message: 'กรุณาเลือกเวลาเริ่มและเวลาจบให้ครบ' };
+      if (start >= end) return { valid: false, message: 'เวลาจบต้องอยู่หลังเวลาเริ่ม' };
+      return { valid: true, value: formatOnlineClassTimeRange(start, end) };
+    }
+
+    function markOnlineClassScheduleChanged(type) {
+      const legacy = getElement(type === 'day' ? 'adminOnlineClassLegacyDay' : 'adminOnlineClassLegacyTime');
+      if (legacy) legacy.dataset.changed = 'true';
+      const notice = getElement(type === 'day' ? 'adminOnlineClassLegacyDayNotice' : 'adminOnlineClassLegacyTimeNotice');
+      if (notice) notice.classList.add('hidden');
+    }
+
+    function setOnlineClassScheduleControls(dayValue, timeValue) {
+      const selectedDays = parseOnlineClassDaySelection(dayValue);
+      document.querySelectorAll('.admin-online-class-day').forEach(function(box) {
+        box.checked = selectedDays.includes(box.value);
+      });
+      const legacyDay = getElement('adminOnlineClassLegacyDay');
+      const legacyDayNotice = getElement('adminOnlineClassLegacyDayNotice');
+      const unparsedDay = dayValue && !selectedDays.length ? String(dayValue) : '';
+      if (legacyDay) { legacyDay.value = unparsedDay; legacyDay.dataset.changed = 'false'; }
+      if (legacyDayNotice) {
+        legacyDayNotice.textContent = unparsedDay ? 'ข้อมูลวันเดิม: ' + unparsedDay + ' (ระบบจะคงค่านี้ไว้จนกว่าจะเลือกวันใหม่)' : '';
+        legacyDayNotice.classList.toggle('hidden', !unparsedDay);
+      }
+
+      const parsedTime = parseOnlineClassTimeRange(timeValue);
+      if (getElement('adminOnlineClassTimeStart')) getElement('adminOnlineClassTimeStart').value = parsedTime ? parsedTime.start : '';
+      if (getElement('adminOnlineClassTimeEnd')) getElement('adminOnlineClassTimeEnd').value = parsedTime ? parsedTime.end : '';
+      const legacyTime = getElement('adminOnlineClassLegacyTime');
+      const legacyTimeNotice = getElement('adminOnlineClassLegacyTimeNotice');
+      const unparsedTime = timeValue && !parsedTime ? String(timeValue) : '';
+      if (legacyTime) { legacyTime.value = unparsedTime; legacyTime.dataset.changed = 'false'; }
+      if (legacyTimeNotice) {
+        legacyTimeNotice.textContent = unparsedTime ? 'ข้อมูลเวลาเดิม: ' + unparsedTime + ' (ระบบจะคงค่านี้ไว้จนกว่าจะเลือกเวลาใหม่)' : '';
+        legacyTimeNotice.classList.toggle('hidden', !unparsedTime);
+      }
+    }
+
+    function readOnlineClassScheduleControls() {
+      const selectedDays = Array.from(document.querySelectorAll('.admin-online-class-day:checked')).map(function(box) { return box.value; });
+      const legacyDay = getElement('adminOnlineClassLegacyDay');
+      const legacyTime = getElement('adminOnlineClassLegacyTime');
+      const dayValue = selectedDays.length
+        ? formatOnlineClassDaySelection(selectedDays)
+        : (legacyDay && legacyDay.dataset.changed !== 'true' ? legacyDay.value : '');
+      const start = (getElement('adminOnlineClassTimeStart') || {}).value || '';
+      const end = (getElement('adminOnlineClassTimeEnd') || {}).value || '';
+      const timeValidation = validateOnlineClassTimeRange(start, end);
+      if (!timeValidation.valid) return timeValidation;
+      const timeValue = start || end
+        ? timeValidation.value
+        : (legacyTime && legacyTime.dataset.changed !== 'true' ? legacyTime.value : '');
+      return { valid: true, day: dayValue, time: timeValue };
+    }
+
     function onlineClassGradeChange() {
       const grade = (getElement('adminOnlineClassGrade') || {}).value || '';
       const scope = (getElement('adminOnlineClassScope') || {}).value || 'shared';
@@ -22792,8 +22896,7 @@
       if (!grade || (scope === 'center' && !location)) { clearOnlineClassForm(); return; }
       const room = getOnlineRoomConfigForTarget(grade, location) || {};
       if (getElement('adminOnlineClassLink')) getElement('adminOnlineClassLink').value = room.onlineLink || '';
-      if (getElement('adminOnlineClassDay')) getElement('adminOnlineClassDay').value = room.onlineClassDay || '';
-      if (getElement('adminOnlineClassTime')) getElement('adminOnlineClassTime').value = room.onlineClassTime || '';
+      setOnlineClassScheduleControls(room.onlineClassDay || '', room.onlineClassTime || '');
       if (getElement('adminOnlineClassRoomId')) getElement('adminOnlineClassRoomId').value = room.roomId || '';
       if (getElement('adminOnlineClassPassword')) getElement('adminOnlineClassPassword').value = room.roomPassword || '';
       if (getElement('adminOnlineClassStatus')) getElement('adminOnlineClassStatus').value = room.status || 'active';
@@ -22802,8 +22905,15 @@
     }
 
     function clearOnlineClassForm() {
-      ['adminOnlineClassLink','adminOnlineClassDay','adminOnlineClassTime','adminOnlineClassRoomId','adminOnlineClassPassword'].forEach(function(id) {
+      ['adminOnlineClassLink','adminOnlineClassTimeStart','adminOnlineClassTimeEnd','adminOnlineClassRoomId','adminOnlineClassPassword','adminOnlineClassLegacyDay','adminOnlineClassLegacyTime'].forEach(function(id) {
         const el = getElement(id); if (el) el.value = '';
+      });
+      document.querySelectorAll('.admin-online-class-day').forEach(function(box) { box.checked = false; });
+      ['adminOnlineClassLegacyDay','adminOnlineClassLegacyTime'].forEach(function(id) {
+        const el = getElement(id); if (el) el.dataset.changed = 'false';
+      });
+      ['adminOnlineClassLegacyDayNotice','adminOnlineClassLegacyTimeNotice'].forEach(function(id) {
+        const el = getElement(id); if (el) { el.textContent = ''; el.classList.add('hidden'); }
       });
       if (getElement('adminOnlineClassStatus')) getElement('adminOnlineClassStatus').value = 'active';
       if (getElement('adminOnlineClassResult')) getElement('adminOnlineClassResult').textContent = '';
@@ -22839,6 +22949,11 @@
         if (resultEl) { resultEl.textContent = 'กรุณาเลือกระดับชั้นและศูนย์ให้ครบ'; resultEl.style.color = '#dc2626'; }
         return;
       }
+      const schedule = readOnlineClassScheduleControls();
+      if (!schedule.valid) {
+        if (resultEl) { resultEl.textContent = schedule.message; resultEl.style.color = '#dc2626'; }
+        return;
+      }
       let room = getStoredOnlineRoom(grade, location);
       if (!room) {
         const id = createFirebaseDocId('onlineRooms');
@@ -22848,8 +22963,8 @@
       Object.assign(room, {
         grade: grade, location: location, status: (getElement('adminOnlineClassStatus') || {}).value || 'active',
         onlineLink: (getElement('adminOnlineClassLink') || {}).value.trim(),
-        onlineClassDay: (getElement('adminOnlineClassDay') || {}).value.trim(),
-        onlineClassTime: (getElement('adminOnlineClassTime') || {}).value.trim(),
+        onlineClassDay: schedule.day,
+        onlineClassTime: schedule.time,
         roomId: (getElement('adminOnlineClassRoomId') || {}).value.trim(),
         roomPassword: (getElement('adminOnlineClassPassword') || {}).value.trim(), deleted: false
       });
@@ -32218,6 +32333,29 @@
       }
     }
 
+    function renderStudentOnlineRoomCard(grade, location, room, mobile) {
+      const hasLink = !!room.onlineLink;
+      if (mobile) {
+        return '<div class="student-mobile-media-card" data-student-online-room-card="true">' +
+          '<strong>ห้องเรียน Online ระดับชั้น ' + escapeHtml(grade || '-') + '</strong>' +
+          '<p class="student-mobile-muted">' + escapeHtml(room.location || 'ใช้ร่วมทุกศูนย์') + ' · ' + escapeHtml(room.onlineClassDay || '-') + ' · ' + escapeHtml(room.onlineClassTime || '-') + '</p>' +
+          '<p class="student-mobile-muted">Meeting ID: ' + escapeHtml(room.roomId || '-') + ' · Passcode: ' + escapeHtml(room.roomPassword || '-') + '</p>' +
+          '<div class="student-mobile-actions"><button class="btn ' + (hasLink ? 'btn-blue' : 'btn-dark') + '" type="button" onclick="' + actionCall('openOnlineRoomForTarget', grade, location) + '">เข้าห้องเรียน Online</button></div>' +
+          renderStudentOnlineDocumentCards(grade, location) +
+        '</div>';
+      }
+      return '<div class="notice student-online-room-card" data-student-online-room-card="true" style="background:white; margin-top:0;">' +
+        '<h3 style="margin-bottom:8px;">ห้องเรียน Online ระดับชั้น ' + escapeHtml(grade || '-') + '</h3>' +
+        '<p><strong>ขอบเขต:</strong> ' + escapeHtml(room.location || 'ใช้ร่วมทุกศูนย์') + '</p>' +
+        '<p><strong>วันเรียน:</strong> ' + escapeHtml(room.onlineClassDay || '-') + '</p>' +
+        '<p><strong>เวลาเรียน:</strong> ' + escapeHtml(room.onlineClassTime || '-') + '</p>' +
+        '<p><strong>Meeting ID:</strong> ' + escapeHtml(room.roomId || '-') + '</p>' +
+        '<p><strong>Password:</strong> ' + escapeHtml(room.roomPassword || '-') + '</p>' +
+        '<button class="btn ' + (hasLink ? 'btn-blue' : 'btn-dark') + '" type="button" onclick="' + actionCall('openOnlineRoomForTarget', grade, location) + '">เข้าเรียน Online</button>' +
+        renderStudentOnlineDocumentCards(grade, location) +
+      '</div>';
+    }
+
     function renderStudentOnlineClasses(courseList, grade) {
       const box = getElement('studentOnlineClassList');
       if (!box) return;
@@ -32228,17 +32366,7 @@
         box.innerHTML = '<div class="notice">ยังไม่มีห้องเรียน Online ที่เปิดใช้งานสำหรับระดับชั้น ' + escapeHtml(grade || '-') + '</div>';
         return;
       }
-      const hasLink = !!room.onlineLink;
-      box.innerHTML = '<div class="notice" style="background:white; margin-top:0;">' +
-        '<h3 style="margin-bottom:8px;">ห้องเรียน Online ระดับชั้น ' + escapeHtml(grade || '-') + '</h3>' +
-        '<p><strong>ขอบเขต:</strong> ' + escapeHtml(room.location || 'ใช้ร่วมทุกศูนย์') + '</p>' +
-        '<p><strong>วันเรียน:</strong> ' + escapeHtml(room.onlineClassDay || '-') + '</p>' +
-        '<p><strong>เวลาเรียน:</strong> ' + escapeHtml(room.onlineClassTime || '-') + '</p>' +
-        '<p><strong>Meeting ID:</strong> ' + escapeHtml(room.roomId || '-') + '</p>' +
-        '<p><strong>Password:</strong> ' + escapeHtml(room.roomPassword || '-') + '</p>' +
-        '<button class="btn ' + (hasLink ? 'btn-blue' : 'btn-dark') + '" type="button" onclick="' + actionCall('openOnlineRoomForTarget', grade, location) + '">เข้าเรียน Online</button>' +
-        renderStudentOnlineDocumentCards(grade, location) +
-      '</div>';
+      box.innerHTML = renderStudentOnlineRoomCard(grade, location, room, false);
     }
 
     function refreshStudentOnDemandFilter() {
@@ -32554,14 +32682,7 @@
         box.innerHTML = '<div class="student-mobile-media-card"><strong>ยังไม่มีห้องเรียน Online</strong><p class="student-mobile-muted">ห้องระดับชั้น ' + escapeHtml(grade || '-') + ' จะแสดงเมื่อเปิดใช้งาน</p></div>';
         return;
       }
-      const hasLink = !!room.onlineLink;
-      box.innerHTML = '<div class="student-mobile-media-card">' +
-        '<strong>ห้องเรียน Online ระดับชั้น ' + escapeHtml(grade || '-') + '</strong>' +
-        '<p class="student-mobile-muted">' + escapeHtml(room.location || 'ใช้ร่วมทุกศูนย์') + ' · ' + escapeHtml(room.onlineClassDay || '-') + ' · ' + escapeHtml(room.onlineClassTime || '-') + '</p>' +
-        '<p class="student-mobile-muted">Meeting ID: ' + escapeHtml(room.roomId || '-') + ' · Passcode: ' + escapeHtml(room.roomPassword || '-') + '</p>' +
-        '<div class="student-mobile-actions"><button class="btn ' + (hasLink ? 'btn-blue' : 'btn-dark') + '" type="button" onclick="' + actionCall('openOnlineRoomForTarget', grade, location) + '">เข้าห้องเรียน Online</button></div>' +
-        renderStudentOnlineDocumentCards(grade, location) +
-      '</div>';
+      box.innerHTML = renderStudentOnlineRoomCard(grade, location, room, true);
     }
 
     function renderStudentMobileOnDemandClasses(courseList, grade) {

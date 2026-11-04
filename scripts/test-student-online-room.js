@@ -41,6 +41,33 @@ function setupDocuments({ courses = [], documents = [] } = {}) {
   return context;
 }
 
+function setupOnlineScheduleControls() {
+  const makeClassList = () => ({
+    hidden: false,
+    add() { this.hidden = true; },
+    toggle(name, force) { if (name === 'hidden') this.hidden = force; }
+  });
+  const elements = {
+    adminOnlineClassLegacyDay: { value: '', dataset: {} },
+    adminOnlineClassLegacyTime: { value: '', dataset: {} },
+    adminOnlineClassLegacyDayNotice: { textContent: '', classList: makeClassList() },
+    adminOnlineClassLegacyTimeNotice: { textContent: '', classList: makeClassList() },
+    adminOnlineClassTimeStart: { value: '' },
+    adminOnlineClassTimeEnd: { value: '' }
+  };
+  const boxes = ['จันทร์', 'อังคาร', 'พุธ', 'พฤหัสบดี', 'ศุกร์', 'เสาร์', 'อาทิตย์'].map(value => ({ value, checked: false }));
+  const context = {
+    getElement: id => elements[id] || null,
+    document: {
+      querySelectorAll: selector => selector.includes(':checked') ? boxes.filter(box => box.checked) : boxes
+    },
+    console
+  };
+  vm.createContext(context);
+  vm.runInContext(sourceBetween('    const ONLINE_CLASS_DAY_NAMES', '    function onlineClassGradeChange('), context);
+  return { context, elements, boxes };
+}
+
 test('shared room is resolved for every center in the grade', () => {
   const shared = { id: 'shared-p4', grade: 'ป.4', location: '', status: 'active', onlineLink: 'https://shared.example' };
   const context = setupRooms({ rooms: [shared] });
@@ -111,6 +138,8 @@ test('student access is grade and center based and blocks paused or withdrawn pr
   assert.equal(context.studentCanAccessOnlineTarget('ม.5', 'ศูนย์ A'), false);
   context.currentStudent.status = 'พักเรียน';
   assert.equal(context.studentCanAccessOnlineTarget('ม.4', 'ศูนย์ A'), false);
+  context.currentStudent.status = 'ลาออก';
+  assert.equal(context.studentCanAccessOnlineTarget('ม.4', 'ศูนย์ A'), false);
 });
 
 test('teacher sees one shared room for duplicate courses in the same grade', () => {
@@ -132,9 +161,100 @@ test('teacher sees one shared room for duplicate courses in the same grade', () 
   assert.deepEqual(Array.from(targets[0].locations), ['ศูนย์ A', 'ศูนย์ B']);
 });
 
-test('student desktop and mobile render one grade-based room and shared document cards', () => {
-  assert.ok((html.match(/renderStudentOnlineDocumentCards\(grade, location\)/g) || []).length >= 2);
+test('Online room schedule formats multiple days and a valid time range', () => {
+  const { context, elements, boxes } = setupOnlineScheduleControls();
+  context.setOnlineClassScheduleControls('จันทร์ / พุธ / เสาร์', '16:00–18:30 น.');
+  assert.deepEqual(Array.from(boxes.filter(box => box.checked), box => box.value), ['จันทร์', 'พุธ', 'เสาร์']);
+  assert.equal(elements.adminOnlineClassTimeStart.value, '16:00');
+  assert.equal(elements.adminOnlineClassTimeEnd.value, '18:30');
+  assert.deepEqual({ ...context.readOnlineClassScheduleControls() }, {
+    valid: true,
+    day: 'จันทร์ / พุธ / เสาร์',
+    time: '16:00–18:30 น.'
+  });
+});
+
+test('Online room schedule rejects incomplete or reversed time ranges', () => {
+  const { context } = setupOnlineScheduleControls();
+  assert.equal(context.validateOnlineClassTimeRange('16:00', '').valid, false);
+  assert.equal(context.validateOnlineClassTimeRange('18:30', '16:00').valid, false);
+  assert.equal(context.validateOnlineClassTimeRange('16:00', '16:00').valid, false);
+  assert.equal(context.validateOnlineClassTimeRange('16:00', '18:30').valid, true);
+});
+
+test('unparseable legacy Online schedule is preserved until controls change', () => {
+  const { context, elements, boxes } = setupOnlineScheduleControls();
+  context.setOnlineClassScheduleControls('ทุกวันหยุด', 'ช่วงเย็น');
+  assert.deepEqual({ ...context.readOnlineClassScheduleControls() }, {
+    valid: true,
+    day: 'ทุกวันหยุด',
+    time: 'ช่วงเย็น'
+  });
+  boxes.find(box => box.value === 'อาทิตย์').checked = true;
+  context.markOnlineClassScheduleChanged('day');
+  elements.adminOnlineClassTimeStart.value = '09:00';
+  elements.adminOnlineClassTimeEnd.value = '10:30';
+  context.markOnlineClassScheduleChanged('time');
+  assert.deepEqual({ ...context.readOnlineClassScheduleControls() }, {
+    valid: true,
+    day: 'อาทิตย์',
+    time: '09:00–10:30 น.'
+  });
+});
+
+test('student desktop and mobile render exactly one grade-based room with documents', () => {
+  const context = {
+    escapeHtml: value => String(value),
+    actionCall: (name, ...args) => `${name}(${args.join(',')})`,
+    renderStudentOnlineDocumentCards: (grade, location) => `<section data-online-documents="true">${grade}|${location}</section>`
+  };
+  vm.createContext(context);
+  vm.runInContext(sourceBetween('    function renderStudentOnlineRoomCard(', '    function renderStudentOnlineClasses('), context);
+  const room = {
+    location: '',
+    onlineClassDay: 'จันทร์ / พุธ / เสาร์',
+    onlineClassTime: '16:00–18:30 น.',
+    roomId: 'ROOM-1',
+    roomPassword: 'PASS',
+    onlineLink: 'https://example.com/room'
+  };
+  [false, true].forEach(mobile => {
+    const output = context.renderStudentOnlineRoomCard('ป.4', 'ศูนย์ A', room, mobile);
+    assert.equal((output.match(/data-student-online-room-card="true"/g) || []).length, 1);
+    assert.equal((output.match(/data-online-documents="true"/g) || []).length, 1);
+    assert.match(output, /จันทร์ \/ พุธ \/ เสาร์/);
+    assert.match(output, /16:00–18:30 น\./);
+  });
+  assert.equal((html.match(/resolveOnlineRoom\(grade, location\)/g) || []).length >= 2, true);
   assert.match(html, /function openOnlineRoomForTarget\(grade, location\)/);
   assert.doesNotMatch(html, /getUniqueStudentOnlineCourses/);
   assert.doesNotMatch(html, /adminOnlineClassShared/);
+});
+
+test('student room renderer resolves once and ignores course count', () => {
+  const box = { innerHTML: '' };
+  let resolveCount = 0;
+  const context = {
+    currentStudent: { grade: 'ป.4', preferredLocation: 'ศูนย์ A', status: 'ปกติ' },
+    getElement: id => id === 'studentOnlineClassList' ? box : null,
+    normalizeOnlineLocation: value => String(value || '').trim(),
+    isStudentLimitedAccess: () => false,
+    resolveOnlineRoom: () => {
+      resolveCount += 1;
+      return { onlineClassDay: 'จันทร์ / พุธ', onlineClassTime: '16:00–18:00 น.', onlineLink: 'https://example.com' };
+    },
+    escapeHtml: value => String(value),
+    actionCall: () => 'open-room',
+    renderStudentOnlineDocumentCards: () => '<section data-online-documents="true"></section>'
+  };
+  vm.createContext(context);
+  vm.runInContext(sourceBetween('    function renderStudentOnlineRoomCard(', '    function refreshStudentOnDemandFilter('), context);
+  context.renderStudentOnlineClasses([
+    { id: 'course-1', grade: 'ป.4' },
+    { id: 'course-2', grade: 'ป.4' },
+    { id: 'historical', grade: 'ป.4', _historicalMedia: true }
+  ], 'ป.4');
+  assert.equal(resolveCount, 1);
+  assert.equal((box.innerHTML.match(/data-student-online-room-card="true"/g) || []).length, 1);
+  assert.equal((box.innerHTML.match(/data-online-documents="true"/g) || []).length, 1);
 });
