@@ -9,120 +9,132 @@ const html = fs.readFileSync(path.join(__dirname, '../index.html'), 'utf8');
 function sourceBetween(startMarker, endMarker) {
   const start = html.indexOf(startMarker);
   const end = html.indexOf(endMarker, start);
-  if (start === -1 || end === -1) throw new Error('Student Online source block not found');
+  if (start === -1 || end === -1) throw new Error(`Source block not found: ${startMarker}`);
   return html.slice(start, end);
 }
 
-function setupOnlineCourseFilter() {
+function setupRooms({ courses = [], rooms = [] } = {}) {
   const context = {
-    courseFeatureEnabled: (course, feature) => course.features && course.features[feature] !== false,
-    console
+    courses,
+    onlineRooms: rooms,
+    getCourseLocations: course => Array.isArray(course.locations) ? course.locations : [course.location].filter(Boolean),
+    getElement: () => null,
+    console,
+    Set
   };
   vm.createContext(context);
-  vm.runInContext(sourceBetween(
-    '    function getUniqueStudentOnlineCourses(',
-    '    function refreshStudentOnDemandFilter('
-  ), context);
+  vm.runInContext(sourceBetween('    function normalizeOnlineLocation(', '    function renderOnlineClassCourseSelect('), context);
   return context;
 }
 
-function setupDocumentRenderer(options = {}) {
+function setupDocuments({ courses = [], documents = [] } = {}) {
   const context = {
-    courseFeatureEnabled: () => options.docsEnabled !== false,
-    getCourseOnlineDocs: () => options.docs || [],
-    jsArg: value => String(value).replace(/'/g, "\\'"),
-    escapeHtml: value => String(value),
-    onlineDocDateText: value => `DATE:${value}`,
-    console
+    courses,
+    onlineDocuments: documents,
+    normalizeOnlineLocation: value => String(value || '').trim().replace(/\s+/g, ' '),
+    getCourseLocations: course => Array.isArray(course.locations) ? course.locations : [course.location].filter(Boolean),
+    console,
+    Set
   };
   vm.createContext(context);
-  vm.runInContext(sourceBetween(
-    '    function getOnlineDocFileButtonTitle(',
-    '    async function saveOnDemandSettings('
-  ), context);
+  vm.runInContext(sourceBetween('    function getOnlineDocLocation(', '    function onlineDocDateText('), context);
   return context;
 }
 
-function setupDocumentMatching(courseList) {
-  const context = { courses: courseList, console };
-  vm.createContext(context);
-  vm.runInContext(sourceBetween(
-    '    function getOnlineDocLocation(',
-    '    function getOnlineDocFileButtonTitle('
-  ), context);
-  return context;
-}
+test('shared room is resolved for every center in the grade', () => {
+  const shared = { id: 'shared-p4', grade: 'ป.4', location: '', status: 'active', onlineLink: 'https://shared.example' };
+  const context = setupRooms({ rooms: [shared] });
+  assert.equal(context.resolveOnlineRoom('ป.4', 'ศูนย์ A').id, 'shared-p4');
+  assert.equal(context.resolveOnlineRoom('ป.4', 'ศูนย์ B').id, 'shared-p4');
+});
 
-test('student Online courses show once per enabled course id', () => {
-  const context = setupOnlineCourseFilter();
+test('active center room overrides shared; inactive center room falls back to shared', () => {
+  const shared = { id: 'shared', grade: 'ป.5', location: '', status: 'active', onlineLink: 'https://shared.example' };
+  const center = { id: 'center', grade: 'ป.5', location: 'ศูนย์ A', status: 'active', onlineLink: 'https://center.example' };
+  const context = setupRooms({ rooms: [shared, center] });
+  assert.equal(context.resolveOnlineRoom('ป.5', 'ศูนย์ A').id, 'center');
+  center.status = 'inactive';
+  assert.equal(context.resolveOnlineRoom('ป.5', 'ศูนย์ A').id, 'shared');
+});
+
+test('inactive stored room suppresses the matching legacy room', () => {
+  const course = { id: 'legacy', grade: 'ป.6', location: 'ศูนย์ A', onlineLink: 'https://legacy.example' };
+  const suppressor = { id: 'off', grade: 'ป.6', location: 'ศูนย์ A', status: 'inactive' };
+  const context = setupRooms({ courses: [course], rooms: [suppressor] });
+  assert.equal(context.resolveOnlineRoom('ป.6', 'ศูนย์ A'), null);
+});
+
+test('identical legacy rooms across centers become one shared fallback', () => {
   const courses = [
-    { id: 'online-1', access: 'Online', features: { online: true } },
-    { id: 'online-1', access: 'Online', features: { online: true }, _historicalMedia: true },
-    { id: 'online-2', access: 'Online + On-demand', features: { online: true } },
-    { id: 'disabled', access: 'Online', features: { online: false } },
-    { id: 'ondemand', access: 'On-demand', features: { online: true } }
+    { id: 'a', grade: 'ม.1', location: 'ศูนย์ A', onlineLink: 'https://same.example', roomId: 'ROOM' },
+    { id: 'b', grade: 'ม.1', location: 'ศูนย์ B', onlineLink: 'https://same.example', roomId: 'ROOM' }
   ];
-
-  assert.deepEqual(
-    Array.from(context.getUniqueStudentOnlineCourses(courses), course => course.id),
-    ['online-1', 'online-2']
-  );
+  const context = setupRooms({ courses });
+  const legacy = context.getLegacyOnlineRooms();
+  assert.equal(legacy.length, 1);
+  assert.equal(legacy[0].location, '');
+  assert.equal(context.resolveOnlineRoom('ม.1', 'ศูนย์ B').onlineLink, 'https://same.example');
 });
 
-test('document rail renders every set and one download button per linked file', () => {
-  const context = setupDocumentRenderer({
-    docs: [
-      {
-        topic: 'ชุดระบบย่อยอาหาร',
-        classDate: '2026-11-04',
-        files: [
-          { title: 'ใบงาน', url: 'https://example.com/workbook.pdf' },
-          { title: 'เฉลย', url: 'https://example.com/answer.pdf' }
-        ]
-      },
-      { topic: 'ชุดเซลล์', classDate: '2026-10-28', files: [] }
-    ]
-  });
-
-  const output = context.renderStudentOnlineDocumentCards({ id: 'course-1' });
-  assert.equal((output.match(/student-online-doc-card"/g) || []).length, 2);
-  assert.equal((output.match(/ดาวน์โหลดเอกสาร:/g) || []).length, 2);
-  assert.match(output, /ชุดระบบย่อยอาหาร/);
-  assert.match(output, /วันที่เรียน DATE:2026-11-04/);
-  assert.match(output, /ยังไม่มีลิงก์ไฟล์เอกสาร/);
-});
-
-test('document rail keeps explicit disabled and empty states', () => {
-  const disabled = setupDocumentRenderer({ docsEnabled: false });
-  assert.match(disabled.renderStudentOnlineDocumentCards({ id: 'course-1' }), /ปิดการแสดงเอกสาร Online/);
-
-  const empty = setupDocumentRenderer({ docs: [] });
-  const output = empty.renderStudentOnlineDocumentCards({ id: 'course-1' });
-  assert.match(output, /0 ชุด/);
-  assert.match(output, /ยังไม่มีเอกสารรายครั้งสำหรับคอร์สนี้/);
-});
-
-test('document cards preserve all-centers and legacy center matching', () => {
-  const nongchang = { id: 'nc-p4', location: 'หนองฉาง', grade: 'ป.4', onlineDocs: [] };
-  const nongkayang = { id: 'nky-p4', location: 'หนองขาหย่าง', grade: 'ป.4', onlineDocs: [] };
-  nongchang.onlineDocs = [
-    { id: 'all', location: '', grade: 'ป.4', classDate: '2026-11-04', status: 'active' },
-    { id: 'legacy', center: 'หนองฉาง', grade: 'ป.4', classDate: '2026-11-03', status: 'active' }
+test('documents include shared plus matching center and exclude another center', () => {
+  const documents = [
+    { id: 'all', grade: 'ม.2', location: '', status: 'active', classDate: '2026-11-04' },
+    { id: 'a', grade: 'ม.2', location: 'ศูนย์ A', status: 'active', classDate: '2026-11-03' },
+    { id: 'b', grade: 'ม.2', location: 'ศูนย์ B', status: 'active', classDate: '2026-11-02' }
   ];
-  const context = setupDocumentMatching([nongchang, nongkayang]);
-
-  assert.deepEqual(
-    Array.from(context.getCourseOnlineDocs(nongchang, false), doc => doc.id),
-    ['all', 'legacy']
-  );
-  assert.deepEqual(
-    Array.from(context.getCourseOnlineDocs(nongkayang, false), doc => doc.id),
-    ['all']
-  );
+  const context = setupDocuments({ documents });
+  assert.deepEqual(Array.from(context.getOnlineDocumentsForTarget('ม.2', 'ศูนย์ A', false), doc => doc.id), ['all', 'a']);
 });
 
-test('desktop and mobile Online rooms use the shared document-card renderer', () => {
-  const desktopCalls = html.match(/renderStudentOnlineDocumentCards\(c\)/g) || [];
-  assert.equal(desktopCalls.length, 2);
-  assert.doesNotMatch(html, /studentMobileOpenLatestOnlineDoc/);
+test('stored migration shadows legacy document and tombstone suppresses it', () => {
+  const course = { id: 'course-a', grade: 'ม.3', location: 'ศูนย์ A', onlineDocs: [{ id: 'old', topic: 'เดิม', classDate: '2026-11-01' }] };
+  const migrated = { id: 'new', grade: 'ม.3', location: 'ศูนย์ A', status: 'active', topic: 'ใหม่', classDate: '2026-11-02', legacySourceKey: 'course-a:old' };
+  const context = setupDocuments({ courses: [course], documents: [migrated] });
+  assert.deepEqual(Array.from(context.getUnifiedOnlineDocuments(false), doc => doc.topic), ['ใหม่']);
+  migrated.status = 'deleted';
+  migrated.suppressLegacy = true;
+  assert.equal(context.getUnifiedOnlineDocuments(false).length, 0);
+});
+
+test('student access is grade and center based and blocks paused or withdrawn profiles', () => {
+  const context = {
+    currentStudent: { grade: 'ม.4', preferredLocation: 'ศูนย์ A', status: 'ปกติ' },
+    isStudentLimitedAccess: student => ['พักเรียน', 'ลาออก'].includes(student.status),
+    getProfileGrade: () => '',
+    normalizeOnlineLocation: value => String(value || '').trim().replace(/\s+/g, ' ')
+  };
+  vm.createContext(context);
+  vm.runInContext(sourceBetween('    function studentCanAccessOnlineTarget(', '    function openStudentOnlineDocFile('), context);
+  assert.equal(context.studentCanAccessOnlineTarget('ม.4', ''), true);
+  assert.equal(context.studentCanAccessOnlineTarget('ม.4', 'ศูนย์ A'), true);
+  assert.equal(context.studentCanAccessOnlineTarget('ม.4', 'ศูนย์ B'), false);
+  assert.equal(context.studentCanAccessOnlineTarget('ม.5', 'ศูนย์ A'), false);
+  context.currentStudent.status = 'พักเรียน';
+  assert.equal(context.studentCanAccessOnlineTarget('ม.4', 'ศูนย์ A'), false);
+});
+
+test('teacher sees one shared room for duplicate courses in the same grade', () => {
+  const sharedRoom = { id: 'shared-m5', grade: 'ม.5', location: '', onlineLink: 'https://shared.example' };
+  const context = {
+    getElement: () => null,
+    getTeacherVisibleCourses: () => [
+      { id: 'course-a', grade: 'ม.5', location: 'ศูนย์ A' },
+      { id: 'course-b', grade: 'ม.5', location: 'ศูนย์ B' }
+    ],
+    getCourseLocations: course => [course.location],
+    resolveOnlineRoom: () => sharedRoom,
+    onlineRoomSignature: room => room.onlineLink
+  };
+  vm.createContext(context);
+  vm.runInContext(sourceBetween('    function getTeacherVisibleOnlineCourses(', '    function syncTeacherMobileOnlineFilter('), context);
+  const targets = context.getTeacherVisibleOnlineCourses();
+  assert.equal(targets.length, 1);
+  assert.deepEqual(Array.from(targets[0].locations), ['ศูนย์ A', 'ศูนย์ B']);
+});
+
+test('student desktop and mobile render one grade-based room and shared document cards', () => {
+  assert.ok((html.match(/renderStudentOnlineDocumentCards\(grade, location\)/g) || []).length >= 2);
+  assert.match(html, /function openOnlineRoomForTarget\(grade, location\)/);
+  assert.doesNotMatch(html, /getUniqueStudentOnlineCourses/);
+  assert.doesNotMatch(html, /adminOnlineClassShared/);
 });

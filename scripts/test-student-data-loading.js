@@ -34,7 +34,7 @@ function setup() {
     startStudentPaymentListeners: (ids, uid) => listeners.push(uid), stopStudentPaymentListeners() {},
     findStudentForUserProfile: (profile, uid) => c.students.find(x => x.authUid === uid) || null
   };
-  for (const name of ['students','courses','courseEnrollments','onDemandClips','announcements','scoreReports','adminScoreRecords','paymentMonths','lineGroups','payments','receipts','paymentBundles','monthlyExamLinks','monthlyPlanSessions','studentGamificationProfiles','studentGamificationEvents','studentPersonalQuests','leaderboardProfiles','gamificationRewards','gamificationRedemptions','specialVoucherActivities','prizeWheelItems','prizeWheelSpins','avatarBattleQuestions']) c[name] = [];
+  for (const name of ['students','courses','courseEnrollments','onlineRooms','onlineDocuments','onDemandClips','announcements','scoreReports','adminScoreRecords','paymentMonths','lineGroups','payments','receipts','paymentBundles','monthlyExamLinks','monthlyPlanSessions','studentGamificationProfiles','studentGamificationEvents','studentPersonalQuests','leaderboardProfiles','gamificationRewards','gamificationRedemptions','specialVoucherActivities','prizeWheelItems','prizeWheelSpins','avatarBattleQuestions']) c[name] = [];
   vm.createContext(c);
   for (const [start, end] of [
     ['    function createRealtimeCollectionGroup(', '    function stopAdminPaymentDataListeners('],

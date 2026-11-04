@@ -35,18 +35,19 @@ function setup() {
   };
   function query(name) { return {where(){return this;},orderBy(){return this;},limit(){return this;},get:async()=>{reads.push(name);return {docs:[{id:name,data:()=>({id:name})}]};}}; }
   c.db={collection:query};
-  for(const name of ['onDemandClips','monthlyExamLinks','scoreReports','adminScoreRecords','leaderboardProfiles','gamificationRewards','specialVoucherActivities','prizeWheelItems','prizeWheelSpins','avatarBattleQuestions','gamificationRedemptions'])c[name]=[];
+  for(const name of ['onDemandClips','onlineRooms','onlineDocuments','monthlyExamLinks','scoreReports','adminScoreRecords','leaderboardProfiles','gamificationRewards','specialVoucherActivities','prizeWheelItems','prizeWheelSpins','avatarBattleQuestions','gamificationRedemptions'])c[name]=[];
   for(const name of ['renderStudentOnlineClasses','renderStudentOnDemandClasses','renderStudentMobileLearning','renderStudentExamFilters','renderScoreHistoryByMonth','renderStudentMobileExam','renderOnlineExamCourseGrid','updateStudentInWebExamUx','renderStudentGamificationPanel']) c[name]=()=>renders.push(name);
   vm.createContext(c);vm.runInContext(featureSource,c);
   return {c,reads,renders,liveStarts,roots,get observer(){return observer;}};
 }
 
-test('preparing UI performs no reads; visible learning section fetches only clips',async()=>{
+test('preparing UI performs no reads; visible learning section fetches clips and Online resources',async()=>{
   const h=setup();h.c.prepareStudentFeatureViews();assert.deepEqual(h.reads,[]);
   assert.equal(h.roots['student-learning'].attrs['data-student-feature-state'],'idle');
   h.observer.callback([{isIntersecting:true,target:h.roots['student-learning']}]);
   await h.c.ensureStudentFeatureData('learning');
-  assert.deepEqual(h.reads,['onDemandClips']);assert.equal(h.c.onDemandClips.length,1);
+  assert.deepEqual(h.reads,['onDemandClips','onlineRooms','onlineDocuments']);assert.equal(h.c.onDemandClips.length,1);
+  assert.equal(h.c.onlineRooms.length,1);assert.equal(h.c.onlineDocuments.length,1);
   assert.equal(h.roots['student-learning'].attrs['data-student-feature-state'],'ready');
 });
 
@@ -55,8 +56,8 @@ test('feature waits for home and concurrent requests including force share one l
   const tasks=[h.c.ensureStudentFeatureData('learning'),h.c.ensureStudentFeatureData('learning',true)];
   assert.deepEqual(h.reads,[]);assert.equal(h.roots['student-learning'].attrs['aria-busy'],'true');
   gate.resolve(h.c.currentStudent);await Promise.all(tasks);
-  await h.c.ensureStudentFeatureData('learning');assert.equal(h.reads.length,1);
-  await h.c.ensureStudentFeatureData('learning',true);assert.equal(h.reads.length,2);
+  await h.c.ensureStudentFeatureData('learning');assert.equal(h.reads.length,3);
+  await h.c.ensureStudentFeatureData('learning',true);assert.equal(h.reads.length,6);
 });
 
 test('failed fetch shows retry state and does not publish incomplete arrays',async()=>{
