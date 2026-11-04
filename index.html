@@ -1783,6 +1783,125 @@
       line-height: 1.6;
     }
 
+    .student-online-doc-section {
+      margin-top: 14px;
+      padding: 14px;
+      border: 1px solid #cbd5e1;
+      border-radius: 12px;
+      background: #f8fafc;
+      color: #0f172a;
+      min-width: 0;
+    }
+
+    .student-online-doc-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      margin-bottom: 10px;
+    }
+
+    .student-online-doc-header h4 {
+      margin: 0;
+      color: #0f172a;
+      font-size: 14px;
+      font-weight: 900;
+    }
+
+    .student-online-doc-count {
+      padding: 3px 8px;
+      border-radius: 999px;
+      background: #e0e7ff;
+      color: #4338ca;
+      font-size: 11px;
+      font-weight: 800;
+      white-space: nowrap;
+    }
+
+    .student-online-doc-cards {
+      display: flex;
+      flex-wrap: nowrap;
+      gap: 12px;
+      overflow-x: auto;
+      overflow-y: hidden;
+      padding: 2px 2px 10px;
+      scroll-snap-type: x proximity;
+      -webkit-overflow-scrolling: touch;
+    }
+
+    .student-online-doc-cards::-webkit-scrollbar {
+      height: 8px;
+    }
+
+    .student-online-doc-cards::-webkit-scrollbar-track {
+      background: #e2e8f0;
+      border-radius: 999px;
+    }
+
+    .student-online-doc-cards::-webkit-scrollbar-thumb {
+      background: #94a3b8;
+      border-radius: 999px;
+    }
+
+    .student-online-doc-card {
+      display: flex;
+      flex: 0 0 260px;
+      flex-direction: column;
+      gap: 8px;
+      min-width: 260px;
+      min-height: 160px;
+      padding: 14px;
+      border: 1px solid #cbd5e1;
+      border-radius: 10px;
+      background: #ffffff;
+      box-shadow: 0 4px 12px rgba(15, 23, 42, 0.06);
+      scroll-snap-align: start;
+    }
+
+    .student-online-doc-card h5 {
+      margin: 0;
+      color: #0f172a;
+      font-size: 14px;
+      line-height: 1.4;
+      font-weight: 900;
+      overflow-wrap: anywhere;
+    }
+
+    .student-online-doc-date {
+      margin: 0;
+      color: #64748b;
+      font-size: 11px;
+      font-weight: 800;
+    }
+
+    .student-online-doc-actions {
+      display: flex;
+      flex-direction: column;
+      align-items: stretch;
+      gap: 7px;
+      margin-top: auto;
+    }
+
+    .student-online-doc-actions .btn {
+      width: 100%;
+      white-space: normal;
+      line-height: 1.35;
+      text-align: left;
+      overflow-wrap: anywhere;
+    }
+
+    .student-online-doc-empty {
+      margin: 0;
+      padding: 12px;
+      border: 1px dashed #cbd5e1;
+      border-radius: 10px;
+      background: #ffffff;
+      color: #64748b;
+      font-size: 12px;
+      line-height: 1.5;
+      text-align: center;
+    }
+
     @media (max-width: 900px) {
       .student-ondemand-cards {
         gap: 10px;
@@ -1792,6 +1911,15 @@
       .student-ondemand-item {
         width: 150px;
         min-width: 150px;
+      }
+
+      .student-online-doc-section {
+        padding: 12px;
+      }
+
+      .student-online-doc-card {
+        flex-basis: 220px;
+        min-width: 220px;
       }
 
       .student-gamification-avatar-wrap {
@@ -22991,6 +23119,42 @@
       '</div>';
     }
 
+    function renderStudentOnlineDocumentCards(course) {
+      if (!courseFeatureEnabled(course, 'onlineDocs')) {
+        return '<div class="student-online-doc-section">' +
+          '<div class="student-online-doc-header"><h4>เอกสารประกอบการเรียน</h4></div>' +
+          '<p class="student-online-doc-empty">คอร์สนี้ปิดการแสดงเอกสาร Online ไว้</p>' +
+        '</div>';
+      }
+
+      const docs = getCourseOnlineDocs(course, false);
+      if (!docs.length) {
+        return '<div class="student-online-doc-section">' +
+          '<div class="student-online-doc-header"><h4>เอกสารประกอบการเรียน</h4><span class="student-online-doc-count">0 ชุด</span></div>' +
+          '<p class="student-online-doc-empty">ยังไม่มีเอกสารรายครั้งสำหรับคอร์สนี้</p>' +
+        '</div>';
+      }
+
+      const courseId = String(course && (course.id || course.firebaseDocId) || '');
+      return '<div class="student-online-doc-section">' +
+        '<div class="student-online-doc-header"><h4>เอกสารประกอบการเรียน</h4><span class="student-online-doc-count">' + docs.length + ' ชุด</span></div>' +
+        '<div class="student-online-doc-cards" role="list" aria-label="เอกสารประกอบการเรียน">' +
+          docs.map(function(doc) {
+            const files = Array.isArray(doc && doc.files) ? doc.files.filter(function(file) { return file && file.url; }) : [];
+            const actions = files.length ? files.map(function(file) {
+              const title = getOnlineDocFileButtonTitle(file.title);
+              return '<button class="btn btn-blue" type="button" onclick="openStudentOnlineDocFile(\'' + jsArg(courseId) + '\',\'' + jsArg(file.url) + '\')">📄 ดาวน์โหลดเอกสาร: ' + escapeHtml(title) + '</button>';
+            }).join('') : '<p class="mini-muted">ยังไม่มีลิงก์ไฟล์เอกสาร</p>';
+            return '<article class="student-online-doc-card" role="listitem">' +
+              '<p class="student-online-doc-date">วันที่เรียน ' + escapeHtml(onlineDocDateText(doc.classDate)) + '</p>' +
+              '<h5>' + escapeHtml(doc.topic || 'ชุดเอกสารประกอบการเรียน') + '</h5>' +
+              '<div class="student-online-doc-actions">' + actions + '</div>' +
+            '</article>';
+          }).join('') +
+        '</div>' +
+      '</div>';
+    }
+
     async function saveOnDemandSettings() {
       const subject = getElement('adminOnDemandSubject').value;
       const grade = getElement('adminOnDemandGrade').value;
@@ -32030,12 +32194,23 @@
       }
     }
 
+    function getUniqueStudentOnlineCourses(courseList) {
+      const seenCourseIds = {};
+      return (courseList || []).filter(function(c) {
+        return String(c && c.access || '').indexOf('Online') !== -1 && courseFeatureEnabled(c, 'online');
+      }).filter(function(c) {
+        const courseId = String(c && (c.id || c.firebaseDocId) || '').trim();
+        if (!courseId) return true;
+        if (seenCourseIds[courseId]) return false;
+        seenCourseIds[courseId] = true;
+        return true;
+      });
+    }
+
     function renderStudentOnlineClasses(courseList, grade) {
       const box = getElement('studentOnlineClassList');
       if (!box) return;
-      const onlineCourses = courseList.filter(function(c) {
-        return c.access.indexOf('Online') !== -1 && courseFeatureEnabled(c, 'online');
-      });
+      const onlineCourses = getUniqueStudentOnlineCourses(courseList);
 
       if (!onlineCourses.length) {
         box.innerHTML = '<div class="notice">ยังไม่มีห้องเรียน Online สำหรับระดับชั้น ' + grade + '</div>';
@@ -32052,7 +32227,7 @@
           '<p><strong>Password:</strong> ' + (c.roomPassword || '-') + '</p>' +
           '<p style="color:#6b7280;">' + (hasLink ? 'ลิงก์ MS Teams พร้อมใช้งาน' : 'ยังไม่มีลิงก์ MS Teams สำหรับคอร์สนี้') + '</p>' +
           '<button class="btn ' + (hasLink ? 'btn-blue' : 'btn-dark') + '" type="button" onclick="' + actionCall('openOnlineClassByCourseId', c.id) + '">เข้าเรียน Online</button>' +
-          (courseFeatureEnabled(c, 'onlineDocs') ? renderOnlineDocsForCourse(c) : '<div class="online-doc-group"><p class="mini-muted">คอร์สนี้ปิดการแสดงเอกสาร Online ไว้</p></div>') +
+          renderStudentOnlineDocumentCards(c) +
         '</div>';
       }).join('');
     }
@@ -32364,24 +32539,21 @@
     function renderStudentMobileOnlineClasses(courseList, grade) {
       const box = getElement('studentMobileOnlineClassList');
       if (!box) return;
-      const onlineCourses = (courseList || []).filter(function(c) {
-        return String(c.access || '').indexOf('Online') !== -1 && courseFeatureEnabled(c, 'online');
-      });
+      const onlineCourses = getUniqueStudentOnlineCourses(courseList);
       if (!onlineCourses.length) {
         box.innerHTML = '<div class="student-mobile-media-card"><strong>ยังไม่มีห้องเรียน Online</strong><p class="student-mobile-muted">เมื่อคอร์สได้รับอนุมัติ ห้องเรียนของระดับชั้น ' + escapeHtml(grade || '-') + ' จะแสดงที่นี่</p></div>';
         return;
       }
       box.innerHTML = onlineCourses.map(function(c) {
         const hasLink = !!c.onlineLink;
-        const docs = courseFeatureEnabled(c, 'onlineDocs') ? getCourseOnlineDocs(c, false) : [];
         return '<div class="student-mobile-media-card">' +
           '<strong>' + escapeHtml(c.name || '-') + (c._historicalMedia ? ' · คอร์สย้อนหลัง' : '') + '</strong>' +
           '<p class="student-mobile-muted">' + escapeHtml(c.grade || grade || '-') + ' · ' + escapeHtml(c.onlineClassDay || ((c.days || []).join(' / ') || '-')) + ' · ' + escapeHtml(c.onlineClassTime || '-') + '</p>' +
           '<p class="student-mobile-muted">Meeting ID: ' + escapeHtml(c.roomId || '-') + ' · Passcode: ' + escapeHtml(c.roomPassword || '-') + '</p>' +
           '<div class="student-mobile-actions">' +
             '<button class="btn ' + (hasLink ? 'btn-blue' : 'btn-dark') + '" type="button" onclick="' + actionCall('openOnlineClassByCourseId', c.id) + '">เข้าห้องเรียน Online</button>' +
-            (docs.length ? '<button class="btn btn-dark" type="button" onclick="studentMobileOpenLatestOnlineDoc(\'' + jsArg(c.id) + '\')">เอกสารประกอบ</button>' : '') +
           '</div>' +
+          renderStudentOnlineDocumentCards(c) +
         '</div>';
       }).join('');
     }
@@ -32440,21 +32612,6 @@
 
     function renderStudentMobileLearning() {
       updateStudentMobileLearningFromExistingData();
-    }
-
-    function studentMobileOpenLatestOnlineDoc(courseId) {
-      if (!studentCanAccessCourseMedia(courseId, 'onlineDocs')) {
-        alert('ไม่มีสิทธิ์ดูเอกสาร Online ของคอร์สนี้');
-        return;
-      }
-      const course = courses.find(function(c) { return String(c.id) === String(courseId); });
-      const doc = getCourseOnlineDocs(course, false)[0];
-      const file = doc && Array.isArray(doc.files) ? doc.files.find(function(item) { return item && item.url; }) : null;
-      if (!file) {
-        alert('ยังไม่มีเอกสารประกอบสำหรับคอร์สนี้');
-        return;
-      }
-      openExternalLink(file.url);
     }
 
     function openOnDemandClipClip(id) {
