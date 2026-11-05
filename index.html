@@ -10856,6 +10856,14 @@
       staffTabLoadPromises = {};
       staffDataSessionUid = '';
       coreDataLoaded = false;
+      if (typeof studentEntityCache !== 'undefined') studentEntityCache.clear();
+      if (typeof courseEnrollmentEntityCache !== 'undefined') courseEnrollmentEntityCache.clear();
+      if (typeof adminStudentServerState !== 'undefined') {
+        adminStudentServerState = { key: '', loading: false, ready: false, page: 1, cursors: [], lastDoc: null, hasMore: false, localAll: false, studentIds: [], enrollmentIds: [], pageCache: new Map() };
+      }
+      if (typeof adminCourseEnrollmentServerState !== 'undefined') {
+        adminCourseEnrollmentServerState = { key: '', loading: false, ready: false, studentIds: [], enrollmentIds: [] };
+      }
       if (courseEndScheduleTimer) clearInterval(courseEndScheduleTimer);
       courseEndScheduleTimer = null;
       courseEndScheduleProcessing = false;
@@ -17722,13 +17730,54 @@
 
     let adminStudentCurrentPage = 1;
     const adminStudentPerPage = 20;
-    let adminStudentServerState = { key: '', loading: false, ready: false, page: 1, cursors: [], lastDoc: null, hasMore: false, localAll: false };
+    const studentEntityCache = new Map();
+    const courseEnrollmentEntityCache = new Map();
+
+    function getStudentEntityKey(student) {
+      return String(student && (student.firebaseDocId || student.id || student.authUid || student.memberId || student.studentId) || '').trim();
+    }
+
+    function getCourseEnrollmentEntityKey(enrollment) {
+      if (!enrollment) return '';
+      const direct = String(enrollment.firebaseDocId || enrollment.id || '').trim();
+      if (direct) return direct;
+      const studentKey = String(enrollment.studentId || enrollment.authUid || enrollment.memberId || '').trim();
+      const courseKey = String(enrollment.courseId || '').trim();
+      return studentKey && courseKey ? getCourseEnrollmentDocId(studentKey, courseKey) : '';
+    }
+
+    function mergeEntityRecords(cache, targetArray, records, keyGetter) {
+      (records || []).forEach(function(record) {
+        const key = keyGetter(record);
+        if (!key) return;
+        const existing = cache.get(key);
+        const merged = existing ? Object.assign(existing, record) : record;
+        cache.set(key, merged);
+        const index = targetArray.findIndex(function(item) { return keyGetter(item) === key; });
+        if (index === -1) targetArray.push(merged);
+        else if (targetArray[index] !== merged) targetArray[index] = merged;
+      });
+    }
+
+    function mergeStudentEntityRecords(records) {
+      mergeEntityRecords(studentEntityCache, students, records, getStudentEntityKey);
+    }
+
+    function mergeCourseEnrollmentEntityRecords(records) {
+      mergeEntityRecords(courseEnrollmentEntityCache, courseEnrollments, records, getCourseEnrollmentEntityKey);
+    }
+
+    function getCachedRecordsByIds(cache, ids) {
+      return (ids || []).map(function(id) { return cache.get(String(id)); }).filter(Boolean);
+    }
+
+    let adminStudentServerState = { key: '', loading: false, ready: false, page: 1, cursors: [], lastDoc: null, hasMore: false, localAll: false, studentIds: [], enrollmentIds: [], pageCache: new Map() };
     let adminStudentServerLoadTimer = null;
     let adminCourseSubtab = 'manage';
     let adminEnrollmentMode = 'single';
     let adminCourseEnrollmentCurrentPage = 1;
     const adminCourseEnrollmentPerPage = 20;
-    let adminCourseEnrollmentServerState = { key: '', loading: false, ready: false };
+    let adminCourseEnrollmentServerState = { key: '', loading: false, ready: false, studentIds: [], enrollmentIds: [] };
     let adminCourseEnrollmentLoadTimer = null;
     let adminCourseEnrollmentRowMessages = new Map();
     let adminEnrollmentListCurrentPage = 1;
@@ -17929,8 +17978,8 @@
             if (!courses.some(function(existing) { return String(existing.firebaseDocId || existing.id || '') === id; })) courses.push(course);
           });
         }
-        replaceArray(students, loadedStudents);
-        replaceArray(courseEnrollments, loadedEnrollments);
+        mergeStudentEntityRecords(loadedStudents);
+        mergeCourseEnrollmentEntityRecords(loadedEnrollments);
         rebuildStudentLookupMap();
         gradePromotionServerLoadedKey = getGradePromotionServerKey();
         return renderGradePromotionPreview();
@@ -18195,7 +18244,7 @@
       if (state.loading) return false;
       const keyChanged = state.key !== key;
       if (keyChanged) {
-        state.key = key; state.page = 1; state.cursors = []; state.lastDoc = null; state.hasMore = false; state.ready = false; state.localAll = false;
+        state.key = key; state.page = 1; state.cursors = []; state.lastDoc = null; state.hasMore = false; state.ready = false; state.localAll = false; state.studentIds = []; state.enrollmentIds = [];
       } else if (direction > 0 && state.hasMore) {
         state.cursors[state.page] = state.lastDoc;
         state.page += 1;
@@ -18206,6 +18255,19 @@
       const tbody = getElement('adminStudentTableBody');
       if (tbody) tbody.innerHTML = '<tr><td colspan="15">กำลังโหลดรายชื่อนักเรียน...</td></tr>';
       try {
+        const pageCacheKey = key + '::' + state.page;
+        const cachedPage = state.pageCache.get(pageCacheKey);
+        if (cachedPage && Date.now() - cachedPage.cachedAt < 60000) {
+          state.studentIds = cachedPage.studentIds.slice();
+          state.enrollmentIds = cachedPage.enrollmentIds.slice();
+          state.lastDoc = cachedPage.lastDoc || null;
+          state.hasMore = cachedPage.hasMore;
+          state.localAll = cachedPage.localAll;
+          state.ready = true;
+          adminStudentCurrentPage = state.page;
+          renderAdminStudents();
+          return true;
+        }
         let pageSnapshot;
         let loadedStudents;
         if (useSearchIndex) {
@@ -18246,20 +18308,35 @@
           state.localAll = hasExplicitFilter;
         }
         const loadedEnrollments = await loadCourseEnrollmentsForStudentPage(loadedStudents);
-        replaceArray(students, loadedStudents);
-        replaceArray(courseEnrollments, loadedEnrollments);
+        mergeStudentEntityRecords(loadedStudents);
+        mergeCourseEnrollmentEntityRecords(loadedEnrollments);
+        state.studentIds = loadedStudents.map(getStudentEntityKey).filter(Boolean);
+        state.enrollmentIds = loadedEnrollments.map(getCourseEnrollmentEntityKey).filter(Boolean);
         rebuildStudentLookupMap();
         state.lastDoc = pageSnapshot.docs[pageSnapshot.docs.length - 1] || null;
         state.hasMore = !state.localAll && pageSnapshot.size === 50;
         state.ready = true;
         adminStudentCurrentPage = state.page;
+        state.pageCache.set(pageCacheKey, {
+          studentIds: state.studentIds.slice(),
+          enrollmentIds: state.enrollmentIds.slice(),
+          lastDoc: state.lastDoc,
+          hasMore: state.hasMore,
+          localAll: state.localAll,
+          cachedAt: Date.now()
+        });
         renderAdminStudents();
         return true;
       } catch (error) {
-        state.ready = false;
         markFirestoreQuotaExceeded(error);
         console.warn('student server search failed:', error);
-        if (tbody) tbody.innerHTML = '<tr><td colspan="15">โหลดรายชื่อไม่สำเร็จ กรุณาลองใหม่</td></tr>';
+        if (state.studentIds.length) {
+          state.ready = true;
+          renderAdminStudents();
+        } else {
+          state.ready = false;
+          if (tbody) tbody.innerHTML = '<tr><td colspan="15">โหลดรายชื่อไม่สำเร็จ กรุณาลองใหม่</td></tr>';
+        }
         return false;
       } finally {
         state.loading = false;
@@ -18274,6 +18351,13 @@
       }, 250);
     }
 
+    function getAdminStudentViewRecords() {
+      if (isQuotaOptimizedLoadingEnabled() && adminStudentServerState.ready) {
+        return getCachedRecordsByIds(studentEntityCache, adminStudentServerState.studentIds);
+      }
+      return students;
+    }
+
     function renderAdminStudents() {
       const tbody = getElement('adminStudentTableBody');
       if (!tbody) return;
@@ -18285,7 +18369,7 @@
           return;
         }
       }
-      const filtered = sortRecordsForTable(getVisibleAdminStudents(), 'students');
+      const filtered = sortRecordsForTable(getVisibleAdminStudents(getAdminStudentViewRecords()), 'students');
       const serverPaged = isQuotaOptimizedLoadingEnabled() && !adminStudentServerState.localAll;
       const totalPages = serverPaged
         ? Math.max(1, adminStudentServerState.page + (adminStudentServerState.hasMore ? 1 : 0))
@@ -18356,7 +18440,7 @@
         loadAdminStudentServerPage(direction);
         return;
       }
-      const filtered = sortRecordsForTable(getVisibleAdminStudents(), 'students');
+      const filtered = sortRecordsForTable(getVisibleAdminStudents(getAdminStudentViewRecords()), 'students');
       const totalPages = Math.max(1, Math.ceil(filtered.length / adminStudentPerPage));
       adminStudentCurrentPage = Math.min(Math.max(1, adminStudentCurrentPage + direction), totalPages);
       renderAdminStudents();
@@ -18853,9 +18937,9 @@
       });
       if (adminCourseSubtab === 'manage') renderAdminCourses();
       if (adminCourseSubtab === 'enroll') {
-        if (isQuotaOptimizedLoadingEnabled()) adminCourseEnrollmentServerState.ready = false;
         renderAdminCourseEnrollmentSection();
         renderAdminBulkEnrollmentControls();
+        if (isQuotaOptimizedLoadingEnabled() && adminCourseEnrollmentServerState.ready) scheduleAdminCourseEnrollmentStudentsLoad();
       }
       if (adminCourseSubtab === 'list') renderAdminEnrollmentList();
     }
@@ -18882,11 +18966,18 @@
         .some(function(value) { return String(value || '').toLowerCase().includes(search); });
     }
 
+    function getAdminCourseEnrollmentViewRecords() {
+      if (isQuotaOptimizedLoadingEnabled() && adminCourseEnrollmentServerState.ready) {
+        return getCachedRecordsByIds(studentEntityCache, adminCourseEnrollmentServerState.studentIds);
+      }
+      return students;
+    }
+
     function getFilteredAdminCourseEnrollmentStudents() {
       const keyword = getElement('adminEnrollStudentSearch') ? getElement('adminEnrollStudentSearch').value : '';
       const grade = getElement('adminEnrollStudentGradeFilter') ? getElement('adminEnrollStudentGradeFilter').value : 'ทั้งหมด';
       const location = getElement('adminEnrollStudentLocationFilter') ? getElement('adminEnrollStudentLocationFilter').value : 'ทั้งหมด';
-      return (students || []).filter(function(student) {
+      return getAdminCourseEnrollmentViewRecords().filter(function(student) {
         return student && student.deleted !== true && studentMatchesAdminEnrollmentSearch(student, keyword) &&
           (grade === 'ทั้งหมด' || String(student.grade || '') === grade) &&
           (location === 'ทั้งหมด' || String(student.preferredLocation || '') === location);
@@ -18909,11 +19000,14 @@
       const state = adminCourseEnrollmentServerState;
       const key = getAdminCourseEnrollmentFilterKey();
       if (state.loading) return false;
+      const sameKey = state.key === key;
+      const hadUsableView = sameKey && state.ready && state.studentIds.length > 0;
+      if (!sameKey) { state.studentIds = []; state.enrollmentIds = []; }
       state.loading = true;
       state.key = key;
-      state.ready = false;
+      state.ready = hadUsableView;
       const tbody = getElement('adminEnrollStudentTableBody');
-      if (tbody) tbody.innerHTML = '<tr><td colspan="6">กำลังโหลดข้อมูลนักเรียน...</td></tr>';
+      if (tbody && !hadUsableView) tbody.innerHTML = '<tr><td colspan="6">กำลังโหลดข้อมูลนักเรียน...</td></tr>';
       try {
         const filter = JSON.parse(key);
         const hasExplicitFilter = !!filter.keyword || filter.grade !== 'ทั้งหมด' || filter.location !== 'ทั้งหมด';
@@ -18926,8 +19020,10 @@
           scheduleAdminCourseEnrollmentStudentsLoad();
           return false;
         }
-        replaceArray(students, loadedStudents);
-        replaceArray(courseEnrollments, loadedEnrollments);
+        mergeStudentEntityRecords(loadedStudents);
+        mergeCourseEnrollmentEntityRecords(loadedEnrollments);
+        state.studentIds = loadedStudents.map(getStudentEntityKey).filter(Boolean);
+        state.enrollmentIds = loadedEnrollments.map(getCourseEnrollmentEntityKey).filter(Boolean);
         rebuildStudentLookupMap();
         state.ready = true;
         adminCourseEnrollmentCurrentPage = 1;
@@ -18937,7 +19033,13 @@
       } catch (error) {
         markFirestoreQuotaExceeded(error);
         console.warn('admin course enrollment students load failed:', error);
-        if (tbody) tbody.innerHTML = '<tr><td colspan="6">โหลดข้อมูลนักเรียนไม่สำเร็จ กรุณาลองใหม่</td></tr>';
+        if (hadUsableView) {
+          state.ready = true;
+          renderAdminCourseEnrollmentSection();
+        } else if (tbody) {
+          state.ready = false;
+          tbody.innerHTML = '<tr><td colspan="6">โหลดข้อมูลนักเรียนไม่สำเร็จ กรุณาลองใหม่</td></tr>';
+        }
         return false;
       } finally {
         state.loading = false;
@@ -46042,7 +46144,7 @@ function receiptStatusText(status) {
       return months;
     }
 
-    function getVisibleAdminStudents() {
+    function getVisibleAdminStudents(sourceStudents) {
       const keyword = getElement('studentSearchKeyword') ? getElement('studentSearchKeyword').value.trim().toLowerCase() : '';
       const selectedGrade = getElement('studentGradeFilter') ? getElement('studentGradeFilter').value : 'ทั้งหมด';
       const selectedLocation = getElement('studentLocationFilter') ? getElement('studentLocationFilter').value : 'ทั้งหมด';
@@ -46051,7 +46153,7 @@ function receiptStatusText(status) {
       const selectedPayment = getElement('studentPaymentFilter') ? getElement('studentPaymentFilter').value : 'ทั้งหมด';
       const selectedOverdue = getElement('studentOverdueFilter') ? getElement('studentOverdueFilter').value : 'ทั้งหมด';
       const selectedLearningStatus = getElement('studentLearningStatusFilter') ? getElement('studentLearningStatusFilter').value : 'ทั้งหมด';
-      return students.filter(function(s) {
+      return (Array.isArray(sourceStudents) ? sourceStudents : students).filter(function(s) {
         const enrollments = getStudentCourseEnrollments(s);
         const enrollmentCourses = enrollments.map(getCourseForEnrollment).filter(Boolean);
         const locationTexts = enrollmentCourses.map(function(course) { return course.location || ''; });

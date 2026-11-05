@@ -65,6 +65,11 @@ test('Spark plan defaults to bounded loading while search index remains separate
   }
   assert.match(html, /function loadAdminCourseEnrollmentStudents\(\)[\s\S]*FieldPath\.documentId\(\)\)\.limit\(50\)/);
   assert.match(html, /function renderAdminCourseEnrollmentSection\(\)[\s\S]*adminCourseEnrollmentServerState\.ready/);
+  assert.match(html, /const studentEntityCache = new Map\(\)/);
+  assert.match(html, /state\.pageCache\.set\(pageCacheKey/);
+  const studentLoader = html.slice(html.indexOf('    async function loadAdminStudentServerPage('), html.indexOf('    function scheduleAdminStudentServerLoad('));
+  assert.doesNotMatch(studentLoader, /replaceArray\(students|replaceArray\(courseEnrollments/);
+  assert.match(studentLoader, /mergeStudentEntityRecords\(loadedStudents\)/);
 });
 
 test('new activity logs explicitly skip the existence read', () => {
