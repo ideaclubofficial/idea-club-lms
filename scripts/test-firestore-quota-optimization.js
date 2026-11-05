@@ -59,7 +59,10 @@ test('Spark plan defaults to bounded loading while search index remains separate
   context.systemSettings.studentSearchIndexVersion = 1;
   assert.equal(context.isQuotaOptimizedLoadingEnabled(), true);
   assert.equal(context.isStudentSearchIndexEnabled(), true);
-  assert.match(html, /Free-plan fallback:[\s\S]*db\.collection\('students'\)\.orderBy\('memberId', 'asc'\)/);
+  assert.match(html, /Free-plan fallback:[\s\S]*orderBy\(firebase\.firestore\.FieldPath\.documentId\(\)\)\.limit\(50\)/);
+  for (const field of ['studentId', 'authUid', 'memberId', 'studentName']) {
+    assert.match(html, new RegExp(field + ': \\[\\]'), field);
+  }
 });
 
 test('new activity logs explicitly skip the existence read', () => {

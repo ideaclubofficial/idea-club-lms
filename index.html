@@ -17850,6 +17850,35 @@
       if (resultEl) resultEl.textContent = '';
     }
 
+    async function loadCourseEnrollmentsForStudentPage(studentList) {
+      const valuesByField = { studentId: [], authUid: [], memberId: [], studentName: [], student: [] };
+      function add(field, value) {
+        value = String(value || '').trim();
+        if (value && !valuesByField[field].includes(value)) valuesByField[field].push(value);
+      }
+      (studentList || []).forEach(function(student) {
+        getStudentIdentityKeys(student).forEach(function(value) { add('studentId', value); });
+        add('authUid', student.authUid || student.uid);
+        add('memberId', student.memberId || student.studentId);
+        add('studentName', student.name);
+        add('student', student.name);
+      });
+      const byId = new Map();
+      const fields = Object.keys(valuesByField);
+      for (let fieldIndex = 0; fieldIndex < fields.length; fieldIndex++) {
+        const field = fields[fieldIndex];
+        const values = valuesByField[field];
+        for (let offset = 0; offset < values.length; offset += 30) {
+          const snapshot = await db.collection('courseEnrollments').where(field, 'in', values.slice(offset, offset + 30)).get();
+          firebaseSnapshotItems(snapshot).forEach(function(item) {
+            if (!(studentList || []).some(function(student) { return enrollmentBelongsToStudent(item, student); })) return;
+            byId.set(String(item.firebaseDocId || item.id || ''), item);
+          });
+        }
+      }
+      return Array.from(byId.values());
+    }
+
     async function loadGradePromotionPreview() {
       if (!isQuotaOptimizedLoadingEnabled()) return renderGradePromotionPreview();
       const state = getGradePromotionFormState();
@@ -17882,12 +17911,7 @@
               (state.learningStatus === 'ทั้งหมด' || getStudentLearningStatus(student) === state.learningStatus);
           });
         }
-        const studentIds = loadedStudents.map(getStudentRecordDocId).filter(Boolean);
-        const loadedEnrollments = [];
-        for (let offset = 0; offset < studentIds.length; offset += 30) {
-          const snapshot = await db.collection('courseEnrollments').where('studentId', 'in', studentIds.slice(offset, offset + 30)).get();
-          firebaseSnapshotItems(snapshot).forEach(function(item) { loadedEnrollments.push(item); });
-        }
+        const loadedEnrollments = await loadCourseEnrollmentsForStudentPage(loadedStudents);
         const courseIds = Array.from(new Set(loadedStudents.map(function(student) { return String(student.courseId || ''); }).filter(Boolean)));
         for (let offset = 0; offset < courseIds.length; offset += 30) {
           const snapshot = await db.collection('courses').where(firebase.firestore.FieldPath.documentId(), 'in', courseIds.slice(offset, offset + 30)).get();
@@ -18202,9 +18226,9 @@
           // Free-plan fallback: the default list reads one bounded server page.
           // A cross-student filter/search reads the full student collection only
           // after the staff member explicitly enters a filter.
-          let query = db.collection('students').orderBy('memberId', 'asc');
+          let query = db.collection('students');
           if (!hasExplicitFilter) {
-            query = query.limit(50);
+            query = query.orderBy(firebase.firestore.FieldPath.documentId()).limit(50);
             const cursor = state.page > 1 ? state.cursors[state.page - 1] : null;
             if (cursor) query = query.startAfter(cursor);
           }
@@ -18212,13 +18236,7 @@
           loadedStudents = firebaseSnapshotItems(pageSnapshot);
           state.localAll = hasExplicitFilter;
         }
-        const ids = loadedStudents.map(getStudentRecordDocId).filter(Boolean);
-        const enrollmentSnapshots = [];
-        for (let offset = 0; offset < ids.length; offset += 30) {
-          enrollmentSnapshots.push(await db.collection('courseEnrollments').where('studentId', 'in', ids.slice(offset, offset + 30)).get());
-        }
-        const loadedEnrollments = [];
-        enrollmentSnapshots.forEach(function(snapshot) { firebaseSnapshotItems(snapshot).forEach(function(item) { loadedEnrollments.push(item); }); });
+        const loadedEnrollments = await loadCourseEnrollmentsForStudentPage(loadedStudents);
         replaceArray(students, loadedStudents);
         replaceArray(courseEnrollments, loadedEnrollments);
         rebuildStudentLookupMap();
@@ -21391,10 +21409,17 @@
 
     function enrollmentBelongsToStudent(enrollment, student) {
       if (!enrollment || !student) return false;
-      const studentId = getEnrollmentStudentId(student);
-      const authUid = String(student.authUid || (firebaseUser ? firebaseUser.uid : '') || '').trim();
-      return (studentId && String(enrollment.studentId || '').trim() === studentId) ||
-        (authUid && String(enrollment.authUid || '').trim() === authUid);
+      const studentKeys = getStudentIdentityKeys(student);
+      const enrollmentKeys = [
+        enrollment.studentId,
+        enrollment.authUid,
+        enrollment.memberId,
+        enrollment.studentMemberId
+      ].map(function(value) { return String(value || '').trim(); }).filter(Boolean);
+      if (enrollmentKeys.some(function(key) { return studentKeys.includes(key); })) return true;
+      if (enrollmentKeys.length) return false;
+      const enrollmentName = String(enrollment.studentName || enrollment.student || '').trim();
+      return !!(enrollmentName && enrollmentName === String(student.name || '').trim());
     }
 
     function buildAdminCourseEnrollment(student, course, courseStatus, options) {
