@@ -2,6 +2,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
+const vm = require('node:vm');
 const {
   buildStudentSearchIndex,
   getEnrollmentSearchText,
@@ -33,7 +34,7 @@ test('online exam remote autosave is capped to a 120-second changed-only cadence
 
 test('quota optimized startup and canonical payment listener have bounded paths', () => {
   assert.match(html, /STUDENT_HOME_REALTIME_COLLECTIONS = \['courseEnrollments', 'payments', 'receipts', 'paymentBundles'\]/);
-  assert.match(html, /quotaOptimizedLoadingVersion/);
+  assert.match(html, /quotaOptimizedLoadingDisabled/);
   assert.match(html, /payments:pending-canonical/);
   assert.doesNotMatch(
     html.slice(html.indexOf('    function startAdminPaymentDataListeners('), html.indexOf('    function scheduleStudentRealtimeRefresh(')),
@@ -42,6 +43,23 @@ test('quota optimized startup and canonical payment listener have bounded paths'
   for (const collection of ['students', 'teachers', 'courses', 'courseEnrollments', 'payments', 'receipts', 'paymentBundles']) {
     assert.match(html, new RegExp(collection + ":[\\s\\S]{0,120}limit:"), collection);
   }
+});
+
+test('Spark plan defaults to bounded loading while search index remains separately gated', () => {
+  const start = html.indexOf('    function isQuotaOptimizedLoadingEnabled(');
+  const end = html.indexOf('    function firebaseSnapshotItems(', start);
+  const context = { systemSettings: {} };
+  vm.createContext(context);
+  vm.runInContext(html.slice(start, end), context);
+  assert.equal(context.isQuotaOptimizedLoadingEnabled(), true);
+  assert.equal(context.isStudentSearchIndexEnabled(), false);
+  context.systemSettings.quotaOptimizedLoadingDisabled = true;
+  assert.equal(context.isQuotaOptimizedLoadingEnabled(), false);
+  context.systemSettings.quotaOptimizedLoadingDisabled = false;
+  context.systemSettings.studentSearchIndexVersion = 1;
+  assert.equal(context.isQuotaOptimizedLoadingEnabled(), true);
+  assert.equal(context.isStudentSearchIndexEnabled(), true);
+  assert.match(html, /Free-plan fallback:[\s\S]*db\.collection\('students'\)\.orderBy\('memberId', 'asc'\)/);
 });
 
 test('new activity logs explicitly skip the existence read', () => {

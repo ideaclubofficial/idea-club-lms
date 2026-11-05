@@ -18,7 +18,7 @@ function setup() {
     STUDENT_HOME_REALTIME_COLLECTIONS: ['courseEnrollments','payments','receipts','paymentBundles'],
     resetStaffDataSession() {}, getElement: () => null, onlineExamCoursesLoadSeq: 0, safeRun: fn => fn(), triggerDailyLoginQuestIfNeeded() {},
     firebaseReady: true, firebaseUser: { uid: 'A' }, db: { collection: () => query },
-    systemSettings: { quotaOptimizedLoadingVersion: 0 }, markFirestoreQuotaExceeded() {}, rememberFirebaseDocumentSnapshot() {},
+    systemSettings: { quotaOptimizedLoadingDisabled: true }, markFirestoreQuotaExceeded() {}, rememberFirebaseDocumentSnapshot() {},
     isFirestoreQuotaExceededError: () => false,
     console: { log() {}, warn() {} }, currentStudent: null,
     studentDataLoadedForUid: '', studentDataLoadingPromise: null,

@@ -10526,7 +10526,13 @@
     }
 
     function isQuotaOptimizedLoadingEnabled() {
-      return Number(systemSettings && systemSettings.quotaOptimizedLoadingVersion || 0) >= 1;
+      // Spark/free-plan default: bounded loaders do not depend on Cloud Functions.
+      // Emergency rollback is still possible with an explicit boolean setting.
+      return !(systemSettings && systemSettings.quotaOptimizedLoadingDisabled === true);
+    }
+
+    function isStudentSearchIndexEnabled() {
+      return Number(systemSettings && systemSettings.studentSearchIndexVersion || 0) >= 1;
     }
 
     function firebaseSnapshotItems(snapshot) {
@@ -10539,6 +10545,7 @@
     async function getStudentRelevantCourses(studentRecords, loadStatus) {
       if (!isQuotaOptimizedLoadingEnabled()) return getFirebaseCollectionQuiet('courses', false, loadStatus);
       const ids = [];
+      const grade = String(studentRecords && studentRecords[0] && studentRecords[0].grade || '').trim();
       (studentRecords || []).forEach(function(student) {
         [student.courseId, student.completedCourseId].forEach(function(id) {
           id = String(id || '').trim();
@@ -10549,21 +10556,41 @@
         const id = String(enrollment.courseId || '').trim();
         if (id && !ids.includes(id)) ids.push(id);
       });
-      const snapshots = await Promise.all(ids.slice(0, 30).map(function(id) {
+      const directSnapshotsPromise = Promise.all(ids.slice(0, 30).map(function(id) {
         return db.collection('courses').doc(id).get().catch(function(error) {
           if (loadStatus) loadStatus.failed = true;
           markFirestoreQuotaExceeded(error);
           return null;
         });
       }));
-      return snapshots.filter(function(doc) { return doc && doc.exists; }).map(function(doc) {
+      const openCoursesPromise = grade
+        ? db.collection('courses').where('grade', '==', grade).limit(50).get().catch(function(error) {
+            if (loadStatus) loadStatus.failed = true;
+            markFirestoreQuotaExceeded(error);
+            return null;
+          })
+        : Promise.resolve(null);
+      const results = await Promise.all([directSnapshotsPromise, openCoursesPromise]);
+      const byId = new Map();
+      results[0].filter(function(doc) { return doc && doc.exists; }).forEach(function(doc) {
         rememberFirebaseDocumentSnapshot(doc);
-        return Object.assign({ firebaseDocId: doc.id }, doc.data());
-      }).filter(function(item) { return item.deleted !== true; });
+        const item = Object.assign({ firebaseDocId: doc.id }, doc.data());
+        if (item.deleted !== true) byId.set(String(doc.id), item);
+      });
+      if (results[1]) firebaseSnapshotItems(results[1]).forEach(function(item) {
+        const id = String(item.firebaseDocId || item.id || '');
+        if (id) byId.set(id, item);
+      });
+      return Array.from(byId.values());
     }
 
     async function getStudentAnnouncements(student, loadStatus) {
       if (!isQuotaOptimizedLoadingEnabled()) return getFirebaseCollectionQuiet('announcements', false, loadStatus);
+      if (!isStudentSearchIndexEnabled()) {
+        // Existing announcements may not have targetKey yet. Keep this bounded and
+        // let renderStudentAnnouncements apply grade/location visibility locally.
+        return getFirebaseCollectionQuiet('announcements', false, loadStatus);
+      }
       const grade = String(student && student.grade || 'ทั้งหมด');
       const location = String(student && student.preferredLocation || 'ทั้งหมด');
       const keys = [grade + '|' + location, grade + '|ทั้งหมด', 'ทั้งหมด|' + location, 'ทั้งหมด|ทั้งหมด'];
@@ -17695,7 +17722,7 @@
 
     let adminStudentCurrentPage = 1;
     const adminStudentPerPage = 20;
-    let adminStudentServerState = { key: '', loading: false, ready: false, page: 1, cursors: [], lastDoc: null, hasMore: false };
+    let adminStudentServerState = { key: '', loading: false, ready: false, page: 1, cursors: [], lastDoc: null, hasMore: false, localAll: false };
     let adminStudentServerLoadTimer = null;
     let adminCourseSubtab = 'manage';
     let adminEnrollmentMode = 'single';
@@ -17830,21 +17857,29 @@
       if (!state.fromGrade || !state.toGrade) return renderGradePromotionPreview();
       if (box) box.innerHTML = '<div class="notice">กำลังโหลดนักเรียนตามเงื่อนไข...</div>';
       try {
-        let query = db.collection('studentSearchIndex')
-          .where('deleted', '==', false)
-          .where('grade', '==', state.fromGrade);
-        if (state.location !== 'ทั้งหมด') query = query.where('location', '==', state.location);
-        if (state.learningStatus !== 'ทั้งหมด') query = query.where('learningStatus', '==', state.learningStatus);
-        const indexSnapshot = await query.orderBy('memberId', 'asc').get();
-        const loadedStudents = [];
-        for (let offset = 0; offset < indexSnapshot.docs.length; offset += 50) {
-          const snapshots = await Promise.all(indexSnapshot.docs.slice(offset, offset + 50).map(function(doc) {
-            return db.collection('students').doc(doc.id).get();
-          }));
-          snapshots.filter(function(doc) { return doc.exists; }).forEach(function(doc) {
-            rememberFirebaseDocumentSnapshot(doc);
-            const student = Object.assign({ firebaseDocId: doc.id }, doc.data());
-            if (student.deleted !== true) loadedStudents.push(student);
+        let loadedStudents = [];
+        if (isStudentSearchIndexEnabled()) {
+          let query = db.collection('studentSearchIndex')
+            .where('deleted', '==', false)
+            .where('grade', '==', state.fromGrade);
+          if (state.location !== 'ทั้งหมด') query = query.where('location', '==', state.location);
+          if (state.learningStatus !== 'ทั้งหมด') query = query.where('learningStatus', '==', state.learningStatus);
+          const indexSnapshot = await query.orderBy('memberId', 'asc').get();
+          for (let offset = 0; offset < indexSnapshot.docs.length; offset += 50) {
+            const snapshots = await Promise.all(indexSnapshot.docs.slice(offset, offset + 50).map(function(doc) {
+              return db.collection('students').doc(doc.id).get();
+            }));
+            snapshots.filter(function(doc) { return doc.exists; }).forEach(function(doc) {
+              rememberFirebaseDocumentSnapshot(doc);
+              const student = Object.assign({ firebaseDocId: doc.id }, doc.data());
+              if (student.deleted !== true) loadedStudents.push(student);
+            });
+          }
+        } else {
+          const snapshot = await db.collection('students').where('grade', '==', state.fromGrade).get();
+          loadedStudents = firebaseSnapshotItems(snapshot).filter(function(student) {
+            return (state.location === 'ทั้งหมด' || String(student.preferredLocation || '') === state.location) &&
+              (state.learningStatus === 'ทั้งหมด' || getStudentLearningStatus(student) === state.learningStatus);
           });
         }
         const studentIds = loadedStudents.map(getStudentRecordDocId).filter(Boolean);
@@ -18120,10 +18155,14 @@
       const filter = getAdminStudentServerFilterState();
       const key = JSON.stringify(filter);
       const state = adminStudentServerState;
+      const useSearchIndex = isStudentSearchIndexEnabled();
+      const hasExplicitFilter = Object.keys(filter).some(function(name) {
+        return name === 'keyword' ? !!filter[name] : filter[name] !== 'ทั้งหมด';
+      });
       if (state.loading) return false;
       const keyChanged = state.key !== key;
       if (keyChanged) {
-        state.key = key; state.page = 1; state.cursors = []; state.lastDoc = null; state.hasMore = false; state.ready = false;
+        state.key = key; state.page = 1; state.cursors = []; state.lastDoc = null; state.hasMore = false; state.ready = false; state.localAll = false;
       } else if (direction > 0 && state.hasMore) {
         state.cursors[state.page] = state.lastDoc;
         state.page += 1;
@@ -18134,27 +18173,45 @@
       const tbody = getElement('adminStudentTableBody');
       if (tbody) tbody.innerHTML = '<tr><td colspan="15">กำลังโหลดรายชื่อนักเรียน...</td></tr>';
       try {
-        let query = db.collection('studentSearchIndex').where('deleted', '==', false);
-        const token = getStudentSearchIndexToken(filter.keyword);
-        if (token) query = query.where('searchTokens', 'array-contains', token);
-        if (filter.grade !== 'ทั้งหมด') query = query.where('grade', '==', filter.grade);
-        if (filter.location !== 'ทั้งหมด') query = query.where('location', '==', filter.location);
-        if (filter.learningStatus !== 'ทั้งหมด') query = query.where('learningStatus', '==', filter.learningStatus);
-        query = query.orderBy('memberId', 'asc').limit(50);
-        const cursor = state.page > 1 ? state.cursors[state.page - 1] : null;
-        if (cursor) query = query.startAfter(cursor);
-        const indexSnapshot = await query.get();
-        const normalizedKeyword = normalizeStudentSearchText(filter.keyword);
-        const matchedIndexDocs = indexSnapshot.docs.filter(function(doc) {
-          return !normalizedKeyword || String(doc.data().normalizedText || '').includes(normalizedKeyword);
-        });
-        const studentSnapshots = await Promise.all(matchedIndexDocs.map(function(doc) {
-          return db.collection('students').doc(doc.id).get();
-        }));
-        const loadedStudents = studentSnapshots.filter(function(doc) { return doc.exists; }).map(function(doc) {
-          rememberFirebaseDocumentSnapshot(doc);
-          return Object.assign({ firebaseDocId: doc.id }, doc.data());
-        }).filter(function(student) { return student.deleted !== true; });
+        let pageSnapshot;
+        let loadedStudents;
+        if (useSearchIndex) {
+          let query = db.collection('studentSearchIndex').where('deleted', '==', false);
+          const token = getStudentSearchIndexToken(filter.keyword);
+          if (token) query = query.where('searchTokens', 'array-contains', token);
+          if (filter.grade !== 'ทั้งหมด') query = query.where('grade', '==', filter.grade);
+          if (filter.location !== 'ทั้งหมด') query = query.where('location', '==', filter.location);
+          if (filter.learningStatus !== 'ทั้งหมด') query = query.where('learningStatus', '==', filter.learningStatus);
+          query = query.orderBy('memberId', 'asc').limit(50);
+          const cursor = state.page > 1 ? state.cursors[state.page - 1] : null;
+          if (cursor) query = query.startAfter(cursor);
+          pageSnapshot = await query.get();
+          const normalizedKeyword = normalizeStudentSearchText(filter.keyword);
+          const matchedIndexDocs = pageSnapshot.docs.filter(function(doc) {
+            return !normalizedKeyword || String(doc.data().normalizedText || '').includes(normalizedKeyword);
+          });
+          const studentSnapshots = await Promise.all(matchedIndexDocs.map(function(doc) {
+            return db.collection('students').doc(doc.id).get();
+          }));
+          loadedStudents = studentSnapshots.filter(function(doc) { return doc.exists; }).map(function(doc) {
+            rememberFirebaseDocumentSnapshot(doc);
+            return Object.assign({ firebaseDocId: doc.id }, doc.data());
+          }).filter(function(student) { return student.deleted !== true; });
+          state.localAll = false;
+        } else {
+          // Free-plan fallback: the default list reads one bounded server page.
+          // A cross-student filter/search reads the full student collection only
+          // after the staff member explicitly enters a filter.
+          let query = db.collection('students').orderBy('memberId', 'asc');
+          if (!hasExplicitFilter) {
+            query = query.limit(50);
+            const cursor = state.page > 1 ? state.cursors[state.page - 1] : null;
+            if (cursor) query = query.startAfter(cursor);
+          }
+          pageSnapshot = await query.get();
+          loadedStudents = firebaseSnapshotItems(pageSnapshot);
+          state.localAll = hasExplicitFilter;
+        }
         const ids = loadedStudents.map(getStudentRecordDocId).filter(Boolean);
         const enrollmentSnapshots = [];
         for (let offset = 0; offset < ids.length; offset += 30) {
@@ -18165,8 +18222,8 @@
         replaceArray(students, loadedStudents);
         replaceArray(courseEnrollments, loadedEnrollments);
         rebuildStudentLookupMap();
-        state.lastDoc = indexSnapshot.docs[indexSnapshot.docs.length - 1] || null;
-        state.hasMore = indexSnapshot.size === 50;
+        state.lastDoc = pageSnapshot.docs[pageSnapshot.docs.length - 1] || null;
+        state.hasMore = !state.localAll && pageSnapshot.size === 50;
         state.ready = true;
         adminStudentCurrentPage = state.page;
         renderAdminStudents();
@@ -18174,7 +18231,7 @@
       } catch (error) {
         state.ready = false;
         markFirestoreQuotaExceeded(error);
-        console.warn('student indexed search failed:', error);
+        console.warn('student server search failed:', error);
         if (tbody) tbody.innerHTML = '<tr><td colspan="15">โหลดรายชื่อไม่สำเร็จ กรุณาลองใหม่</td></tr>';
         return false;
       } finally {
@@ -18202,13 +18259,14 @@
         }
       }
       const filtered = sortRecordsForTable(getVisibleAdminStudents(), 'students');
-      const totalPages = isQuotaOptimizedLoadingEnabled()
+      const serverPaged = isQuotaOptimizedLoadingEnabled() && !adminStudentServerState.localAll;
+      const totalPages = serverPaged
         ? Math.max(1, adminStudentServerState.page + (adminStudentServerState.hasMore ? 1 : 0))
         : Math.max(1, Math.ceil(filtered.length / adminStudentPerPage));
       if (adminStudentCurrentPage > totalPages) adminStudentCurrentPage = totalPages;
-      const start = isQuotaOptimizedLoadingEnabled() ? 0 : (adminStudentCurrentPage - 1) * adminStudentPerPage;
+      const start = serverPaged ? 0 : (adminStudentCurrentPage - 1) * adminStudentPerPage;
       const pageItems = filtered.slice(start, start + adminStudentPerPage);
-      const rowNumberBase = isQuotaOptimizedLoadingEnabled() ? (adminStudentCurrentPage - 1) * adminStudentPerPage : start;
+      const rowNumberBase = serverPaged ? (adminStudentCurrentPage - 1) * adminStudentPerPage : start;
 
       renderPendingCourseApprovalList();
       tbody.innerHTML = pageItems.length ? pageItems.map(function(s, i) {
@@ -18257,7 +18315,7 @@
           '<td class="row-actions-cell">' + renderAdminStudentActions(s) + '</td>' +
         '</tr>';
       }).join('') : '<tr><td colspan="15">ยังไม่มีนักเรียนในเงื่อนไขที่เลือก</td></tr>';
-      const estimatedTotal = isQuotaOptimizedLoadingEnabled()
+      const estimatedTotal = serverPaged
         ? ((adminStudentServerState.page - 1) * adminStudentPerPage + pageItems.length + (adminStudentServerState.hasMore ? 1 : 0))
         : filtered.length;
       renderTablePagination('adminStudentsPagination', adminStudentCurrentPage, totalPages, estimatedTotal, 'changeAdminStudentsPage');
@@ -18267,7 +18325,7 @@
     }
 
     function changeAdminStudentsPage(direction) {
-      if (isQuotaOptimizedLoadingEnabled()) {
+      if (isQuotaOptimizedLoadingEnabled() && !adminStudentServerState.localAll) {
         loadAdminStudentServerPage(direction);
         return;
       }
