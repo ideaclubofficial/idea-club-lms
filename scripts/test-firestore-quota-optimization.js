@@ -63,6 +63,8 @@ test('Spark plan defaults to bounded loading while search index remains separate
   for (const field of ['studentId', 'authUid', 'memberId', 'studentName']) {
     assert.match(html, new RegExp(field + ': \\[\\]'), field);
   }
+  assert.match(html, /function loadAdminCourseEnrollmentStudents\(\)[\s\S]*FieldPath\.documentId\(\)\)\.limit\(50\)/);
+  assert.match(html, /function renderAdminCourseEnrollmentSection\(\)[\s\S]*adminCourseEnrollmentServerState\.ready/);
 });
 
 test('new activity logs explicitly skip the existence read', () => {

@@ -17728,6 +17728,8 @@
     let adminEnrollmentMode = 'single';
     let adminCourseEnrollmentCurrentPage = 1;
     const adminCourseEnrollmentPerPage = 20;
+    let adminCourseEnrollmentServerState = { key: '', loading: false, ready: false };
+    let adminCourseEnrollmentLoadTimer = null;
     let adminCourseEnrollmentRowMessages = new Map();
     let adminEnrollmentListCurrentPage = 1;
     const adminEnrollmentListPerPage = 20;
@@ -17869,7 +17871,14 @@
         const field = fields[fieldIndex];
         const values = valuesByField[field];
         for (let offset = 0; offset < values.length; offset += 30) {
-          const snapshot = await db.collection('courseEnrollments').where(field, 'in', values.slice(offset, offset + 30)).get();
+          let snapshot = null;
+          try {
+            snapshot = await db.collection('courseEnrollments').where(field, 'in', values.slice(offset, offset + 30)).get();
+          } catch (error) {
+            markFirestoreQuotaExceeded(error);
+            console.warn('student enrollment identity query skipped:', field, error);
+            continue;
+          }
           firebaseSnapshotItems(snapshot).forEach(function(item) {
             if (!(studentList || []).some(function(student) { return enrollmentBelongsToStudent(item, student); })) return;
             byId.set(String(item.firebaseDocId || item.id || ''), item);
@@ -18844,6 +18853,7 @@
       });
       if (adminCourseSubtab === 'manage') renderAdminCourses();
       if (adminCourseSubtab === 'enroll') {
+        if (isQuotaOptimizedLoadingEnabled()) adminCourseEnrollmentServerState.ready = false;
         renderAdminCourseEnrollmentSection();
         renderAdminBulkEnrollmentControls();
       }
@@ -18886,12 +18896,75 @@
       });
     }
 
+    function getAdminCourseEnrollmentFilterKey() {
+      return JSON.stringify({
+        keyword: getElement('adminEnrollStudentSearch') ? getElement('adminEnrollStudentSearch').value.trim() : '',
+        grade: getElement('adminEnrollStudentGradeFilter') ? getElement('adminEnrollStudentGradeFilter').value : 'ทั้งหมด',
+        location: getElement('adminEnrollStudentLocationFilter') ? getElement('adminEnrollStudentLocationFilter').value : 'ทั้งหมด'
+      });
+    }
+
+    async function loadAdminCourseEnrollmentStudents() {
+      if (!isQuotaOptimizedLoadingEnabled() || !firebaseReady || !db) return false;
+      const state = adminCourseEnrollmentServerState;
+      const key = getAdminCourseEnrollmentFilterKey();
+      if (state.loading) return false;
+      state.loading = true;
+      state.key = key;
+      state.ready = false;
+      const tbody = getElement('adminEnrollStudentTableBody');
+      if (tbody) tbody.innerHTML = '<tr><td colspan="6">กำลังโหลดข้อมูลนักเรียน...</td></tr>';
+      try {
+        const filter = JSON.parse(key);
+        const hasExplicitFilter = !!filter.keyword || filter.grade !== 'ทั้งหมด' || filter.location !== 'ทั้งหมด';
+        let query = db.collection('students');
+        if (!hasExplicitFilter) query = query.orderBy(firebase.firestore.FieldPath.documentId()).limit(50);
+        const snapshot = await query.get();
+        const loadedStudents = firebaseSnapshotItems(snapshot);
+        const loadedEnrollments = await loadCourseEnrollmentsForStudentPage(loadedStudents);
+        if (getAdminCourseEnrollmentFilterKey() !== key) {
+          scheduleAdminCourseEnrollmentStudentsLoad();
+          return false;
+        }
+        replaceArray(students, loadedStudents);
+        replaceArray(courseEnrollments, loadedEnrollments);
+        rebuildStudentLookupMap();
+        state.ready = true;
+        adminCourseEnrollmentCurrentPage = 1;
+        renderAdminCourseEnrollmentSection();
+        renderAdminBulkEnrollmentControls();
+        return true;
+      } catch (error) {
+        markFirestoreQuotaExceeded(error);
+        console.warn('admin course enrollment students load failed:', error);
+        if (tbody) tbody.innerHTML = '<tr><td colspan="6">โหลดข้อมูลนักเรียนไม่สำเร็จ กรุณาลองใหม่</td></tr>';
+        return false;
+      } finally {
+        state.loading = false;
+      }
+    }
+
+    function scheduleAdminCourseEnrollmentStudentsLoad() {
+      if (adminCourseEnrollmentLoadTimer) clearTimeout(adminCourseEnrollmentLoadTimer);
+      adminCourseEnrollmentLoadTimer = setTimeout(function() {
+        adminCourseEnrollmentLoadTimer = null;
+        loadAdminCourseEnrollmentStudents();
+      }, 250);
+    }
+
     function renderAdminCourseEnrollmentSection() {
       const tbody = getElement('adminEnrollStudentTableBody');
       if (!tbody) return;
+      const subtab = getElement('adminCourseSubtabEnroll');
+      if (subtab && subtab.classList.contains('hidden')) return;
       renderAdminEnrollmentQuotaNotice();
       if (!canManageAdminCourseEnrollments()) {
         tbody.innerHTML = '<tr><td colspan="6">ไม่มีสิทธิ์สมัครคอร์สให้นักเรียน</td></tr>';
+        return;
+      }
+      if (isQuotaOptimizedLoadingEnabled() && (!adminCourseEnrollmentServerState.ready || adminCourseEnrollmentServerState.key !== getAdminCourseEnrollmentFilterKey())) {
+        tbody.innerHTML = '<tr><td colspan="6">กำลังโหลดข้อมูลนักเรียน...</td></tr>';
+        scheduleAdminCourseEnrollmentStudentsLoad();
         return;
       }
       const filtered = getFilteredAdminCourseEnrollmentStudents();
@@ -18973,6 +19046,7 @@
 
     function resetAdminCourseEnrollmentPage() {
       adminCourseEnrollmentCurrentPage = 1;
+      if (isQuotaOptimizedLoadingEnabled()) adminCourseEnrollmentServerState.ready = false;
       renderAdminCourseEnrollmentSection();
     }
 
