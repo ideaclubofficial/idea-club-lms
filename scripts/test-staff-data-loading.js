@@ -8,7 +8,7 @@ const staffSource=html.slice(html.indexOf('    const STAFF_DATA_GROUPS ='),html.
 function source(name){const m=new RegExp('^    (?:async )?function '+name+'\\(','m').exec(html);return html.slice(m.index,html.indexOf('\n    }',m.index)+6);}
 function deferred(){let resolve;const promise=new Promise(r=>resolve=r);return {promise,resolve};}
 function setup(){
- const reads=[],renders=[],roots={};
+ const reads=[],renders=[],attendanceLoads=[],roots={};
  function element(){return {style:{},parentElement:null,hidden:false,attrs:{},children:[],classList:{hidden:false,contains(k){return k==='hidden'&&this.hidden;}},setAttribute(k,v){this.attrs[k]=v;},querySelector(){return this.children[0]||null;},prepend(n){n.parent=this;this.children.unshift(n);},remove(){this.parent.children=[];}};}
  for(const id of ['admin-video','admin-courses','admin-dashboard','admin-settings','teacher-dashboard','teacher-attendance'])roots[id]=element();
  const c={firebaseReady:true,db:{},firebaseUser:{uid:'A'},studentDataSessionVersion:1,coreDataLoaded:false,PRODUCTION_MODE:true,
@@ -18,12 +18,14 @@ function setup(){
    getFirebaseCollection:async(name,deleted,status)=>{reads.push(name);return [{id:name}];},getFirebasePaymentCollection:async()=>{reads.push('payments');return [{id:'bill'}];},
    applyPaymentRepairsSync() {}, safeRun:fn=>fn(),replaceArray:(a,b)=>a.splice(0,a.length,...b),rebuildStudentLookupMap(){},applySystemSettingsToPage(){},cacheStartupSettings(){},systemSettings:{},prizeWheelSettings:{},
    getElement:id=>roots[id]||null,document:{createElement:element},console:{warn(){},error(){}},
+   getPickupDateValue:()=> '2026-11-09',isAttendanceRosterReadyForDate:()=>true,
+   loadAttendanceRosterForDate:async date=>{attendanceLoads.push(date);},
    canOpenAdminTab:()=>true,canOpenTeacherTab:()=>true,canOpenTeacherTool:()=>true,
    renderAdminTabContent:id=>renders.push(id),renderTeacherTabContent:id=>renders.push(id)
  };
  for(const name of source('getStaffCollectionTargets').match(/return \{([\s\S]*?)\};/)[1].match(/\b\w+\b/g))if(!c[name])c[name]=[];
  vm.createContext(c);vm.runInContext(staffSource,c);vm.runInContext(source('loadCoreDataFromFirebase'),c);
- return {c,reads,renders,roots};
+ return {c,reads,renders,attendanceLoads,roots};
 }
 
 test('staff core requests only the five base collections and never repairs records',async()=>{
@@ -38,6 +40,15 @@ test('quota optimized staff startup reads settings only and defers tab datasets'
  assert.deepEqual(Array.from(h.c.getStaffTabCollections('admin-dashboard')),['settings']);
  assert.ok(h.c.getStaffTabCollections('admin-students').includes('courses'));
  assert.ok(!h.c.getStaffTabCollections('admin-students').includes('payments'));
+  assert.deepEqual(Array.from(h.c.getStaffTabCollections('teacher-attendance')),['settings','attendanceHistory']);
+});
+
+test('quota optimized attendance skips generic 50-student page and uses date roster loader',async()=>{
+ const h=setup();h.c.isQuotaOptimizedLoadingEnabled=()=>true;
+ await h.c.requestStaffTabData('teacher-attendance');
+ assert.deepEqual(h.reads,['settings','attendanceHistory']);
+ assert.deepEqual(h.attendanceLoads,['2026-11-09']);
+ assert.deepEqual(h.renders,['teacher-attendance']);
 });
 
 test('teacher home loads schedules but not finance, scores, clips, games or expenses',async()=>{

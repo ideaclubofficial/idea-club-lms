@@ -75,3 +75,15 @@ test('Spark plan defaults to bounded loading while search index remains separate
 test('new activity logs explicitly skip the existence read', () => {
   assert.match(html, /setFirebaseDocument\('activityLogs', item, \{ assumeNew: true \}\)/);
 });
+
+test('attendance loads the complete day roster without replacing the shared student cache', () => {
+  const start = html.indexOf('    async function loadAttendanceRosterForDate(');
+  const end = html.indexOf('    function getAttendanceRosterStudents(', start);
+  const loader = html.slice(start, end);
+  assert.match(loader, /getAttendanceCoursesForDate\(targetDate\)/);
+  assert.match(loader, /where\('grade', 'in', gradeChunk\)\.get\(\)/);
+  assert.match(loader, /mergeStudentEntityRecords\(loadedStudents\)/);
+  assert.doesNotMatch(loader, /replaceArray\(students/);
+  assert.match(html, /function syncPickupListFromStudents\(\)[\s\S]*getAttendanceRosterStudents\(\)\.forEach/);
+  assert.match(html, /'teacher-attendance': \['attendanceHistory'\]/);
+});

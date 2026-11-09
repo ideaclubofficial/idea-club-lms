@@ -10843,18 +10843,30 @@
       'teacher-dashboard': ['courses', 'monthlyPlanSessions'],
       'teacher-online': ['courses', 'onlineRooms', 'onlineDocuments'],
       'teacher-private-lessons': ['monthlyPlanSessions'],
-      'teacher-attendance': ['students', 'attendanceHistory'],
+      // Attendance has its own date/grade-aware roster loader. Do not spend 50
+      // reads on the generic first-page student query before loading that roster.
+      'teacher-attendance': ['attendanceHistory'],
       'teacher-students': ['students', 'courses'],
       'teacher-tools': []
     };
     let staffCollectionStates = {};
     let staffTabLoadPromises = {};
     let staffDataSessionUid = '';
+    let attendanceCourseRosterLoadedForUid = '';
+    let attendanceCourseRosterLoadPromise = null;
+    let attendanceRosterLoadSequence = 0;
+    let attendanceRosterLoadState = { key: '', ready: false, promise: null, studentIds: [] };
+    const attendanceRosterCache = new Map();
 
     function resetStaffDataSession() {
       staffCollectionStates = {};
       staffTabLoadPromises = {};
       staffDataSessionUid = '';
+      attendanceCourseRosterLoadedForUid = '';
+      attendanceCourseRosterLoadPromise = null;
+      attendanceRosterLoadSequence += 1;
+      attendanceRosterLoadState = { key: '', ready: false, promise: null, studentIds: [] };
+      attendanceRosterCache.clear();
       coreDataLoaded = false;
       if (typeof studentEntityCache !== 'undefined') studentEntityCache.clear();
       if (typeof courseEnrollmentEntityCache !== 'undefined') courseEnrollmentEntityCache.clear();
@@ -10987,8 +10999,12 @@
       if (staffDataSessionUid !== firebaseUser.uid) { resetStaffDataSession(); staffDataSessionUid = firebaseUser.uid; }
       const uid = firebaseUser.uid, version = studentDataSessionVersion;
       setStaffTabLoadStatus(tabId, 'loading');
-      const pending = ensureStaffCollections(getStaffTabCollections(tabId)).then(function() {
+      const pending = ensureStaffCollections(getStaffTabCollections(tabId)).then(async function() {
         if (!firebaseUser || firebaseUser.uid !== uid || studentDataSessionVersion !== version) return false;
+        if (tabId === 'teacher-attendance') {
+          await loadAttendanceRosterForDate(getPickupDateValue());
+          if (!firebaseUser || firebaseUser.uid !== uid || studentDataSessionVersion !== version) return false;
+        }
         if (getStaffTabCollections(tabId).includes('payments')) safeRun(applyPaymentRepairsSync, 'staff-finance-normalize');
         setStaffTabLoadStatus(tabId, 'ready');
         if (!isStaffTabVisible(tabId)) return true;
@@ -11006,7 +11022,8 @@
 
     function requireStaffTabData(tabId) {
       if (!Object.prototype.hasOwnProperty.call(STAFF_TAB_DATA, tabId)) return true;
-      if (staffDataSessionUid !== (firebaseUser && firebaseUser.uid) || !getStaffTabCollections(tabId).every(isStaffCollectionReady)) {
+      const attendanceReady = tabId !== 'teacher-attendance' || isAttendanceRosterReadyForDate(getPickupDateValue());
+      if (staffDataSessionUid !== (firebaseUser && firebaseUser.uid) || !getStaffTabCollections(tabId).every(isStaffCollectionReady) || !attendanceReady) {
         requestStaffTabData(tabId);
         return false;
       }
@@ -15147,7 +15164,7 @@
       if (selectedTab) selectedTab.classList.remove('hidden');
       if (tabId !== 'teacher-tools') restoreTeacherEmbeddedTool();
       if (tabId === 'teacher-attendance') {
-        ['students', 'attendanceHistory'].forEach(function(name) {
+        ['attendanceHistory'].forEach(function(name) {
           const state = staffCollectionStates[name];
           if (state && !state.promise) state.status = 'idle';
         });
@@ -16455,7 +16472,7 @@
       });
     }
 
-    function handleAttendanceDateChange(source) {
+    async function handleAttendanceDateChange(source) {
       const desktopDate = getElement('pickupDate');
       const mobileDate = getElement('teacherMobilePickupDate');
       const selectedDate = source === 'mobile'
@@ -16467,7 +16484,15 @@
       }
       attendanceDateManualOverride = true;
       pickupCurrentPage = 1;
-      renderPickupList();
+      setAttendanceResult('กำลังโหลดรายชื่อนักเรียนตามวันเรียน...', '#6b7280');
+      try {
+        await loadAttendanceRosterForDate(selectedDate);
+        renderPickupList();
+        setAttendanceResult('', '');
+      } catch (error) {
+        console.warn('attendance date roster load failed:', error);
+        setAttendanceResult('โหลดรายชื่อตามวันเรียนไม่สำเร็จ กรุณาลองใหม่', '#dc2626');
+      }
     }
 
     function syncAttendanceDateForRealDayChange(forceRefresh) {
@@ -16560,6 +16585,150 @@
       return getTeacherVisibleCourses().filter(isAttendanceCourseEnabled);
     }
 
+    function getAttendanceCoursesForDate(dateText) {
+      const thaiDay = getThaiDayFromDate(dateText || getPickupDateValue());
+      return getTeacherAttendanceCourses().filter(function(course) {
+        if (!isOnsiteCourse(course)) return false;
+        const courseDays = getCourseDayList(course);
+        return !courseDays.length || courseDays.includes(thaiDay);
+      });
+    }
+
+    function getAttendanceCourseGrades(courseList) {
+      const grades = [];
+      (courseList || []).forEach(function(course) {
+        [course.grade, course.classLevel, course.level].forEach(function(value) {
+          const text = String(value || '').trim();
+          if (text && !grades.includes(text)) grades.push(text);
+        });
+        if (Array.isArray(course.grades)) {
+          course.grades.forEach(function(value) {
+            const text = String(value || '').trim();
+            if (text && !grades.includes(text)) grades.push(text);
+          });
+        }
+      });
+      return grades.sort(function(a, b) { return gradeOrder(a) - gradeOrder(b); });
+    }
+
+    function isAttendanceRosterReadyForDate(dateText) {
+      const uid = String(firebaseUser && firebaseUser.uid || '');
+      const key = uid + '|' + String(dateText || getPickupDateValue());
+      return !!(attendanceRosterLoadState.ready && attendanceRosterLoadState.key === key);
+    }
+
+    async function ensureAttendanceCoursesLoaded() {
+      const uid = String(firebaseUser && firebaseUser.uid || '');
+      if (!uid) throw new Error('ไม่พบ session เจ้าหน้าที่');
+      if (attendanceCourseRosterLoadedForUid === uid) return;
+      if (attendanceCourseRosterLoadPromise) return attendanceCourseRosterLoadPromise;
+      const version = studentDataSessionVersion;
+      const pending = (async function() {
+        const status = { failed: false };
+        const loadedCourses = await getFirebaseCollection('courses', false, status, { unbounded: true });
+        if (status.failed) throw new Error('โหลดข้อมูลคอร์สสำหรับเช็คชื่อไม่สำเร็จ');
+        if (!firebaseUser || String(firebaseUser.uid || '') !== uid || studentDataSessionVersion !== version) return;
+        // This is the complete, one-shot course list for attendance. It also
+        // restores legacy courses that have no updatedAt field and are skipped
+        // by the normal ordered/limited loader.
+        replaceArray(courses, loadedCourses);
+        attendanceCourseRosterLoadedForUid = uid;
+      })().finally(function() {
+        if (attendanceCourseRosterLoadPromise === pending) attendanceCourseRosterLoadPromise = null;
+      });
+      attendanceCourseRosterLoadPromise = pending;
+      return pending;
+    }
+
+    async function loadAttendanceRosterForDate(dateText, options) {
+      options = options || {};
+      const uid = String(firebaseUser && firebaseUser.uid || '');
+      if (!uid || !firebaseReady || !db) throw new Error('Firebase ยังไม่พร้อมใช้งาน');
+      const targetDate = String(dateText || getPickupDateValue());
+      const stateKey = uid + '|' + targetDate;
+      if (!options.force && attendanceRosterLoadState.key === stateKey && attendanceRosterLoadState.promise) {
+        return attendanceRosterLoadState.promise;
+      }
+      if (!options.force && isAttendanceRosterReadyForDate(targetDate)) return;
+
+      const requestSequence = ++attendanceRosterLoadSequence;
+      const version = studentDataSessionVersion;
+      const pending = (async function() {
+        await ensureAttendanceCoursesLoaded();
+        if (!firebaseUser || String(firebaseUser.uid || '') !== uid || studentDataSessionVersion !== version) return;
+        const dayCourses = getAttendanceCoursesForDate(targetDate);
+        const grades = getAttendanceCourseGrades(dayCourses);
+        const courseKeys = dayCourses.map(function(course) {
+          return String(course.id || course.firebaseDocId || course.name || '').trim();
+        }).filter(Boolean).sort();
+        const queryKey = uid + '|courses|' + courseKeys.join('|') + '|grades|' + grades.join('|');
+        const cached = attendanceRosterCache.get(queryKey);
+        if (!options.force && cached && Date.now() - cached.loadedAtMs < 60000) {
+          if (requestSequence === attendanceRosterLoadSequence) {
+            attendanceRosterLoadState = { key: stateKey, ready: true, promise: null, studentIds: cached.studentIds.slice() };
+          }
+          return;
+        }
+
+        let loadedStudents = [];
+        if (grades.length) {
+          for (let index = 0; index < grades.length; index += 10) {
+            const gradeChunk = grades.slice(index, index + 10);
+            let snapshot;
+            try {
+              snapshot = await db.collection('students').where('grade', 'in', gradeChunk).get();
+            } catch (error) {
+              markFirestoreQuotaExceeded(error);
+              throw error;
+            }
+            snapshot.docs.forEach(function(docSnap) {
+              rememberFirebaseDocument('students', docSnap.id);
+              const student = Object.assign({ firebaseDocId: docSnap.id }, docSnap.data());
+              if (student.deleted !== true) loadedStudents.push(student);
+            });
+          }
+        } else if (dayCourses.length) {
+          // Malformed legacy courses may not have a grade. Completeness is more
+          // important than showing an empty panel, so use a one-shot fallback.
+          const status = { failed: false };
+          loadedStudents = await getFirebaseCollection('students', false, status, { unbounded: true });
+          if (status.failed) throw new Error('โหลดข้อมูลนักเรียนสำหรับเช็คชื่อไม่สำเร็จ');
+        }
+        if (!firebaseUser || String(firebaseUser.uid || '') !== uid || studentDataSessionVersion !== version) return;
+        mergeStudentEntityRecords(loadedStudents);
+
+        const teacherCourseIds = dayCourses.map(function(course) {
+          return String(course.id || course.firebaseDocId || '');
+        }).filter(Boolean);
+        const studentIds = loadedStudents.filter(function(student) {
+          const course = getStudentAttendanceCourse(student);
+          if (!course || !isStudentEligibleForAttendance(student, targetDate) || !isOnsiteCourse(course)) return false;
+          if (currentTeacher && currentTeacher.role === 'Admin') return true;
+          return teacherCourseIds.includes(String(course.id || course.firebaseDocId || ''));
+        }).map(getStudentEntityKey).filter(function(id, index, list) {
+          return id && list.indexOf(id) === index;
+        });
+        attendanceRosterCache.set(queryKey, { loadedAtMs: Date.now(), studentIds: studentIds.slice() });
+        if (requestSequence === attendanceRosterLoadSequence) {
+          attendanceRosterLoadState = { key: stateKey, ready: true, promise: null, studentIds: studentIds };
+        }
+      })();
+      attendanceRosterLoadState = { key: stateKey, ready: false, promise: pending, studentIds: [] };
+      try {
+        await pending;
+      } catch (error) {
+        if (requestSequence === attendanceRosterLoadSequence) {
+          attendanceRosterLoadState = { key: stateKey, ready: false, promise: null, studentIds: [] };
+        }
+        throw error;
+      }
+    }
+
+    function getAttendanceRosterStudents() {
+      if (!attendanceRosterLoadState.ready) return [];
+      return getCachedRecordsByIds(studentEntityCache, attendanceRosterLoadState.studentIds);
+    }
+
     function getAttendanceOnsiteClassOptions(dateText) {
       const targetDate = dateText || getPickupDateValue();
       const teacherCourses = getTeacherAttendanceCourses().filter(function(course) {
@@ -16567,7 +16736,7 @@
       });
       const teacherCourseIds = teacherCourses.map(function(c) { return String(c.id || c.firebaseDocId || ''); });
       const optionMap = {};
-      students.forEach(function(student) {
+      getAttendanceRosterStudents().forEach(function(student) {
         const course = getStudentAttendanceCourse(student);
         if (!course || !isAttendanceCourseEnabled(course) || !isOnsiteCourse(course) || !isStudentClassOnDate(student, targetDate)) return;
         const courseId = String(course.id || course.firebaseDocId || '');
@@ -16658,7 +16827,8 @@
       const version = studentDataSessionVersion;
       setAttendanceResult('กำลังโหลดข้อมูลล่าสุด...', '#6b7280');
       try {
-        await ensureStaffCollections(['students', 'attendanceHistory'], { force: true });
+        await ensureStaffCollections(['attendanceHistory'], { force: true });
+        await loadAttendanceRosterForDate(getPickupDateValue(), { force: true });
         if (!firebaseUser || firebaseUser.uid !== uid || studentDataSessionVersion !== version) return;
         renderPickupList();
         renderPickupHistory();
@@ -16672,7 +16842,7 @@
     function syncPickupListFromStudents() {
       const selectedDate = getPickupDateValue();
       pickupList.length = 0;
-      students.forEach(function(student, index) {
+      getAttendanceRosterStudents().forEach(function(student, index) {
         if (!isStudentVisibleToTeacher(student)) return;
         const course = getStudentAttendanceCourse(student);
         const hasClassToday = isStudentEligibleForAttendance(student, selectedDate);
