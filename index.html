@@ -5610,6 +5610,7 @@
                 <div id="attendanceMobileTodayCourses" style="margin-top:12px;"></div>
                 <div class="teacher-mobile-actions">
                   <button class="btn btn-blue" type="button" onclick="teacherSaveAttendance()">บันทึกเช็คชื่อ</button>
+                  <button class="btn btn-dark" type="button" onclick="refreshAttendanceData()">รีเฟรชข้อมูล</button>
                   <button class="btn btn-dark" type="button" onclick="downloadAttendanceRosterPng()">บันทึกรูปใบรายชื่อ</button>
                 </div>
                 <p id="teacherMobileAttendanceResult" style="margin-top:10px; font-weight:bold;"></p>
@@ -5679,6 +5680,7 @@
                 <button class="btn btn-dark" type="button" onclick="markAllPickup('ผู้ปกครองมาส่ง')">ผู้ปกครองมาส่งทั้งหมด</button>
                 <button class="btn btn-red" type="button" onclick="markAllPickup('ไม่มา')">ไม่มาทั้งหมด</button>
                 <button class="btn btn-blue" type="button" onclick="teacherSaveAttendance()">บันทึกเช็คชื่อ</button>
+                <button class="btn btn-dark" type="button" onclick="refreshAttendanceData()">รีเฟรชข้อมูล</button>
                 <button class="btn btn-dark" type="button" onclick="downloadAttendanceRosterPng()">บันทึกรูปใบรายชื่อ</button>
               </div>
 
@@ -9646,6 +9648,7 @@
     }
 
     async function restoreSessionFromAuth(user, profile) {
+      const startedAt = Date.now();
       if (!profile || isSessionExpired()) {
         clearSessionExpiry();
         try { if (auth) await auth.signOut(); } catch (e) { /* ignore */ }
@@ -9741,6 +9744,8 @@
       } catch (err) {
         console.error('restoreSessionFromAuth error:', err);
         hideAuthLoadingOverlay();
+      } finally {
+        if (typeof recordClientLoadTiming === 'function') recordClientLoadTiming('auth.restore', startedAt, !!firebaseUser);
       }
     }
 
@@ -10420,6 +10425,7 @@
       if (previous && previous.promise) return previous.promise;
       if (!force && previous && previous.status === 'ready') return true;
       const state = { status: 'loading', promise: null };
+      const startedAt = Date.now();
       studentFeatureStates[name] = state;
       updateStudentFeatureStatus(name);
       const isCurrent = function() {
@@ -10500,7 +10506,10 @@
             updateStudentFeatureStatus(name);
           }
           throw error;
-        } finally { state.promise = null; }
+        } finally {
+          if (typeof recordClientLoadTiming === 'function') recordClientLoadTiming('student.feature.' + name, startedAt, state.status === 'ready');
+          state.promise = null;
+        }
       })();
       return state.promise;
     }
@@ -10672,25 +10681,38 @@
         return keys;
       }, studentDocIds.slice());
       if (!studentRecord) return null;
+      currentStudent = studentRecord;
+      if (typeof refreshProfileBox === 'function') safeRun(refreshProfileBox, 'student-profile-early');
       const realtime = startStudentPaymentListeners(studentDocIds, uid, studentPaymentIds, STUDENT_HOME_REALTIME_COLLECTIONS);
       if (!realtime) return null;
+      // These datasets do not depend on the enrollment listener's first snapshot.
+      const independentData = Promise.all([
+        getStudentAnnouncements(studentRecord, loadStatus),
+        getFirebaseCollectionQuiet('paymentMonths', false, loadStatus),
+        getFirebaseCollectionQuiet('lineGroups', false, loadStatus)
+      ]).catch(function(error) {
+        loadStatus.failed = true;
+        markFirestoreQuotaExceeded(error);
+        console.warn('student home independent data failed:', error);
+        return [[], [], []];
+      });
       await Promise.all(STUDENT_HOME_REALTIME_COLLECTIONS.map(function(name) { return waitForRealtimeCollection(realtime, name, loadStatus); }));
       const results = await Promise.all([
         getStudentRelevantCourses(normalizedStudents, loadStatus),
-        getStudentAnnouncements(studentRecord, loadStatus),
-        getFirebaseCollectionQuiet('paymentMonths', false, loadStatus),
-        getFirebaseCollectionQuiet('lineGroups', false, loadStatus),
+        independentData,
         getStudentMonthlyPlanSessions(loadStatus)
       ]);
 
       if (!isCurrentSession() || !realtime.active) return null;
       replaceArray(students, normalizedStudents);
       currentStudent = studentRecord;
-      replaceArray(courses, results[0]);
-      replaceArray(announcements, results[1]);
-      replaceArray(paymentMonths, results[2]);
-      replaceArray(lineGroups, results[3]);
-      replaceArray(monthlyPlanSessions, results[4]);
+      if (!loadStatus.failed) {
+        replaceArray(courses, results[0]);
+        replaceArray(announcements, results[1][0]);
+        replaceArray(paymentMonths, results[1][1]);
+        replaceArray(lineGroups, results[1][2]);
+        replaceArray(monthlyPlanSessions, results[2]);
+      }
       console.log('student-home-data-load-success', { uid: uid, studentCount: normalizedStudents.length, complete: !loadStatus.failed });
       realtime.uiReady = true;
       scheduleStudentRealtimeRefresh(realtime);
@@ -10713,6 +10735,7 @@
         if (cachedStudent) return cachedStudent;
       }
       const sessionVersion = studentDataSessionVersion;
+      const startedAt = Date.now();
       studentDataLoadedForUid = '';
       studentDataLoadingForUid = uid;
       updateStudentHomeLoadStatus('loading');
@@ -10726,6 +10749,7 @@
         if (firebaseUser && firebaseUser.uid === uid && studentDataSessionVersion === sessionVersion) updateStudentHomeLoadStatus('error');
         throw error;
       }).finally(function() {
+        if (typeof recordClientLoadTiming === 'function') recordClientLoadTiming('student.home', startedAt, studentDataLoadedForUid === uid && studentDataSessionVersion === sessionVersion);
         // An old request must never clear a newer session's pending request.
         if (studentDataLoadingPromise === loadingPromise) {
           studentDataLoadingPromise = null;
@@ -10768,6 +10792,14 @@
       }).catch(function(error) {
         console.warn('student-data-refresh-background-skipped', error);
       });
+    }
+
+    // Session-only diagnostics: fixed labels and durations, with no IDs or data.
+    function recordClientLoadTiming(label, startedAt, success) {
+      if (typeof window === 'undefined') return;
+      const samples = window.ideaClubLoadTimings || (window.ideaClubLoadTimings = []);
+      samples.push({ label: label, durationMs: Math.max(0, Date.now() - startedAt), success: !!success });
+      if (samples.length > 200) samples.splice(0, samples.length - 200);
     }
 
     const STAFF_DATA_GROUPS = {
@@ -10867,6 +10899,7 @@
       attendanceRosterLoadSequence += 1;
       attendanceRosterLoadState = { key: '', ready: false, promise: null, studentIds: [] };
       attendanceRosterCache.clear();
+      if (typeof window !== 'undefined') window.ideaClubLoadTimings = [];
       coreDataLoaded = false;
       if (typeof studentEntityCache !== 'undefined') studentEntityCache.clear();
       if (typeof courseEnrollmentEntityCache !== 'undefined') courseEnrollmentEntityCache.clear();
@@ -10917,6 +10950,7 @@
         if (previous && previous.promise) return previous.promise;
         if (!options.force && isStaffCollectionReady(name)) return Promise.resolve();
         const state = { status: 'loading', promise: null, realtime: null };
+        const startedAt = Date.now();
         staffCollectionStates[name] = state;
         const isCurrent = function() { return firebaseUser && firebaseUser.uid === uid && studentDataSessionVersion === version && staffCollectionStates[name] === state; };
         state.promise = (async function() {
@@ -10950,7 +10984,10 @@
           } catch (error) {
             if (isCurrent()) state.status = 'error';
             throw error;
-          } finally { state.promise = null; }
+          } finally {
+            if (typeof recordClientLoadTiming === 'function') recordClientLoadTiming('staff.collection.' + name, startedAt, state.status === 'ready');
+            state.promise = null;
+          }
         })();
         return state.promise;
       }));
@@ -10998,24 +11035,39 @@
       // Initialize the session before registering the tab promise (collection loading shares it).
       if (staffDataSessionUid !== firebaseUser.uid) { resetStaffDataSession(); staffDataSessionUid = firebaseUser.uid; }
       const uid = firebaseUser.uid, version = studentDataSessionVersion;
+      const startedAt = Date.now();
+      let tabSucceeded = false;
       setStaffTabLoadStatus(tabId, 'loading');
-      const pending = ensureStaffCollections(getStaffTabCollections(tabId)).then(async function() {
+      const rosterTask = tabId === 'teacher-attendance'
+        ? loadAttendanceRosterForDate(getPickupDateValue()).then(function() {
+            if (!firebaseUser || firebaseUser.uid !== uid || studentDataSessionVersion !== version || !isStaffTabVisible(tabId)) return;
+            if (!isAttendanceRosterReadyForDate(getPickupDateValue())) return;
+            if (typeof renderPickupList === 'function') renderPickupList();
+            if (!isStaffCollectionReady('attendanceHistory') && typeof setAttendanceResult === 'function') {
+              setAttendanceResult('กำลังโหลดประวัติเช็คชื่อ ยังบันทึกไม่ได้', '#6b7280');
+            }
+          })
+        : Promise.resolve();
+      const pending = Promise.all([ensureStaffCollections(getStaffTabCollections(tabId)), rosterTask]).then(async function() {
         if (!firebaseUser || firebaseUser.uid !== uid || studentDataSessionVersion !== version) return false;
-        if (tabId === 'teacher-attendance') {
-          await loadAttendanceRosterForDate(getPickupDateValue());
-          if (!firebaseUser || firebaseUser.uid !== uid || studentDataSessionVersion !== version) return false;
-        }
+        if (tabId === 'teacher-attendance' && !isAttendanceRosterReadyForDate(getPickupDateValue())) await loadAttendanceRosterForDate(getPickupDateValue());
+        if (!firebaseUser || firebaseUser.uid !== uid || studentDataSessionVersion !== version) return false;
         if (getStaffTabCollections(tabId).includes('payments')) safeRun(applyPaymentRepairsSync, 'staff-finance-normalize');
         setStaffTabLoadStatus(tabId, 'ready');
+        tabSucceeded = true;
         if (!isStaffTabVisible(tabId)) return true;
         if (tabId.indexOf('teacher-') === 0) renderTeacherTabContent(tabId);
         else renderAdminTabContent(tabId);
+        if (tabId === 'teacher-attendance' && typeof setAttendanceResult === 'function') setAttendanceResult('', '');
         return true;
       }).catch(function(error) {
         if (firebaseUser && firebaseUser.uid === uid && studentDataSessionVersion === version) setStaffTabLoadStatus(tabId, 'error');
         console.warn('staff tab data load failed:', tabId, error);
         return false;
-      }).finally(function() { if (staffTabLoadPromises[tabId] === pending) delete staffTabLoadPromises[tabId]; });
+      }).finally(function() {
+        if (typeof recordClientLoadTiming === 'function') recordClientLoadTiming('staff.tab.' + tabId, startedAt, tabSucceeded);
+        if (staffTabLoadPromises[tabId] === pending) delete staffTabLoadPromises[tabId];
+      });
       staffTabLoadPromises[tabId] = pending;
       return pending;
     }
@@ -16422,6 +16474,12 @@
       return !!findAttendanceHistoryFor(dateText, grade, courseId) && !isAttendanceEditModeFor(dateText, grade, courseId);
     }
 
+    function attendanceDataReadyForChanges() {
+      if (isAttendanceRosterReadyForDate(getPickupDateValue()) && isStaffCollectionReady('attendanceHistory')) return true;
+      setAttendanceResult('ข้อมูลรายชื่อหรือประวัติยังโหลดไม่ครบ กรุณาลองใหม่ก่อนบันทึก', '#dc2626');
+      return false;
+    }
+
     function setAttendanceResult(message, color) {
       ['teacherAttendanceResult', 'teacherMobileAttendanceResult'].forEach(function(id) {
         const el = getElement(id);
@@ -16827,8 +16885,10 @@
       const version = studentDataSessionVersion;
       setAttendanceResult('กำลังโหลดข้อมูลล่าสุด...', '#6b7280');
       try {
-        await ensureStaffCollections(['attendanceHistory'], { force: true });
-        await loadAttendanceRosterForDate(getPickupDateValue(), { force: true });
+        await Promise.all([
+          ensureStaffCollections(['attendanceHistory'], { force: true }),
+          loadAttendanceRosterForDate(getPickupDateValue(), { force: true })
+        ]);
         if (!firebaseUser || firebaseUser.uid !== uid || studentDataSessionVersion !== version) return;
         renderPickupList();
         renderPickupHistory();
@@ -17055,6 +17115,7 @@
 
     async function setPickupStatus(id, status) {
       if (isCurrentStudentSession()) { alert('ไม่มีสิทธิ์'); return; }
+      if (!attendanceDataReadyForChanges()) return;
       if (!VALID_PICKUP_STATUSES.includes(status)) { return; }
       const selectedDate = getPickupDateValue();
       if (!validateAttendanceDate(selectedDate)) return;
@@ -17131,6 +17192,7 @@
 
     async function markAllPickup(status) {
       if (isCurrentStudentSession()) { alert('ไม่มีสิทธิ์'); return; }
+      if (!attendanceDataReadyForChanges()) return;
       if (!VALID_PICKUP_STATUSES.includes(status)) return;
       const selectedDate = getPickupDateValue();
       if (!validateAttendanceDate(selectedDate)) return;
@@ -17371,6 +17433,7 @@
     }
 
     function editAttendanceHistory(historyId) {
+      if (!attendanceDataReadyForChanges()) return;
       const item = pickupHistory.find(function(record) {
         return String(record.id || record.firebaseDocId || '') === String(historyId);
       });
@@ -17405,6 +17468,7 @@
 
     async function deleteAttendanceHistory(historyId) {
       if (isCurrentStudentSession()) { alert('ไม่มีสิทธิ์'); return; }
+      if (!attendanceDataReadyForChanges()) return;
       const item = pickupHistory.find(function(record) {
         return String(record.id || record.firebaseDocId || '') === String(historyId);
       });
@@ -17426,6 +17490,7 @@
 
     async function teacherSaveAttendance() {
       if (isCurrentStudentSession()) { alert('ไม่มีสิทธิ์'); return; }
+      if (!attendanceDataReadyForChanges()) return;
       if (attendanceSaving) return;
       const selectedDate = getPickupDateValue();
       if (!validateAttendanceDate(selectedDate)) return;
@@ -18085,24 +18150,31 @@
         add('student', student.name);
       });
       const byId = new Map();
-      const fields = Object.keys(valuesByField);
-      for (let fieldIndex = 0; fieldIndex < fields.length; fieldIndex++) {
-        const field = fields[fieldIndex];
+      const queries = [];
+      Object.keys(valuesByField).forEach(function(field) {
         const values = valuesByField[field];
         for (let offset = 0; offset < values.length; offset += 30) {
-          let snapshot = null;
+          queries.push({ field: field, values: values.slice(offset, offset + 30) });
+        }
+      });
+      // Keep the same legacy identity queries, but limit concurrency so a
+      // large cross-student search does not launch hundreds at once.
+      for (let offset = 0; offset < queries.length; offset += 5) {
+        const snapshots = await Promise.all(queries.slice(offset, offset + 5).map(async function(spec) {
           try {
-            snapshot = await db.collection('courseEnrollments').where(field, 'in', values.slice(offset, offset + 30)).get();
+            return await db.collection('courseEnrollments').where(spec.field, 'in', spec.values).get();
           } catch (error) {
             markFirestoreQuotaExceeded(error);
-            console.warn('student enrollment identity query skipped:', field, error);
-            continue;
+            console.warn('student enrollment identity query skipped:', spec.field, error);
+            throw error;
           }
+        }));
+        snapshots.forEach(function(snapshot) {
           firebaseSnapshotItems(snapshot).forEach(function(item) {
             if (!(studentList || []).some(function(student) { return enrollmentBelongsToStudent(item, student); })) return;
             byId.set(String(item.firebaseDocId || item.id || ''), item);
           });
-        }
+        });
       }
       return Array.from(byId.values());
     }
@@ -18468,8 +18540,11 @@
           // A cross-student filter/search reads the full student collection only
           // after the staff member explicitly enters a filter.
           let query = db.collection('students');
+          // The UI's grade filter compares this exact field, including for
+          // legacy records, so this restriction cannot exclude a match.
+          if (hasExplicitFilter && filter.grade !== 'ทั้งหมด') query = query.where('grade', '==', filter.grade);
           if (!hasExplicitFilter) {
-            query = query.orderBy(firebase.firestore.FieldPath.documentId()).limit(50);
+            query = query.orderBy(firebase.firestore.FieldPath.documentId()).limit(adminStudentPerPage);
             const cursor = state.page > 1 ? state.cursors[state.page - 1] : null;
             if (cursor) query = query.startAfter(cursor);
           }
@@ -18484,7 +18559,7 @@
         state.enrollmentIds = loadedEnrollments.map(getCourseEnrollmentEntityKey).filter(Boolean);
         rebuildStudentLookupMap();
         state.lastDoc = pageSnapshot.docs[pageSnapshot.docs.length - 1] || null;
-        state.hasMore = !state.localAll && pageSnapshot.size === 50;
+        state.hasMore = !state.localAll && pageSnapshot.size === (useSearchIndex ? 50 : adminStudentPerPage);
         state.ready = true;
         adminStudentCurrentPage = state.page;
         state.pageCache.set(pageCacheKey, {

@@ -176,3 +176,18 @@ test('home load never requests deferred clips, exam bank, reward shop or wheel d
   assert.ok(!reads.includes('scoreReports'),'scoreReports is deferred');
   assert.equal(Object.keys(h.c.studentRealtimeSession.groups).length,4);
 });
+
+test('student home starts independent reads while enrollment listeners are still loading', async () => {
+  const h = setup(), gate = deferred(), reads = [];
+  h.c.waitForRealtimeCollection = () => gate.promise;
+  h.c.getFirebaseCollectionQuiet = async name => { reads.push(name); return []; };
+  const pending = h.load(); h.finish(0);
+  await new Promise(resolve => setImmediate(resolve));
+  assert.ok(reads.includes('announcements'));
+  assert.ok(reads.includes('paymentMonths'));
+  assert.ok(reads.includes('lineGroups'));
+  assert.ok(!reads.includes('courses'));
+  gate.resolve();
+  await pending;
+  assert.ok(reads.includes('courses'));
+});

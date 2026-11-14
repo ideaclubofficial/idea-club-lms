@@ -51,6 +51,39 @@ test('quota optimized attendance skips generic 50-student page and uses date ros
  assert.deepEqual(h.renders,['teacher-attendance']);
 });
 
+test('attendance shows the roster while history is pending and only becomes ready after history',async()=>{
+ const h=setup(),gate=deferred(),started=deferred(),read=h.c.getFirebaseCollection;
+ let rosterRenders=0;
+ h.c.isQuotaOptimizedLoadingEnabled=()=>true;
+ h.c.renderPickupList=()=>{rosterRenders++;};
+ h.c.setAttendanceResult=()=>{};
+ h.c.getFirebaseCollection=async(name,...args)=>{
+   if(name==='attendanceHistory'){started.resolve();return gate.promise;}
+   return read(name,...args);
+ };
+ const pending=h.c.requestStaffTabData('teacher-attendance');
+ await started.promise;
+ await new Promise(resolve=>setImmediate(resolve));
+ assert.equal(rosterRenders,1);
+ assert.equal(h.roots['teacher-attendance'].attrs['data-staff-data-state'],'loading');
+ assert.equal(h.c.isStaffCollectionReady('attendanceHistory'),false);
+ gate.resolve([]);
+ assert.equal(await pending,true);
+ assert.equal(h.roots['teacher-attendance'].attrs['data-staff-data-state'],'ready');
+});
+
+test('attendance changes are blocked until both roster and history are ready',()=>{
+ const h=setup();let message='';
+ h.c.setAttendanceResult=text=>{message=text;};
+ vm.runInContext(source('attendanceDataReadyForChanges'),h.c);
+ assert.equal(h.c.attendanceDataReadyForChanges(),false);
+ assert.match(message,/โหลดไม่ครบ/);
+ vm.runInContext("staffCollectionStates.attendanceHistory = { status: 'ready' }",h.c);
+ assert.equal(h.c.attendanceDataReadyForChanges(),true);
+ h.c.isAttendanceRosterReadyForDate=()=>false;
+ assert.equal(h.c.attendanceDataReadyForChanges(),false);
+});
+
 test('teacher home loads schedules but not finance, scores, clips, games or expenses',async()=>{
  const h=setup();await h.c.requestStaffTabData('teacher-dashboard');
  assert.ok(h.reads.includes('monthlyPlanSessions'));assert.ok(h.reads.includes('attendanceHistory'));
