@@ -61,11 +61,30 @@ function setupOnlineScheduleControls() {
     document: {
       querySelectorAll: selector => selector.includes(':checked') ? boxes.filter(box => box.checked) : boxes
     },
-    console
+    console: { warn() {} }
   };
   vm.createContext(context);
   vm.runInContext(sourceBetween('    const ONLINE_CLASS_DAY_NAMES', '    function onlineClassGradeChange('), context);
   return { context, elements, boxes };
+}
+
+function setupOnlineRoomLineCopy(rooms, clipboardWrite) {
+  const state = { copied: '', prompts: [], alerts: [] };
+  const context = {
+    getAdminOnlineRoomRows: () => rooms,
+    navigator: { clipboard: clipboardWrite === null ? null : {
+      writeText: async text => {
+        if (clipboardWrite instanceof Error) throw clipboardWrite;
+        state.copied = text;
+      }
+    } },
+    window: { prompt: (title, text) => state.prompts.push({ title, text }) },
+    alert: message => state.alerts.push(message),
+    console: { warn() {} }
+  };
+  vm.createContext(context);
+  vm.runInContext(sourceBetween('    function buildOnlineRoomLineMessage(', '    function renderOnlineClassTable('), context);
+  return { context, state };
 }
 
 test('shared room is resolved for every center in the grade', () => {
@@ -159,6 +178,55 @@ test('teacher sees one shared room for duplicate courses in the same grade', () 
   const targets = context.getTeacherVisibleOnlineCourses();
   assert.equal(targets.length, 1);
   assert.deepEqual(Array.from(targets[0].locations), ['ศูนย์ A', 'ศูนย์ B']);
+});
+
+test('Online room LINE message includes useful fields and hides empty fields', () => {
+  const { context } = setupOnlineRoomLineCopy([], null);
+  const sharedMessage = context.buildOnlineRoomLineMessage({
+    grade: 'ป.4',
+    location: '',
+    onlineClassDay: 'จันทร์ / พุธ',
+    onlineClassTime: '16:00–18:30 น.',
+    onlineLink: 'https://example.com/room',
+    roomId: '',
+    roomPassword: 'PASS'
+  });
+  assert.match(sharedMessage, /📢 ห้องเรียน Online IDEA CLUB/);
+  assert.match(sharedMessage, /ระดับชั้น: ป\.4/);
+  assert.match(sharedMessage, /ขอบเขต: ใช้ร่วมทุกศูนย์/);
+  assert.match(sharedMessage, /วันเรียน: จันทร์ \/ พุธ/);
+  assert.match(sharedMessage, /เวลาเรียน: 16:00–18:30 น\./);
+  assert.match(sharedMessage, /ลิงก์เข้าห้อง: https:\/\/example\.com\/room/);
+  assert.match(sharedMessage, /Password: PASS/);
+  assert.doesNotMatch(sharedMessage, /Meeting ID:/);
+
+  const centerMessage = context.buildOnlineRoomLineMessage({ grade: 'ม.1', location: 'ศูนย์ A' });
+  assert.match(centerMessage, /ขอบเขต: ศูนย์ A/);
+  assert.doesNotMatch(centerMessage, /วันเรียน:|เวลาเรียน:|ลิงก์เข้าห้อง:|Meeting ID:|Password:/);
+});
+
+test('Online room LINE copy uses clipboard and falls back to a selectable prompt', async () => {
+  const activeRoom = { id: 'active', grade: 'ป.5', status: 'active', onlineLink: 'https://example.com' };
+  const clipboardSetup = setupOnlineRoomLineCopy([activeRoom]);
+  await clipboardSetup.context.copyOnlineRoomForLine('active');
+  assert.match(clipboardSetup.state.copied, /ระดับชั้น: ป\.5/);
+  assert.deepEqual(clipboardSetup.state.alerts, ['คัดลอกข้อมูลห้อง Online สำหรับส่ง LINE เรียบร้อย']);
+  assert.equal(clipboardSetup.state.prompts.length, 0);
+
+  const fallbackSetup = setupOnlineRoomLineCopy([activeRoom], new Error('denied'));
+  await fallbackSetup.context.copyOnlineRoomForLine('active');
+  assert.equal(fallbackSetup.state.prompts.length, 1);
+  assert.match(fallbackSetup.state.prompts[0].text, /ลิงก์เข้าห้อง: https:\/\/example\.com/);
+});
+
+test('inactive Online room cannot be copied for LINE', async () => {
+  const setup = setupOnlineRoomLineCopy([{ id: 'inactive', grade: 'ป.6', status: 'inactive' }]);
+  await setup.context.copyOnlineRoomForLine('inactive');
+  assert.equal(setup.state.copied, '');
+  assert.equal(setup.state.prompts.length, 0);
+  assert.match(setup.state.alerts[0], /ปิดใช้งาน/);
+  assert.match(html, /คัดลอกส่ง LINE<\/button>/);
+  assert.match(html, /disabled title="ห้องนี้ปิดใช้งาน"/);
 });
 
 test('Online room schedule formats multiple days and a valid time range', () => {

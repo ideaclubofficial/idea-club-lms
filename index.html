@@ -24255,6 +24255,55 @@
       }).join('') : '<tr><td colspan="6">ยังไม่มีเอกสาร Online รายครั้ง</td></tr>';
     }
 
+    function buildOnlineRoomLineMessage(room) {
+      const item = room || {};
+      const lines = [
+        '📢 ห้องเรียน Online IDEA CLUB',
+        'ระดับชั้น: ' + (item.grade || '-'),
+        'ขอบเขต: ' + (item.location || 'ใช้ร่วมทุกศูนย์')
+      ];
+      [
+        ['วันเรียน', item.onlineClassDay],
+        ['เวลาเรียน', item.onlineClassTime],
+        ['ลิงก์เข้าห้อง', item.onlineLink],
+        ['Meeting ID', item.roomId],
+        ['Password', item.roomPassword]
+      ].forEach(function(entry) {
+        const value = String(entry[1] || '').trim();
+        if (value) lines.push(entry[0] + ': ' + value);
+      });
+      return lines.join(String.fromCharCode(10));
+    }
+
+    async function copyOnlineRoomForLine(id) {
+      const room = getAdminOnlineRoomRows().find(function(item) {
+        return String(item.firebaseDocId || item.id || '') === String(id);
+      });
+      if (!room) {
+        alert('ไม่พบข้อมูลห้อง Online');
+        return;
+      }
+      if ((room.status || 'active') !== 'active') {
+        alert('ห้องนี้ปิดใช้งานอยู่ จึงยังไม่สามารถคัดลอกเพื่อส่ง LINE ได้');
+        return;
+      }
+      const text = buildOnlineRoomLineMessage(room);
+      try {
+        if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+          await navigator.clipboard.writeText(text);
+          alert('คัดลอกข้อมูลห้อง Online สำหรับส่ง LINE เรียบร้อย');
+          return;
+        }
+      } catch (error) {
+        console.warn('copyOnlineRoomForLine clipboard error:', error);
+      }
+      if (window.prompt) {
+        window.prompt('คัดลอกข้อความด้านล่างเพื่อนำไปส่ง LINE', text);
+      } else {
+        alert(text);
+      }
+    }
+
     function renderOnlineClassTable() {
       const tbody = getElement('adminOnlineClassTableBody');
       if (!tbody) return;
@@ -24273,7 +24322,9 @@
         const ref = String(room.firebaseDocId || room.id || '');
         const scopeText = room.location ? escapeHtml(room.location) : 'ศูนย์ทั้งหมด';
         const legacyText = room._legacy ? '<br><span class="mini-muted">ข้อมูลเดิมจากคอร์ส</span>' : '';
-        const statusText = (room.status || 'active') === 'active' ? '<span class="status-paid">เปิดใช้งาน</span>' : '<span class="status-waiting">ปิดไว้ก่อน</span>';
+        const isActive = (room.status || 'active') === 'active';
+        const statusText = isActive ? '<span class="status-paid">เปิดใช้งาน</span>' : '<span class="status-waiting">ปิดไว้ก่อน</span>';
+        const copyButton = '<button class="btn btn-dark" type="button" onclick="' + actionCall('copyOnlineRoomForLine', ref) + '"' + (isActive ? '' : ' disabled title="ห้องนี้ปิดใช้งาน"') + '>คัดลอกส่ง LINE</button>';
         return '<tr>' +
           '<td>' + escapeHtml(room.grade || '-') + '</td>' +
           '<td>' + scopeText + legacyText + '</td>' +
@@ -24284,7 +24335,8 @@
           '<td>' + escapeHtml(room.roomPassword || '-') + '</td>' +
           '<td>' + statusText + '</td>' +
           '<td style="white-space:nowrap;">' +
-            '<button class="btn btn-blue" type="button" onclick="' + actionCall('editOnlineClass', ref) + '">แก้ไข</button>' +
+            copyButton +
+            ' <button class="btn btn-blue" type="button" onclick="' + actionCall('editOnlineClass', ref) + '">แก้ไข</button>' +
             ' <button class="btn btn-red" type="button" onclick="' + actionCall('deleteOnlineClassRoom', ref) + '">ลบ</button>' +
           '</td>' +
         '</tr>';
