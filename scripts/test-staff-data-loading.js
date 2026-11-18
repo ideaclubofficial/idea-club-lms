@@ -194,3 +194,50 @@ test('cached first page cannot bypass teacher roster loading through tab readine
  await h.c.requestStaffTabData('teacher-students');
  assert.equal(h.c.requireStaffTabData('teacher-students'),true);
 });
+
+test('teacher roster loads saved profession, EXP, coins and reward history before rendering',async()=>{
+ const h=setup();h.c.isQuotaOptimizedLoadingEnabled=()=>true;
+ const student={id:'primary-child',authUid:'child-auth',memberId:'0099'};
+ const saved={id:'saved-profile',studentId:student.id,authUid:student.authUid,profession:'mage',level:7,exp:321,coins:654};
+ h.c.getStudentRecordDocId=s=>s.id;
+ h.c.getStudentGamificationProfileId=s=>'gamification-'+s.id;
+ h.c.normalizeOwnedAvatarItems=v=>v||[];
+ h.c.normalizeEquippedAvatarItems=v=>v||{};
+ h.c.DEFAULT_GAMIFICATION_PROFESSION_ID='IDEA Explorer';
+ for(const name of ['normalizeStudentGamificationProfile','findStudentGamificationProfile','getStudentGamificationProfile'])vm.runInContext(source(name),h.c);
+ h.c.getFirebaseCollection=async(name,deleted,status,options)=>{
+  h.reads.push(name);
+  if(name==='students')return [student];
+  if(name==='studentGamificationProfiles')return [saved];
+  if(name==='studentGamificationEvents')return [{id:'past-award',studentId:student.id,exp:50}];
+  return [];
+ };
+ await h.c.requestStaffTabData('teacher-students');
+ const profile=h.c.getStudentGamificationProfile(student);
+ assert.equal(profile.profession,'mage');assert.equal(profile.level,7);
+ assert.equal(profile.exp,321);assert.equal(profile.coins,654);
+ assert.equal(h.c.studentGamificationEvents[0].id,'past-award');
+ for(const name of ['studentPersonalQuests','gamificationRedemptions','specialVoucherActivities'])assert.ok(h.reads.includes(name),name);
+});
+
+test('missing progress data blocks teacher rendering and reward actions until retry succeeds',async()=>{
+ const h=setup();h.c.isQuotaOptimizedLoadingEnabled=()=>true;
+ const read=h.c.getFirebaseCollection;
+ h.c.getFirebaseCollection=async(name,deleted,status,options)=>{
+  if(name==='studentGamificationProfiles'){status.failed=true;return [];}
+  return read(name,deleted,status,options);
+ };
+ assert.equal(await h.c.requestStaffTabData('teacher-students'),false);
+ assert.equal(h.renders.length,0);
+ let opened=0;
+ h.c.students.push({id:'child'});h.c.canTeacherManageStudentReward=()=>true;
+ h.c.openGiveExpBubbleForStudent=()=>opened++;
+ h.c.openGiveRewardDirectBubble=()=>opened++;
+ for(const name of ['openTeacherGiveExpBubble','openTeacherGiveRewardDirectBubble'])vm.runInContext(source(name),h.c);
+ h.c.openTeacherGiveExpBubble('child');h.c.openTeacherGiveRewardDirectBubble('child');
+ assert.equal(opened,0);
+ await h.c.requestStaffTabData('teacher-students');
+ h.c.getFirebaseCollection=read;
+ assert.equal(await h.c.requestStaffTabData('teacher-students'),true);
+ assert.deepEqual(h.renders,['teacher-students']);
+});
