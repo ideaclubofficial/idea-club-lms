@@ -36654,6 +36654,58 @@
         .find(function(value) { return value && value !== '-'; }) || '';
     }
 
+    const paymentStudentLoads = new Map();
+    async function loadPaymentStudentRecords() {
+      if (!firebaseUser || !db || isCurrentStudentSession() || firestoreQuotaBlocked) return false;
+      const uid = firebaseUser.uid, version = studentDataSessionVersion;
+      const isCurrent = function() { return firebaseUser && firebaseUser.uid === uid && studentDataSessionVersion === version && !isCurrentStudentSession(); };
+      const pending = [];
+      const memberIds = new Set();
+      const docIds = new Set();
+      payments.forEach(function(payment) {
+        if (!payment || payment.deleted === true || getPaymentStudentRecord(payment)) return;
+        const memberId = String(payment.memberId || '').trim();
+        const studentId = String(payment.studentId || '').trim();
+        if (memberId) memberIds.add(memberId);
+        else if (studentId && !studentId.includes('/')) docIds.add(studentId);
+      });
+      const load = function(key, fetchRecords) {
+        const sessionKey = uid + ':' + version + ':' + key;
+        if (paymentStudentLoads.has(sessionKey)) return;
+        const task = fetchRecords().then(function(records) {
+          if (!isCurrent()) return false;
+          const active = records.filter(function(record) { return record.deleted !== true; });
+          mergeStudentEntityRecords(active);
+          rebuildStudentLookupMap();
+          return active.length > 0;
+        }).catch(function(error) {
+          paymentStudentLoads.delete(sessionKey);
+          markFirestoreQuotaExceeded(error);
+          console.warn('payment student details load failed:', error);
+          return false;
+        });
+        paymentStudentLoads.set(sessionKey, task);
+        pending.push(task);
+      };
+      const ids = Array.from(memberIds).sort();
+      for (let i = 0; i < ids.length; i += 10) {
+        const batch = ids.slice(i, i + 10);
+        load('members:' + JSON.stringify(batch), async function() {
+          const snapshot = await db.collection('students').where('memberId', 'in', batch).get();
+          return snapshot.docs.map(function(doc) { return Object.assign({}, doc.data(), { firebaseDocId: doc.id }); });
+        });
+      }
+      docIds.forEach(function(id) {
+        load('doc:' + id, async function() {
+          const doc = await db.collection('students').doc(id).get();
+          if (doc.exists) return [Object.assign({}, doc.data(), { firebaseDocId: doc.id })];
+          const snapshot = await db.collection('students').where('memberId', '==', id).get();
+          return snapshot.docs.map(function(item) { return Object.assign({}, item.data(), { firebaseDocId: item.id }); });
+        });
+      });
+      return (await Promise.all(pending)).some(Boolean);
+    }
+
     function paymentScopeLocationMatches(scopeLocation, payment, student, course) {
       if (scopeLocation === 'ทั้งหมด') return true;
       const wanted = String(scopeLocation || '').trim();
@@ -36739,6 +36791,9 @@
     function renderPaymentTableNow() {
       const tbody = getElement('paymentTableBody');
       if (!tbody) return;
+      loadPaymentStudentRecords().then(function(changed) {
+        if (changed) renderPaymentTable();
+      });
       const filtered = getFilteredPaymentsForTable();
       const ptTotalPages = Math.max(1, Math.ceil(filtered.length / LIST_PAGE_SIZE));
       if (paymentCurrentPage > ptTotalPages) paymentCurrentPage = ptTotalPages;
