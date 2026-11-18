@@ -10965,10 +10965,17 @@
       if (staffDataSessionUid !== uid) { resetStaffDataSession(); staffDataSessionUid = uid; }
       const version = studentDataSessionVersion;
       await Promise.all(names.map(function(name) {
+        const unbounded = (options.unboundedCollections || []).includes(name);
         const previous = staffCollectionStates[name];
-        if (previous && previous.promise) return previous.promise;
-        if (!options.force && isStaffCollectionReady(name)) return Promise.resolve();
-        const state = { status: 'loading', promise: null, realtime: null };
+        if (previous && previous.promise) {
+          if (!unbounded || previous.unbounded) return previous.promise;
+          return previous.promise.then(function() {
+            if (!firebaseUser || firebaseUser.uid !== uid || studentDataSessionVersion !== version) return;
+            return ensureStaffCollections([name], options);
+          });
+        }
+        if (!options.force && isStaffCollectionReady(name) && (!unbounded || previous.unbounded)) return Promise.resolve();
+        const state = { status: 'loading', promise: null, realtime: null, unbounded: unbounded };
         const startedAt = Date.now();
         staffCollectionStates[name] = state;
         const isCurrent = function() { return firebaseUser && firebaseUser.uid === uid && studentDataSessionVersion === version && staffCollectionStates[name] === state; };
@@ -10977,7 +10984,7 @@
             const status = { failed: false };
             const targets = getStaffCollectionTargets();
             if (!PRODUCTION_MODE && targets[name]) await seedCollectionIfEmpty(name, targets[name]);
-            const items = name === 'payments' ? await getFirebasePaymentCollection(false, status) : await getFirebaseCollection(name, false, status);
+            const items = name === 'payments' ? await getFirebasePaymentCollection(false, status) : await getFirebaseCollection(name, false, status, { unbounded: unbounded });
             if (!isCurrent()) return;
             if (status.failed) throw new Error('โหลดข้อมูล ' + name + ' ไม่สำเร็จ');
             if (name === 'settings') {
@@ -11067,7 +11074,9 @@
             }
           })
         : Promise.resolve();
-      const pending = Promise.all([ensureStaffCollections(getStaffTabCollections(tabId)), rosterTask]).then(async function() {
+      // The teacher roster filters locally: a first-page cache omits entire grades.
+      const collectionOptions = tabId === 'teacher-students' ? { unboundedCollections: ['students', 'courses'] } : {};
+      const pending = Promise.all([ensureStaffCollections(getStaffTabCollections(tabId), collectionOptions), rosterTask]).then(async function() {
         if (!firebaseUser || firebaseUser.uid !== uid || studentDataSessionVersion !== version) return false;
         if (tabId === 'teacher-attendance' && !isAttendanceRosterReadyForDate(getPickupDateValue())) await loadAttendanceRosterForDate(getPickupDateValue());
         if (!firebaseUser || firebaseUser.uid !== uid || studentDataSessionVersion !== version) return false;
@@ -11094,7 +11103,10 @@
     function requireStaffTabData(tabId) {
       if (!Object.prototype.hasOwnProperty.call(STAFF_TAB_DATA, tabId)) return true;
       const attendanceReady = tabId !== 'teacher-attendance' || isAttendanceRosterReadyForDate(getPickupDateValue());
-      if (staffDataSessionUid !== (firebaseUser && firebaseUser.uid) || !getStaffTabCollections(tabId).every(isStaffCollectionReady) || !attendanceReady) {
+      const teacherRosterReady = tabId !== 'teacher-students' || ['students', 'courses'].every(function(name) {
+        return staffCollectionStates[name] && staffCollectionStates[name].unbounded;
+      });
+      if (staffDataSessionUid !== (firebaseUser && firebaseUser.uid) || !getStaffTabCollections(tabId).every(isStaffCollectionReady) || !attendanceReady || !teacherRosterReady) {
         requestStaffTabData(tabId);
         return false;
       }

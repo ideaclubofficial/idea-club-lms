@@ -141,3 +141,56 @@ test('backup waits for all datasets and refuses to download after a read failure
  h.c.Blob=function(){downloaded=true;};vm.runInContext(source('exportAllDataBackup'),h.c);
  await h.c.exportAllDataBackup();assert.equal(downloaded,false);assert.match(message,/ข้อมูลสำรองไม่ครบ/);
 });
+
+
+test('teacher student list includes primary pupils beyond the first 50 and legacy records',async()=>{
+ const h=setup();h.c.isQuotaOptimizedLoadingEnabled=()=>true;
+ const rows={
+  students:Array.from({length:50},(_,i)=>({id:'secondary-'+i,memberId:String(i).padStart(3,'0'),grade:'ม.1'})).concat([
+   {id:'primary',memberId:'999',grade:'ป.4'}, {id:'legacy-primary',grade:'ป.5'}
+  ]),
+  courses:Array.from({length:100},(_,i)=>({id:'course-'+i,updatedAt:i})).concat([{id:'primary-course',grade:'ป.4'}])
+ };
+ h.c.COLLECTION_FETCH_LIMITS={students:{orderField:'memberId',limit:50},courses:{orderField:'updatedAt',limit:100}};
+ h.c.rememberFirebaseDocument=()=>{};h.c.markFirestoreQuotaExceeded=()=>{};
+ h.c.db={collection:name=>{
+  let list=rows[name]||[];
+  const q={orderBy(field){list=list.filter(r=>r[field]!==undefined);return q;},limit(n){list=list.slice(0,n);return q;},
+   async get(){h.reads.push(name);return {docs:list.map(r=>({id:r.id,data:()=>r}))};}};return q;
+ }};
+ vm.runInContext(source('getFirebaseCollection'),h.c);
+ // Another menu may already have cached a capped page.
+ await h.c.ensureStaffCollections(['students','courses']);
+ assert.equal(h.c.students.length,50);
+ await h.c.requestStaffTabData('teacher-students');
+ assert.ok(h.c.students.some(s=>s.id==='primary'));
+ assert.ok(h.c.students.some(s=>s.id==='legacy-primary'));
+ assert.ok(h.c.courses.some(c=>c.id==='primary-course'));
+ const count=h.reads.length;
+ await h.c.requestStaffTabData('teacher-students');
+ assert.equal(h.reads.length,count,'complete roster is cached for the session');
+});
+
+
+test('teacher roster upgrades a concurrent capped load before it becomes ready',async()=>{
+ const h=setup(),gate=deferred(),started=deferred(),calls=[];
+ h.c.isQuotaOptimizedLoadingEnabled=()=>true;
+ h.c.getFirebaseCollection=async(name,deleted,status,options)=>{
+  calls.push({name,unbounded:!!(options&&options.unbounded)});
+  if(name==='students'&&!options.unbounded){started.resolve();return gate.promise;}
+  return [{id:options&&options.unbounded?'complete':'page'}];
+ };
+ const page=h.c.ensureStaffCollections(['students']);await started.promise;
+ const roster=h.c.requestStaffTabData('teacher-students');
+ gate.resolve([{id:'first-page'}]);await Promise.all([page,roster]);
+ assert.equal(h.c.students[0].id,'complete');
+ assert.deepEqual(calls.filter(c=>c.name==='students').map(c=>c.unbounded),[false,true]);
+});
+
+test('cached first page cannot bypass teacher roster loading through tab readiness',async()=>{
+ const h=setup();h.c.isQuotaOptimizedLoadingEnabled=()=>true;
+ await h.c.ensureStaffCollections(h.c.getStaffTabCollections('teacher-students'));
+ assert.equal(h.c.requireStaffTabData('teacher-students'),false);
+ await h.c.requestStaffTabData('teacher-students');
+ assert.equal(h.c.requireStaffTabData('teacher-students'),true);
+});
