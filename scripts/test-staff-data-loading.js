@@ -10,7 +10,7 @@ function deferred(){let resolve;const promise=new Promise(r=>resolve=r);return {
 function setup(){
  const reads=[],renders=[],attendanceLoads=[],roots={};
  function element(){return {style:{},parentElement:null,hidden:false,attrs:{},children:[],classList:{hidden:false,contains(k){return k==='hidden'&&this.hidden;}},setAttribute(k,v){this.attrs[k]=v;},querySelector(){return this.children[0]||null;},prepend(n){n.parent=this;this.children.unshift(n);},remove(){this.parent.children=[];}};}
- for(const id of ['admin-video','admin-courses','admin-dashboard','admin-settings','teacher-dashboard','teacher-attendance'])roots[id]=element();
+ for(const id of ['admin-video','admin-courses','admin-dashboard','admin-settings','teacher-dashboard','teacher-attendance','teacher-students'])roots[id]=element();
  const c={firebaseReady:true,db:{},firebaseUser:{uid:'A'},studentDataSessionVersion:1,coreDataLoaded:false,PRODUCTION_MODE:true,
    firestoreQuotaBlocked:false,isQuotaOptimizedLoadingEnabled:()=>false,
    adminRealtimeSession:null,isCurrentStudentSession:()=>false,startAdminPaymentDataListeners:()=>null,
