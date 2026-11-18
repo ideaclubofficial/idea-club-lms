@@ -36648,6 +36648,12 @@
       return { student: student, course: course };
     }
 
+    function getPaymentStudentNickname(payment, student) {
+      return [student && student.nickname, payment && payment.nickname, payment && payment.studentNickname]
+        .map(function(value) { return String(value || '').trim(); })
+        .find(function(value) { return value && value !== '-'; }) || '';
+    }
+
     function paymentScopeLocationMatches(scopeLocation, payment, student, course) {
       if (scopeLocation === 'ทั้งหมด') return true;
       const wanted = String(scopeLocation || '').trim();
@@ -36670,7 +36676,7 @@
         payment.student || '',
         payment.studentName || '',
         student ? (student.name || '') : '',
-        student ? (student.nickname || '') : '',
+        getPaymentStudentNickname(payment, student),
         payment.course || '',
         payment.courseName || '',
         payment.month || '',
@@ -36747,11 +36753,11 @@
         const bundleText = bundle && bundle.status !== 'ยกเลิก' && bundle.status !== 'cancelled'
           ? '<br><span class="tag">ยอดรวม: ' + escapeHtml(bundle.status || '-') + '</span>'
           : '';
-        const student = getPaymentStudentRecord(p);
-        const nickname = student ? (student.nickname || '') : '';
+        const student = getPaymentRecordCourseAndStudent(p).student;
+        const nickname = getPaymentStudentNickname(p, student);
         const memberId = student ? (student.memberId || p.memberId || '') : (p.memberId || '');
-        const subLine = [memberId, nickname ? '(' + escapeHtml(nickname) + ')' : ''].filter(Boolean).join(' ');
-        const nameCell = '<strong style="white-space:nowrap;">' + escapeHtml(p.student || '-') + '</strong>' +
+        const subLine = [escapeHtml(memberId), nickname ? '(' + escapeHtml(nickname) + ')' : ''].filter(Boolean).join(' ');
+        const nameCell = '<strong style="white-space:nowrap;">' + escapeHtml(p.student || p.studentName || (student && student.name) || '-') + '</strong>' +
           (subLine ? '<br><span class="mini-muted">' + subLine + '</span>' : '');
         return '<tr data-payment-id="' + escapeHtml(pid) + '">' +
           '<td style="text-align:center;"><input type="checkbox" class="paymentBundleRowCheck" value="' + escapeHtml(pid) + '"' + (canPaymentBeBundled(p) ? '' : ' disabled') + ' onchange="updatePaymentBundleSelectionHint()"></td>' +
