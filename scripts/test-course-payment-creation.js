@@ -1,3 +1,4 @@
+const { installStudentDisplayHelpers } = require('./student-display-test-helpers');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -27,7 +28,7 @@ test('shared enrollment payment path prefers registered month and normal payment
       return { id: 'payment-1', firebaseDocId: 'payment-1', studentId: target.id, courseId: selectedCourse.id, month };
     }
   };
-  vm.createContext(context);
+  vm.createContext(context); installStudentDisplayHelpers(context);
   for (const name of ['isCoursePaymentCancelled', 'getCourseEnrollmentPaymentMonth', 'findCourseEnrollmentPayment', 'prepareCourseEnrollmentPayment']) {
     vm.runInContext(source(name), context);
   }
@@ -41,7 +42,7 @@ test('shared enrollment payment path prefers registered month and normal payment
 
 test('admin enrollment detects and explains Firestore quota exhaustion', () => {
   const context = {};
-  vm.createContext(context);
+  vm.createContext(context); installStudentDisplayHelpers(context);
   for (const name of ['isFirestoreQuotaExceededError', 'getFirestoreQuotaExceededMessage', 'getAdminEnrollmentErrorMessage']) {
     vm.runInContext(source(name), context);
   }
@@ -61,7 +62,7 @@ test('shared enrollment payment path reuses the existing student course month re
     getCourseForEnrollment: () => ({}),
     buildStudentMonthlyPaymentRecord: () => { throw new Error('must not build a duplicate'); }
   };
-  vm.createContext(context);
+  vm.createContext(context); installStudentDisplayHelpers(context);
   for (const name of ['isCoursePaymentCancelled', 'getCourseEnrollmentPaymentMonth', 'findCourseEnrollmentPayment', 'prepareCourseEnrollmentPayment']) {
     vm.runInContext(source(name), context);
   }
@@ -88,7 +89,7 @@ test('re-enrollment creates a new bill instead of reviving a cancelled payment',
     getCourseForEnrollment: () => ({ id: 'course-1', name: 'Course A' }),
     buildStudentMonthlyPaymentRecord: () => ({ ...fresh })
   };
-  vm.createContext(context);
+  vm.createContext(context); installStudentDisplayHelpers(context);
   for (const name of ['isCoursePaymentCancelled', 'getCourseEnrollmentPaymentMonth', 'findCourseEnrollmentPayment', 'prepareCourseEnrollmentPayment']) {
     vm.runInContext(source(name), context);
   }
@@ -170,7 +171,7 @@ function createAdminTransactionContext(status, options = {}) {
       }
     }
   };
-  vm.createContext(context);
+  vm.createContext(context); installStudentDisplayHelpers(context);
   vm.runInContext(source('createAdminEnrollmentError'), context);
   vm.runInContext(source('isCourseEnrollmentReenrollable'), context);
   vm.runInContext(source('buildReactivatedCourseEnrollment'), context);
@@ -260,7 +261,7 @@ test('approving a pending enrollment reuses a payment already created by slip up
     db: {},
     console: { error() {} }
   };
-  vm.createContext(context);
+  vm.createContext(context); installStudentDisplayHelpers(context);
   vm.runInContext(source('approveStudentCourse'), context);
   await context.approveStudentCourse(student.id, enrollment.courseId);
   assert.equal(enrollment.courseStatus, 'อนุมัติแล้ว');

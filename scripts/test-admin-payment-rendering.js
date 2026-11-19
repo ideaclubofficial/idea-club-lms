@@ -1,3 +1,4 @@
+const { installStudentDisplayHelpers } = require('./student-display-test-helpers');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -36,7 +37,7 @@ function setup() {
   c.renderTuitionNoticeStudentTable = () => {};
   c.renderTuitionNoticeStudentTableNow = () => {};
   c.renderTuitionNoticeMonthFilter = () => {};
-  vm.createContext(c);
+  vm.createContext(c); installStudentDisplayHelpers(c);
   const queueStart = html.indexOf('    const adminPaymentRenderDirty = ');
   if (queueStart !== -1) vm.runInContext(html.slice(queueStart, html.indexOf('    function scheduleAdminPaymentDataRefresh(', queueStart)), c);
   for (const name of [...names,'updatePaymentAmountSummary','scheduleAdminPaymentDataRefresh']) {
@@ -257,7 +258,7 @@ test('payment adjustment commits payment, month override, and audit log in one a
     getPrimaryStudentIdentityKey: student => student.memberId,
     getStudentIdentityKeys: () => ['s1', 'S001']
   };
-  vm.createContext(c);
+  vm.createContext(c); installStudentDisplayHelpers(c);
   vm.runInContext(source('commitPaymentAmountAdjustment'), c);
   await c.commitPaymentAmountAdjustment(payment, 1200, { oldAmount: 1500, reason: 'แก้ยอด', user: 'Admin', adjustedAtText: '28/9/2569', isHistorical: true });
   assert.equal(reads, 0);
@@ -289,7 +290,7 @@ test('approved payment batch updates a linked receipt without changing its statu
     formatPrice: amount => amount + ' บาท',
     getElement: () => null
   };
-  vm.createContext(c);
+  vm.createContext(c); installStudentDisplayHelpers(c);
   vm.runInContext(source('commitPaymentAmountAdjustment'), c);
   await c.commitPaymentAmountAdjustment(payment, 1000, { oldAmount: 2700, reason: 'แก้ไขตามข้อตกลง', user: 'Admin', adjustedAtText: '28/9/2569', isHistorical: true });
   assert.deepEqual(writes.map(write => write.ref.name), ['payments', 'receipts', 'activityLogs']);
@@ -320,7 +321,7 @@ test('failed atomic adjustment leaves month, receipt, and audit collections unch
     formatPrice: String,
     getElement: () => null
   };
-  vm.createContext(c);
+  vm.createContext(c); installStudentDisplayHelpers(c);
   vm.runInContext(source('commitPaymentAmountAdjustment'), c);
   await assert.rejects(c.commitPaymentAmountAdjustment({ id: 'p1', studentId: 's1', month: 'กันยายน 2569', finalAmount: 1000 }, 1000, { oldAmount: 2700, reason: 'แก้ไข' }), /batch failed/);
   assert.equal(monthItem.studentPrices.S001, 2700);
@@ -333,7 +334,7 @@ test('linked receipt lookup supports receipt number and legacy identity matching
   const byNumber = { id: 'r1', receiptNo: 'R001' };
   const legacy = { id: 'r2' };
   const c = { receipts: [byNumber], findPaymentForReceipt: () => null };
-  vm.createContext(c);
+  vm.createContext(c); installStudentDisplayHelpers(c);
   vm.runInContext(source('findReceiptLinkedToPayment'), c);
   assert.equal(c.findReceiptLinkedToPayment(payment), byNumber);
   c.receipts = [legacy];
@@ -354,7 +355,7 @@ test('paid standalone rows show edit amount while active bundle rows stay locked
     actionCall: () => 'noop()',
     formatPrice: String
   };
-  vm.createContext(c);
+  vm.createContext(c); installStudentDisplayHelpers(c);
   vm.runInContext(source('paymentActionButtons'), c);
   assert.match(c.paymentActionButtons('ชำระแล้ว', 'p1'), /editPaymentAmountDiscount/);
   c.getPaymentBundleForPayment = () => ({ id: 'b1', status: 'ชำระแล้ว' });
@@ -371,7 +372,7 @@ test('retroactive amount edit requires finance permission and rejects active bun
   };
   c.hasPermission = key => c.allowed && key === 'admin.finance';
   c.isPaymentInActiveBundle = () => c.bundled;
-  vm.createContext(c);
+  vm.createContext(c); installStudentDisplayHelpers(c);
   vm.runInContext(source('canEditPaymentAmount'), c);
   assert.equal(c.canEditPaymentAmount(payment), true);
   c.allowed = false;
@@ -396,7 +397,7 @@ test('edit bubble accepts only one save while an async write is pending', async 
     },
     window: { setTimeout() {} }
   };
-  vm.createContext(c);
+  vm.createContext(c); installStudentDisplayHelpers(c);
   const start = html.indexOf('    let editBubbleSaveHandler = null;');
   const end = html.indexOf('    function getMonthlySessionStatusLabel(', start);
   vm.runInContext(html.slice(start, end), c);
@@ -440,7 +441,7 @@ test('cancelled payments are removed from active finance lists and expected tota
     paymentMatchesDashboardScope: () => true,
     getPaymentFinalAmount: payment => payment.amount
   };
-  vm.createContext(c);
+  vm.createContext(c); installStudentDisplayHelpers(c);
   vm.runInContext(source('isCoursePaymentCancelled'), c);
   vm.runInContext(source('getDashboardScopedPayments'), c);
   vm.runInContext(source('getExpectedMonthlyIncome'), c);
@@ -448,7 +449,7 @@ test('cancelled payments are removed from active finance lists and expected tota
   assert.equal(c.getExpectedMonthlyIncome('ตุลาคม 2569'), 3000);
 });
 
-test('payment export includes nickname and only the currently filtered rows', () => {
+test('payment export includes nickname and only the currently filtered rows', async () => {
   let exported;
   const c = {
     payments: [
@@ -458,12 +459,13 @@ test('payment export includes nickname and only the currently filtered rows', ()
     ],
     getFilteredPaymentsForTable: () => c.payments.filter(payment => payment.id !== 'hidden'),
     getPaymentStudentRecord: payment => payment.id === 'p2' ? { id: 's2', name: 'สมหญิง', nickname: 'หญิง' } : null,
+    loadStudentDisplayRecords: async () => false,
     downloadCsv: (filename, rows) => { exported = { filename, rows }; },
     addActivityLog() {}
   };
-  vm.createContext(c);
+  vm.createContext(c); installStudentDisplayHelpers(c);
   vm.runInContext(source('exportPaymentsCsv'), c);
-  c.exportPaymentsCsv();
+  await c.exportPaymentsCsv();
   assert.equal(exported.filename, 'idea-club-payments.csv');
   assert.equal(exported.rows[0][1], 'ชื่อเล่น');
   assert.equal(exported.rows[1][1], 'ชาย');
@@ -506,7 +508,7 @@ function setupTuitionNotices() {
     Set,
     Date
   };
-  vm.createContext(c);
+  vm.createContext(c); installStudentDisplayHelpers(c);
   for (const name of ['getTuitionNoticeIdentityKeys','isTuitionNoticePrintablePayment','buildTuitionNoticeStudentRows','getTuitionNoticeRowCenters','getTuitionNoticeRowMonths','tuitionNoticeDetailRowsHtml','buildTuitionNoticeGroups','getTuitionNoticePreviewSummary','tuitionNoticeHtml']) {
     vm.runInContext(source(name), c);
   }
@@ -598,7 +600,7 @@ test('bulk tuition PDF renders exactly one A4 page per notice group', async () =
     alert() {},
     console
   };
-  vm.createContext(c);
+  vm.createContext(c); installStudentDisplayHelpers(c);
   vm.runInContext(source('downloadTuitionNoticesPdf'), c);
   await c.downloadTuitionNoticesPdf([{ html: 'first' }, { html: 'second' }], 'notices.pdf');
   assert.equal(calls.addImage, 2);
@@ -614,7 +616,7 @@ test('tuition notice image wait decodes an already loaded first-page QR before c
     decode: async () => { decoded = true; }
   };
   const c = { Array, Promise };
-  vm.createContext(c);
+  vm.createContext(c); installStudentDisplayHelpers(c);
   vm.runInContext(source('waitForTuitionNoticeImages'), c);
   await c.waitForTuitionNoticeImages({ querySelectorAll: () => [image] });
   assert.equal(decoded, true);
@@ -650,7 +652,7 @@ test('tuition notice filters keep only payable records inside the selected scope
     isCoursePaymentCancelled: payment => payment.status === 'ยกเลิก',
     paymentMatchesDashboardScope: (payment, scope) => payment.month === scope.month
   };
-  vm.createContext(c);
+  vm.createContext(c); installStudentDisplayHelpers(c);
   vm.runInContext(source('isTuitionNoticePrintablePayment'), c);
   vm.runInContext(source('getFilteredTuitionNoticePayments'), c);
   assert.deepEqual(Array.from(c.getFilteredTuitionNoticePayments(), payment => payment.id), ['pending']);
@@ -658,7 +660,7 @@ test('tuition notice filters keep only payable records inside the selected scope
 
 test('changing tuition notice filters clears hidden selections and resets pagination', () => {
   const c = { Set };
-  vm.createContext(c);
+  vm.createContext(c); installStudentDisplayHelpers(c);
   vm.runInContext('let tuitionNoticeCurrentPage = 4; let tuitionNoticeSelectedStudentKeys = new Set(["student:s1"]); let tuitionNoticeRenderCount = 0; function renderTuitionNoticeStudentTable(){ tuitionNoticeRenderCount++; }', c);
   vm.runInContext(source('applyTuitionNoticeFilters'), c);
   c.applyTuitionNoticeFilters();
@@ -686,7 +688,7 @@ test('tuition notice per-student download requires finance permission', () => {
     alert: message => alerts.push(message),
     getFilteredTuitionNoticeStudentRow: () => null
   };
-  vm.createContext(c);
+  vm.createContext(c); installStudentDisplayHelpers(c);
   vm.runInContext(source('downloadTuitionNoticeStudentPdf'), c);
   c.downloadTuitionNoticeStudentPdf('student:s1');
   assert.equal(alerts.pop(), 'ไม่มีสิทธิ์');
@@ -710,7 +712,7 @@ test('selected tuition notice download exports all selected student-center pages
     getLocalDateString: () => '2026-11-03',
     downloadTuitionNoticesPdf: async (items, filename) => { downloaded = { items, filename }; }
   };
-  vm.createContext(c);
+  vm.createContext(c); installStudentDisplayHelpers(c);
   vm.runInContext('let tuitionNoticeSelectedStudentKeys = new Set(["student:s1", "student:s2"]);', c);
   vm.runInContext(source('downloadSelectedTuitionNoticesPdf'), c);
   await c.downloadSelectedTuitionNoticesPdf();
@@ -731,7 +733,7 @@ test('monthly payment targets exclude enrollments whose course has completed', (
     getStudentCourseEnrollments: () => enrollments,
     getCourseForEnrollment: enrollment => enrollment.courseId === completedCourse.id ? completedCourse : activeCourse
   };
-  vm.createContext(c);
+  vm.createContext(c); installStudentDisplayHelpers(c);
   vm.runInContext(source('isCourseCompleted'), c);
   vm.runInContext(source('isCourseCompletedForBilling'), c);
   vm.runInContext(source('isCourseEnrollmentBillable'), c);
@@ -762,7 +764,7 @@ test('preview deletion removes only an unlocked payment record', async () => {
     renderDashboardPaymentSummary: () => {},
     console: { error() {} }
   };
-  vm.createContext(c);
+  vm.createContext(c); installStudentDisplayHelpers(c);
   vm.runInContext(source('deleteStudentMonthPayment'), c);
   await c.deleteStudentMonthPayment('ตุลาคม 2569', 'student-1');
   assert.deepEqual(Array.from(c.payments), []);

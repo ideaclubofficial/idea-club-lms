@@ -10913,6 +10913,7 @@
       staffCollectionStates = {};
       staffTabLoadPromises = {};
       staffDataSessionUid = '';
+      if (typeof studentDisplayLoads !== 'undefined') studentDisplayLoads.clear();
       attendanceCourseRosterLoadedForUid = '';
       attendanceCourseRosterLoadPromise = null;
       attendanceRosterLoadSequence += 1;
@@ -11080,6 +11081,13 @@
         if (!firebaseUser || firebaseUser.uid !== uid || studentDataSessionVersion !== version) return false;
         if (tabId === 'teacher-attendance' && !isAttendanceRosterReadyForDate(getPickupDateValue())) await loadAttendanceRosterForDate(getPickupDateValue());
         if (!firebaseUser || firebaseUser.uid !== uid || studentDataSessionVersion !== version) return false;
+        if (typeof loadStudentDisplayRecords === 'function') {
+          const targets = getStaffCollectionTargets();
+          const displayRecords = getStaffTabCollections(tabId).filter(function(name) { return !['students', 'teachers', 'courses'].includes(name); })
+            .reduce(function(records, name) { return records.concat(targets[name] || []); }, []);
+          await loadStudentDisplayRecords(displayRecords);
+          if (!firebaseUser || firebaseUser.uid !== uid || studentDataSessionVersion !== version) return false;
+        }
         if (getStaffTabCollections(tabId).includes('payments')) safeRun(applyPaymentRepairsSync, 'staff-finance-normalize');
         setStaffTabLoadStatus(tabId, 'ready');
         tabSucceeded = true;
@@ -11149,6 +11157,143 @@
         .replace(/>/g, '&gt;')
         .replace(/"/g, '&quot;')
         .replace(/'/g, '&#39;');
+    }
+
+    // Display labels never replace the raw names/IDs used by writes and lookups.
+    function studentDisplayText(value) {
+      const text = String(value == null ? '' : value).trim();
+      return text === '-' ? '' : text;
+    }
+
+    function findStudentForDisplay(source) {
+      if (!source || typeof source !== 'object') source = { studentName: source };
+      const directStudent = students.includes(source);
+      if (directStudent) return source;
+      const isStudent = !!source.name && !source.studentName && !source.student;
+      const ids = [source.studentId, source.studentDocId, source.studentFirebaseDocId, source.studentMemberId, source.memberId];
+      if (isStudent) ids.push(source.id, source.firebaseDocId, source.uid);
+      const keys = ids.map(studentDisplayText).filter(Boolean);
+      if (keys.length) {
+        const matches = students.filter(function(student) {
+          return student && student.deleted !== true && [student.id, student.firebaseDocId, student.studentId, student.memberId, student.uid, student.authUid]
+            .some(function(id) { return studentDisplayText(id) && keys.includes(studentDisplayText(id)); });
+        });
+        if (matches.length === 1) return matches[0];
+        if (matches.length > 1) return null;
+      }
+      const uid = studentDisplayText(source.studentAuthUid || source.studentUid || source.authUid || (isStudent ? source.uid : ''));
+      if (uid) {
+        const matches = students.filter(function(student) {
+          return student && student.deleted !== true && [student.authUid, student.studentAuthUid].some(function(value) { return studentDisplayText(value) === uid; });
+        });
+        if (matches.length === 1) return matches[0];
+        if (matches.length > 1) return null;
+      }
+      if (keys.length || uid) return null;
+      const name = studentDisplayText(source.studentName || source.student || source.name);
+      const matches = name ? students.filter(function(student) { return student && student.deleted !== true && studentDisplayText(student.name) === name; }) : [];
+      return matches.length === 1 ? matches[0] : null;
+    }
+
+    function getStudentDisplayNickname(source, student) {
+      source = source && typeof source === 'object' ? source : {};
+      const profile = student && (student.name || student.nickname || student.id || student.firebaseDocId) ? student : findStudentForDisplay(source);
+      return [profile && profile.nickname, source.nickname, source.studentNickname].map(studentDisplayText).find(Boolean) || '';
+    }
+
+    function getStudentDisplayName(source, student) {
+      const record = source && typeof source === 'object' ? source : { studentName: source };
+      const rawName = studentDisplayText(record.studentName || record.student);
+      if (Array.isArray(record.studentNames) && record.studentNames.length) {
+        return (rawName.startsWith('ยอดรวม:') ? 'ยอดรวม: ' : '') + getStudentBundleDisplayNames(record);
+      }
+      if (rawName.startsWith('ยอดรวม:')) {
+        const bundle = typeof findPaymentBundleById === 'function' ? findPaymentBundleById(record.bundleId || record.paymentId || '') : null;
+        return 'ยอดรวม: ' + getStudentBundleDisplayNames(bundle || { studentNames: rawName.slice('ยอดรวม:'.length).split(',').map(studentDisplayText).filter(Boolean) });
+      }
+      const profile = student && (student.name || student.nickname || student.id || student.firebaseDocId) ? student : findStudentForDisplay(record);
+      const name = studentDisplayText((profile && (profile.name || profile.displayName)) || record.studentName || record.student || record.name || record.displayName);
+      const nickname = getStudentDisplayNickname(record, profile);
+      if (!name) return nickname || studentDisplayText(record.studentMemberId || record.memberId || record.studentId || record.studentUid) || '-';
+      if (!nickname || name === nickname || name.endsWith(' (' + nickname + ')')) return name;
+      return name + ' (' + nickname + ')';
+    }
+
+    function getStudentBundleDisplayNames(bundle) {
+      if (!bundle) return '-';
+      const items = Array.isArray(bundle.paymentItems) ? bundle.paymentItems : (Array.isArray(bundle.items) ? bundle.items : []);
+      if (items.length) return Array.from(new Set(items.map(function(item) { return getStudentDisplayName(item); }))).join(', ');
+      const names = bundle.studentNames || [];
+      if (names.length) return names.map(function(name) {
+        return getStudentDisplayName({ studentName: name });
+      }).join(', ');
+      return getStudentDisplayName(bundle);
+    }
+
+    const studentDisplayLoads = new Map();
+    async function loadStudentDisplayRecords(records) {
+      if (!firebaseReady || !db || !firebaseUser || isCurrentStudentSession() || firestoreQuotaBlocked) return false;
+      const uid = firebaseUser.uid, version = studentDataSessionVersion;
+      const queries = new Map();
+      const add = function(field, value) {
+        value = studentDisplayText(value);
+        if (!value || (field === '__name__' && value.includes('/'))) return;
+        if (!queries.has(field)) queries.set(field, new Set());
+        queries.get(field).add(value);
+      };
+      const collect = function(record) {
+        if (!record || typeof record !== 'object' || record.deleted === true) return;
+        if (Array.isArray(record.studentNames)) record.studentNames.forEach(function(name) { collect({ studentName: name }); });
+        if (record.student && typeof record.student === 'object') { collect(record.student); return; }
+        const aggregateName = studentDisplayText(record.student);
+        if (aggregateName.startsWith('ยอดรวม:')) {
+          aggregateName.slice('ยอดรวม:'.length).split(',').forEach(function(name) { collect({ studentName: studentDisplayText(name) }); });
+          return;
+        }
+        ['paymentItems', 'items', 'students', 'records'].forEach(function(key) { if (Array.isArray(record[key])) record[key].forEach(collect); });
+        if (!record.studentName && !record.student && !record.studentId && !record.studentMemberId && !record.studentUid && !record.studentAuthUid) return;
+        const cached = findStudentForDisplay(record);
+        if (cached && Object.prototype.hasOwnProperty.call(cached, 'nickname')) return;
+        const memberId = (cached && cached.memberId) || record.studentMemberId || record.memberId;
+        const docId = (cached && (cached.firebaseDocId || cached.id)) || record.studentDocId || record.studentFirebaseDocId || record.studentId;
+        if (memberId) add('memberId', memberId);
+        if (docId) { add('__name__', docId); add('studentId', docId); add('memberId', docId); }
+        const authUid = record.studentAuthUid || record.studentUid || record.authUid;
+        if (authUid) add('authUid', authUid);
+        if (!memberId && !docId && !authUid) add('name', record.studentName || record.student);
+      };
+      (records || []).forEach(collect);
+      const tasks = [];
+      queries.forEach(function(values, field) {
+        const ids = Array.from(values).sort();
+        for (let i = 0; i < ids.length; i += 10) {
+          const chunk = ids.slice(i, i + 10);
+          const key = JSON.stringify([uid, version, field, chunk]);
+          if (!studentDisplayLoads.has(key)) {
+            const task = (async function() {
+              await Promise.resolve(); // Register the pending task before a synchronous query failure.
+              if (!firebaseUser || firebaseUser.uid !== uid || studentDataSessionVersion !== version || isCurrentStudentSession()) return false;
+              try {
+                const queryField = field === '__name__' ? firebase.firestore.FieldPath.documentId() : field;
+                const snapshot = await db.collection('students').where(queryField, 'in', chunk).get();
+                if (!firebaseUser || firebaseUser.uid !== uid || studentDataSessionVersion !== version || isCurrentStudentSession()) return false;
+                const loaded = snapshot.docs.map(function(doc) { return Object.assign({}, doc.data(), { firebaseDocId: doc.id }); }).filter(function(item) { return item.deleted !== true; });
+                mergeStudentEntityRecords(loaded);
+                rebuildStudentLookupMap();
+                return loaded.length > 0;
+              } catch (error) {
+                studentDisplayLoads.delete(key);
+                markFirestoreQuotaExceeded(error);
+                console.warn('student display details load failed:', error);
+                return false;
+              }
+            })();
+            studentDisplayLoads.set(key, task);
+          }
+          tasks.push(studentDisplayLoads.get(key));
+        }
+      });
+      return (await Promise.all(tasks)).some(Boolean);
     }
 
     function actionCall(functionName) {
@@ -14747,6 +14892,7 @@
       const record = info.record || {};
       const firebaseEmailName = firebaseUser && firebaseUser.email ? firebaseUser.email.split('@')[0] : '';
       let displayName = record.name || record.nickname || record.parentName || (firebaseUserProfile && firebaseUserProfile.name) || firebaseEmailName || 'ผู้ใช้งาน';
+      if (info.type === 'student') displayName = getStudentDisplayName(record);
       if (info.type === 'admin' && displayName === 'Admin IDEA CLUB' && firebaseEmailName) displayName = firebaseEmailName;
       const displayId = info.type === 'student' ? (record.memberId || record.id || '-') :
         info.type === 'teacher' ? (record.teacherId || record.id || record.username || '-') :
@@ -15856,7 +16002,7 @@
     function renderTeacherMobileApprovalCard(student) {
       const payment = payments.slice().reverse().find(function(p) { return String(p.studentId) === String(student.id) || p.student === student.name; });
       return '<div class="teacher-mobile-approval-card">' +
-        '<strong>' + escapeHtml(student.name || '-') + '</strong>' +
+        '<strong>' + escapeHtml(getStudentDisplayName(student)) + '</strong>' +
         '<div class="teacher-mobile-muted">' + escapeHtml(student.grade || '-') + ' · ' + escapeHtml(student.course || '-') + '</div>' +
         '<div class="teacher-mobile-card-row"><span class="status-waiting">' + escapeHtml(student.courseStatus || 'รออนุมัติคอร์ส') + '</span></div>' +
         '<div class="teacher-mobile-muted">เดือนแรก: ' + escapeHtml(student.registeredCourseMonth || '-') + ' · สลิป: ' + escapeHtml(payment ? ((payment.month || '-') + ' / ' + (payment.status || '-')) : '-') + '</div>' +
@@ -16088,7 +16234,7 @@
           '<button class="btn btn-green" type="button"' + (canEnd ? ' onclick="' + actionCall('completePrivateLessonSession', id) + '"' : ' disabled') + '>จบการสอน</button>';
         return '<tr>' +
           '<td>' + escapeHtml(getMonthlySessionDate(session) || '-') + '</td>' +
-          '<td>' + escapeHtml(session.studentName || session.studentMemberId || '-') + '</td>' +
+          '<td>' + escapeHtml(getStudentDisplayName(session)) + '</td>' +
           '<td>' + escapeHtml(session.subject || '-') + '</td>' +
           '<td>' + escapeHtml(session.timeStart || session.sessionTime || '-') + '<br><span class="mini-muted">จริง: ' + escapeHtml(formatPrivateLessonActualTime(session.actualStartTime)) + '</span></td>' +
           '<td>' + escapeHtml(session.timeEnd || '-') + '<br><span class="mini-muted">จริง: ' + escapeHtml(formatPrivateLessonActualTime(session.actualEndTime)) + '</span></td>' +
@@ -16108,7 +16254,7 @@
         : '<button class="btn btn-blue" type="button"' + (canStart ? ' onclick="' + actionCall('startPrivateLessonSession', id) + '"' : ' disabled') + '>เริ่มสอน</button>';
       return '<div class="teacher-mobile-private-card">' +
         '<strong>' + escapeHtml(getMonthlySessionDate(session) || '-') + ' · ' + escapeHtml(formatMonthlySessionTimeRange(session) || '-') + '</strong>' +
-        '<div class="teacher-mobile-muted">นักเรียน: ' + escapeHtml(session.studentName || session.studentMemberId || '-') + '</div>' +
+        '<div class="teacher-mobile-muted">นักเรียน: ' + escapeHtml(getStudentDisplayName(session)) + '</div>' +
         '<div class="teacher-mobile-muted">วิชา: ' + escapeHtml(session.subject || '-') + '</div>' +
         '<div class="teacher-mobile-card-row"><span class="' + (session.lessonCompleted ? 'status-paid' : (session.actualStartTime ? 'status-waiting' : 'status-parent')) + '">' + escapeHtml(getPrivateLessonStatusText(session)) + '</span>' + (session.actualHours ? '<span class="teacher-mobile-muted">' + Number(session.actualHours).toFixed(2) + ' ชม.</span>' : '') + '</div>' +
         '<div class="teacher-mobile-actions">' + actionButton + '</div>' +
@@ -16279,7 +16425,7 @@
           id: session.id || session.firebaseDocId || '',
           date: getMonthlySessionDate(session) || '-',
           time: formatMonthlySessionTimeRange(session) || '-',
-          courseName: session.type === 'oneOnOne' ? (session.studentName || session.studentMemberId || '-') : getMonthlyPlanCourseName(session),
+          courseName: session.type === 'oneOnOne' ? getStudentDisplayName(session) : getMonthlyPlanCourseName(session),
           subject: session.subject || '-',
           type: session.type || '',
           typeText: getMonthlyPlanTypeText(session.type),
@@ -17165,14 +17311,14 @@
       }
 
       if (student && !isStudentClassOnDate(student, selectedDate)) {
-        setAttendanceResult((student.name || '-') + ' ไม่มีเรียนในวันที่เลือก จึงไม่ต้องเช็คชื่อ', '#6b7280');
+        setAttendanceResult(getStudentDisplayName(student) + ' ไม่มีเรียนในวันที่เลือก จึงไม่ต้องเช็คชื่อ', '#6b7280');
         renderPickupList();
         return;
       }
 
       const attendanceCourse = student ? getStudentAttendanceCourse(student) : null;
       if (student && !teacherCanAccessAttendanceCourse(attendanceCourse)) {
-        setAttendanceResult((student.name || '-') + ' ไม่มีสิทธิ์เช็คชื่อในคอร์สนี้', '#dc2626');
+        setAttendanceResult(getStudentDisplayName(student) + ' ไม่มีสิทธิ์เช็คชื่อในคอร์สนี้', '#dc2626');
         renderPickupList();
         return;
       }
@@ -17184,7 +17330,7 @@
         student.pickupDate = selectedDate;
         try {
           await setFirebaseDocument('students', student);
-          setAttendanceResult('บันทึกสถานะ "' + status + '" ของ ' + (student.name || '-') + ' เรียบร้อย', '#16a34a');
+          setAttendanceResult('บันทึกสถานะ "' + status + '" ของ ' + getStudentDisplayName(student) + ' เรียบร้อย', '#16a34a');
         } catch (error) {
           console.error('pickup firebase error:', error);
           setAttendanceResult('บันทึกเช็คชื่อไม่สำเร็จ: ' + (error.message || error.code || 'ไม่ทราบสาเหตุ'), '#dc2626');
@@ -19597,7 +19743,7 @@
         renderAdminCourseEnrollmentSection();
         return;
       }
-      if (!confirm('สมัครคอร์ส ' + (course.name || '-') + ' ให้ ' + (student.name || '-') + ' เป็นสถานะ “' + status + '” ใช่หรือไม่?')) return;
+      if (!confirm('สมัครคอร์ส ' + (course.name || '-') + ' ให้ ' + getStudentDisplayName(student) + ' เป็นสถานะ “' + status + '” ใช่หรือไม่?')) return;
       if (button) button.disabled = true;
       adminCourseEnrollmentRowMessages.set(studentId, { ok: true, text: 'กำลังบันทึก...' });
       try {
@@ -19657,7 +19803,7 @@
       box.innerHTML = course
         ? (eligible.length ? eligible.map(function(student) {
             const id = getEnrollmentStudentId(student);
-            return '<label class="course-bulk-student-item"><input type="checkbox" value="' + escapeHtml(id) + '"' + (adminBulkEnrollmentSelectedIds.has(id) ? ' checked' : '') + ' onchange="setAdminBulkEnrollmentStudentSelected(this.value,this.checked)" /><span><strong>' + escapeHtml((student.memberId || student.studentId || '-') + ' · ' + (student.name || '-')) + '</strong><br><span class="mini-muted">' + escapeHtml((student.grade || '-') + ' · ' + (student.preferredLocation || '-')) + '</span></span></label>';
+            return '<label class="course-bulk-student-item"><input type="checkbox" value="' + escapeHtml(id) + '"' + (adminBulkEnrollmentSelectedIds.has(id) ? ' checked' : '') + ' onchange="setAdminBulkEnrollmentStudentSelected(this.value,this.checked)" /><span><strong>' + escapeHtml((student.memberId || student.studentId || '-') + ' · ' + getStudentDisplayName(student)) + '</strong><br><span class="mini-muted">' + escapeHtml((student.grade || '-') + ' · ' + (student.preferredLocation || '-')) + '</span></span></label>';
           }).join('') : '<div class="notice">ไม่พบนักเรียนที่เข้าเงื่อนไขและยังไม่เคยสมัครคอร์สนี้</div>')
         : '<div class="notice">เลือกคอร์สก่อน</div>';
       updateAdminBulkEnrollmentSelectionSummary(eligible);
@@ -19759,7 +19905,7 @@
       refreshAdminCourseEnrollmentViews();
       if (resultBox) {
         resultBox.innerHTML = '<span style="color:' + (failures.length || paymentsSkippedForPermission ? '#d97706' : '#16a34a') + ';">สำเร็จ ' + successes.length + ' คน · ไม่สำเร็จ ' + failures.length + ' คน' + (status === 'อนุมัติแล้ว' ? ' · สร้างยอด ' + paymentsCreated + ' · ใช้ยอดเดิม ' + paymentsReused + (paymentsSkippedForPermission ? ' · ยังไม่สร้างยอดเพราะไม่มีสิทธิ์การเงิน ' + paymentsSkippedForPermission : '') : '') + '</span>' +
-          (failures.length ? '<ul class="course-enrollment-result-list">' + failures.map(function(item) { return '<li>' + escapeHtml((item.student.name || '-') + ': ' + item.reason) + '</li>'; }).join('') + '</ul>' : '');
+          (failures.length ? '<ul class="course-enrollment-result-list">' + failures.map(function(item) { return '<li>' + escapeHtml(getStudentDisplayName(item.student) + ': ' + item.reason) + '</li>'; }).join('') + '</ul>' : '');
       }
       if (button) button.disabled = firestoreQuotaBlocked || adminBulkEnrollmentSelectedIds.size === 0;
     }
@@ -19854,7 +20000,7 @@
         } else if (canManageAdminCourseEnrollments() && isCourseStatusApproved(status)) {
           actions = '<button class="btn btn-red" type="button" onclick="' + actionCall('cancelStudentCourse', studentId, enrollment.courseId) + '">ยกเลิก</button>';
         }
-        return '<tr><td><strong>' + escapeHtml(student.name || '-') + '</strong><br><span class="mini-muted">' + escapeHtml(student.memberId || student.studentId || '-') + '</span></td>' +
+        return '<tr><td><strong>' + escapeHtml(getStudentDisplayName(student)) + '</strong><br><span class="mini-muted">' + escapeHtml(student.memberId || student.studentId || '-') + '</span></td>' +
           '<td>' + escapeHtml(courseName) + '</td><td>' + escapeHtml((enrollment.grade || student.grade || '-') + ' · ' + (enrollment.location || student.preferredLocation || '-')) + '</td>' +
           '<td><span class="' + statusClass + '">' + escapeHtml(status) + '</span></td><td>' + escapeHtml(paymentStatus) + '</td>' +
           '<td>' + escapeHtml(enrollment.registeredCourseMonth || '-') + '</td><td>' + escapeHtml(getAdminEnrollmentRecordedAtText(enrollment)) + '</td><td>' + actions + '</td></tr>';
@@ -19880,7 +20026,7 @@
         return;
       }
       const course = getCourseForEnrollment(enrollment);
-      if (!confirm('อนุมัติคอร์ส ' + ((course && course.name) || enrollment.courseName || '-') + ' ให้ ' + (student.name || '-') + ' ใช่หรือไม่?')) return;
+      if (!confirm('อนุมัติคอร์ส ' + ((course && course.name) || enrollment.courseName || '-') + ' ให้ ' + getStudentDisplayName(student) + ' ใช่หรือไม่?')) return;
       const canCreatePayment = hasPermission('admin.finance') || hasPermission('admin.full');
       const paymentResult = canCreatePayment
         ? prepareCourseEnrollmentPayment(student, enrollment, course, enrollment.registeredCourseMonth)
@@ -20211,7 +20357,7 @@
         const courseName = (course && course.name) || enrollment.courseName || '-';
         const payment = payments.slice().reverse().find(function(p) { return (String(p.studentId) === String(s.id) || p.student === s.name) && String(p.courseId || '') === String(enrollment.courseId || ''); });
         return '<div class="status-display-row" style="align-items:flex-start;">' +
-          '<span><strong>' + (s.name || '-') + '</strong><br>' +
+          '<span><strong>' + escapeHtml(getStudentDisplayName(s)) + '</strong><br>' +
           '<span style="color:#6b7280;">' + (s.grade || '-') + ' · ' + escapeHtml(courseName) + '</span><br>' +
           '<span style="color:#6b7280;">เดือนแรกที่สมัคร: ' + (enrollment.registeredCourseMonth || '-') + ' · สลิป: ' + (payment ? (payment.month || '-') + ' / ' + (payment.status || '-') : '-') + '</span></span>' +
           '<span><button class="btn btn-green" type="button" onclick="' + actionCall('approveStudentCourse', s.id, enrollment.courseId) + '">อนุมัติคอร์ส</button>' +
@@ -20430,12 +20576,12 @@
 
       openEditBubble('Reset รหัสผ่านนักเรียน',
         '<div class="notice">' +
-          '<p><strong>นักเรียน:</strong> ' + escapeHtml(s.name || '-') + '</p>' +
+          '<p><strong>นักเรียน:</strong> ' + escapeHtml(getStudentDisplayName(s)) + '</p>' +
           '<p><strong>Member ID:</strong> ' + escapeHtml(memberId) + '</p>' +
           '<p><strong>รหัสผ่านใหม่:</strong> <strong style="color:#1a3a8f; font-size:15px;">' + escapeHtml(newPassword) + '</strong></p>' +
         '</div>' +
         '<div class="notice" style="background:#eff6ff; color:#1e40af;">' +
-          '<p>กด "บันทึก" เพื่อรีเซ็ตรหัสผ่านของ ' + escapeHtml(s.name || '-') + ' กลับเป็น <strong>' + escapeHtml(newPassword) + '</strong> (ic + 4 ตัวท้าย Member ID)</p>' +
+          '<p>กด "บันทึก" เพื่อรีเซ็ตรหัสผ่านของ ' + escapeHtml(getStudentDisplayName(s)) + ' กลับเป็น <strong>' + escapeHtml(newPassword) + '</strong> (ic + 4 ตัวท้าย Member ID)</p>' +
         '</div>',
         async function() {
           try {
@@ -20978,7 +21124,7 @@
           : '<span class="status-paid">Active</span>';
         return '<tr>' +
           '<td>' + (s.memberId || '-') + '</td>' +
-          '<td>' + (s.name || '-') + '</td>' +
+          '<td>' + escapeHtml(getStudentDisplayName(s)) + '</td>' +
           '<td>' + (s.grade || '-') + '</td>' +
           '<td>' + (s.phone || s.email || '-') + '</td>' +
           '<td>' + statusText + '</td>' +
@@ -20996,7 +21142,7 @@
       if (!s) return;
       const text = [
         'ข้อมูลเข้าสู่ระบบ IDEA CLUB',
-        'นักเรียน: ' + (s.name || '-'),
+        'นักเรียน: ' + getStudentDisplayName(s),
         'Member ID: ' + (s.memberId || '-'),
         'ID เข้าสู่ระบบ: ' + (s.memberId || s.studentId || '-'),
         'รหัสผ่านเริ่มต้น: ' + buildDefaultStudentPassword(s)
@@ -21354,7 +21500,7 @@
       tbody.innerHTML = psItems.length ? psItems.map(function(student) {
         const id = student.id || student.firebaseDocId || '';
         return '<tr>' +
-          '<td><strong>' + escapeHtml(student.name || '-') + '</strong><br><span class="mini-muted">' + escapeHtml((student.memberId || '-') + ' · ' + (student.grade || '-')) + '</span></td>' +
+          '<td><strong>' + escapeHtml(getStudentDisplayName(student)) + '</strong><br><span class="mini-muted">' + escapeHtml((student.memberId || '-') + ' · ' + (student.grade || '-')) + '</span></td>' +
           '<td>' + escapeHtml(student.preferredLocation || '-') + '<br><span class="mini-muted">' + escapeHtml(student.course || '-') + '</span></td>' +
           '<td>' + escapeHtml(getMonthlyPlanDayText(student.privateLessonDay || '') || '-') + '<br><span class="mini-muted">' + escapeHtml((student.privateLessonTimeStart || '-') + '-' + (student.privateLessonTimeEnd || '-')) + '</span></td>' +
           '<td>' + escapeHtml(student.privateLessonTeacherName || getPrivateLessonTeacherNameById(student.privateLessonTeacherId) || '-') + '</td>' +
@@ -21392,7 +21538,7 @@
         return idA.localeCompare(idB, undefined, { numeric: true });
       }).forEach(function(student) {
         const id = student.id || student.firebaseDocId || '';
-        options.push('<option value="' + escapeHtml(id) + '">' + escapeHtml((student.name || '-') + ' · ' + (student.memberId || student.phone || '-') + ' · ' + (student.grade || '-')) + '</option>');
+        options.push('<option value="' + escapeHtml(id) + '">' + escapeHtml(getStudentDisplayName(student) + ' · ' + (student.memberId || student.phone || '-') + ' · ' + (student.grade || '-')) + '</option>');
       });
       return options.join('');
     }
@@ -21432,7 +21578,7 @@
       const student = findStudentForPrivateLesson(studentId);
       if (!student) return;
       openEditBubble('ตั้งค่านักเรียนเดี่ยว 1:1',
-        '<div class="notice"><strong>' + escapeHtml(student.name || '-') + '</strong><p>' + escapeHtml((student.memberId || '-') + ' · ' + (student.grade || '-') + ' · ' + (student.preferredLocation || '-')) + '</p></div>' +
+        '<div class="notice"><strong>' + escapeHtml(getStudentDisplayName(student)) + '</strong><p>' + escapeHtml((student.memberId || '-') + ' · ' + (student.grade || '-') + ' · ' + (student.preferredLocation || '-')) + '</p></div>' +
         '<div class="form-row">' +
           '<div><label>วันเรียน</label><select id="bubblePrivateStudentDay">' + privateLessonDayOptionsHtml(student.privateLessonDay || '') + '</select></div>' +
           '<div><label>เวลาเริ่ม</label><input id="bubblePrivateStudentTimeStart" type="time" value="' + escapeHtml(student.privateLessonTimeStart || '') + '"></div>' +
@@ -21522,7 +21668,7 @@
         const teacherKey = getPrivateLessonBillingTeacherKey(session);
         const studentKey = getPrivateLessonBillingStudentKey(session);
         if (teacherKey && !teacherMap[teacherKey]) teacherMap[teacherKey] = session.teacherName || getTeacherNameById(session.teacherId) || teacherKey;
-        if (studentKey && !studentMap[studentKey]) studentMap[studentKey] = session.studentName || session.studentMemberId || studentKey;
+        if (studentKey && !studentMap[studentKey]) studentMap[studentKey] = getStudentDisplayName(session);
       });
       setPrivateBillingSelectOptions('privateBillingMonthFilter', [{ value: 'ทั้งหมด', label: 'ทั้งหมด' }].concat(months.map(function(monthKey) {
         return { value: monthKey, label: formatMonthTextFromKey(monthKey) || monthKey };
@@ -21604,7 +21750,7 @@
           '<td>' + escapeHtml(formatMonthTextFromKey(getPrivateLessonBillingMonthKey(session)) || getPrivateLessonBillingMonthKey(session) || '-') + '</td>' +
           '<td>' + escapeHtml(getMonthlySessionDate(session) || '-') + '</td>' +
           '<td>' + escapeHtml(session.teacherName || getTeacherNameById(session.teacherId) || '-') + '</td>' +
-          '<td>' + escapeHtml(session.studentName || session.studentMemberId || '-') + '</td>' +
+          '<td>' + escapeHtml(getStudentDisplayName(session)) + '</td>' +
           '<td>' + escapeHtml(session.subject || '-') + '</td>' +
           '<td>' + row.hours.toFixed(2) + '</td>' +
           '<td>' + escapeHtml(row.billingType === 'fixed' ? 'fixed' : 'hourly') + '<br><span class="mini-muted">' + escapeHtml(rateText) + '</span></td>' +
@@ -25505,7 +25651,7 @@
         const studentMeta = [student.nickname || '', payment.memberId || student.memberId || student.studentId || ''].filter(Boolean).join(' · ');
         return '<label style="display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid #eef2f7;">' +
           '<input class="studentBundlePaymentCheck" type="checkbox" value="' + escapeHtml(paymentId) + '" onchange="updateStudentBundleSelectionHint()">' +
-          '<span><strong>' + escapeHtml(studentName) + '</strong>' +
+          '<span><strong>' + escapeHtml(getStudentDisplayName({ studentName: studentName }, student)) + '</strong>' +
             (studentMeta ? ' <span class="mini-muted">(' + escapeHtml(studentMeta) + ')</span>' : '') +
             '<br><span class="mini-muted">' + escapeHtml(payment.month || '-') + ' · ' + escapeHtml(payment.course || payment.courseName || student.course || '-') + ' · ' + formatPrice(getPaymentFinalAmount(payment)) + ' · ' + escapeHtml(getPaymentDisplayStatus(payment)) + '</span></span>' +
         '</label>';
@@ -25519,7 +25665,7 @@
         return '<div class="status-display-row" style="align-items:flex-start;">' +
           '<span>' +
             '<strong>ยอดรวม ' + formatPrice(bundle.totalAmount || bundle.amount || 0) + '</strong><br>' +
-            '<span class="mini-muted">' + escapeHtml((bundle.studentNames || []).join(', ') || '-') + '</span><br>' +
+            '<span class="mini-muted">' + escapeHtml(getStudentBundleDisplayNames(bundle)) + '</span><br>' +
             '<span class="mini-muted">' + escapeHtml((bundle.months || []).join(', ') || '-') + ' · ' + (bundle.itemCount || (bundle.paymentIds || []).length || 0) + ' รายการ</span><br>' +
             '<span class="' + statusClass + '">' + escapeHtml(status) + '</span>' +
             (slipUrl ? '<br><a href="' + escapeHtml(slipUrl) + '" target="_blank" rel="noopener">ดูสลิปที่ส่งแล้ว</a>' : '') +
@@ -25757,7 +25903,7 @@
     function updateStudentMobileHomeFromCurrentStudent(selectedCourse, hasRegisteredCourse) {
       if (!getElement('studentMobileHome')) return;
       const student = currentStudent || {};
-      const displayName = student.nickname || student.name || 'นักเรียน';
+      const displayName = getStudentDisplayName(student);
       const memberId = student.memberId || student.studentId || '-';
       const mobileEnrollment = getSelectedStudentCourseEnrollment(student);
       const courseStatus = mobileEnrollment ? mobileEnrollment.courseStatus || '' : '';
@@ -28310,7 +28456,7 @@
         : '';
       openEditBubble('🎯 มอบ Quest รายบุคคล',
         '<div class="notice" style="margin-bottom:14px;">' +
-          '<p><strong>' + escapeHtml(student.name || '-') + '</strong> · Member ID: ' + escapeHtml(student.memberId || student.studentId || '-') + '</p>' +
+          '<p><strong>' + escapeHtml(getStudentDisplayName(student)) + '</strong> · Member ID: ' + escapeHtml(student.memberId || student.studentId || '-') + '</p>' +
           '<p class="mini-muted">ปัจจุบัน: LV.' + escapeHtml(profile.level) + ' · ' + escapeHtml(profile.exp) + '/' + escapeHtml(getStudentGamificationLevelMaxExp(profile.level)) + ' EXP · ' + escapeHtml(profile.coins) + ' Coins · 🎟 ' + wheelTickets + ' บัตรหมุนวงล้อ</p>' +
         '</div>' +
         '<label>ชื่อ Quest</label>' +
@@ -28353,7 +28499,7 @@
             await createPersonalQuestForStudent(student, title, description, exp, coins, wheelTickets, dueDate);
             addActivityLog('มอบ Quest รายบุคคล', (student.name || '-') + ' · ' + title + ' · ' + exp + ' EXP · ' + coins + ' Coins · ' + wheelTickets + ' บัตรหมุนวงล้อ');
             if (resultEl) {
-              resultEl.textContent = 'มอบ Quest ให้ ' + (student.name || '-') + ' เรียบร้อย · รอครู/แอดมินยืนยันสำเร็จ';
+              resultEl.textContent = 'มอบ Quest ให้ ' + getStudentDisplayName(student) + ' เรียบร้อย · รอครู/แอดมินยืนยันสำเร็จ';
               resultEl.style.color = '#16a34a';
             }
             scheduleEditBubbleClose(600);
@@ -28373,7 +28519,7 @@
       const sid = jsArg(student.id || student.firebaseDocId || '');
       openEditBubble('🎁 ให้รางวัล นักเรียน',
         '<div class="notice" style="margin-bottom:14px;">' +
-          '<p><strong>' + escapeHtml(student.name || '-') + '</strong> · Member ID: ' + escapeHtml(student.memberId || student.studentId || '-') + '</p>' +
+          '<p><strong>' + escapeHtml(getStudentDisplayName(student)) + '</strong> · Member ID: ' + escapeHtml(student.memberId || student.studentId || '-') + '</p>' +
           '<p class="mini-muted">ปัจจุบัน: LV.' + escapeHtml(profile.level) + ' · ' + escapeHtml(profile.exp) + '/' + escapeHtml(getStudentGamificationLevelMaxExp(profile.level)) + ' EXP · ' + escapeHtml(profile.coins) + ' Coins · 🎟 ' + wheelTickets + ' บัตรหมุนวงล้อ</p>' +
         '</div>' +
         '<div class="form-row">' +
@@ -28434,7 +28580,7 @@
             const bonusText = rewardResult ? formatLevelBonusText(rewardResult.levelsGained, rewardResult.levelBonusCoins) : '';
             if (bonusText) parts.push(bonusText);
             addActivityLog('ให้รางวัลนักเรียนโดยตรง', (student.name || '-') + ' · ' + parts.join(' · ') + ' · ' + reason);
-            if (resultEl) { resultEl.textContent = 'ให้รางวัล ' + (student.name || '-') + ' เรียบร้อย' + (bonusText ? ' · ' + bonusText : ''); resultEl.style.color = '#16a34a'; }
+            if (resultEl) { resultEl.textContent = 'ให้รางวัล ' + getStudentDisplayName(student) + ' เรียบร้อย' + (bonusText ? ' · ' + bonusText : ''); resultEl.style.color = '#16a34a'; }
             scheduleEditBubbleClose(600);
           } catch (error) {
             if (resultEl) { resultEl.textContent = 'บันทึกไม่สำเร็จ: ' + (error.message || error.code || 'ไม่ทราบสาเหตุ'); resultEl.style.color = '#dc2626'; }
@@ -28455,7 +28601,7 @@
       const safeAmount = Math.max(0, Number(amount) || 0);
       if (![10, 20, 30].includes(safeAmount)) return;
       const reason = bubbleValue('bubbleDirectAwardReason') || 'ครูลด EXP';
-      if (!confirm('ยืนยันลด EXP ของ ' + (student.name || '-') + ' จำนวน ' + safeAmount + ' EXP?\n\nระบบจะไม่ทำให้นักเรียนตกเลเวล')) return;
+      if (!confirm('ยืนยันลด EXP ของ ' + getStudentDisplayName(student) + ' จำนวน ' + safeAmount + ' EXP?\n\nระบบจะไม่ทำให้นักเรียนตกเลเวล')) return;
       const resultEl = getElement('editBubbleResult');
       if (resultEl) { resultEl.textContent = 'กำลังลด EXP...'; resultEl.style.color = '#d97706'; }
       try {
@@ -28972,7 +29118,7 @@
           studentGamificationProfiles.forEach(function(profile) {
             if (!profile || profile.deleted) return;
             const sp = profile.stampProgress || {};
-            const name = escapeHtml(profile.studentName || profile.name || '-');
+            const name = escapeHtml(getStudentDisplayName(profile));
             const memberId = escapeHtml(profile.memberId || '-');
             stampCards.forEach(function(card) {
               const cid = card.firebaseDocId || card.id || '';
@@ -29025,7 +29171,7 @@
               ? '<span style="font-size:10px;background:#fef3c7;color:#92400e;border-radius:4px;padding:1px 5px;font-weight:700;margin-left:4px;">เด็กกดแลก</span>'
               : '<span style="font-size:10px;background:#ede9fe;color:#6d28d9;border-radius:4px;padding:1px 5px;font-weight:700;margin-left:4px;">รายการเดิม</span>';
             return '<tr>' +
-              '<td>' + escapeHtml(r.studentName || '-') + '<br><span style="font-size:11px;color:#94a3b8;">' + escapeHtml(r.memberId || '-') + '</span></td>' +
+              '<td>' + escapeHtml(getStudentDisplayName(r)) + '<br><span style="font-size:11px;color:#94a3b8;">' + escapeHtml(r.memberId || '-') + '</span></td>' +
               '<td>' + escapeHtml(r.rewardTitle || 'รางวัลแสตมป์') + sourceTag + '<br><span style="font-size:11px;color:#92400e;">กดส่งมอบแล้วเลือกรางวัลจริงได้</span></td>' +
               '<td>' + escapeHtml(r.createdAtText || '-') + '</td>' +
               '<td><button class="btn btn-sm btn-green" onclick="adminFulfillRedemption(\'' + escapeHtml(r.firebaseDocId || r.id) + '\')">เลือกและส่งมอบ</button></td>' +
@@ -29049,7 +29195,7 @@
           const rows = pendingSpecialVouchers.map(function(r) {
             const sourceTag = getSpecialVoucherSourceBadgeHtml(r);
             return '<tr>' +
-              '<td>' + escapeHtml(r.studentName || '-') + '<br><span style="font-size:11px;color:#94a3b8;">' + escapeHtml(r.memberId || '-') + '</span></td>' +
+              '<td>' + escapeHtml(getStudentDisplayName(r)) + '<br><span style="font-size:11px;color:#94a3b8;">' + escapeHtml(r.memberId || '-') + '</span></td>' +
               '<td>' + escapeHtml(getSpecialVoucherDisplayTitle(r)) + sourceTag + (r.adminNote ? '<br><span style="font-size:11px;color:#7c3aed;">' + escapeHtml(r.adminNote) + '</span>' : '') + '<br><span style="font-size:11px;color:#7c3aed;">เลือกได้ว่าจะใช้เข้ากิจกรรมพิเศษหรือแลกของรางวัลใหญ่</span></td>' +
               '<td>' + escapeHtml(r.createdAtText || '-') + '</td>' +
               '<td><button class="btn btn-sm btn-green" onclick="useSpecialVoucherRedemption(\'' + escapeHtml(r.firebaseDocId || r.id) + '\')">เลือกการใช้บัตร</button></td>' +
@@ -29089,7 +29235,7 @@
             (deliveredTitle ? '<br><span style="font-size:11px;color:#16a34a;font-weight:700;">ส่งจริง: ' + escapeHtml(deliveredTitle) + '</span>' : '') +
             specialUseMeta;
           return '<tr>' +
-            '<td>' + escapeHtml(r.studentName || '-') + '</td>' +
+            '<td>' + escapeHtml(getStudentDisplayName(r)) + '</td>' +
             '<td>' + rewardCell + '</td>' +
             '<td style="text-align:center;">' + (r.coinsPaid ? escapeHtml(r.coinsPaid) + ' 💰' : '—') + '</td>' +
             '<td>' + escapeHtml(r.createdAtText || '-') + '</td>' +
@@ -29373,7 +29519,7 @@
         const title = redemption.specialVoucherActivityTitle || redemption.specialVoucherUseTitle || '-';
         const activityDate = redemption.specialVoucherActivityDateText || '';
         return '<tr>' +
-          '<td>' + escapeHtml(redemption.studentName || '-') + '<br><span style="font-size:11px;color:#94a3b8;">' + escapeHtml(redemption.memberId || '-') + '</span></td>' +
+          '<td>' + escapeHtml(getStudentDisplayName(redemption)) + '<br><span style="font-size:11px;color:#94a3b8;">' + escapeHtml(redemption.memberId || '-') + '</span></td>' +
           '<td>' + escapeHtml(title) + (activityDate ? '<br><span style="font-size:11px;color:#64748b;">' + escapeHtml(activityDate) + '</span>' : '') + '</td>' +
           '<td>' + escapeHtml(getSpecialVoucherDisplayTitle(redemption)) + '</td>' +
           '<td>' + escapeHtml(redemption.usedAtText || redemption.updatedAtText || '-') + '<br><span style="font-size:11px;color:#64748b;">โดย ' + escapeHtml(redemption.usedByName || '-') + '</span></td>' +
@@ -29654,7 +29800,7 @@
       }).join('') + '<option value="__custom__">พิมพ์เอง</option>';
       const reward = getRewardForRedemption(redemption);
       const body = '<div class="form-row">' +
-          '<div><label>นักเรียน</label><input type="text" readonly value="' + escapeHtml((student.name || redemption.studentName || '-') + ' · ' + (student.memberId || redemption.memberId || '-')) + '" /></div>' +
+          '<div><label>นักเรียน</label><input type="text" readonly value="' + escapeHtml(getStudentDisplayName(redemption, student) + ' · ' + (student.memberId || redemption.memberId || '-')) + '" /></div>' +
         '</div>' +
         '<div class="form-row">' +
           '<div><label>บัตรสะสมที่เด็กกดแลก</label><input type="text" readonly value="' + escapeHtml(redemption.rewardTitle || (reward && reward.title) || 'รางวัลแสตมป์') + '" /></div>' +
@@ -29741,7 +29887,7 @@
         if (resultEl) { resultEl.textContent = 'กรุณาระบุชื่อรางวัลที่จะส่งมอบ'; resultEl.style.color = '#dc2626'; }
         return;
       }
-      if (!confirm('ยืนยันส่งมอบ "' + deliveredRewardTitle + '" ให้ ' + (student.name || redemption.studentName || '-') + '?\nหลังส่งมอบ ระบบจะ reset แสตมป์ให้เริ่มสะสมใหม่')) return;
+      if (!confirm('ยืนยันส่งมอบ "' + deliveredRewardTitle + '" ให้ ' + getStudentDisplayName(redemption, student) + '?\nหลังส่งมอบ ระบบจะ reset แสตมป์ให้เริ่มสะสมใหม่')) return;
       const teacherInfo = getActiveTeacherAwardInfo();
       const now = firebase.firestore.FieldValue.serverTimestamp();
       const updatedAtText = new Date().toLocaleString('th-TH');
@@ -29823,7 +29969,7 @@
       const body =
         '<div style="display:flex;flex-direction:column;gap:12px;">' +
           '<div style="padding:10px 12px;border-radius:10px;background:#faf5ff;border:1px solid #c4b5fd;color:#5b21b6;font-size:13px;">' +
-            '<strong>' + escapeHtml(student.name || redemption.studentName || '-') + '</strong><br>' +
+            '<strong>' + escapeHtml(getStudentDisplayName(redemption, student)) + '</strong><br>' +
             '<span>บัตร: ' + escapeHtml(voucherTitle) + '</span>' +
           '</div>' +
           '<div><label style="font-size:13px;font-weight:700;display:block;margin-bottom:4px;">ประเภทการใช้บัตร</label>' +
@@ -29885,7 +30031,7 @@
         if (resultEl) { resultEl.textContent = 'กรุณาระบุชื่อกิจกรรมหรือรางวัลจริง'; resultEl.style.color = '#dc2626'; }
         return;
       }
-      if (!confirm('ยืนยันใช้บัตร "' + getSpecialVoucherDisplayTitle(redemption) + '" ให้ ' + (student.name || '-') + '?\nประเภท: ' + getSpecialVoucherUseTypeLabel(useType) + '\nรายการ: ' + useTitle)) return;
+      if (!confirm('ยืนยันใช้บัตร "' + getSpecialVoucherDisplayTitle(redemption) + '" ให้ ' + getStudentDisplayName(student) + '?\nประเภท: ' + getSpecialVoucherUseTypeLabel(useType) + '\nรายการ: ' + useTitle)) return;
       const teacherInfo = getActiveTeacherAwardInfo();
       const now = firebase.firestore.FieldValue.serverTimestamp();
       const updatedAtText = new Date().toLocaleString('th-TH');
@@ -29952,7 +30098,7 @@
 
       const studentOptions = activeStudents.map(function(s) {
         const id = escapeHtml(String(s.firebaseDocId || s.id || s.studentId || ''));
-        const label = escapeHtml((s.name || '-') + (s.memberId ? ' (' + s.memberId + ')' : ''));
+        const label = escapeHtml(getStudentDisplayName(s) + (s.memberId ? ' · ' + s.memberId : ''));
         return '<option value="' + id + '">' + label + '</option>';
       }).join('');
       const rewardOptions = activeRewards.map(function(r) {
@@ -31631,7 +31777,7 @@
         } else {
           const rows = allSpins.map(function(s) {
             return '<tr>' +
-              '<td>' + escapeHtml(s.studentName || '-') + '</td>' +
+              '<td>' + escapeHtml(getStudentDisplayName(s)) + '</td>' +
               '<td>' + escapeHtml(s.prizeIcon || '') + ' ' + escapeHtml(s.prizeName || '-') + '</td>' +
               '<td>' + escapeHtml(s.rewardType === 'coins' ? '+' + s.rewardValue + ' Coins' : s.rewardType === 'exp' ? '+' + s.rewardValue + ' EXP' : s.rewardType === 'wheelTickets' ? '🎟 +' + (s.rewardValue || 1) + ' ตั๋วหมุนวงล้อ' : s.linkedRewardTitle ? 'บัตรรางวัลพิเศษ: ' + s.linkedRewardTitle : 'บัตรรางวัลพิเศษ') + '</td>' +
               '<td style="text-align:center;">' + escapeHtml(String(s.coinsPaid || 0)) + ' 💰</td>' +
@@ -33559,7 +33705,7 @@
         const statusClass = statusText === 'ชำระแล้ว' ? 'status-paid' : (statusText === 'สลิปไม่ผ่าน' || statusText === 'ค้างชำระ' ? 'status-absent' : 'status-waiting');
         const memberId = item.memberId || payment.memberId || student.memberId || student.studentId || '-';
         return '<tr>' +
-          '<td><strong>' + escapeHtml(item.student || payment.student || student.name || '-') + '</strong><br><span class="mini-muted">' + escapeHtml(memberId) + '</span></td>' +
+          '<td><strong>' + escapeHtml(getStudentDisplayName(item, student)) + '</strong><br><span class="mini-muted">' + escapeHtml(memberId) + '</span></td>' +
           '<td>' + escapeHtml(item.month || payment.month || '-') + '</td>' +
           '<td>' + escapeHtml(item.course || payment.course || payment.courseName || '-') + '</td>' +
           '<td>' + formatPrice(item.amount || getPaymentFinalAmount(payment) || 0) + '</td>' +
@@ -33586,7 +33732,7 @@
         : '';
       openViewBubble('รายละเอียดยอดรวม',
         '<div class="receipt-box">' +
-          '<div class="receipt-header"><div><div class="receipt-title">ยอดรวมหลายรายการ</div><p>' + escapeHtml((bundle.studentNames || []).join(', ') || bundle.student || '-') + '</p></div><span class="' + statusClass + '">' + escapeHtml(status) + '</span></div>' +
+          '<div class="receipt-header"><div><div class="receipt-title">ยอดรวมหลายรายการ</div><p>' + escapeHtml(getStudentBundleDisplayNames(bundle)) + '</p></div><span class="' + statusClass + '">' + escapeHtml(status) + '</span></div>' +
           '<div class="receipt-line"><strong>ยอดรวม</strong><span style="font-weight:800;">' + formatPrice(bundle.totalAmount || bundle.amount || 0) + '</span></div>' +
           '<div class="receipt-line"><strong>เดือน</strong><span>' + escapeHtml((bundle.months || []).join(', ') || '-') + '</span></div>' +
           '<div class="receipt-line"><strong>จำนวนรายการ</strong><span>' + escapeHtml(bundle.itemCount || (bundle.paymentIds || []).length || 0) + ' รายการ</span></div>' +
@@ -33717,13 +33863,13 @@
           const status = getPaymentBundleDisplayStatus(bundle);
           const statusClass = status === 'ชำระแล้ว' ? 'status-paid' : (status === 'สลิปไม่ผ่าน' ? 'status-absent' : 'status-waiting');
           const detail = items.slice(0, 4).map(function(item) {
-            return escapeHtml((item.student || '-') + ' · ' + (item.month || '-') + ' · ' + formatPrice(item.amount || 0));
+            return escapeHtml(getStudentDisplayName(item) + ' · ' + (item.month || '-') + ' · ' + formatPrice(item.amount || 0));
           }).join('<br>');
           const more = items.length > 4 ? '<br><span class="mini-muted">และอีก ' + (items.length - 4) + ' รายการ</span>' : '';
           const receiptText = bundle.receiptNo ? '<span class="mini-muted">ใบเสร็จ: ' + escapeHtml(bundle.receiptNo) + '</span>' : '';
           return '<div class="status-display-row" style="align-items:flex-start;">' +
             '<span>' +
-              '<strong>' + escapeHtml((bundle.studentNames || []).join(', ') || '-') + '</strong><br>' +
+              '<strong>' + escapeHtml(getStudentBundleDisplayNames(bundle)) + '</strong><br>' +
               '<span class="mini-muted">' + escapeHtml((bundle.months || []).join(', ') || '-') + ' · ' + items.length + ' รายการ · รวม ' + formatPrice(bundle.totalAmount || bundle.amount || 0) + '</span><br>' +
               '<span class="' + statusClass + '">' + escapeHtml(status) + '</span> ' + receiptText +
               '<div style="margin-top:6px;">' + detail + more + '</div>' +
@@ -33993,7 +34139,7 @@
         '<div style="display:flex;gap:20px;flex-wrap:wrap;align-items:flex-start;">' +
         '<div style="flex:1 1 220px;">' + slipHtml + '</div>' +
         '<div style="flex:1 1 180px;">' +
-        '<div class="receipt-line"><strong>นักเรียน</strong><span>' + escapeHtml(payment.student || '-') + '</span></div>' +
+        '<div class="receipt-line"><strong>นักเรียน</strong><span>' + escapeHtml(getStudentDisplayName(payment)) + '</span></div>' +
         '<div class="receipt-line"><strong>คอร์ส</strong><span>' + escapeHtml(payment.course || '-') + '</span></div>' +
         '<div class="receipt-line"><strong>เดือน</strong><span>' + escapeHtml(payment.month || '-') + '</span></div>' +
         '<div class="receipt-line"><strong>ยอด</strong><span style="font-weight:800;">' + escapeHtml(renderPaymentAmountText(payment)) + '</span></div>' +
@@ -34161,7 +34307,7 @@
       if (index === -1) return;
       const payment = payments[index];
 
-      if (!confirm('ต้องการลบข้อมูลการชำระเงินของ ' + (payment.student || '-') + ' เดือน ' + (payment.month || '-') + ' ใช่หรือไม่?')) return;
+      if (!confirm('ต้องการลบข้อมูลการชำระเงินของ ' + getStudentDisplayName(payment) + ' เดือน ' + (payment.month || '-') + ' ใช่หรือไม่?')) return;
 
       try {
         await deleteFirebaseDocument('payments', payment);
@@ -34226,7 +34372,7 @@
       if (!paymentId) return;
       const payment = findPaymentByAnyId(paymentId);
       if (!payment) return;
-      if (!confirm('บันทึกการจ่ายเงินสดสำหรับ ' + (payment.student || '-') + ' เดือน ' + (payment.month || '-') + '?')) return;
+      if (!confirm('บันทึกการจ่ายเงินสดสำหรับ ' + getStudentDisplayName(payment) + ' เดือน ' + (payment.month || '-') + '?')) return;
       button.disabled = true;
       button.textContent = 'กำลังบันทึก...';
       payment.slipSource = 'จ่ายสด';
@@ -34236,9 +34382,9 @@
 
     async function syncStudentPaymentStatusFromRow(row, status) {
       if (!row) return;
-      const studentName = row.children[1] ? row.children[1].innerText.trim() : '';
-      const month = row.children[3] ? row.children[3].innerText.trim() : '';
-      const student = students.find(function(s) { return s.name === studentName; });
+      const payment = findPaymentByAnyId(row.getAttribute('data-payment-id'));
+      const month = payment ? (payment.month || '') : (row.getAttribute('data-month') || '');
+      const student = getStudentByPaymentRow(row);
       if (!student) return;
 
       student.overdueMonths = Array.isArray(student.overdueMonths) ? student.overdueMonths : [];
@@ -35325,8 +35471,14 @@
     }
 
     function getStudentByPaymentRow(row) {
-      const studentName = row && row.children[1] ? row.children[1].innerText.trim() : '';
-      return students.find(function(s) { return s.name === studentName; }) || null;
+      if (!row) return null;
+      const paymentId = row.getAttribute('data-payment-id');
+      const payment = paymentId ? findPaymentByAnyId(paymentId) : null;
+      if (payment) return findStudentForDisplay(payment);
+      const studentId = row.getAttribute('data-student-id');
+      if (studentId) return findStudentForDisplay({ studentId: studentId });
+      const rawName = row.getAttribute('data-student-name');
+      return rawName ? findStudentForDisplay({ studentName: rawName }) : null;
     }
 
     function getCourseByStudentOrName(student, courseName) {
@@ -35979,7 +36131,7 @@
         const saveRowButton = canSelect ? '<button class="btn btn-green" style="font-size:12px;padding:4px 10px;" type="button" onclick="saveSinglePaymentCoursePriceAndRecord(\'' + jsArg(month) + '\',\'' + jsArg(studentKey) + '\')">บันทึกยอด</button>' : '';
         const deleteRowButton = payment && isPaymentRecordUpdatable(payment) ? '<button class="btn btn-red" style="font-size:12px;padding:4px 10px;" type="button" onclick="deleteStudentMonthPayment(\'' + jsArg(month) + '\',\'' + jsArg(studentKey) + '\')">ลบรายการยอด</button>' : '';
         return '<tr data-student-id="' + escapeHtml(String(studentKey || '')) + '"' +
-            ' data-name="' + escapeHtml((student.name || '').toLowerCase()) + '"' +
+            ' data-name="' + escapeHtml(getStudentDisplayName(student).toLowerCase()) + '"' +
             ' data-course="' + escapeHtml(student.course || '') + '"' +
             ' data-location="' + escapeHtml(student.preferredLocation || '') + '"' +
             ' data-record-status="' + recordStatusText + '" style="' + (isSkipped ? 'opacity:0.45;' : '') + '">' +
@@ -36021,7 +36173,7 @@
               '<tbody>' +
                 excludedStudents.map(function(s) {
                   return '<tr style="opacity:0.55;">' +
-                    '<td>' + escapeHtml(s.name || '') + '</td>' +
+                    '<td>' + escapeHtml(getStudentDisplayName(s)) + '</td>' +
                     '<td>' + escapeHtml(s.course || '-') + '</td>' +
                     '<td>' + escapeHtml(s.billingStartMonth || '-') + '</td>' +
                     '</tr>';
@@ -36217,7 +36369,7 @@
         return;
       }
       const month = payment.month || payment.paymentMonth || '-';
-      if (!confirm('ลบสลิปออกจากรายการของ ' + (payment.student || '-') + ' เดือน ' + month + '?\n\nระบบจะลบเฉพาะข้อมูลสลิปในระบบ ไม่ลบไฟล์จริงใน Google Drive')) return;
+      if (!confirm('ลบสลิปออกจากรายการของ ' + getStudentDisplayName(payment) + ' เดือน ' + month + '?\n\nระบบจะลบเฉพาะข้อมูลสลิปในระบบ ไม่ลบไฟล์จริงใน Google Drive')) return;
 
       const nowText = new Date().toLocaleString('th-TH');
       const note = 'Admin ลบสลิปออกจากรายการเดือน ' + month + ' เมื่อ ' + nowText;
@@ -36453,7 +36605,7 @@
       const student = getPaymentStudentRecord(payment) || getUniqueStudentRecordByPaymentName(payment) || {};
 
       openEditBubble(
-        'อัพโหลดสลิปแทนผู้ปกครอง — ' + escapeHtml(payment.student || student.name || '-') + ' · ' + escapeHtml(payment.month || '-'),
+        'อัพโหลดสลิปแทนผู้ปกครอง — ' + escapeHtml(getStudentDisplayName(payment, student)) + ' · ' + escapeHtml(payment.month || '-'),
         '<p style="color:#6b7280;margin-bottom:12px;">เลือกไฟล์รูปสลิปที่ผู้ปกครองส่งมา</p>' +
         '<div id="adminSlipDropzone" class="student-slip-dropzone" role="button" tabindex="0" onclick="chooseAdminSlipFile()" onkeydown="handleAdminSlipDropzoneKey(event)" ondragover="handleAdminSlipDragOver(event)" ondragleave="handleAdminSlipDragLeave(event)" ondrop="handleAdminSlipDrop(event)" style="margin-bottom:10px;">' +
           '<strong id="adminSlipDropzoneTitle">ลากไฟล์มาวางที่นี่</strong>' +
@@ -36594,7 +36746,7 @@
         '<div class="receipt-box">' +
           '<div class="receipt-header"><div><div class="receipt-title">Payment Slip OCR</div><p>' + (ENABLE_PAYMENT_SLIP_OCR ? 'ข้อมูล OCR เบื้องต้นสำหรับ Admin ตรวจสอบ' : 'ระบบ OCR ยังไม่เปิดใช้งาน ข้อมูลนี้เป็นข้อมูลเดิมหรือข้อมูลสำหรับอนาคต') + '</p></div><span class="status-badge parent">' + escapeHtml(payment.ocrCheckStatus || 'pending') + '</span></div>' +
           '<h3>ข้อมูลจากระบบ</h3>' +
-          '<div class="receipt-line"><strong>นักเรียน</strong><span>' + escapeHtml(payment.student || student.name || '-') + '</span></div>' +
+          '<div class="receipt-line"><strong>นักเรียน</strong><span>' + escapeHtml(getStudentDisplayName(payment, student)) + '</span></div>' +
           '<div class="receipt-line"><strong>Member ID</strong><span>' + escapeHtml(student.memberId || payment.memberId || '-') + '</span></div>' +
           '<div class="receipt-line"><strong>เดือน</strong><span>' + escapeHtml(payment.month || '-') + '</span></div>' +
           '<div class="receipt-line"><strong>ยอดในระบบ</strong><span>' + escapeHtml(payment.finalAmount || payment.amount || payment.baseAmount || '-') + '</span></div>' +
@@ -36741,6 +36893,7 @@
       const rowText = [
         payment.student || '',
         payment.studentName || '',
+        getStudentDisplayNickname(payment, student),
         student ? (student.name || '') : '',
         getPaymentStudentNickname(payment, student),
         payment.course || '',
@@ -36879,6 +37032,8 @@
       return {
         paymentId: paymentId,
         studentId: payment ? payment.studentId : '',
+        memberId: payment ? (payment.memberId || '') : '',
+        nickname: payment ? (payment.nickname || payment.studentNickname || '') : '',
         authUid: payment ? payment.authUid : '',
         courseId: payment ? payment.courseId : '',
         phone: payment ? (payment.phone || payment.studentPhone || '') : '',
@@ -36900,12 +37055,12 @@
 
     function copyPaymentMessageFromDetail() {
       if (!tempPaymentDetail) return;
-      copyTextToClipboard('แจ้งชำระเงิน IDEA CLUB\nนักเรียน: ' + tempPaymentDetail.student + '\nคอร์ส: ' + tempPaymentDetail.course + '\nเดือน: ' + tempPaymentDetail.month + '\nยอดเงิน: ' + tempPaymentDetail.amount + ' บาท\nสถานะ: ' + tempPaymentDetail.status);
+      copyTextToClipboard('แจ้งชำระเงิน IDEA CLUB\nนักเรียน: ' + getStudentDisplayName(tempPaymentDetail) + '\nคอร์ส: ' + tempPaymentDetail.course + '\nเดือน: ' + tempPaymentDetail.month + '\nยอดเงิน: ' + tempPaymentDetail.amount + ' บาท\nสถานะ: ' + tempPaymentDetail.status);
     }
 
     function copyOverdueMessageFromDetail() {
       if (!tempPaymentDetail) return;
-      copyTextToClipboard('แจ้งค้างชำระ IDEA CLUB\nนักเรียน: ' + tempPaymentDetail.student + '\nคอร์ส: ' + tempPaymentDetail.course + '\nเดือน: ' + tempPaymentDetail.month + '\nยอดเงิน: ' + tempPaymentDetail.amount + ' บาท');
+      copyTextToClipboard('แจ้งค้างชำระ IDEA CLUB\nนักเรียน: ' + getStudentDisplayName(tempPaymentDetail) + '\nคอร์ส: ' + tempPaymentDetail.course + '\nเดือน: ' + tempPaymentDetail.month + '\nยอดเงิน: ' + tempPaymentDetail.amount + ' บาท');
     }
 
     function resetPaymentToPendingById(paymentId) {
@@ -36924,7 +37079,7 @@
       openViewBubble('ข้อมูลการชำระเงิน',
         '<div class="receipt-box">' +
           '<div class="receipt-header"><div><div class="receipt-title">รายละเอียดชำระเงิน</div><p>ข้อมูลการชำระเงินรายเดือน</p></div><span class="status-badge ' + (data.status.includes('ชำระแล้ว') ? 'present' : data.status.includes('ไม่ผ่าน') || data.status.includes('ค้าง') ? 'absent' : 'parent') + '">' + data.status + '</span></div>' +
-          '<div class="receipt-line"><strong>นักเรียน</strong><span>' + data.student + '</span></div>' +
+          '<div class="receipt-line"><strong>นักเรียน</strong><span>' + escapeHtml(getStudentDisplayName(data)) + '</span></div>' +
           '<div class="receipt-line"><strong>คอร์ส</strong><span>' + data.course + '</span></div>' +
           '<div class="receipt-line"><strong>เดือนที่ชำระ</strong><span>' + (data.month || '-') + '</span></div>' +
           '<div class="receipt-line"><strong>ยอดเงิน</strong><span>' + data.amount + ' บาท</span></div>' +
@@ -37455,8 +37610,8 @@
     function viewTuitionNoticeStudentDetails(key) {
       const row = getFilteredTuitionNoticeStudentRow(key);
       if (!row) { alert('ไม่พบข้อมูลนักเรียนตามตัวกรองปัจจุบัน'); return; }
-      openViewBubble('รายละเอียดใบแจ้งยอด · ' + row.studentName,
-        '<div class="receipt-box"><div class="receipt-line"><strong>นักเรียน</strong><span>' + escapeHtml(row.studentName) + '</span></div>' +
+      openViewBubble('รายละเอียดใบแจ้งยอด · ' + getStudentDisplayName(row),
+        '<div class="receipt-box"><div class="receipt-line"><strong>นักเรียน</strong><span>' + escapeHtml(getStudentDisplayName(row)) + '</span></div>' +
         '<div class="receipt-line"><strong>Member ID</strong><span>' + escapeHtml(row.memberId || '-') + '</span></div>' +
         '<div class="receipt-line"><strong>ระดับชั้น</strong><span>' + escapeHtml(row.grade || '-') + '</span></div>' +
         '<div class="table-wrap" style="margin-top:14px;"><table><thead><tr><th>เดือน</th><th>คอร์ส</th><th>ศูนย์</th><th style="text-align:right;">ยอด</th></tr></thead><tbody>' + tuitionNoticeDetailRowsHtml(row) + '</tbody></table></div>' +
@@ -37585,7 +37740,7 @@
       '</style>' +
       '<div class="tuition-notice">' +
         '<div class="tuition-header"><div>' + getPrintableLogoHtml() + '</div><div><h1>' + escapeHtml(instituteName) + '</h1><p>ใบแจ้งยอดชำระค่าเรียน</p></div><div class="tuition-date"><strong>วันที่ออกเอกสาร</strong><br>' + escapeHtml(today) + '</div></div>' +
-        '<div class="tuition-student"><div><strong>นักเรียน</strong>' + escapeHtml(group.studentName) + '</div><div><strong>ระดับชั้น</strong>' + escapeHtml(group.grade || '-') + '</div><div><strong>Member ID</strong>' + escapeHtml(group.memberId || '-') + '</div><div style="grid-column:1/-1"><strong>ศูนย์</strong>' + escapeHtml(group.centerText || '-') + '</div></div>' +
+        '<div class="tuition-student"><div><strong>นักเรียน</strong>' + escapeHtml(getStudentDisplayName(group)) + '</div><div><strong>ระดับชั้น</strong>' + escapeHtml(group.grade || '-') + '</div><div><strong>Member ID</strong>' + escapeHtml(group.memberId || '-') + '</div><div style="grid-column:1/-1"><strong>ศูนย์</strong>' + escapeHtml(group.centerText || '-') + '</div></div>' +
         '<p style="font-size:13px;margin:0 0 12px;color:#475569;">เรียน คุณผู้ปกครอง ทางสถาบันฯ ขอแจ้งยอดชำระค่าเรียนตามรายการดังต่อไปนี้</p>' +
         '<table><thead><tr><th>คอร์ส</th><th>เดือน</th><th>ยอดชำระ</th></tr></thead><tbody>' + rows + '</tbody></table>' +
         '<div class="tuition-total"><span>ยอดชำระรวม</span><span>' + escapeHtml(formatPrice(group.totalAmount)) + '</span></div>' +
@@ -37774,7 +37929,7 @@
           '</div>' +
         '</div>' +
         '<div class="notice-body">' +
-          '<p style="margin:0 0 8px;">เรียน คุณผู้ปกครองของ <strong>' + escapeHtml(studentName) + '</strong>' +
+          '<p style="margin:0 0 8px;">เรียน คุณผู้ปกครองของ <strong>' + escapeHtml(getStudentDisplayName({ studentName: studentName }, student)) + '</strong>' +
             (studentGrade ? ' (' + escapeHtml(studentGrade) + ')' : '') +
             (studentMemberId ? ' <span style="color:#6b7280;font-size:13px;">[' + escapeHtml(studentMemberId) + ']</span>' : '') +
           '</p>' +
@@ -38064,7 +38219,7 @@ function receiptStatusText(status) {
           '<div style="min-width:0;"><div class="receipt-title" style="font-size:24px; font-weight:800; color:#0f4cbd;">IDEA CLUB</div><p>ใบเสร็จ / ใบยืนยันการชำระเงิน</p><p style="color:#6b7280;">Payment Receipt</p></div>' +
           '<div class="receipt-meta" style="text-align:right; font-size:12px; line-height:1.35; overflow-wrap:anywhere;"><strong>เลขที่</strong><br>' + receipt.receiptNo + '<br><br><strong>วันที่อนุมัติ</strong><br>' + receipt.approvedDate + '</div>' +
         '</div>' +
-        '<div class="receipt-line"><strong>ชื่อนักเรียน</strong><span>' + receipt.student + '</span></div>' +
+        '<div class="receipt-line"><strong>ชื่อนักเรียน</strong><span>' + escapeHtml(getStudentDisplayName(receipt)) + '</span></div>' +
         '<div class="receipt-line"><strong>คอร์สเรียน</strong><span>' + receipt.course + '</span></div>' +
         '<div class="receipt-line"><strong>เดือนที่ชำระ</strong><span>' + getReceiptMonth(receipt) + '</span></div>' +
         '<div class="receipt-line"><strong>สถานะ</strong><span>ชำระแล้ว</span></div>' +
@@ -38179,7 +38334,7 @@ function receiptStatusText(status) {
       ctx.stroke();
 
       let y = 390;
-      y = drawReceiptLine(ctx, 'ชื่อนักเรียน', receipt.student, y);
+      y = drawReceiptLine(ctx, 'ชื่อนักเรียน', getStudentDisplayName(receipt), y);
       y = drawReceiptLine(ctx, 'คอร์สเรียน', receipt.course, y);
       y = drawReceiptLine(ctx, 'เดือนที่ชำระ', receipt.month || '-', y);
       y = drawReceiptLine(ctx, 'สถานะ', 'ชำระแล้ว', y);
@@ -38369,7 +38524,7 @@ function receiptStatusText(status) {
       const arStart = (adminReceiptsCurrentPage - 1) * LIST_PAGE_SIZE;
       const arItems = filtered.slice(arStart, arStart + LIST_PAGE_SIZE);
       tbody.innerHTML = arItems.length ? arItems.map(function(r) {
-        return '<tr><td>' + (r.receiptNo || '-') + '</td><td>' + (r.student || '-') + '</td><td>' + (r.course || '-') + '</td><td>' + getReceiptMonth(r) + '</td><td>' + formatPrice(getReceiptDisplayTotal(r)) + '</td><td>' + receiptStatusText(r.status) + '</td><td>' + renderAdminReceiptActions(r) + '</td></tr>';
+        return '<tr><td>' + (r.receiptNo || '-') + '</td><td>' + escapeHtml(getStudentDisplayName(r)) + '</td><td>' + (r.course || '-') + '</td><td>' + getReceiptMonth(r) + '</td><td>' + formatPrice(getReceiptDisplayTotal(r)) + '</td><td>' + receiptStatusText(r.status) + '</td><td>' + renderAdminReceiptActions(r) + '</td></tr>';
       }).join('') : '<tr><td colspan="7">ยังไม่มีใบเสร็จตามเงื่อนไขที่เลือก</td></tr>';
       renderTablePagination('adminReceiptsPagination', adminReceiptsCurrentPage, arTotalPages, filtered.length, 'changeAdminReceiptsPage');
 
@@ -40145,7 +40300,7 @@ function receiptStatusText(status) {
         { subject: 'ภาษาอังกฤษ', score: 0, max: 0, min: 0, avg: 0 }
       ]);
 
-      if (getElement('scoreHistoryStudentName')) getElement('scoreHistoryStudentName').textContent = currentStudent ? (currentStudent.name || '-') : '-';
+      if (getElement('scoreHistoryStudentName')) getElement('scoreHistoryStudentName').textContent = currentStudent ? getStudentDisplayName(currentStudent) : '-';
       if (getElement('latestScoreMonth')) getElement('latestScoreMonth').textContent = selectedMonth || '-';
 
       if (getElement('scoreHistoryTitle')) getElement('scoreHistoryTitle').textContent = 'ใบประกาศคะแนน: Monthly Test ' + (selectedMonth || '-') + ' · ' + (selectedGrade || '-');
@@ -40486,19 +40641,7 @@ function receiptStatusText(status) {
     }
 
     function findStudentForScoreRecord(record) {
-      if (!record) return null;
-      if (!_studentLookupMap.size) rebuildStudentLookupMap();
-      const ids = [record.studentId, record.memberId, record.studentMemberId, record.authUid];
-      for (var i = 0; i < ids.length; i++) {
-        if (!ids[i]) continue;
-        var s = _studentLookupMap.get(String(ids[i]).trim());
-        if (s) return s;
-      }
-      if (record.student) {
-        var s2 = _studentLookupMap.get('n:' + String(record.student).trim());
-        if (s2) return s2;
-      }
-      return null;
+      return findStudentForDisplay(record);
     }
 
     function getScoreRecordMemberId(record) {
@@ -40571,7 +40714,7 @@ function receiptStatusText(status) {
     function renderScoreRecordStudentCell(record) {
       const student = findStudentForScoreRecord(record);
       const displayName = (record && record.student) || (student && student.name) || '-';
-      const nickname = (record && record.nickname && record.nickname !== '-') ? record.nickname : (student && student.nickname);
+      const nickname = getStudentDisplayNickname(record, student);
       const memberId = getScoreRecordMemberId(record);
       return '<strong>' + escapeHtml(displayName) + '</strong>' +
         (nickname ? '<br><span class="mini-muted">ชื่อเล่น: ' + escapeHtml(nickname) + '</span>' : '') +
@@ -40686,7 +40829,7 @@ function receiptStatusText(status) {
       const idx = adminScoreRecords.findIndex(function(r) { return String(r.id) === String(recordId); });
       if (idx === -1) return;
       const record = adminScoreRecords[idx];
-      if (!confirm('ลบคะแนนวิชา "' + subject + '" ของ "' + (record.student || '-') + '" และให้ทำข้อสอบใหม่?')) return;
+      if (!confirm('ลบคะแนนวิชา "' + subject + '" ของ "' + getStudentDisplayName(record) + '" และให้ทำข้อสอบใหม่?')) return;
 
       const resultEl = getElement('scoreAdjustResult');
       const backupScore = record.scores ? record.scores[subject] : undefined;
@@ -40754,7 +40897,7 @@ function receiptStatusText(status) {
 
       addActivityLog('ลบคะแนน + รีเซ็ตข้อสอบ', (record.student || '-') + ' · ' + subject + (resetCount ? ' (รีเซ็ต ' + resetCount + ' ผลสอบ)' : ''));
       if (resultEl) {
-        resultEl.textContent = 'ลบคะแนนวิชา ' + subject + ' ของ ' + (record.student || '-') + ' แล้ว' +
+        resultEl.textContent = 'ลบคะแนนวิชา ' + subject + ' ของ ' + getStudentDisplayName(record) + ' แล้ว' +
           (resetCount ? ' — รีเซ็ตผลสอบ ' + resetCount + ' รายการ นักเรียนทำใหม่ได้' : ' — ไม่พบผลสอบออนไลน์ที่ตรงกัน');
         resultEl.style.color = '#16a34a';
       }
@@ -40764,7 +40907,7 @@ function receiptStatusText(status) {
       const idx = adminScoreRecords.findIndex(function(r) { return String(r.id) === String(recordId); });
       if (idx === -1) return;
       const record = adminScoreRecords[idx];
-      if (!confirm('ยืนยันยกเลิกคะแนนของ "' + (record.student || '-') + '"?')) return;
+      if (!confirm('ยืนยันยกเลิกคะแนนของ "' + getStudentDisplayName(record) + '"?')) return;
       adminScoreRecords.splice(idx, 1);
       renderAdminScoreTables();
       const result = getElement('scoreAdjustResult');
@@ -41169,7 +41312,7 @@ function receiptStatusText(status) {
         const id = getStudentPrivateLessonReferenceId(student);
         const learningType = String(student.learningType || 'group').toLowerCase();
         const privateTag = isPrivateLessonStudentEnabled(student) ? ' · 1:1 พร้อมใช้' : ' · group';
-        const label = (student.name || student.nickname || id) + (student.grade ? ' · ' + student.grade : '') + (student.preferredLocation ? ' · ' + student.preferredLocation : '') + (learningType ? privateTag : '');
+        const label = getStudentDisplayName(student) + (student.grade ? ' · ' + student.grade : '') + (student.preferredLocation ? ' · ' + student.preferredLocation : '') + (learningType ? privateTag : '');
         return '<option value="' + escapeHtml(id) + '">' + escapeHtml(label) + '</option>';
       }).join('');
       select.value = activeStudents.some(function(student) {
@@ -41657,7 +41800,7 @@ function receiptStatusText(status) {
               '<div class="grid-card-row"><span class="grid-card-label">' + escapeHtml(getMonthlyPlanTypeText(sessionType)) + '</span><span class="grid-card-time">' + escapeHtml(formatMonthlySessionTimeRange(session)) + '</span></div>' +
               '<div class="grid-card-teacher">' + escapeHtml(isMonthlySessionAwaitingTeacher(session) ? 'รอเลือกครู' : (getMonthlyPlanTeacherName(session) || '-')) + '</div>' +
               '<div><strong>' + escapeHtml(getSessionDisplaySubject(session) || '-') + '</strong></div>' +
-              (session.type === 'oneOnOne' ? '<div class="grid-card-topic">นักเรียน: ' + escapeHtml(session.studentName || session.studentMemberId || '-') + '</div>' : '') +
+              (session.type === 'oneOnOne' ? '<div class="grid-card-topic">นักเรียน: ' + escapeHtml(getStudentDisplayName(session)) + '</div>' : '') +
               '<div class="grid-card-topic">' + escapeHtml(session.topic || '-') + '</div>' +
               '<div class="grid-card-badges">' + getMonthlyPlanExtraBadges(session) + '</div>' +
             '</div>';
@@ -42046,7 +42189,7 @@ function receiptStatusText(status) {
         '<div class="monthly-planner-mobile-meta">' + escapeHtml(getMonthlyPlanCourseName(session) || '-') + '</div>' +
         '<div>วิชา: <strong>' + escapeHtml(getSessionDisplaySubject(session) || 'ยังไม่กำหนดวิชา') + '</strong></div>' +
         '<div class="monthly-planner-mobile-muted">ครู: ' + escapeHtml(isMonthlySessionAwaitingTeacher(session) ? 'รอเลือกครู' : (getMonthlyPlanTeacherName(session) || '-')) + '</div>' +
-        (isOneOnOne ? '<div class="monthly-planner-mobile-muted">นักเรียน: ' + escapeHtml(session.studentName || session.studentMemberId || '-') + '</div>' : '') +
+        (isOneOnOne ? '<div class="monthly-planner-mobile-muted">นักเรียน: ' + escapeHtml(getStudentDisplayName(session)) + '</div>' : '') +
         '<div class="monthly-planner-mobile-muted">หัวข้อ: ' + escapeHtml(session.topic || session.objective || '-') + '</div>' +
         '<div class="monthly-planner-mobile-badges"><span class="' + getMonthlyPlanStatusClass(status) + '">' + escapeHtml(getMonthlyPlanStatusText(status)) + '</span>' + getMonthlyPlannerMobileBadges(session) + '</div>' +
         '<div class="monthly-planner-mobile-actions">' + actions.join('') + '</div>' +
@@ -43159,7 +43302,7 @@ function receiptStatusText(status) {
         '<div>' + escapeHtml(getMonthlyPlanCourseName(session) || '-') + ' · ' + escapeHtml(getMonthlyPlanTypeText(session.type || 'onsite')) + '</div>' +
         (session.isSharedClass && getMonthlySessionGradeLabel(session) ? '<div class="mini-muted">รวมคลาส: ' + escapeHtml(getMonthlySessionGradeLabel(session)) + '</div>' : '') +
         (session.center ? '<div class="mini-muted">📍 ' + escapeHtml(session.center) + '</div>' : '') +
-        (session.type === 'oneOnOne' && session.studentName ? '<div class="mini-muted">นักเรียน: ' + escapeHtml(session.studentName) + '</div>' : '') +
+        (session.type === 'oneOnOne' && session.studentName ? '<div class="mini-muted">นักเรียน: ' + escapeHtml(getStudentDisplayName(session)) + '</div>' : '') +
         '<div><span class="' + statusClass + '">' + escapeHtml(getMonthlySessionStatusLabel(session) || 'ตารางสอน') + '</span>' +
         (session.isRescheduled ? ' <span class="mini-muted">· ย้ายวัน</span>' : '') + '</div>' +
       '</div>';
@@ -43278,7 +43421,7 @@ function receiptStatusText(status) {
       if (studentSelect) {
         studentSelect.innerHTML = '<option value="">เลือกนักเรียน</option>' + availableStudents.map(function(student) {
           const id = getStudentPrivateLessonReferenceId(student);
-          const label = [student.name || student.nickname || id, student.nickname ? 'ชื่อเล่น ' + student.nickname : '', student.grade || '', student.memberId || ''].filter(Boolean).join(' · ');
+          const label = [getStudentDisplayName(student), student.grade || '', student.memberId || ''].filter(Boolean).join(' · ');
           return '<option value="' + escapeHtml(id) + '">' + escapeHtml(label) + '</option>';
         }).join('');
         studentSelect.value = availableStudents.some(function(student) { return getStudentPrivateLessonReferenceId(student) === currentStudent; }) ? currentStudent : '';
@@ -43590,7 +43733,7 @@ function receiptStatusText(status) {
       return '<div class="simple-schedule-card simple-schedule-card-' + escapeHtml(typeKey) + '">' +
         '<strong>' + escapeHtml(formatMonthlySessionTimeRange(session) || '-') + '</strong>' +
         '<div><strong>' + escapeHtml(getSessionDisplaySubject(session) || '-') + (isOneOnOne ? ' 1:1' : '') + '</strong></div>' +
-        '<div>' + escapeHtml(isOneOnOne ? (session.studentName || session.studentMemberId || '-') : (getMonthlyPlanCourseName(session) || '-')) + '</div>' +
+        '<div>' + escapeHtml(isOneOnOne ? getStudentDisplayName(session) : (getMonthlyPlanCourseName(session) || '-')) + '</div>' +
         '<div class="mini-muted">ครู: ' + escapeHtml(getMonthlyPlanTeacherName(session) || '-') + '</div>' +
         '<div class="mini-muted">' + escapeHtml(getSimpleScheduleLocationText(session)) + ' / ' + escapeHtml(getMonthlyPlanTypeText(typeKey)) + '</div>' +
         '<div class="simple-schedule-card-actions">' +
@@ -45803,7 +45946,7 @@ function receiptStatusText(status) {
           '<td>' + escapeHtml(getMonthlyPlanDateText(item)) + '<br><span class="mini-muted">' + escapeHtml(getMonthlyPlanDayText(item.dayName || '')) + '</span></td>' +
           '<td>' + escapeHtml(getMonthlyPlanCourseName(item)) + '</td>' +
           '<td>' + escapeHtml(isMonthlySessionAwaitingTeacher(item) ? 'รอเลือกครู' : (getMonthlyPlanTeacherName(item) || '-')) + '</td>' +
-          '<td><span class="tag">' + escapeHtml(getMonthlyPlanTypeText(item.type)) + '</span><br><strong>' + escapeHtml(item.subject || 'ยังไม่กำหนดวิชา') + '</strong>' + (item.type === 'oneOnOne' ? '<br><span class="mini-muted">นักเรียน: ' + escapeHtml(item.studentName || item.studentMemberId || '-') + '</span>' : '') + '<br><span class="mini-muted">' + escapeHtml(item.topic || item.objective || '') + '</span></td>' +
+          '<td><span class="tag">' + escapeHtml(getMonthlyPlanTypeText(item.type)) + '</span><br><strong>' + escapeHtml(item.subject || 'ยังไม่กำหนดวิชา') + '</strong>' + (item.type === 'oneOnOne' ? '<br><span class="mini-muted">นักเรียน: ' + escapeHtml(getStudentDisplayName(item)) + '</span>' : '') + '<br><span class="mini-muted">' + escapeHtml(item.topic || item.objective || '') + '</span></td>' +
           '<td><span class="' + getMonthlyPlanStatusClass(status) + '">' + getMonthlyPlanStatusText(status) + '</span>' + getMonthlyPlanConflictBadge(item) + getMonthlyPlanExtraBadges(item) + '</td>' +
           '<td>' + escapeHtml(item.updatedAtText || item.createdAtText || '-') + '</td>' +
           '<td>' + actionButtons + '</td>' +
@@ -45896,7 +46039,7 @@ function receiptStatusText(status) {
         if (getElement('monthlyPlanObjective') && !getElement('monthlyPlanObjective').value) getElement('monthlyPlanObjective').value = 'คาบเรียนเดี่ยว 1:1 · ' + billingText;
       }
       if (result) {
-        result.textContent = 'เลือกนักเรียน 1:1: ' + (student.name || student.nickname || '-') + ' · ข้อมูลนี้เป็นวันประจำสัปดาห์ กรุณาเลือกวันที่เรียนจริงก่อนบันทึก';
+        result.textContent = 'เลือกนักเรียน 1:1: ' + getStudentDisplayName(student) + ' · ข้อมูลนี้เป็นวันประจำสัปดาห์ กรุณาเลือกวันที่เรียนจริงก่อนบันทึก';
         result.style.color = '#16a34a';
       }
       updateMonthlyPlanConflictPreview();
@@ -46694,11 +46837,12 @@ function receiptStatusText(status) {
       addActivityLog('Export ข้อมูลนักเรียน', 'ดาวน์โหลด CSV รายชื่อนักเรียน');
     }
 
-    function exportPaymentsCsv() {
+    async function exportPaymentsCsv() {
+      await loadStudentDisplayRecords(getFilteredPaymentsForTable());
       const rows = [['นักเรียน','ชื่อเล่น','คอร์ส','เดือนที่ชำระ','ยอดเงิน','สถานะ','หมายเหตุ Admin','แจ้งเมื่อ']];
       getFilteredPaymentsForTable().forEach(function(p) {
         const student = getPaymentStudentRecord(p) || {};
-        const nickname = p.nickname || p.studentNickname || student.nickname || '';
+        const nickname = getStudentDisplayNickname(p, student);
         rows.push([p.student || student.name || '', nickname, p.course || '', p.month || '', p.amount || '', p.status || '', p.adminNote || '', p.createdAtText || '']);
       });
       downloadCsv('idea-club-payments.csv', rows);
@@ -47349,7 +47493,7 @@ function receiptStatusText(status) {
             const slipUrl = getPaymentSlipUrl(p);
             const driveButton = slipUrl ? '<a class="btn btn-blue" href="' + escapeHtml(slipUrl) + '" target="_blank" rel="noopener">เปิดสลิป</a>' : '';
             const kindText = p.uploadKind === 'bundle' ? 'ยอดรวม' : (p.driveGradeFolderName || p.grade || p.studentGrade || '-');
-            return '<div class="status-display-row"><span><strong>' + escapeHtml(p.studentName || p.student || '-') + '</strong><br><span style="color:#6b7280;">' +
+            return '<div class="status-display-row"><span><strong>' + escapeHtml(getStudentDisplayName(p)) + '</strong><br><span style="color:#6b7280;">' +
               escapeHtml((p.month || '-') + ' · ' + kindText + ' · อัปโหลดโดย ' + (p.slipUploadedByName || p.slipUploadedByUid || '-')) +
               '<br>เวลา: ' + escapeHtml(uploadedText) + '</span></span>' + driveButton + '</div>';
           }).join('') +
@@ -47825,7 +47969,7 @@ function receiptStatusText(status) {
       const data = getPaymentDataFromRow(row);
       const message = [
         'แจ้งชำระค่าเรียน IDEA CLUB',
-        'นักเรียน: ' + (data.student || '-'),
+        'นักเรียน: ' + getStudentDisplayName(data),
         'คอร์ส: ' + (data.course || '-'),
         'เดือนที่ชำระ: ' + (data.month || '-'),
         'ยอดชำระ: ' + (data.amount || '-') + ' บาท',
@@ -47840,7 +47984,7 @@ function receiptStatusText(status) {
       const data = getPaymentDataFromRow(row);
       const message = [
         'แจ้งยอดค้างชำระ IDEA CLUB',
-        'นักเรียน: ' + (data.student || '-'),
+        'นักเรียน: ' + getStudentDisplayName(data),
         'คอร์ส: ' + (data.course || '-'),
         'เดือนที่ค้างชำระ: ' + (data.month || '-'),
         'ยอดชำระ: ' + (data.amount || '-') + ' บาท',
@@ -47986,7 +48130,7 @@ function receiptStatusText(status) {
       const rows = recent.latest.map(function(item) {
         const s = item.student || {};
         const timeText = item.createdDate ? item.createdDate.toLocaleString('th-TH') : (s.registeredAtText || s.createdAtText || 'ไม่พบเวลาสมัคร');
-        return '<div class="feature-warning"><strong>' + escapeHtml(s.name || '-') + '</strong><p>' +
+        return '<div class="feature-warning"><strong>' + escapeHtml(getStudentDisplayName(s)) + '</strong><p>' +
           escapeHtml((s.grade || '-') + ' · ' + (s.phone || '-') + ' · ' + (s.courseStatus || s.course || 'ยังไม่ได้สมัครคอร์ส')) +
           '</p><p class="mini-muted">สมัครเมื่อ: ' + escapeHtml(timeText) + '</p></div>';
       }).join('');
@@ -48097,7 +48241,7 @@ function receiptStatusText(status) {
       }).slice(0, 30);
       const sampleRows = samples.length ? samples.map(function(item) {
         const payment = list.find(function(p) { return getPaymentDocId(p) === item.paymentId; }) || {};
-        return '<tr><td>' + escapeHtml(item.paymentId || '-') + '</td><td>' + escapeHtml(payment.studentName || payment.student || '-') + '</td><td>' + escapeHtml(item.memberId || '-') + '</td><td>' + escapeHtml(item.studentId || '-') + '</td><td>' + escapeHtml(item.studentAuthUid || '-') + '</td><td>' + escapeHtml(item.expectedAmount || '-') + '</td></tr>';
+        return '<tr><td>' + escapeHtml(item.paymentId || '-') + '</td><td>' + escapeHtml(getStudentDisplayName(payment)) + '</td><td>' + escapeHtml(item.memberId || '-') + '</td><td>' + escapeHtml(item.studentId || '-') + '</td><td>' + escapeHtml(item.studentAuthUid || '-') + '</td><td>' + escapeHtml(item.expectedAmount || '-') + '</td></tr>';
       }).join('') : '<tr><td colspan="6">ไม่พบรายการที่ต้องตรวจสอบ</td></tr>';
 
       openViewBubble('ตรวจ payment ที่ขาดข้อมูลนักเรียน',
@@ -48298,7 +48442,7 @@ function receiptStatusText(status) {
       const results = data && Array.isArray(data.results) ? data.results : [];
       const rows = (isDeleteRun ? results : candidates).slice(0, 20).map(function(item) {
         return '<div class="status-display-row"><span class="status-label">' +
-          escapeHtml((item.studentName || '-') + ' · ' + (item.memberId || '-') + ' · ' + (item.email || item.uid || '-')) +
+          escapeHtml(getStudentDisplayName(item) + ' · ' + (item.memberId || '-') + ' · ' + (item.email || item.uid || '-')) +
           '</span><strong>' + escapeHtml(item.status || 'พร้อมลบ') + '</strong></div>';
       }).join('');
       const skippedRows = skipped.slice(0, 10).map(function(item) {
@@ -48520,7 +48664,7 @@ function receiptStatusText(status) {
         ? 'พบนักเรียนคนนี้มีประวัติผูกกับระบบ เช่น การเงิน/คะแนน/ตารางเรียน/ระบบตัวละคร\n\nปุ่มนี้จะลบประวัตินักเรียน record นี้ออกจาก Firebase จริง และถ้า Member ID เป็นลำดับล่าสุดจะลดตัวนับให้\n\nข้อมูลรายการอื่นที่เคยผูกกับนักเรียนอาจยังอยู่ในระบบตาม collection เดิม'
         : 'ปุ่มนี้จะลบประวัตินักเรียน record นี้ออกจาก Firebase จริง และถ้า Member ID เป็นลำดับล่าสุดจะลดตัวนับให้';
       if (!confirm(warning + '\n\nกด OK เพื่อยืนยันลบประวัติถาวร\nกด Cancel เพื่อยกเลิก')) return;
-      if (!confirm('ยืนยันอีกครั้ง: ต้องการลบประวัติของ ' + (student.name || '-') + ' ถาวรใช่ไหม?')) return;
+      if (!confirm('ยืนยันอีกครั้ง: ต้องการลบประวัติของ ' + getStudentDisplayName(student) + ' ถาวรใช่ไหม?')) return;
       try {
         await hardDeleteStudentRecordAndRecalibrate(student, 'hard_delete_student_history', 'ลบประวัตินักเรียนออกจาก Firebase');
         alert('ลบประวัตินักเรียนออกจาก Firebase แล้ว และปรับเลข Member ID ล่าสุดตามข้อมูลที่เหลือ');
@@ -48916,6 +49060,7 @@ function receiptStatusText(status) {
      * render ลงตาราง Student Database และ populate select สำหรับ OCR
      */
     async function loadStudentsFromFirebase() {
+      const displaySessionUid = firebaseUser && firebaseUser.uid, displaySessionVersion = studentDataSessionVersion;
       if (!hasPermission('admin.exams')) return;
       if (!firebaseReady || !db) return;
       const gradeFilter = ((getElement('examProcGradeFilter') || {}).value) || 'ทั้งหมด';
@@ -48940,6 +49085,9 @@ function receiptStatusText(status) {
         examStudentUsers = [];
       }
 
+      await loadStudentDisplayRecords(examStudentUsers.map(function(user) { return Object.assign({}, user, { studentUid: user.uid, studentName: user.name || user.displayName || user.firstName }); }));
+      if (!firebaseUser || firebaseUser.uid !== displaySessionUid || studentDataSessionVersion !== displaySessionVersion) return;
+
       // render ตาราง Student Database
       if (dbArea) {
         if (!examStudentUsers.length) {
@@ -48951,7 +49099,7 @@ function receiptStatusText(status) {
             '</tr></thead><tbody>' +
             examStudentUsers.map(function(u) {
               const uid = u.uid || u.authUid || '';
-              const name = u.name || u.displayName || u.firstName || uid;
+              const name = getStudentDisplayName({ studentUid: uid, studentName: u.name || u.displayName || u.firstName, nickname: u.nickname });
               const memberId = u.memberId || u.studentId || '-';
               const grade = u.grade || u.gradeLevel || '-';
               const status = u.status || 'active';
@@ -48972,7 +49120,7 @@ function receiptStatusText(status) {
         select.innerHTML = '<option value="">— เลือกนักเรียน —</option>' +
           examStudentUsers.map(function(u) {
             const uid = u.uid || u.authUid || '';
-            const name = u.name || u.displayName || u.firstName || uid;
+            const name = getStudentDisplayName({ studentUid: uid, studentName: u.name || u.displayName || u.firstName, nickname: u.nickname });
             const grade = u.grade || u.gradeLevel || '-';
             const memberId = u.memberId || u.studentId || '';
             return '<option value="' + escapeHtml(uid) + '">' +
@@ -49216,7 +49364,7 @@ function receiptStatusText(status) {
         if (resultEl) {
           resultEl.style.color = color;
           resultEl.textContent = (passed ? '✅ ผ่าน' : '❌ ไม่ผ่าน') + ' — ' +
-            escapeHtml(studentName || studentUid) + ': ' +
+            escapeHtml(getStudentDisplayName({ studentUid: studentUid, studentName: studentName })) + ': ' +
             correct + '/' + total + ' (' + scorePercent + '%)' +
             (weakTopics.length ? ' · Weak: ' + weakTopics.join(', ') : '');
         }
@@ -49261,6 +49409,7 @@ function receiptStatusText(status) {
      * ใช้ orderBy('createdAt','desc') + fallback ถ้า index ยังไม่พร้อม
      */
     async function loadAndRenderReports() {
+      const displaySessionUid = firebaseUser && firebaseUser.uid, displaySessionVersion = studentDataSessionVersion;
       if (!hasPermission('admin.exams')) return;
       if (!firebaseReady || !db) return;
       const container = getElement('examReportArea');
@@ -49279,6 +49428,8 @@ function receiptStatusText(status) {
           return;
         }
       }
+      await loadStudentDisplayRecords(examResultsCache);
+      if (!firebaseUser || firebaseUser.uid !== displaySessionUid || studentDataSessionVersion !== displaySessionVersion) return;
       renderReports();
     }
 
@@ -49340,7 +49491,7 @@ function receiptStatusText(status) {
         return '<div style="border:1px solid ' + cardBorder + ';background:' + cardBg + ';border-radius:8px;padding:12px 14px;margin-bottom:10px;">' +
           '<div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:8px;">' +
             '<div>' +
-              '<div style="font-weight:bold;">' + escapeHtml(r.studentName || r.studentId || '-') + '</div>' +
+              '<div style="font-weight:bold;">' + escapeHtml(getStudentDisplayName(r)) + '</div>' +
               '<div style="font-size:0.85em;color:#6b7280;">' +
                 escapeHtml(r.grade || '-') + ' · ' + escapeHtml(r.subject || '-') +
                 ' · Test: ' + escapeHtml(r.testId || '-') +
@@ -49446,7 +49597,7 @@ function receiptStatusText(status) {
       }
 
       if (!area) return;
-      let html = '<h4 style="margin-bottom:8px;">' + escapeHtml(examProcActiveName) + '</h4>';
+      let html = '<h4 style="margin-bottom:8px;">' + escapeHtml(getStudentDisplayName({ studentUid: uid, studentName: examProcActiveName, nickname: student && student.nickname })) + '</h4>';
 
       if (!studentResults.length) {
         html += '<p style="color:#6b7280;">ยังไม่มีผลสอบในระบบสำหรับนักเรียนคนนี้</p>';
@@ -51691,10 +51842,7 @@ function receiptStatusText(status) {
     }
 
     function getOnlineExamResultNickname(result) {
-      const direct = String((result && (result.nickname || result.studentNickname)) || '').trim();
-      if (direct && direct !== '-') return direct;
-      const student = findStudentForOnlineExamResult(result);
-      return student ? String(student.nickname || '').trim() : '';
+      return getStudentDisplayNickname(result);
     }
 
     function formatOnlineExamSubmittedAtShort(result) {
@@ -51982,7 +52130,7 @@ function receiptStatusText(status) {
       if (!group) return;
       const result = group.resultsBySubject[subject];
       if (!result) { alert('ไม่พบผลสอบวิชา ' + subject); return; }
-      if (!confirm('ลบผลสอบวิชา "' + subject + '" ของ "' + (group.studentName || '-') + '"?\nนักเรียนจะสามารถทำข้อสอบใหม่ได้')) return;
+      if (!confirm('ลบผลสอบวิชา "' + subject + '" ของ "' + getStudentDisplayName(group) + '"?\nนักเรียนจะสามารถทำข้อสอบใหม่ได้')) return;
       try {
         await db.collection('onlineExamResults').doc(result._docId).delete();
         onlineExamGradeAllResults = onlineExamGradeAllResults.filter(function(r) { return r._docId !== result._docId; });
@@ -52015,7 +52163,7 @@ function receiptStatusText(status) {
       record.status = record.status || 'draft';
       onlineExamDirtyGroups[groupKey] = true;
       if (resultEl) {
-        resultEl.textContent = 'ปรับ ' + subject + ' ของ ' + (group.studentName || '-') + ' เป็นถูก ' + nextCorrect + '/' + data.total + ' · กดปุ่ม "บันทึก" เพื่อยืนยัน';
+        resultEl.textContent = 'ปรับ ' + subject + ' ของ ' + getStudentDisplayName(group) + ' เป็นถูก ' + nextCorrect + '/' + data.total + ' · กดปุ่ม "บันทึก" เพื่อยืนยัน';
         resultEl.style.color = '#d97706';
       }
       renderOnlineExamGradingPage(onlineExamGradePage);
@@ -52030,7 +52178,7 @@ function receiptStatusText(status) {
       if (!record) return;
       const resultEl = getElement('scoreAdjustResult');
       const isPublished = record.status === 'published' || group.results.some(function(r) { return r.resultStatus === 'published'; });
-      if (isPublished && !confirm('คะแนนของ "' + (group.studentName || '-') + '" ประกาศผลแล้ว\nต้องการบันทึกคะแนนที่แก้ไขลงในผลที่ประกาศแล้วหรือไม่?')) return;
+      if (isPublished && !confirm('คะแนนของ "' + getStudentDisplayName(group) + '" ประกาศผลแล้ว\nต้องการบันทึกคะแนนที่แก้ไขลงในผลที่ประกาศแล้วหรือไม่?')) return;
       try {
         await setFirebaseDocument('adminScoreRecords', record);
         await syncScoreReportFromAdmin(group.month, group.grade, record.status || 'draft');
@@ -52040,7 +52188,7 @@ function receiptStatusText(status) {
         renderScoreHistoryByMonth();
         renderStudentExamFilters();
         if (resultEl) {
-          resultEl.textContent = 'บันทึกการปรับคะแนนของ "' + (group.studentName || '-') + '" เรียบร้อยแล้ว';
+          resultEl.textContent = 'บันทึกการปรับคะแนนของ "' + getStudentDisplayName(group) + '" เรียบร้อยแล้ว';
           resultEl.style.color = '#16a34a';
         }
       } catch (error) {
@@ -52077,7 +52225,7 @@ function receiptStatusText(status) {
       safeRun(renderAdminScoreTables, 'admin-score-refresh-after-group-publish');
       const resultEl = getElement('scoreAdjustResult');
       if (resultEl && failed) {
-        resultEl.textContent = 'ประกาศผลของ "' + (group.studentName || '-') + '" สำเร็จ ' + count + ' วิชา · ไม่สำเร็จ ' + failed + ' วิชา';
+        resultEl.textContent = 'ประกาศผลของ "' + getStudentDisplayName(group) + '" สำเร็จ ' + count + ' วิชา · ไม่สำเร็จ ' + failed + ' วิชา';
         resultEl.style.color = '#d97706';
       }
       return count;
@@ -52104,7 +52252,7 @@ function receiptStatusText(status) {
       if (!hasPermission('admin.onlineExams')) { alert('ไม่มีสิทธิ์'); return; }
       const group = findOnlineExamGroupedRow(groupKey);
       if (!group || !group.results.length) return;
-      if (!confirm((allowRetake ? 'เปิดสิทธิ์ทำใหม่' : 'ปิดสิทธิ์ทำใหม่') + ' ให้ ' + (group.studentName || '-') + ' ทุกวิชาในแถวนี้?')) return;
+      if (!confirm((allowRetake ? 'เปิดสิทธิ์ทำใหม่' : 'ปิดสิทธิ์ทำใหม่') + ' ให้ ' + getStudentDisplayName(group) + ' ทุกวิชาในแถวนี้?')) return;
       for (var i = 0; i < group.results.length; i++) {
         try {
           await db.collection('onlineExamResults').doc(group.results[i]._docId).set({
@@ -52127,7 +52275,7 @@ function receiptStatusText(status) {
       if (!hasPermission('admin.onlineExams')) { alert('ไม่มีสิทธิ์'); return; }
       const group = findOnlineExamGroupedRow(groupKey);
       if (!group || !group.results.length) return;
-      if (!confirm('ลบผลสอบของ "' + (group.studentName || '-') + '" ทุกวิชาในแถวนี้? นักเรียนจะสามารถทำข้อสอบใหม่ได้อีกครั้ง')) return;
+      if (!confirm('ลบผลสอบของ "' + getStudentDisplayName(group) + '" ทุกวิชาในแถวนี้? นักเรียนจะสามารถทำข้อสอบใหม่ได้อีกครั้ง')) return;
       const docIds = group.results.map(function(result) { return result._docId; });
       for (var i = 0; i < docIds.length; i++) {
         try {
@@ -52181,6 +52329,7 @@ function receiptStatusText(status) {
     }
 
     async function loadOnlineExamResultsForGradeScope(scope, forceRefresh) {
+      const displaySessionUid = firebaseUser && firebaseUser.uid, displaySessionVersion = studentDataSessionVersion;
       const filter = scope || getOnlineExamGradeFilterScope();
       const cacheKey = getOnlineExamGradeResultCacheKey(filter);
       if (!forceRefresh && onlineExamGradeResultCacheLoaded && onlineExamGradeResultCacheKey === cacheKey) {
@@ -52216,6 +52365,8 @@ function receiptStatusText(status) {
       }
       onlineExamGradeResultCacheKey = cacheKey;
       onlineExamGradeResultCache = Object.keys(byId).map(function(id) { return byId[id]; });
+      await loadStudentDisplayRecords(onlineExamGradeResultCache);
+      if (!firebaseUser || firebaseUser.uid !== displaySessionUid || studentDataSessionVersion !== displaySessionVersion) return [];
       onlineExamGradeResultCacheLoaded = true;
       return onlineExamGradeResultCache.slice();
     }
@@ -52274,7 +52425,7 @@ function receiptStatusText(status) {
       const lines = (item.missingCourses || []).map(function(course, i) {
         return (i + 1) + '. ' + [course.examMonth || '', getOnlineExamCourseGrade(course) || '', course.subject || '', getOnlineExamCourseLocationLabel(course), course.title || ''].filter(Boolean).join(' · ');
       });
-      alert('ชุดข้อสอบที่ยังไม่ได้ทำของ ' + (student.name || '-') + '\n\n' + (lines.join('\n') || 'ไม่พบรายการ'));
+      alert('ชุดข้อสอบที่ยังไม่ได้ทำของ ' + getStudentDisplayName(student) + '\n\n' + (lines.join('\n') || 'ไม่พบรายการ'));
     }
 
     function showOnlineExamMissingStudentList() {
@@ -52373,7 +52524,7 @@ function receiptStatusText(status) {
           seen[key] = true;
           const opt = document.createElement('option');
           opt.value = key;
-          opt.textContent = (data.studentName || '') + (getOnlineExamResultMemberId(data) ? ' (' + getOnlineExamResultMemberId(data) + ')' : '');
+          opt.textContent = getStudentDisplayName(data) + (getOnlineExamResultMemberId(data) ? ' (' + getOnlineExamResultMemberId(data) + ')' : '');
           studentSel.appendChild(opt);
         });
         if (currentStudentUid && seen[currentStudentUid]) studentSel.value = currentStudentUid;
@@ -52535,8 +52686,7 @@ function receiptStatusText(status) {
         const nickname = group.nickname || '';
         const submittedShort = formatOnlineExamSubmittedAtShort(group.latestResult);
         const studentLine = [
-          group.studentName || '',
-          nickname ? 'ชื่อเล่น: ' + nickname : '',
+          getStudentDisplayName(group),
           memberId || ''
         ].filter(Boolean).join(' · ');
 
@@ -52723,7 +52873,7 @@ function receiptStatusText(status) {
       if (!course) { alert('ไม่พบชุดข้อสอบ'); return; }
       if (!studentCanParticipateInExams(student)) { alert('นักเรียนสถานะพักเรียนยังไม่สามารถทำข้อสอบหรือถูกบันทึกสถานะสอบได้'); return; }
       const courseLabel = [course.examMonth || '', getOnlineExamCourseGrade(course) || '', course.subject || '', course.title || ''].filter(Boolean).join(' · ');
-      if (!confirm('บันทึกว่า "' + (student.name || '-') + '" ขาดสอบ "' + courseLabel + '"?')) return;
+      if (!confirm('บันทึกว่า "' + getStudentDisplayName(student) + '" ขาดสอบ "' + courseLabel + '"?')) return;
       const newId = createFirebaseDocId('onlineExamResults');
       const absentDoc = {
         firebaseDocId: newId,
@@ -52826,7 +52976,7 @@ function receiptStatusText(status) {
       if (!group) return;
       const result = group.resultsBySubject[subject];
       if (!result || result.resultStatus !== 'absent') return;
-      if (!confirm('ยกเลิกสถานะขาดสอบวิชา "' + subject + '" ของ "' + (group.studentName || '-') + '"?\nนักเรียนจะกลับไปปรากฏในรายการ "ยังไม่ทำข้อสอบ"')) return;
+      if (!confirm('ยกเลิกสถานะขาดสอบวิชา "' + subject + '" ของ "' + getStudentDisplayName(group) + '"?\nนักเรียนจะกลับไปปรากฏในรายการ "ยังไม่ทำข้อสอบ"')) return;
       try {
         await db.collection('onlineExamResults').doc(result._docId).delete();
         onlineExamGradeAllResults = onlineExamGradeAllResults.filter(function(r) { return r._docId !== result._docId; });
@@ -53204,7 +53354,7 @@ function receiptStatusText(status) {
           addManualExamExistingResultKey(key, localDoc);
         });
         updateManualExamStudentOptions();
-        if (resultEl) { resultEl.textContent = (existingResult ? 'แก้ผลสอบเรียบร้อย — ' : 'บันทึกผลสอบเรียบร้อย — ') + (student.name || '-') + ' · ถูก ' + correct + '/' + total + ' ข้อ · ' + onlineExamFormatScore50Value(score50val) + ' คะแนน'; resultEl.style.color = '#16a34a'; }
+        if (resultEl) { resultEl.textContent = (existingResult ? 'แก้ผลสอบเรียบร้อย — ' : 'บันทึกผลสอบเรียบร้อย — ') + getStudentDisplayName(student) + ' · ถูก ' + correct + '/' + total + ' ข้อ · ' + onlineExamFormatScore50Value(score50val) + ' คะแนน'; resultEl.style.color = '#16a34a'; }
         renderOnlineExamGradingPage(onlineExamGradePage);
         safeRun(renderAdminScoreTables, 'admin-score-refresh-after-manual');
         manualExamAnswers = {};
@@ -53216,7 +53366,7 @@ function receiptStatusText(status) {
     async function setOnlineExamResultRetake(resultDocId, allowRetake) {
       if (!hasPermission('admin.onlineExams')) { alert('ไม่มีสิทธิ์'); return; }
       const result = onlineExamGradeAllResults.find(function(x) { return x._docId === resultDocId; });
-      const studentName = result ? (result.studentName || result.studentId || '-') : '-';
+      const studentName = result ? getStudentDisplayName(result) : '-';
       const courseTitle = result ? (result.courseTitle || getOnlineExamResultSubject(result) || '-') : '-';
       const message = allowRetake
         ? 'อนุญาตให้ ' + studentName + ' ทำข้อสอบ "' + courseTitle + '" ใหม่?\nผลสอบเดิมจะยังอยู่ แต่เด็กจะกดทำใหม่ได้'
@@ -53290,7 +53440,7 @@ function receiptStatusText(status) {
 
       const usedMin = r.usedSeconds ? Math.ceil(r.usedSeconds / 60) : (r.timeTakenSeconds ? Math.ceil(r.timeTakenSeconds / 60) : '-');
       content.innerHTML =
-        '<h3 style="font-size:15px;margin-bottom:4px;">' + escapeHtml(r.studentName || '') + '</h3>' +
+        '<h3 style="font-size:15px;margin-bottom:4px;">' + escapeHtml(getStudentDisplayName(r)) + '</h3>' +
         '<p style="font-size:12px;color:#6b7280;margin-bottom:4px;">' + escapeHtml(r.courseTitle || '') + ' · ' + (r.submittedAtText || '') + '</p>' +
         '<p style="font-size:12px;margin-bottom:12px;">คะแนน/50: <strong>' + (r.scoreText || onlineExamFormatScore50(r.correctCount, r.totalQ)) + '</strong> <span style="color:#6b7280;">(' + (r.scorePercent || 0) + '%)</span> · เวลา: ' + (usedMin !== '-' ? usedMin + ' นาที' : '-') + '</p>' +
         (questions.length
