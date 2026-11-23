@@ -96,6 +96,8 @@ function setupReport() {
     getOnlineExamGradeFilterScope: () => ({ grade: 'ป.6', month: '', subject: '' }),
     syncAdminScoreFiltersFromOnlineExamFilters() {}, renderAdminScoreTables() {}, setOnlineExamGradeRefreshLoading() {},
     loadOnlineExamResultsForGradeScope: async () => [], getOnlineExamGradingTargetCourses: () => [exam],
+    loadOnlineExamGradingStudents: async () => c.students,
+    mergeStudentEntityRecords() {}, rebuildStudentLookupMap() {},
     onlineExamGradingResultMatchesFilters: () => true, compareOnlineExamResultsByMemberId: () => 0,
     buildOnlineExamGroupedRows: results => results, renderAdminScoreStatsChartCard() {},
     getAdminScoreStatsRecordsForScope() {}, getAdminScoreVisibleFilterScope() {},
@@ -104,6 +106,98 @@ function setupReport() {
   load(c, ['renderOnlineExamGradingReport']);
   return { c, report, filters };
 }
+
+function mockRosterDatabase(c, getRows) {
+  const reads = [];
+  c.db = { collection(name) {
+    assert.equal(name, 'students');
+    let grades = null;
+    const query = {
+      where(field, op, values) {
+        assert.equal(field, 'grade'); assert.equal(op, 'in');
+        grades = Array.from(values);
+        return query;
+      },
+      async get() {
+        reads.push(grades);
+        const rows = getRows();
+        return { docs: rows.filter(s => !grades || grades.includes(s.grade)).map(s => ({ id: s.id, data: () => s })) };
+      }
+    };
+    return query;
+  } };
+  c.firebaseSnapshotItems = snap => snap.docs.map(d => ({ firebaseDocId: d.id, ...d.data() })).filter(s => s.deleted !== true);
+  c.markFirestoreQuotaExceeded = () => {};
+  load(c, ['loadOnlineExamGradingStudents']);
+  return reads;
+}
+
+test('students added after the exam opens appear even when absent from the startup cache', async () => {
+  const { c, report } = setupReport();
+  c.students = [student('old', { grade: 'ป.5' })];
+  const addedStudent = student('new-student', { memberId: '0070027' });
+  const reads = mockRosterDatabase(c, () => [addedStudent]);
+  c.loadCourseEnrollmentsForStudentPage = async () => [enrollment('new-student')];
+  await c.renderOnlineExamGradingReport(true);
+  assert.deepEqual(Array.from(c.onlineExamGradeMissingItems, row => row.student.memberId), ['0070027']);
+  assert.match(report.innerHTML, /นักเรียนเป้าหมาย 1 คน/);
+  assert.deepEqual(reads, [['ป.6']]);
+});
+
+test('exam roster reads all matching students beyond the first 50 and refreshes after enrollment changes', async () => {
+  const c = setup();
+  const serverStudents = Array.from({ length: 65 }, (_, i) => student('s' + i));
+  serverStudents.push(student('other-grade', { grade: 'ป.5' }), student('deleted', { deleted: true }));
+  const reads = mockRosterDatabase(c, () => serverStudents);
+  const first = await c.loadOnlineExamGradingStudents('ป.6', [exam]);
+  assert.equal(first.length, 65);
+  serverStudents.push(student('added-later', { memberId: '0070027' }));
+  const refreshed = await c.loadOnlineExamGradingStudents('ป.6', [exam]);
+  assert.equal(refreshed.length, 66);
+  assert.ok(refreshed.some(s => s.memberId === '0070027'));
+  assert.deepEqual(reads, [['ป.6'], ['ป.6']]);
+});
+
+test('all-grade report loads target grades and only falls back to all students for ungraded exams', async () => {
+  const c = setup();
+  const reads = mockRosterDatabase(c, () => []);
+  await c.loadOnlineExamGradingStudents('', [exam, { ...exam, grade: 'ป.5' }, exam]);
+  await c.loadOnlineExamGradingStudents('', [{ ...exam, grade: '' }]);
+  await c.loadOnlineExamGradingStudents('', []);
+  assert.deepEqual(reads, [['ป.6', 'ป.5'], null]);
+});
+
+test('roster loading failure shows an error rather than using the stale cached roster', async () => {
+  const { c, report } = setupReport();
+  c.students = [student('cached')];
+  mockRosterDatabase(c, () => { throw new Error('roster offline'); });
+  await c.renderOnlineExamGradingReport(true);
+  assert.match(report.innerHTML, /roster offline/);
+  assert.doesNotMatch(report.innerHTML, /นักเรียนเป้าหมาย/);
+});
+
+test('fresh server roster excludes cached students no longer returned by the query', async () => {
+  const { c, report } = setupReport();
+  c.students = [student('stale')];
+  c.courseEnrollments = [enrollment('stale')];
+  mockRosterDatabase(c, () => []);
+  await c.renderOnlineExamGradingReport(true);
+  assert.equal(c.onlineExamGradeMissingItems.length, 0);
+  assert.match(report.innerHTML, /นักเรียนเป้าหมาย 0 คน/);
+});
+
+test('a session change during roster loading cannot merge or render the old report', async () => {
+  const { c, report } = setupReport();
+  let merged = false;
+  c.mergeStudentEntityRecords = () => { merged = true; };
+  c.loadOnlineExamGradingStudents = async () => {
+    c.studentDataSessionVersion++;
+    return [student('old-session')];
+  };
+  await c.renderOnlineExamGradingReport();
+  assert.equal(merged, false);
+  assert.doesNotMatch(report.innerHTML, /นักเรียนเป้าหมาย/);
+});
 
 test('report loads enrollments before filtering and preserves historical results', async () => {
   const { c, report } = setupReport();

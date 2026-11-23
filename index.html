@@ -4906,10 +4906,10 @@
                 <div id="onlineExamSubjectFilter" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px;"></div>
                 <div id="onlineExamCourseCards" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:12px;"></div>
               </div>
-              <div id="onlineExamHistoryCard" class="form-box" style="display:none;">
-                <h3>📋 ประวัติการสอบของฉัน</h3>
-                <div id="onlineExamHistoryList"></div>
-              </div>
+              <details id="onlineExamHistoryCard" class="form-box" style="display:none;">
+                <summary style="cursor:pointer;font-size:16px;font-weight:700;">📋 ประวัติการสอบของฉัน <span id="onlineExamHistoryCount" style="font-size:12px;font-weight:400;color:#64748b;"></span></summary>
+                <div id="onlineExamHistoryList" style="margin-top:12px;"></div>
+              </details>
             </div>
 
             <div id="onlineExamActiveExam" style="display:none;">
@@ -12889,6 +12889,7 @@
     let onlineExamCoursesLoadPromise = null;
     let onlineExamCoursesLoadSeq = 0;
     let onlineExamActiveCourseId = '';
+    let onlineExamStartPending = false;
     let onlineExamStudentAnswers = {};
     let onlineExamTimerHandle = null;
     let onlineExamTimeRemaining = 0;
@@ -51787,6 +51788,30 @@ function receiptStatusText(status) {
       });
     }
 
+    async function loadOnlineExamGradingStudents(gradeFilter, targetCourses) {
+      if (!(targetCourses || []).length) return [];
+      const grades = gradeFilter ? [gradeFilter] : Array.from(new Set(targetCourses.map(function(course) {
+        return getOnlineExamCourseGrade(course);
+      }).filter(Boolean)));
+      const loaded = [];
+      try {
+        // A report needs the whole exam audience, not the capped startup cache.
+        if (grades.length) {
+          for (let offset = 0; offset < grades.length; offset += 10) {
+            const snapshot = await db.collection('students').where('grade', 'in', grades.slice(offset, offset + 10)).get();
+            loaded.push.apply(loaded, firebaseSnapshotItems(snapshot));
+          }
+        } else {
+          const snapshot = await db.collection('students').get();
+          loaded.push.apply(loaded, firebaseSnapshotItems(snapshot));
+        }
+      } catch (error) {
+        markFirestoreQuotaExceeded(error);
+        throw error;
+      }
+      return loaded;
+    }
+
     function getOnlineExamCandidateStudents(gradeFilter, targetCourses, studentList) {
       const courses = targetCourses || [];
       if (!courses.length) return [];
@@ -52577,6 +52602,8 @@ function receiptStatusText(status) {
       if (!hasPermission('admin.onlineExams')) return;
       if (!firebaseReady || !db) return;
       const requestId = ++onlineExamGradeRefreshSeq;
+      const sessionUid = firebaseUser && firebaseUser.uid;
+      const sessionVersion = studentDataSessionVersion;
 
       const scope = getOnlineExamGradeFilterScope();
       const subjectFilter = scope.subject;
@@ -52640,7 +52667,11 @@ function receiptStatusText(status) {
         }
 
         const targetCourses = getOnlineExamGradingTargetCourses(monthFilter, subjectFilter, gradeFilter);
-        let candidateStudents = getOnlineExamCandidateStudents(gradeFilter, targetCourses);
+        const reportStudents = await loadOnlineExamGradingStudents(gradeFilter, targetCourses);
+        if (requestId !== onlineExamGradeRefreshSeq || !firebaseUser || firebaseUser.uid !== sessionUid || studentDataSessionVersion !== sessionVersion) return;
+        mergeStudentEntityRecords(reportStudents);
+        rebuildStudentLookupMap();
+        let candidateStudents = getOnlineExamCandidateStudents(gradeFilter, targetCourses, reportStudents);
         if (studentKey) {
           candidateStudents = candidateStudents.filter(function(student) {
             const keys = [student.authUid, student.uid, student.id, student.firebaseDocId, student.memberId, student.studentId, student.name]
@@ -54201,7 +54232,13 @@ function receiptStatusText(status) {
       Object.keys(studentResults || {}).forEach(function(cid) {
         (studentResults[cid] || []).forEach(function(r) { allResults.push(r); });
       });
-      if (!allResults.length) { historyCard.style.display = 'none'; return; }
+      const historyCount = getElement('onlineExamHistoryCount');
+      if (historyCount) historyCount.textContent = '· ' + allResults.length + ' รายการ';
+      if (!allResults.length) {
+        historyCard.style.display = 'none';
+        historyList.innerHTML = '';
+        return;
+      }
       allResults.sort(function(a, b) {
         const ta = a.submittedAt && a.submittedAt.toMillis ? a.submittedAt.toMillis() : 0;
         const tb = b.submittedAt && b.submittedAt.toMillis ? b.submittedAt.toMillis() : 0;
@@ -54226,6 +54263,19 @@ function receiptStatusText(status) {
     }
 
     async function startOnlineExam(courseId) {
+      if (onlineExamStartPending) return;
+      onlineExamStartPending = true;
+      try {
+        await startOnlineExamSession(courseId);
+      } catch (error) {
+        console.error('startOnlineExam error', error);
+        alert('เปิดข้อสอบไม่สำเร็จ กรุณาลองใหม่');
+      } finally {
+        onlineExamStartPending = false;
+      }
+    }
+
+    async function startOnlineExamSession(courseId) {
       if (!studentCanUseCourseEntitlements(currentStudent)) {
         alert(getPausedCourseAccessMessage());
         return;
@@ -54263,18 +54313,11 @@ function receiptStatusText(status) {
         return;
       }
 
-      // Try to load existing in-progress draft (Firestore first, localStorage fallback)
+      // Load the newest saved attempt, then restore the entire exam in one step.
       const existingDraft = await onlineExamLoadDraft(courseId);
       if (existingDraft) {
-        if (confirm('พบการสอบที่ค้างอยู่ ต้องการทำต่อจากที่หยุดไหม?\n(OK = ทำต่อ, Cancel = เริ่มใหม่)')) {
-          onlineExamActiveCourseId = courseId;
-          onlineExamStudentAnswers = existingDraft.answers || {};
-          onlineExamQuestionOrder = existingDraft.questionOrder || [];
-          onlineExamChoiceOrder = existingDraft.choiceOrder || {};
-          onlineExamStartedAt = new Date(existingDraft.startedAtMs || Date.now());
-          onlineExamTimeRemaining = Math.max(0, Math.round(((existingDraft.deadlineAtMs || Date.now()) - Date.now()) / 1000));
-          onlineExamStartAutosave(courseId);
-          switchToOnlineExamPhase(course);
+        if (confirm('พบข้อสอบที่ทำค้างไว้ ต้องการคืนคำตอบทุกข้อและทำต่อหรือไม่?\n(ตกลง = คืนคำตอบทุกข้อ, ยกเลิก = เริ่มใหม่)')) {
+          restoreOnlineExamDraft(course, existingDraft);
           return;
         } else {
           onlineExamDeleteDraft(courseId);
@@ -54312,7 +54355,24 @@ function receiptStatusText(status) {
       switchToOnlineExamPhase(course);
     }
 
+    function restoreOnlineExamDraft(course, draft) {
+      onlineExamActiveCourseId = course.firebaseDocId;
+      onlineExamStudentAnswers = Object.assign({}, draft.answers || {});
+      onlineExamQuestionOrder = (draft.questionOrder || []).slice();
+      onlineExamChoiceOrder = {};
+      Object.keys(draft.choiceOrder || {}).forEach(function(questionId) {
+        onlineExamChoiceOrder[questionId] = draft.choiceOrder[questionId].slice();
+      });
+      onlineExamStartedAt = new Date(draft.startedAtMs || Date.now());
+      onlineExamTimeRemaining = Math.max(0, Math.round(((draft.deadlineAtMs || Date.now()) - Date.now()) / 1000));
+      switchToOnlineExamPhase(course);
+      onlineExamStartAutosave(course.firebaseDocId);
+    }
+
     function switchToOnlineExamPhase(course) {
+      // Render all saved selections and counters before revealing the exam.
+      renderOnlineExamQuestionFeed(course);
+      updateOnlineExamNavigator(course);
       const grid = getElement('onlineExamCourseGrid');
       const exam = getElement('onlineExamActiveExam');
       const result = getElement('onlineExamResultView');
@@ -54324,8 +54384,6 @@ function receiptStatusText(status) {
       // แสดง sticky submit bar
       const stickyBar = getElement('onlineExamStickySubmit');
       if (stickyBar) stickyBar.style.display = 'flex';
-      renderOnlineExamQuestionFeed(course);
-      updateOnlineExamNavigator(course);
       startOnlineExamTimer(course);
     }
 
