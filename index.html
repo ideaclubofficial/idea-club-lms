@@ -51787,13 +51787,13 @@ function receiptStatusText(status) {
       });
     }
 
-    function getOnlineExamExpectedStudents(gradeFilter, targetCourses) {
+    function getOnlineExamCandidateStudents(gradeFilter, targetCourses, studentList) {
       const courses = targetCourses || [];
       if (!courses.length) return [];
       const targetGrades = Array.from(new Set((targetCourses || []).map(function(course) {
         return getOnlineExamCourseGrade(course);
       }).filter(Boolean)));
-      return (students || []).filter(function(student) {
+      return (studentList || students || []).filter(function(student) {
         if (!student || !isActiveStudentForDashboard(student)) return false;
         if (!studentCanParticipateInExams(student)) return false;
         if (gradeFilter && student.grade !== gradeFilter) return false;
@@ -51807,6 +51807,23 @@ function receiptStatusText(status) {
       }).slice().sort(function(a, b) {
         return String(a.memberId || a.studentId || '').localeCompare(String(b.memberId || b.studentId || ''), undefined, { numeric: true, sensitivity: 'base' });
       });
+    }
+
+    function getOnlineExamExpectedStudents(gradeFilter, targetCourses, studentList) {
+      return getOnlineExamCandidateStudents(gradeFilter, targetCourses, studentList).filter(function(student) {
+        return studentCanUseCourseEntitlements(student);
+      });
+    }
+
+    async function refreshOnlineExamStudentEnrollments(studentList) {
+      if (!studentList.length) return;
+      const sessionUid = firebaseUser && firebaseUser.uid;
+      const sessionVersion = studentDataSessionVersion;
+      const enrollments = await loadCourseEnrollmentsForStudentPage(studentList);
+      if (!firebaseUser || firebaseUser.uid !== sessionUid || studentDataSessionVersion !== sessionVersion) {
+        throw new Error('เซสชันเปลี่ยน กรุณาโหลดรายงานใหม่');
+      }
+      mergeCourseEnrollmentEntityRecords(enrollments);
     }
 
     function getStudentOnlineExamIdentitySet(student) {
@@ -52623,15 +52640,18 @@ function receiptStatusText(status) {
         }
 
         const targetCourses = getOnlineExamGradingTargetCourses(monthFilter, subjectFilter, gradeFilter);
-        let expectedStudents = getOnlineExamExpectedStudents(gradeFilter, targetCourses);
+        let candidateStudents = getOnlineExamCandidateStudents(gradeFilter, targetCourses);
         if (studentKey) {
-          expectedStudents = expectedStudents.filter(function(student) {
+          candidateStudents = candidateStudents.filter(function(student) {
             const keys = [student.authUid, student.uid, student.id, student.firebaseDocId, student.memberId, student.studentId, student.name]
               .map(function(value) { return String(value || '').trim(); })
               .filter(Boolean);
             return keys.includes(String(studentKey));
           });
         }
+        await refreshOnlineExamStudentEnrollments(candidateStudents);
+        if (requestId !== onlineExamGradeRefreshSeq) return;
+        const expectedStudents = getOnlineExamExpectedStudents(gradeFilter, targetCourses, candidateStudents);
         const missingStudents = getOnlineExamMissingStudents(targetCourses, expectedStudents, allResults);
         onlineExamGradeMissingItems = missingStudents;
         results = results.slice().sort(compareOnlineExamResultsByMemberId);
@@ -52868,10 +52888,21 @@ function receiptStatusText(status) {
       if (!hasPermission('admin.onlineExams')) { alert('ไม่มีสิทธิ์'); return; }
       const item = onlineExamGradeMissingItems[Number(studentIndex)];
       if (!item) return;
-      const student = item.student || {};
+      const student = (students || []).find(function(record) {
+        return getEnrollmentStudentId(record) === getEnrollmentStudentId(item.student);
+      }) || item.student || {};
       const course = (item.missingCourses || []).find(function(c) { return (c.firebaseDocId || '') === courseFirebaseDocId; });
       if (!course) { alert('ไม่พบชุดข้อสอบ'); return; }
-      if (!studentCanParticipateInExams(student)) { alert('นักเรียนสถานะพักเรียนยังไม่สามารถทำข้อสอบหรือถูกบันทึกสถานะสอบได้'); return; }
+      try {
+        await refreshOnlineExamStudentEnrollments([student]);
+      } catch (error) {
+        alert('ตรวจสอบสิทธิ์คอร์สไม่สำเร็จ: ' + (error.message || error));
+        return;
+      }
+      if (!isActiveStudentForDashboard(student) || !studentCanUseCourseEntitlements(student)) {
+        alert('นักเรียนต้องมีคอร์สปัจจุบันที่อนุมัติแล้วและไม่อยู่ในสถานะพักเรียนหรือลาออก จึงบันทึกขาดสอบได้');
+        return;
+      }
       const courseLabel = [course.examMonth || '', getOnlineExamCourseGrade(course) || '', course.subject || '', course.title || ''].filter(Boolean).join(' · ');
       if (!confirm('บันทึกว่า "' + getStudentDisplayName(student) + '" ขาดสอบ "' + courseLabel + '"?')) return;
       const newId = createFirebaseDocId('onlineExamResults');
@@ -52903,15 +52934,8 @@ function receiptStatusText(status) {
         onlineExamGradeAllResults.push(Object.assign({ _docId: newId }, absentDoc));
         onlineExamGradeGroupedRows = buildOnlineExamGroupedRows(onlineExamGradeAllResults);
         resetOnlineExamGradeResultCache();
-        item.missingCourses = (item.missingCourses || []).filter(function(c) { return (c.firebaseDocId || '') !== courseFirebaseDocId; });
-        onlineExamGradeMissingItems = onlineExamGradeMissingItems.filter(function(x) { return (x.missingCourses || []).length > 0; });
-        onlineExamGradeMissingHtml = renderOnlineExamMissingStudentsHtml(onlineExamGradeMissingItems, getOnlineExamGradingTargetCourses(
-          (getElement('onlineExamGradeMonthFilter') || {}).value || '',
-          (getElement('onlineExamGradeSubjectFilter') || {}).value || '',
-          (getElement('onlineExamGradeLevelFilter') || {}).value || ''
-        ), 0);
+        await renderOnlineExamGradingReport(true);
         showOnlineExamMissingStudentList();
-        renderOnlineExamGradingPage(onlineExamGradePage);
       } catch(e) { alert('บันทึกไม่สำเร็จ: ' + (e.message || e)); }
     }
 
