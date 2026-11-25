@@ -7106,6 +7106,7 @@
                 <button class="btn btn-dark" type="button" onclick="selectAllFilteredTuitionNoticeStudents()">เลือกทั้งหมดตามตัวกรอง</button>
                 <button class="btn btn-dark" type="button" onclick="clearTuitionNoticeSelection()">ล้างที่เลือก</button>
                 <button class="btn btn-orange" type="button" onclick="downloadSelectedTuitionNoticesPdf()">ดาวน์โหลด PDF ที่เลือก</button>
+                <button class="btn btn-green" type="button" onclick="downloadSelectedTuitionNoticesImages()">ดาวน์โหลดรูปที่เลือก</button>
                 <span id="tuitionNoticeSelectionSummary" class="mini-muted">เลือก 0 คน</span>
               </div>
             </div>
@@ -37568,7 +37569,7 @@
           '<td>' + (months || '-') + '</td>' +
           '<td>' + row.payments.length + ' รายการ</td>' +
           '<td>' + escapeHtml(formatPrice(row.totalAmount)) + '</td>' +
-          '<td><div class="payment-actions-wrap"><button class="btn btn-blue" type="button" onclick="viewTuitionNoticeStudentDetails(\'' + jsArg(row.key) + '\')">ดูรายละเอียด</button><button class="btn btn-orange" type="button" onclick="downloadTuitionNoticeStudentPdf(\'' + jsArg(row.key) + '\')">ดาวน์โหลด PDF</button></div></td>' +
+          '<td><div class="payment-actions-wrap"><button class="btn btn-blue" type="button" onclick="viewTuitionNoticeStudentDetails(\'' + jsArg(row.key) + '\')">ดูรายละเอียด</button><button class="btn btn-orange" type="button" onclick="downloadTuitionNoticeStudentPdf(\'' + jsArg(row.key) + '\')">ดาวน์โหลด PDF</button><button class="btn btn-green" type="button" onclick="downloadTuitionNoticeStudentImage(\'' + jsArg(row.key) + '\')">ดาวน์โหลดรูป</button></div></td>' +
         '</tr>';
       }).join('') : '<tr><td colspan="8">ไม่พบนักเรียนที่มีรายการต้องชำระตามตัวกรอง</td></tr>';
       if (getElement('tuitionNoticeStudentCount')) getElement('tuitionNoticeStudentCount').textContent = rows.length + ' คน';
@@ -37635,7 +37636,7 @@
         '<div class="receipt-line"><strong>ระดับชั้น</strong><span>' + escapeHtml(row.grade || '-') + '</span></div>' +
         '<div class="table-wrap" style="margin-top:14px;"><table><thead><tr><th>เดือน</th><th>คอร์ส</th><th>ศูนย์</th><th style="text-align:right;">ยอด</th></tr></thead><tbody>' + tuitionNoticeDetailRowsHtml(row) + '</tbody></table></div>' +
         '<div class="receipt-total" style="margin-top:14px;">ยอดรวม ' + escapeHtml(formatPrice(row.totalAmount)) + '</div>' +
-        '<div class="test-actions" style="margin-top:14px;"><button class="btn btn-orange" type="button" onclick="downloadTuitionNoticeStudentPdf(\'' + jsArg(row.key) + '\')">ดาวน์โหลด PDF</button><button class="btn btn-dark" type="button" onclick="closeEditBubble()">ปิด</button></div></div>'
+        '<div class="test-actions" style="margin-top:14px;"><button class="btn btn-orange" type="button" onclick="downloadTuitionNoticeStudentPdf(\'' + jsArg(row.key) + '\')">ดาวน์โหลด PDF</button><button class="btn btn-green" type="button" onclick="downloadTuitionNoticeStudentImage(\'' + jsArg(row.key) + '\')">ดาวน์โหลดรูป</button><button class="btn btn-dark" type="button" onclick="closeEditBubble()">ปิด</button></div></div>'
       );
     }
 
@@ -37665,6 +37666,28 @@
       }, []);
       warnMissingTuitionNoticeQr(groups);
       return downloadTuitionNoticesPdf(groups, 'tuition-notices-selected-' + getLocalDateString() + '.pdf');
+    }
+
+    function downloadTuitionNoticeStudentImage(key) {
+      if (!hasPermission('admin.finance')) { alert('ไม่มีสิทธิ์'); return; }
+      const row = getFilteredTuitionNoticeStudentRow(key);
+      if (!row) { alert('ไม่พบข้อมูลนักเรียนตามตัวกรองปัจจุบัน'); return; }
+      const groups = buildTuitionNoticeGroups(row.payments);
+      warnMissingTuitionNoticeQr(groups);
+      return downloadTuitionNoticesImages(groups);
+    }
+
+    function downloadSelectedTuitionNoticesImages() {
+      if (!hasPermission('admin.finance')) { alert('ไม่มีสิทธิ์'); return; }
+      const selectedRows = buildTuitionNoticeStudentRows().filter(function(row) {
+        return tuitionNoticeSelectedStudentKeys.has(row.key);
+      });
+      if (!selectedRows.length) { alert('กรุณาเลือกนักเรียนอย่างน้อย 1 คน'); return; }
+      const groups = selectedRows.reduce(function(list, row) {
+        return list.concat(buildTuitionNoticeGroups(row.payments));
+      }, []);
+      warnMissingTuitionNoticeQr(groups);
+      return downloadTuitionNoticesImages(groups);
     }
 
     function buildTuitionNoticeGroups(sourcePayments) {
@@ -37802,6 +37825,65 @@
         await new Promise(function(resolve) {
           requestAnimationFrame(function() { requestAnimationFrame(resolve); });
         });
+      }
+    }
+
+    async function downloadTuitionNoticesImages(groups) {
+      if (downloadTuitionNoticesImages.running || !groups.length) return;
+      downloadTuitionNoticesImages.running = true;
+      try {
+        const exportToolsReady = await ensureExportLibraries(false);
+        const html2canvasLib = window.html2canvas;
+        if (!exportToolsReady || !html2canvasLib) throw new Error('โหลดเครื่องมือรูปภาพไม่ครบ กรุณาตรวจสอบอินเทอร์เน็ตแล้วกดลองใหม่');
+        const files = [];
+        for (let index = 0; index < groups.length; index++) {
+          const group = groups[index];
+          const element = buildPdfDocumentElement('ใบแจ้งยอดชำระค่าเรียน', tuitionNoticeHtml(group));
+          document.body.appendChild(element);
+          try {
+            await waitForTuitionNoticeImages(element);
+            const target = element.querySelector('.pdf-document');
+            const canvas = await html2canvasLib(target, {
+              scale: 2,
+              useCORS: true,
+              backgroundColor: '#ffffff',
+              width: target.offsetWidth,
+              height: target.scrollHeight,
+              windowWidth: target.offsetWidth,
+              windowHeight: target.scrollHeight
+            });
+            const blob = await new Promise(function(resolve) { canvas.toBlob(resolve, 'image/png'); });
+            if (!blob) throw new Error('ไม่สามารถแปลงใบแจ้งยอดเป็นไฟล์รูปได้');
+            const fileName = getSafeFileName('tuition-notice-' + (group.memberId || group.studentName || 'student') + '-' + (group.centerText || 'center') + '-' + getLocalDateString() + '-' + (index + 1)) + '.png';
+            files.push(new File([blob], fileName, { type: 'image/png' }));
+          } finally {
+            document.body.removeChild(element);
+          }
+        }
+        // Match attendance PNG export: use the device share/save sheet when
+        // supported, otherwise download the PNG files through object URLs.
+        if (navigator.canShare && navigator.canShare({ files: files })) {
+          await navigator.share({ files: files, title: 'ใบแจ้งยอดชำระค่าเรียน' });
+        } else {
+          files.forEach(function(file) {
+            const url = URL.createObjectURL(file);
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = file.name;
+            document.body.appendChild(link);
+            try { link.click(); } finally {
+              document.body.removeChild(link);
+              setTimeout(function() { URL.revokeObjectURL(url); }, 1000);
+            }
+          });
+        }
+      } catch (error) {
+        if (error.name !== 'AbortError') {
+          console.error('download tuition notices image error:', error);
+          alert('ดาวน์โหลดรูปไม่สำเร็จ: ' + (error.message || error.code || 'ไม่ทราบสาเหตุ'));
+        }
+      } finally {
+        downloadTuitionNoticesImages.running = false;
       }
     }
 
