@@ -4175,9 +4175,9 @@
     .finance-detail-link:hover { opacity: 0.75; }
 
     /* ── Payment table: truncate course column ── */
-    #paymentTableBody td:nth-child(3) { max-width: 120px; }
-    #paymentTableBody td:nth-child(5),
-    #paymentTableBody td:nth-child(7) { white-space: nowrap !important; }
+    #paymentTableBody td:nth-child(4) { max-width: 120px; }
+    #paymentTableBody td:nth-child(6),
+    #paymentTableBody td:nth-child(8) { white-space: nowrap !important; }
     .payment-course-name {
       display: block;
       max-width: 120px;
@@ -7028,12 +7028,13 @@
                 <thead>
                   <tr>
                     <th><input type="checkbox" id="paymentBundleSelectAll" onchange="togglePaymentBundleSelectAll(this)"></th>
-                    <th class="sortable" onclick="sortStaticTable(this, 1)">นักเรียน</th>
-                    <th class="sortable" onclick="sortStaticTable(this, 2)">คอร์ส</th>
-                    <th class="sortable" data-sort-type="thai-month" onclick="sortStaticTable(this, 3)">เดือนที่ชำระ</th>
-                    <th class="sortable" onclick="sortStaticTable(this, 4)">ยอดเงิน</th>
-                    <th class="sortable" onclick="sortStaticTable(this, 5)">สลิป</th>
-                    <th class="sortable" onclick="sortStaticTable(this, 6)">สถานะ</th>
+                    <th>ลำดับ</th>
+                    <th class="sortable" onclick="sortStaticTable(this, 2)">นักเรียน</th>
+                    <th class="sortable" onclick="sortStaticTable(this, 3)">คอร์ส</th>
+                    <th class="sortable" data-sort-type="thai-month" onclick="sortStaticTable(this, 4)">เดือนที่ชำระ</th>
+                    <th class="sortable" onclick="sortStaticTable(this, 5)">ยอดเงิน</th>
+                    <th class="sortable" onclick="sortStaticTable(this, 6)">สลิป</th>
+                    <th class="sortable" onclick="sortStaticTable(this, 7)">สถานะ</th>
                     <th>จัดการ</th>
                   </tr>
                 </thead>
@@ -10240,6 +10241,11 @@
         safeRun(renderPaymentBundlePanel, 'admin-payment-listener-bundles');
         safeRun(renderAdminDashboard, 'admin-payment-listener-dashboard');
         safeRun(renderPaymentRecordPreview, 'admin-payment-listener-preview');
+        safeRun(function() {
+          if (isStaffTabVisible('admin-receipts')) { renderReceiptMonthFilter(); renderAdminReceipts(); }
+          if (isStaffTabVisible('admin-finance-summary')) { renderFinanceSummary(); renderYearlyFinanceSummary(); }
+          if (isStaffTabVisible('admin-payment-round')) renderPaymentMonths();
+        }, 'admin-payment-listener-related-views');
         console.log('admin-payment-realtime-refresh', reason || 'payment-data-change');
       }, 150);
     }
@@ -10247,28 +10253,35 @@
     function startAdminPaymentDataListeners(options) {
       options = options || {};
       if (!firebaseReady || !db || !firebaseUser) return null;
-      if (!hasPermission('admin.finance') && !hasPermission('admin.full')) {
+      if (!hasPermission('admin.finance') && !hasPermission('admin.full') && !hasPermission('admin.receipts')) {
         stopAdminPaymentDataListeners();
         return null;
       }
       const uid = firebaseUser.uid;
-      if (!options.force && adminRealtimeSession && adminRealtimeSession.uid === uid &&
-          !Object.values(adminRealtimeSession.groups).some(function(group) { return group.failed; })) return adminRealtimeSession;
-      stopAdminPaymentDataListeners();
-      const session = { uid: uid, active: true, groups: {} };
-      adminRealtimeSession = session;
+      if (options.force || !adminRealtimeSession || adminRealtimeSession.uid !== uid ||
+          Object.values(adminRealtimeSession.groups).some(function(group) { return group.failed; })) {
+        stopAdminPaymentDataListeners();
+        adminRealtimeSession = { uid: uid, active: true, groups: {} };
+      }
+      const session = adminRealtimeSession;
       const isCurrent = function() { return session.active && adminRealtimeSession === session && firebaseUser && firebaseUser.uid === uid; };
-      session.groups.payments = createRealtimeCollectionGroup([
-        { key: 'payments:pending-canonical', query: db.collection('payments').where('slipStatus', '==', 'waiting_admin_review') }
-      ], adminPendingPaymentRecords, isCurrent, function() {
-        adminPendingPaymentRecords.forEach(function(pending) {
-          const id = String(pending.firebaseDocId || pending.id || '');
-          const existing = payments.find(function(item) { return String(item.firebaseDocId || item.id || '') === id; });
-          if (existing) Object.assign(existing, pending);
-          else payments.push(pending);
+      const targets = { payments: payments, receipts: receipts, paymentBundles: paymentBundles, paymentMonths: paymentMonths };
+      // These screens filter and paginate locally, so their shared data must be
+      // complete. A pending-slip query misses newly created unpaid bills and
+      // stops reporting a record as soon as its slip is approved or rejected.
+      (options.collections || Object.keys(targets)).forEach(function(name) {
+        if (!targets[name] || session.groups[name]) return;
+        session.groups[name] = createRealtimeCollectionGroup([
+          { key: name + ':all', query: db.collection(name) }
+        ], targets[name], isCurrent, function() {
+          if (name === 'payments') {
+            replaceArray(adminPendingPaymentRecords, payments.filter(function(payment) {
+              return payment.slipStatus === 'waiting_admin_review';
+            }));
+            if (adminDashboardQuotaSummary) adminDashboardQuotaSummary.pendingPayments = adminPendingPaymentRecords.length;
+          }
+          scheduleAdminPaymentDataRefresh(name);
         });
-        if (adminDashboardQuotaSummary) adminDashboardQuotaSummary.pendingPayments = adminPendingPaymentRecords.length;
-        scheduleAdminPaymentDataRefresh('payments');
       });
       return session;
     }
@@ -10985,6 +10998,18 @@
             const status = { failed: false };
             const targets = getStaffCollectionTargets();
             if (!PRODUCTION_MODE && targets[name]) await seedCollectionIfEmpty(name, targets[name]);
+            if (['payments', 'receipts', 'paymentBundles', 'paymentMonths'].includes(name)) {
+              const live = startAdminPaymentDataListeners({ collections: [name] });
+              if (live) {
+                state.realtime = live;
+                state.unbounded = true;
+                await waitForRealtimeCollection(live, name, status);
+                if (!isCurrent()) return;
+                if (status.failed || !live.active) throw new Error('โหลดข้อมูลการเงินไม่สำเร็จ');
+                state.status = 'ready';
+                return;
+              }
+            }
             const items = name === 'payments' ? await getFirebasePaymentCollection(false, status) : await getFirebaseCollection(name, false, status, { unbounded: unbounded });
             if (!isCurrent()) return;
             if (status.failed) throw new Error('โหลดข้อมูล ' + name + ' ไม่สำเร็จ');
@@ -10997,14 +11022,6 @@
               prizeWheelSettings = Object.assign({ spinCost: 30, enabled: true }, main || {});
             } else {
               replaceArray(getStaffCollectionTargets()[name], items);
-            }
-            if (name === 'payments') {
-              const live = startAdminPaymentDataListeners();
-              if (live) {
-                state.realtime = live;
-                await waitForRealtimeCollection(live, 'payments', status);
-                if (status.failed || !live.active) throw new Error('โหลดข้อมูลการเงินไม่สำเร็จ');
-              }
             }
             state.status = 'ready';
             if (name === 'students') rebuildStudentLookupMap();
@@ -34049,11 +34066,11 @@
       if (!row) return;
       const paymentId = row.getAttribute('data-payment-id');
       const payment = findPaymentByAnyId(paymentId);
-      const nameCell = row.children[1];
-      const monthCell = row.children[3];
-      const slipCell = row.children[5];
-      const statusCell = row.children[6];
-      const actionCell = row.children[7];
+      const nameCell = row.children[2];
+      const monthCell = row.children[4];
+      const slipCell = row.children[6];
+      const statusCell = row.children[7];
+      const actionCell = row.children[8];
       if (payment) {
         payment.status = status;
         payment.paymentStatus = status;
@@ -34417,8 +34434,8 @@
 
       const message = [
         'แจ้งเตือนค้างชำระเรียบร้อย',
-        'นักเรียน: ' + (row.children[1] ? row.children[1].innerText : '-'),
-        'เดือน: ' + (row.children[3] ? row.children[3].innerText : '-')
+        'นักเรียน: ' + (row.children[2] ? row.children[2].innerText : '-'),
+        'เดือน: ' + (row.children[4] ? row.children[4].innerText : '-')
       ].join(String.fromCharCode(10));
 
       alert(message);
@@ -35422,8 +35439,8 @@
 
           if (oldMonth !== newMonth) {
             document.querySelectorAll('#paymentTableBody tr').forEach(function(row) {
-              if (row.children[3] && row.children[3].innerText.trim() === oldMonth) {
-                row.children[3].textContent = newMonth;
+              if (row.children[4] && row.children[4].innerText.trim() === oldMonth) {
+                row.children[4].textContent = newMonth;
               }
             });
 
@@ -36967,7 +36984,7 @@
       if (paymentCurrentPage > ptTotalPages) paymentCurrentPage = ptTotalPages;
       const ptStart = (paymentCurrentPage - 1) * LIST_PAGE_SIZE;
       const ptItems = filtered.slice(ptStart, ptStart + LIST_PAGE_SIZE);
-      tbody.innerHTML = ptItems.length ? ptItems.map(function(p) {
+      tbody.innerHTML = ptItems.length ? ptItems.map(function(p, index) {
         const slipCell = formatPaymentSlipReviewCell(p);
         const pid = p.id || p.firebaseDocId || '';
         const statusText = getPaymentDisplayStatus(p);
@@ -36984,6 +37001,7 @@
           (subLine ? '<br><span class="mini-muted">' + subLine + '</span>' : '');
         return '<tr data-payment-id="' + escapeHtml(pid) + '">' +
           '<td style="text-align:center;"><input type="checkbox" class="paymentBundleRowCheck" value="' + escapeHtml(pid) + '"' + (canPaymentBeBundled(p) ? '' : ' disabled') + ' onchange="updatePaymentBundleSelectionHint()"></td>' +
+          '<td style="text-align:center;">' + (ptStart + index + 1) + '</td>' +
           '<td style="word-break:break-word;white-space:normal;">' + nameCell + bundleText + '</td>' +
           '<td>' + renderPaymentCourseText(p) + '</td>' +
           '<td>' + (p.month || '-') + '</td>' +
@@ -36992,7 +37010,7 @@
           '<td><span class="' + statusClass + '">' + statusText + '</span></td>' +
           '<td>' + paymentActionButtons(p.status || p.paymentStatus || 'รอชำระเงิน', pid) + '</td>' +
         '</tr>';
-      }).join('') : '<tr><td colspan="8">ยังไม่มีรายการชำระเงินตามเงื่อนไขที่เลือก</td></tr>';
+      }).join('') : '<tr><td colspan="9">ยังไม่มีรายการชำระเงินตามเงื่อนไขที่เลือก</td></tr>';
       renderTablePagination('paymentTablePagination', paymentCurrentPage, ptTotalPages, filtered.length, 'changePaymentPage');
       if (getElement('paymentBundleSelectAll')) getElement('paymentBundleSelectAll').checked = false;
       updatePaymentBundleSelectionHint();
@@ -37038,15 +37056,15 @@
         authUid: payment ? payment.authUid : '',
         courseId: payment ? payment.courseId : '',
         phone: payment ? (payment.phone || payment.studentPhone || '') : '',
-        student: payment ? (payment.student || '-') : (row && row.children[1] ? row.children[1].innerText.trim() : '-'),
-        course: payment ? (payment.course || '-') : (row && row.children[2] ? row.children[2].innerText.trim() : '-'),
-        month: payment ? (payment.month || '-') : (row && row.children[3] ? row.children[3].innerText.trim() : '-'),
-        amount: payment ? String(getPaymentFinalAmount(payment)) : (row && row.children[4] ? row.children[4].innerText.trim().replace(' บาท', '') : '0'),
+        student: payment ? (payment.student || '-') : (row && row.children[2] ? row.children[2].innerText.trim() : '-'),
+        course: payment ? (payment.course || '-') : (row && row.children[3] ? row.children[3].innerText.trim() : '-'),
+        month: payment ? (payment.month || '-') : (row && row.children[4] ? row.children[4].innerText.trim() : '-'),
+        amount: payment ? String(getPaymentFinalAmount(payment)) : (row && row.children[5] ? row.children[5].innerText.trim().replace(' บาท', '') : '0'),
         lineItems: payment && Array.isArray(payment.lineItems) ? payment.lineItems : [],
-        slip: payment ? (getPaymentSlipUrl(payment) ? 'มีสลิป' : (payment.slipSource || '-')) : (row && row.children[5] ? row.children[5].innerText.trim() : '-'),
+        slip: payment ? (getPaymentSlipUrl(payment) ? 'มีสลิป' : (payment.slipSource || '-')) : (row && row.children[6] ? row.children[6].innerText.trim() : '-'),
         slipNote: payment ? (payment.slipNote || ('นักเรียนแจ้งส่งสลิปของเดือน ' + (payment.month || '-'))) : '',
         sentAt: payment ? (payment.createdAtText || '-') : '-',
-        status: payment ? (payment.status || '-') : (row && row.children[6] ? row.children[6].innerText.trim() : '-')
+        status: payment ? (payment.status || '-') : (row && row.children[7] ? row.children[7].innerText.trim() : '-')
       };
     }
 

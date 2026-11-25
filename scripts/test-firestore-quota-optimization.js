@@ -32,14 +32,13 @@ test('online exam remote autosave is capped to a 120-second changed-only cadence
   assert.ok(maximumWrites <= 10, String(maximumWrites));
 });
 
-test('quota optimized startup and canonical payment listener have bounded paths', () => {
+test('quota optimized startup stays bounded; finance uses complete lazy listeners', () => {
   assert.match(html, /STUDENT_HOME_REALTIME_COLLECTIONS = \['courseEnrollments', 'payments', 'receipts', 'paymentBundles'\]/);
   assert.match(html, /quotaOptimizedLoadingDisabled/);
-  assert.match(html, /payments:pending-canonical/);
-  assert.doesNotMatch(
-    html.slice(html.indexOf('    function startAdminPaymentDataListeners('), html.indexOf('    function scheduleStudentRealtimeRefresh(')),
-    /paymentBundles.*onSnapshot|receipts.*onSnapshot/
-  );
+  const finance = html.slice(html.indexOf('    function startAdminPaymentDataListeners('), html.indexOf('    function scheduleStudentRealtimeRefresh('));
+  assert.match(finance, /options.collections/);
+  assert.match(finance, /query: db.collection\(name\)/);
+  assert.doesNotMatch(finance, /\.limit\(|\.orderBy\(|\.where\(/);
   for (const collection of ['students', 'teachers', 'courses', 'courseEnrollments', 'payments', 'receipts', 'paymentBundles']) {
     assert.match(html, new RegExp(collection + ":[\\s\\S]{0,120}limit:"), collection);
   }

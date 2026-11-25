@@ -771,3 +771,36 @@ test('preview deletion removes only an unlocked payment record', async () => {
   assert.deepEqual(calls[0], ['delete', 'payments', 'payment-1']);
   assert.ok(calls.some(call => call[0] === 'preview'));
 });
+
+test('payment row numbers precede names and continue across pages', () => {
+  const h=setup();
+  h.c.getFilteredPaymentsForTable=()=>Array.from({length:22},(_,i)=>({id:'p'+i,student:'Student '+i,month:'11/2569'}));
+  h.c.loadPaymentStudentRecords=async()=>false;
+  h.c.formatPaymentSlipReviewCell=()=>'-';
+  h.c.getPaymentDisplayStatus=()=> 'รอชำระเงิน';
+  h.c.getPaymentBundleForPayment=()=>null;
+  h.c.getPaymentRecordCourseAndStudent=()=>({student:null});
+  h.c.getPaymentStudentNickname=()=>'';
+  h.c.escapeHtml=String;
+  h.c.canPaymentBeBundled=()=>true;
+  h.c.renderPaymentCourseText=()=> 'Course';
+  h.c.renderPaymentAmountText=()=> '900';
+  h.c.paymentActionButtons=()=>'';
+  h.c.paymentCurrentPage=2;
+  h.c.renderPaymentTableNow();
+  const rows=h.elements.paymentTableBody.innerHTML.split('</tr>').filter(Boolean);
+  assert.equal(rows.length,2);
+  assert.match(rows[0], /<td style="text-align:center;">21<\/td><td[^>]*><strong[^>]*>Student 20/);
+  assert.match(rows[1], /<td style="text-align:center;">22<\/td>/);
+  assert.equal((rows[0].match(/<td\b/g)||[]).length,9);
+});
+
+test('payment details fallback reads the correct cells after the sequence column', () => {
+  const h=setup(); h.c.findPaymentByAnyId=()=>null;
+  vm.runInContext(source('getPaymentDataFromRow'),h.c);
+  const row={getAttribute:()=> 'missing',children:['check','21','Name','Course','11/2569','900 บาท','Slip','รอชำระเงิน','actions'].map(innerText=>({innerText}))};
+  const data=h.c.getPaymentDataFromRow(row);
+  assert.equal(data.student,'Name'); assert.equal(data.course,'Course');
+  assert.equal(data.month,'11/2569'); assert.equal(data.amount,'900');
+  assert.equal(data.slip,'Slip'); assert.equal(data.status,'รอชำระเงิน');
+});
