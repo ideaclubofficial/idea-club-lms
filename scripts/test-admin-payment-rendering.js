@@ -528,6 +528,33 @@ function setupTuitionNotices() {
   return c;
 }
 
+test('slip review defaults to the latest month and keeps explicit month selections', () => {
+  const c = {
+    getThaiCalendarMonthNames: () => ['มกราคม', 'กุมภาพันธ์', 'มีนาคม', 'เมษายน', 'พฤษภาคม', 'มิถุนายน',
+      'กรกฎาคม', 'สิงหาคม', 'กันยายน', 'ตุลาคม', 'พฤศจิกายน', 'ธันวาคม'],
+    escapeHtml: String
+  };
+  vm.createContext(c);
+  for (const name of ['parseThaiMonthYear', 'compareThaiMonthYear', 'renderPaymentReviewMonthOptions']) {
+    vm.runInContext(source(name), c);
+  }
+  const select = { value: '', innerHTML: '' };
+  c.renderPaymentReviewMonthOptions(select, []);
+  assert.equal(select.value, '');
+  const months = ['ธันวาคม 2569', 'พฤศจิกายน 2569', 'มกราคม 2570'];
+  c.renderPaymentReviewMonthOptions(select, months);
+  assert.equal(select.value, 'มกราคม 2570');
+  select.value = 'ธันวาคม 2569';
+  c.renderPaymentReviewMonthOptions(select, months);
+  assert.equal(select.value, 'ธันวาคม 2569');
+  select.value = 'ทั้งหมด';
+  c.renderPaymentReviewMonthOptions(select, months);
+  assert.equal(select.value, 'ทั้งหมด');
+  select.value = 'ตุลาคม 2569';
+  c.renderPaymentReviewMonthOptions(select, months);
+  assert.equal(select.value, 'มกราคม 2570');
+});
+
 test('settlement retries only the student status write that failed', async () => {
   const c = setupTuitionNotices();
   const student = { id: 's1', courseId: 'c1', paymentStatus: 'ค้างชำระ', overdueMonths: ['ตุลาคม 2569'] };

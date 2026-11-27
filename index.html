@@ -6989,6 +6989,7 @@
                 <div>
                   <label>เลือกเดือนที่ต้องการดูสถานะ</label>
                   <select id="paymentStatusMonthFilter" onchange="filterPaymentStatusByMonth()">
+                    <option value="" hidden>ทั้งหมด</option>
                     <option value="ทั้งหมด">ทั้งหมด</option>
                   </select>
                 </div>
@@ -35074,9 +35075,21 @@
       renderStudentPaymentBundlePanel();
     }
 
+    function renderPaymentReviewMonthOptions(select, months) {
+      if (!select) return;
+      const previous = select.value;
+      const ordered = Array.from(new Set(months.filter(Boolean))).sort(function(a, b) {
+        return compareThaiMonthYear(b, a);
+      });
+      select.innerHTML = '<option value="" hidden>ทั้งหมด</option><option value="ทั้งหมด">ทั้งหมด</option>' +
+        ordered.map(function(month) {
+          return '<option value="' + escapeHtml(month) + '">' + escapeHtml(month) + '</option>';
+        }).join('');
+      select.value = previous === 'ทั้งหมด' || ordered.includes(previous) ? previous : (ordered[0] || '');
+    }
+
     function renderPaymentMonths() {
       const tbody = getElement('paymentMonthTableBody');
-      const studentSelect = getElement('studentPaymentMonth');
       const statusFilter = getElement('paymentStatusMonthFilter');
       const dashboardMonthFilter = getElement('dashboardPaymentMonthFilter');
       const priceMonthSelect = getElement('paymentPriceMonthSelect');
@@ -35085,7 +35098,7 @@
       if (!Array.isArray(paymentMonths) || paymentMonths.length === 0) {
         tbody.innerHTML = '<tr><td colspan="5">ยังไม่มีเดือนชำระเงิน ให้เพิ่มจากฟอร์มด้านบน</td></tr>';
         refreshStudentPaymentMonthSelect();
-        if (statusFilter) statusFilter.innerHTML = '<option value="ทั้งหมด">ทั้งหมด</option>';
+        renderPaymentReviewMonthOptions(statusFilter, []);
         if (priceMonthSelect) priceMonthSelect.innerHTML = '<option value="">ยังไม่มีเดือนชำระเงิน</option>';
         renderReceiptMonthFilter();
         filterPaymentStatusByMonth();
@@ -35112,13 +35125,7 @@
         dashboardMonthFilter.value = sortedPaymentMonths.some(function(item) { return item.month === currentDashboardMonth; }) ? currentDashboardMonth : (sortedPaymentMonths[0] ? sortedPaymentMonths[0].month : '');
       }
 
-      if (statusFilter) {
-        const currentValue = statusFilter.value || 'ทั้งหมด';
-        statusFilter.innerHTML = '<option value="ทั้งหมด">ทั้งหมด</option>' + sortedPaymentMonths.map(function(item) {
-          return '<option value="' + item.month + '">' + item.month + '</option>';
-        }).join('');
-        statusFilter.value = sortedPaymentMonths.some(function(item) { return item.month === currentValue; }) ? currentValue : 'ทั้งหมด';
-      }
+      renderPaymentReviewMonthOptions(statusFilter, sortedPaymentMonths.map(function(item) { return item.month; }));
 
       if (priceMonthSelect) {
         const currentPriceMonth = priceMonthSelect.value || (sortedPaymentMonths[0] ? sortedPaymentMonths[0].month : '');
@@ -37028,7 +37035,7 @@
 
     function getPaymentDashboardFilterScope() {
       return {
-        month: getElement('paymentStatusMonthFilter') ? getElement('paymentStatusMonthFilter').value : 'ทั้งหมด',
+        month: (getElement('paymentStatusMonthFilter') || {}).value || 'ทั้งหมด',
         location: getElement('paymentStatusLocationFilter') ? getElement('paymentStatusLocationFilter').value : 'ทั้งหมด',
         grade: getElement('paymentStatusGradeFilter') ? getElement('paymentStatusGradeFilter').value : 'ทั้งหมด',
         status: getElement('paymentStatusStateFilter') ? getElement('paymentStatusStateFilter').value : 'ทั้งหมด',
