@@ -6966,7 +6966,7 @@
                 <div class="stat clickable" onclick="jumpToPendingPaymentBundles()"><h4>สลิปยอดรวมรอตรวจ</h4><p id="pendingBundleSlipCount">0 รายการ</p></div>
                 <div class="stat clickable" onclick="jumpToPaymentStatus('ค้างชำระ')"><h4>ค้างชำระ</h4><p id="overdueCount">0 รายการ</p></div>
                 <div class="stat"><h4>ชำระแล้วเดือนนี้</h4><p id="paidThisMonthCount">0 รายการ</p></div>
-                <div class="stat"><h4>ยอดที่ชำระแล้ว</h4><p id="paidAmountThisMonth">0 บาท</p></div>
+                <div class="stat"><h4>ยอดรับจริง</h4><p id="paidAmountThisMonth">0 บาท</p></div>
                 <div class="stat"><h4>ยอดที่ควรได้รับ</h4><p id="expectedAmountThisMonth">0 บาท</p></div>
               </div>
             </div>
@@ -10889,7 +10889,7 @@
       'admin-video': ['courses', 'onDemandClips'],
       'admin-payment-round': ['paymentMonths', 'courses'],
       'admin-payment': ['payments', 'paymentBundles', 'receipts'],
-      'admin-tuition-notices': ['payments'],
+      'admin-tuition-notices': ['payments', 'paymentBundles'],
       'admin-private-lesson-billing': ['payments', 'monthlyPlanSessions'],
       'admin-receipts': ['receipts'],
       'admin-finance-summary': ['payments', 'expenses'],
@@ -20207,6 +20207,7 @@
       const oldCourse = (course && course.name) || enrollment.courseName || student.course || '-';
       const financials = resolveCourseCancellationFinancials(student, enrollment, course);
       if (financials.error) { alert(financials.message); return; }
+      if (getPaymentInstallmentSatang(financials.payment) > 0) { alert('รายการนี้มีประวัติรับเงินผ่อน จึงยกเลิกไม่ได้'); return; }
       if (financials.payment && !hasPermission('admin.finance') && !hasPermission('admin.full')) {
         alert('รายการนี้มียอดชำระ ผู้ยกเลิกต้องมีสิทธิ์จัดการนักเรียนและสิทธิ์การเงิน เพื่อยกเลิกคอร์สกับยอดพร้อมกัน');
         return;
@@ -21956,6 +21957,24 @@
       return Number(payment.amount || 0) || 0;
     }
 
+    function getPaymentInstallmentSatang(payment) {
+      return Number(payment && payment.installmentReceivedSatang) || 0;
+    }
+
+    function getPaymentBalanceSatang(payment) {
+      return Math.max(0, Math.round(getPaymentFinalAmount(payment) * 100) - getPaymentInstallmentSatang(payment));
+    }
+
+    function getPaymentPayableAmount(payment) {
+      return getPaymentBalanceSatang(payment) / 100;
+    }
+
+    function getPaymentReceivedAmount(payment) {
+      return getPaymentDisplayStatus(payment) === 'ชำระแล้ว'
+        ? getPaymentFinalAmount(payment)
+        : getPaymentInstallmentSatang(payment) / 100;
+    }
+
     function getPaymentBaseAmount(payment) {
       if (!payment) return 0;
       if (payment.baseAmount !== undefined && payment.baseAmount !== null) return Number(payment.baseAmount || 0) || 0;
@@ -21995,6 +22014,11 @@
       const finalAmount = getPaymentFinalAmount(payment);
       const privateLessonTotal = getPaymentPrivateLessonLineItemTotal(payment);
       const lineItemText = privateLessonTotal > 0 ? '<br><span class="mini-muted">เรียนเดี่ยว: ' + formatPrice(privateLessonTotal) + '</span>' : '';
+      if (getPaymentInstallmentSatang(payment) > 0) {
+        return '<strong>คงเหลือ ' + formatPrice(getPaymentPayableAmount(payment)) +
+          '</strong><br><span class="mini-muted">ยอดค่าเรียน ' + formatPrice(finalAmount) +
+          ' · รับแล้ว ' + formatPrice(getPaymentInstallmentSatang(payment) / 100) + '</span>';
+      }
       if (discount > 0 || base !== finalAmount) {
         return '<strong>' + formatPrice(finalAmount) + '</strong><br><span class="mini-muted">ราคาคอร์ส: ' + formatPrice(base) + '</span><br><span class="mini-muted">ส่วนลด: ' + formatPrice(discount) + '</span>' + lineItemText;
       }
@@ -25264,6 +25288,7 @@
       const enrollment = getSelectedStudentCourseEnrollment(currentStudent);
       const seen = new Set();
       return (payments || []).filter(function(payment) {
+        if (getPaymentInstallmentSatang(payment) > 0) return false;
         if (!isCurrentFamilyPaymentRecord(payment)) return false;
         if (!enrollment || String(payment.courseId || '') !== String(enrollment.courseId || '')) return false;
         if (!(payment.paymentMonth || payment.month || payment.billingMonth)) return false;
@@ -25309,7 +25334,7 @@
     function getSelectedStudentBundlePayments() {
       return Array.from(document.querySelectorAll('.studentBundlePaymentCheck:checked'))
         .map(function(input) { return findPaymentByAnyId(input.value); })
-        .filter(Boolean);
+        .filter(function(payment) { return payment && getPaymentInstallmentSatang(payment) === 0; });
     }
 
     function updateStudentBundleSelectionHint() {
@@ -25403,6 +25428,11 @@
       const bundle = findPaymentBundleById(bundleId);
       if (!result || !bundle) return;
       result.classList.remove('hidden');
+      if ((bundle.paymentIds || []).some(function(id) { return getPaymentInstallmentSatang(findPaymentByAnyId(id)) > 0; })) {
+        result.textContent = 'ยอดรวมนี้มีรายการที่บันทึกเงินผ่อนแล้ว กรุณาชำระยอดคงเหลือจากรายการเดี่ยว';
+        result.style.color = '#dc2626';
+        return;
+      }
       result.style.color = '#0f4cbd';
       if (!ENABLE_PAYMENT_SLIP_WEB_UPLOAD || !USE_APPS_SCRIPT_DRIVE_UPLOAD) {
         result.textContent = 'ระบบอัปโหลดสลิปผ่านเว็บยังไม่เปิดใช้งาน กรุณาติดต่อเจ้าหน้าที่';
@@ -25508,7 +25538,7 @@
         const pMonth = String(p.paymentMonth || p.month || p.billingMonth || '').trim();
         return isCurrentStudentCoursePaymentRecord(p) && pMonth === String(month);
       });
-      if (payment) return getPaymentFinalAmount(payment);
+      if (payment) return getPaymentPayableAmount(payment);
       return getExpectedPaymentAmountForStudent(currentStudent, month, getCurrentStudentCourse());
     }
 
@@ -32962,8 +32992,8 @@
       const selectedPaymentRecord = currentStudent && selectedPaymentMonth && selectedPaymentMonth !== '-'
         ? getCurrentStudentPaymentForSelectedMonth()
         : null;
-      const selectedPaymentAmount = selectedPaymentRecord ? getPaymentFinalAmount(selectedPaymentRecord) : 0;
-      if (getElement('studentPaymentAmount')) getElement('studentPaymentAmount').textContent = selectedPaymentRecord && selectedPaymentAmount ? formatPrice(selectedPaymentAmount) : '-';
+      const selectedPaymentAmount = selectedPaymentRecord ? getPaymentPayableAmount(selectedPaymentRecord) : 0;
+      if (getElement('studentPaymentAmount')) getElement('studentPaymentAmount').textContent = selectedPaymentRecord ? formatPrice(selectedPaymentAmount) : '-';
       if (getElement('studentPaymentCurrentMonth')) {
         getElement('studentPaymentCurrentMonth').textContent = selectedPaymentMonth || '-';
       }
@@ -33582,6 +33612,7 @@
       const displayStatus = p ? getPaymentDisplayStatus(p) : status;
       const isPaid = displayStatus === 'ชำระแล้ว';
       const isCancelled = displayStatus === 'ยกเลิก';
+      const hasInstallments = getPaymentInstallmentSatang(p) > 0;
       const rowIdScript = 'openSlipReviewModal(this.closest(\'[data-payment-id]\').dataset.paymentId)';
       const bundle = getPaymentBundleForPayment(p);
       if (bundle && bundle.status !== 'ยกเลิก' && bundle.status !== 'cancelled') {
@@ -33597,6 +33628,7 @@
       const isOverdue = displayStatus === 'ค้างชำระ';
       const overdueNoticeBtn = isOverdue && paymentId ? '<button class="btn btn-orange" type="button" onclick="' + actionCall('printOverdueNotice', paymentId) + '">ใบแจ้งหนี้</button>' : '';
       const adjustAmountBtn = p && canEditPaymentAmount(p) ? '<button class="btn btn-blue" type="button" onclick="editPaymentAmountDiscount(this)">แก้ยอด</button>' : '';
+      const deletePaymentBtn = hasInstallments ? '' : '<button class="btn btn-red" type="button" onclick="deletePaymentRecord(this)">ลบ</button>';
       if (isCancelled) {
         return '<div class="payment-actions-wrap">' +
           '<button class="btn btn-blue" type="button" onclick="showPaymentDetail(this)">ดูข้อมูล</button>' +
@@ -33612,14 +33644,15 @@
           ocrBtn +
           adjustAmountBtn +
           '<button class="btn btn-dark" type="button" onclick="editPaymentAdminNote(this)">หมายเหตุ</button>' +
-          '<button class="btn btn-red" type="button" onclick="deletePaymentRecord(this)">ลบ</button>' +
+          deletePaymentBtn +
         '</div>';
       }
       return '<div class="payment-actions-wrap">' +
         '<button class="btn btn-blue" type="button" onclick="' + rowIdScript + '">ตรวจสลิป</button>' +
-        '<button class="btn btn-green" type="button" onclick="approvePayment(this)">อนุมัติ</button>' +
-        '<button class="btn btn-red" type="button" onclick="rejectPayment(this)">ไม่ผ่าน</button>' +
-        '<button class="btn btn-dark" type="button" onclick="paymentCash(this)">💵 จ่ายเงินสด</button>' +
+        (!hasInstallments || displayStatus === 'รอตรวจสลิป'
+          ? '<button class="btn btn-green" type="button" onclick="approvePayment(this)">อนุมัติ</button>' +
+            '<button class="btn btn-red" type="button" onclick="rejectPayment(this)">ไม่ผ่าน</button>' : '') +
+        (hasInstallments ? '' : '<button class="btn btn-dark" type="button" onclick="paymentCash(this)">💵 จ่ายเงินสด</button>') +
         '<button class="btn btn-red" type="button" onclick="setPaymentOverdue(this)">ค้างชำระ</button>' +
         overdueNoticeBtn +
         moveSlipBtn +
@@ -33629,7 +33662,7 @@
         ocrBtn +
         adjustAmountBtn +
         '<button class="btn btn-dark" type="button" onclick="editPaymentAdminNote(this)">หมายเหตุ</button>' +
-        '<button class="btn btn-red" type="button" onclick="deletePaymentRecord(this)">ลบ</button>' +
+        deletePaymentBtn +
         '</div>';
     }
 
@@ -33659,6 +33692,7 @@
       if (bundleId) return findPaymentBundleById(bundleId);
       const paymentId = getPaymentRecordId(payment);
       if (!paymentId) return null;
+      if (getPaymentInstallmentSatang(payment) > 0) return null;
       return (paymentBundles || []).find(function(bundle) {
         if (!bundle || bundle.status === 'ยกเลิก' || bundle.status === 'cancelled') return false;
         return (bundle.paymentIds || []).map(String).includes(paymentId);
@@ -33702,9 +33736,7 @@
     function getPaymentDashboardAmountTotals() {
       const scope = getPaymentDashboardFilterScope();
       const scopedPayments = getDashboardScopedPayments(false);
-      const paidAmount = scopedPayments
-        .filter(function(p) { return getPaymentDisplayStatus(p) === 'ชำระแล้ว'; })
-        .reduce(function(sum, p) { return sum + getPaymentFinalAmount(p); }, 0);
+      const paidAmount = scopedPayments.reduce(function(sum, p) { return sum + getPaymentReceivedAmount(p); }, 0);
       const expectedAmount = scopedPayments.reduce(function(sum, p) { return sum + getPaymentFinalAmount(p); }, 0);
 
       return {
@@ -33769,6 +33801,7 @@
 
     function canPaymentBeBundled(payment) {
       if (!payment) return false;
+      if (getPaymentInstallmentSatang(payment) > 0) return false;
       if (isCoursePaymentCancelled(payment)) return false;
       const status = getPaymentDisplayStatus(payment);
       if (status === 'ชำระแล้ว') return false;
@@ -33932,9 +33965,34 @@
     }
 
     async function approvePaymentBundle(bundleId) {
+      if (!hasPermission('admin.finance')) { alert('ไม่มีสิทธิ์'); return; }
       const bundle = findPaymentBundleById(bundleId);
       if (!bundle) return;
+      if ((bundle.paymentIds || []).some(function(id) { return getPaymentInstallmentSatang(findPaymentByAnyId(id)) > 0; })) {
+        alert('ยอดรวมนี้มีรายการที่เริ่มผ่อนแล้ว กรุณาตรวจสอบยอดก่อนอนุมัติ');
+        return;
+      }
       if (!confirm('อนุมัติยอดรวม ' + formatPrice(bundle.totalAmount || bundle.amount || 0) + ' และอัปเดตรายการย่อยทั้งหมด?')) return;
+      try {
+        const bundleDocId = String(bundle.firebaseDocId || bundle.id);
+        await db.runTransaction(async function(transaction) {
+          const refs = (bundle.paymentIds || []).map(function(id) {
+            const local = findPaymentByAnyId(id);
+            return db.collection('payments').doc(String((local && local.firebaseDocId) || id));
+          });
+          const snapshots = await Promise.all(refs.map(function(ref) { return transaction.get(ref); }));
+          if (snapshots.some(function(snapshot) { return getPaymentInstallmentSatang(snapshot.data()) > 0; })) {
+            throw new Error('ยอดรวมนี้มีรายการที่เริ่มผ่อนแล้ว กรุณาตรวจสอบยอดก่อนอนุมัติ');
+          }
+          // Student-created bundles may not yet be linked from the payment document.
+          snapshots.forEach(function(snapshot, index) {
+            if (snapshot.exists && !snapshot.data().bundleId) transaction.update(refs[index], { bundleId: bundleDocId });
+          });
+        });
+      } catch (error) {
+        alert(error.message || 'ตรวจสอบยอดรวมไม่สำเร็จ');
+        return;
+      }
       bundle.status = 'ชำระแล้ว';
       bundle.paymentStatus = 'ชำระแล้ว';
       bundle.slipStatus = 'approved';
@@ -34017,14 +34075,38 @@
       renderPaymentBundlePanel();
     }
 
-    async function syncStudentPaymentStatusFromPayment(payment, status) {
+    async function syncStudentPaymentStatusFromPayment(payment, status, forceStudentWrite) {
       if (!payment) return null;
-      const student = getPaymentStudentRecord(payment) || (students || []).find(function(s) {
-        return isStudentPaymentRecord(s, payment);
-      });
+      let student = getPaymentStudentRecord(payment);
+      if (forceStudentWrite && !student) {
+        if (payment.studentId || payment.memberId || payment.authUid || payment.studentAuthUid) {
+          await loadStudentDisplayRecords([payment]);
+          student = getPaymentStudentRecord(payment);
+        } else if (payment.studentName || payment.student) {
+          const name = String(payment.studentName || payment.student).trim();
+          const snapshot = await db.collection('students').where('name', '==', name).get();
+          const matches = snapshot.docs.filter(function(doc) { return doc.data().deleted !== true; });
+          if (matches.length === 1) {
+            const match = matches[0];
+            mergeStudentEntityRecords([Object.assign({}, match.data(), { firebaseDocId: match.id })]);
+            rebuildStudentLookupMap();
+            student = getUniqueStudentRecordByPaymentName(payment);
+          }
+        }
+      } else if (!student) {
+        student = (students || []).find(function(s) { return isStudentPaymentRecord(s, payment); });
+      }
       if (!student) return null;
       const beforeSync = [student.courseId, student.course, student.courseStatus, student.paymentStatus, Array.isArray(student.overdueMonths) ? student.overdueMonths.join('|') : ''].join('::');
-      const enrollment = getStudentCourseEnrollment(student, payment.courseId || '');
+      let enrollment = getStudentCourseEnrollment(student, payment.courseId || '');
+      if (forceStudentWrite && payment.courseId && getEnrollmentStudentId(student) && (!enrollment || enrollment.legacy)) {
+        const enrollmentId = getCourseEnrollmentDocId(getEnrollmentStudentId(student), payment.courseId);
+        const snapshot = await db.collection('courseEnrollments').doc(enrollmentId).get();
+        if (snapshot.exists && snapshot.data().deleted !== true) {
+          enrollment = Object.assign({}, snapshot.data(), { firebaseDocId: snapshot.id });
+          courseEnrollments.push(enrollment);
+        }
+      }
       if (enrollment && !enrollment.legacy) {
         enrollment.paymentStatus = status;
         if (status === 'ชำระแล้ว' && enrollment.courseStatus === 'รออนุมัติคอร์ส') {
@@ -34055,7 +34137,7 @@
       }
 
       const afterSync = [student.courseId, student.course, student.courseStatus, student.paymentStatus, Array.isArray(student.overdueMonths) ? student.overdueMonths.join('|') : ''].join('::');
-      if (beforeSync !== afterSync) await setFirebaseDocument('students', student);
+      if (forceStudentWrite || beforeSync !== afterSync) await setFirebaseDocument('students', student);
       if (currentStudent && isStudentPaymentRecord(currentStudent, payment)) {
         Object.assign(currentStudent, student);
         updateStudentCourseDisplay();
@@ -34072,6 +34154,20 @@
       const slipCell = row.children[6];
       const statusCell = row.children[7];
       const actionCell = row.children[8];
+      if (payment && getPaymentInstallmentSatang(payment) > 0) {
+        if (status === 'ชำระแล้ว') {
+          try {
+            await approvePaymentAndIssueReceipt(paymentId);
+          } catch (error) {
+            alert(error.message || 'อนุมัติไม่สำเร็จ');
+          }
+          return;
+        }
+        if (getPaymentDisplayStatus(payment) === 'ชำระแล้ว') {
+          alert('รายการนี้รับเงินครบแล้ว');
+          return;
+        }
+      }
       if (payment) {
         payment.status = status;
         payment.paymentStatus = status;
@@ -34144,7 +34240,7 @@
       const deleteSlipBtn = canDeletePaymentSlip(payment)
         ? '<button class="btn btn-red" type="button" onclick="deletePaymentSlipOnly(\'' + jsArg(String(paymentId)) + '\')">ลบสลิป</button>'
         : '';
-      const revertBtn = statusText === 'ชำระแล้ว'
+      const revertBtn = statusText === 'ชำระแล้ว' && getPaymentInstallmentSatang(payment) === 0
         ? '<button class="btn btn-orange" type="button" onclick="revertPaymentApproval(\'' + jsArg(String(paymentId)) + '\')">↩ ยกเลิกการอนุมัติ</button>'
         : '';
       const linkedReceipt = (receipts || []).find(function(r) {
@@ -34161,9 +34257,9 @@
         '<div class="receipt-line"><strong>นักเรียน</strong><span>' + escapeHtml(getStudentDisplayName(payment)) + '</span></div>' +
         '<div class="receipt-line"><strong>คอร์ส</strong><span>' + escapeHtml(payment.course || '-') + '</span></div>' +
         '<div class="receipt-line"><strong>เดือน</strong><span>' + escapeHtml(payment.month || '-') + '</span></div>' +
-        '<div class="receipt-line"><strong>ยอด</strong><span style="font-weight:800;">' + escapeHtml(renderPaymentAmountText(payment)) + '</span></div>' +
+        '<div class="receipt-line"><strong>ยอด</strong><span style="font-weight:800;">' + renderPaymentAmountText(payment) + '</span></div>' +
         '<div class="receipt-line"><strong>สถานะ</strong><span class="' + statusClass + '">' + escapeHtml(statusText) + '</span></div>' +
-        receiptNote + adminNote + ocrNote +
+        receiptNote + adminNote + ocrNote + paymentInstallmentHistoryHtml(payment) + installmentSyncButtonHtml(payment) +
         '</div></div>' +
         '<div class="test-actions" style="margin-top:18px;">' +
         '<button id="slipModalApproveBtn" class="btn btn-green" type="button" onclick="approvePaymentByIdFromModal(\'' + jsArg(String(paymentId)) + '\')">✓ อนุมัติ</button>' +
@@ -34180,9 +34276,15 @@
     async function approvePaymentByIdFromModal(paymentId) {
       const btn = getElement('slipModalApproveBtn');
       if (btn) { btn.disabled = true; btn.textContent = 'กำลังอนุมัติ...'; }
-      await approvePaymentAndIssueReceipt(paymentId);
-      getElement('editBubbleOverlay').classList.add('hidden');
-      renderPaymentTable();
+      try {
+        await approvePaymentAndIssueReceipt(paymentId);
+        closeEditBubble();
+        renderPaymentTable();
+      } catch (error) {
+        alert(error.message || 'อนุมัติไม่สำเร็จ');
+      } finally {
+        if (btn) { btn.disabled = false; btn.textContent = '✓ อนุมัติ'; }
+      }
     }
 
     async function rejectPaymentByIdFromModal(paymentId) {
@@ -34192,6 +34294,11 @@
         return String(p.id || '') === String(paymentId) || String(p.firebaseDocId || '') === String(paymentId);
       });
       if (!payment) { if (btn) { btn.disabled = false; btn.textContent = '✗ ไม่ผ่าน'; } return; }
+      if (getPaymentInstallmentSatang(payment) > 0 && getPaymentBalanceSatang(payment) === 0) {
+        if (btn) { btn.disabled = false; btn.textContent = '✗ ไม่ผ่าน'; }
+        alert('รายการนี้รับเงินครบแล้ว');
+        return;
+      }
       payment.status = 'สลิปไม่ผ่าน';
       payment.paymentStatus = 'สลิปไม่ผ่าน';
       payment.slipStatus = 'rejected';
@@ -34208,6 +34315,7 @@
       if (!hasPermission('admin.finance')) { alert('ไม่มีสิทธิ์'); return; }
       const payment = findPaymentByAnyId(paymentId);
       if (!payment) { alert('ไม่พบรายการชำระเงิน'); return; }
+      if (getPaymentInstallmentSatang(payment) > 0) { alert('รายการนี้มีประวัติรับเงินผ่อน จึงยกเลิกไม่ได้'); return; }
       if (getPaymentDisplayStatus(payment) !== 'ชำระแล้ว') { alert('รายการนี้ยังไม่ได้อนุมัติ'); return; }
       const linkedReceipt = (receipts || []).find(function(r) {
         return (payment.receiptId && String(r.id || '') === String(payment.receiptId)) ||
@@ -34247,13 +34355,26 @@
     }
 
     async function approvePaymentAndIssueReceipt(paymentId) {
-      const payment = findPaymentByAnyId(paymentId);
+      let payment = findPaymentByAnyId(paymentId);
       if (!payment) return null;
-      payment.status = 'ชำระแล้ว';
-      payment.paymentStatus = 'ชำระแล้ว';
-      payment.slipStatus = 'approved';
-      payment.receiptStatus = 'issued';
-      await setFirebaseDocument('payments', payment);
+      const hasInstallments = getPaymentInstallmentSatang(payment) > 0;
+      if (hasInstallments) {
+        const balance = getPaymentBalanceSatang(payment);
+        if (balance > 0) {
+          if (!getPaymentSlipUrl(payment)) throw new Error('กรุณาส่งสลิปยอดคงเหลือ หรือบันทึกยอดที่รับด้วยปุ่มหักยอดผ่อน');
+          payment = await recordPaymentInstallment(payment.firebaseDocId || paymentId, {
+            id: 'final-slip', amountSatang: balance, expectedBalanceSatang: balance, note: 'อนุมัติสลิปงวดสุดท้าย', receivedAtMs: Date.now()
+          }, true);
+        } else {
+          await syncClosedPaymentInstallment(payment);
+        }
+      } else {
+        payment.status = 'ชำระแล้ว';
+        payment.paymentStatus = 'ชำระแล้ว';
+        payment.slipStatus = 'approved';
+        payment.receiptStatus = 'issued';
+        await setFirebaseDocument('payments', payment);
+      }
       const receipt = await issueReceiptFromPayment(payment);
       if (receipt) {
         payment.receiptId = receipt.id || payment.receiptId || '';
@@ -34261,7 +34382,7 @@
         payment.receiptStatus = 'published';
         await setFirebaseDocument('payments', payment);
       }
-      await syncStudentPaymentStatusFromPayment(payment, 'ชำระแล้ว');
+      if (!hasInstallments) await syncStudentPaymentStatusFromPayment(payment, 'ชำระแล้ว');
       renderPaymentTable();
       updatePaymentSummary();
       renderAdminReceipts();
@@ -34325,6 +34446,7 @@
       const index = payments.findIndex(function(p) { return String(p.id) === String(paymentId); });
       if (index === -1) return;
       const payment = payments[index];
+      if (getPaymentInstallmentSatang(payment) > 0) { alert('รายการนี้มีประวัติรับเงินผ่อน จึงลบไม่ได้'); return; }
 
       if (!confirm('ต้องการลบข้อมูลการชำระเงินของ ' + getStudentDisplayName(payment) + ' เดือน ' + (payment.month || '-') + ' ใช่หรือไม่?')) return;
 
@@ -34391,6 +34513,7 @@
       if (!paymentId) return;
       const payment = findPaymentByAnyId(paymentId);
       if (!payment) return;
+      if (getPaymentInstallmentSatang(payment) > 0) { alert('กรุณาบันทึกเงินสดผ่านปุ่มหักยอดผ่อนในใบแจ้งยอด'); return; }
       if (!confirm('บันทึกการจ่ายเงินสดสำหรับ ' + getStudentDisplayName(payment) + ' เดือน ' + (payment.month || '-') + '?')) return;
       button.disabled = true;
       button.textContent = 'กำลังบันทึก...';
@@ -34844,7 +34967,7 @@
       const amount = canShowMonth ? getCurrentStudentAdjustedPaymentAmount(month) : 0;
       const statusText = canShowMonth ? (selectedPayment ? getPaymentDisplayStatus(selectedPayment) : getCurrentStudentPaymentStatusText()) : '-';
       if (getElement('studentPaymentCurrentMonth')) getElement('studentPaymentCurrentMonth').textContent = month || '-';
-      if (getElement('studentPaymentAmount')) getElement('studentPaymentAmount').textContent = amount ? formatPrice(amount) : '-';
+      if (getElement('studentPaymentAmount')) getElement('studentPaymentAmount').textContent = selectedPayment || amount ? formatPrice(amount) : '-';
       if (getElement('studentPaymentStatus')) {
         getElement('studentPaymentStatus').textContent = statusText;
         const isWaiting = statusText === 'รอตรวจสลิป';
@@ -35077,6 +35200,7 @@
 
     function canAdjustPaymentAmount(payment) {
       if (!payment) return false;
+      if (getPaymentInstallmentSatang(payment) > 0) return canRecordPaymentInstallment(payment);
       if (!isPaymentRecordUpdatable(payment)) return false;
       if (payment.receiptId || payment.receiptNo || payment.receiptStatus) return false;
       if (isPaymentInActiveBundle(payment)) return false;
@@ -35087,6 +35211,7 @@
       if (!payment) return false;
       if (!hasPermission('admin.finance') && !hasPermission('admin.full')) return false;
       if (isPaymentInActiveBundle(payment)) return false;
+      if (getPaymentInstallmentSatang(payment) > 0) return canAdjustPaymentAmount(payment);
       if (canAdjustPaymentAmount(payment)) return true;
       return getPaymentDisplayStatus(payment) === 'ชำระแล้ว';
     }
@@ -35767,6 +35892,7 @@
 
     function isPaymentRecordUpdatable(payment) {
       if (!payment) return false;
+      if (getPaymentInstallmentSatang(payment) > 0) return false;
       const status = String(payment.status || payment.paymentStatus || '').trim();
       const slipStatus = String(payment.slipStatus || '').trim();
       if (paymentHasUploadedSlip(payment)) return false;
@@ -35944,15 +36070,22 @@
 
     async function voidSelectedStudentMonthPayments() {
       if (voidSelectedStudentMonthPayments._saving) return;
-      const selectedIds = getSelectedPaymentPreviewStudentIds();
       const month = getSelectedPaymentRecordMonth();
       const result = getElement('paymentRecordPreviewResult');
       if (!month) {
         if (result) { result.textContent = 'กรุณาเลือกเดือนก่อนยกเลิกรายการ'; result.style.color = '#dc2626'; }
         return;
       }
+      const requestedIds = getSelectedPaymentPreviewStudentIds();
+      const selectedIds = requestedIds.filter(function(id) {
+        const student = findStudentByIdentityKey(id);
+        return getPaymentInstallmentSatang(student && findPaymentForStudentMonth(student, month)) === 0;
+      });
       if (!selectedIds.length) {
-        if (result) { result.textContent = 'กรุณาเลือกรายการที่ต้องการยกเลิกก่อน'; result.style.color = '#dc2626'; }
+        if (result) {
+          result.textContent = requestedIds.length ? 'รายการที่เลือกมีประวัติรับเงินผ่อน จึงยกเลิกไม่ได้' : 'กรุณาเลือกรายการที่ต้องการยกเลิกก่อน';
+          result.style.color = '#dc2626';
+        }
         return;
       }
       if (!confirm('ยืนยันยกเลิกยอดเรียกเก็บรอบ ' + month + ' จำนวน ' + selectedIds.length + ' รายการ?')) return;
@@ -35960,7 +36093,7 @@
       if (!pmItem) return;
       voidSelectedStudentMonthPayments._saving = true;
       let voidedPayments = 0;
-      let skippedPayments = 0;
+      let skippedPayments = requestedIds.length - selectedIds.length;
       try {
         if (!pmItem.skippedStudents) pmItem.skippedStudents = {};
         selectedIds.forEach(function(studentId) {
@@ -36002,13 +36135,14 @@
     async function voidStudentMonthPayment(month, studentId) {
       const pmItem = getPaymentMonthItem(month);
       if (!pmItem) return;
+      const student = findStudentByIdentityKey(studentId);
+      const payment = student ? findPaymentForStudentMonth(student, month) : null;
+      if (getPaymentInstallmentSatang(payment) > 0) { alert('รายการนี้มีประวัติรับเงินผ่อน จึงยกเลิกไม่ได้'); return; }
       if (!confirm('ยืนยันยกเลิกยอดเรียกเก็บรอบ ' + month + ' ของนักเรียนรายนี้?')) return;
       if (!pmItem.skippedStudents) pmItem.skippedStudents = {};
-      const student = findStudentByIdentityKey(studentId);
       const skipKey = student ? getPrimaryStudentIdentityKey(student) : String(studentId);
       pmItem.skippedStudents[skipKey] = true;
       await setFirebaseDocument('paymentMonths', pmItem);
-      const payment = student ? findPaymentForStudentMonth(student, month) : null;
       if (payment && isPaymentRecordUpdatable(payment)) {
         payment.status = 'ยกเว้น';
         payment.paymentStatus = 'ยกเว้น';
@@ -36101,7 +36235,8 @@
         const studentKey = getPrimaryStudentIdentityKey(student);
         const expectedAmount = getMonthlyPaymentAmountForStudent(student, month);
         const payment = findPaymentForStudentMonth(student, month);
-        const amount = payment ? getPaymentFinalAmount(payment) : expectedAmount;
+        const amount = payment && getPaymentInstallmentSatang(payment) > 0 && getPaymentDisplayStatus(payment) !== 'ชำระแล้ว'
+          ? getPaymentPayableAmount(payment) : payment ? getPaymentFinalAmount(payment) : expectedAmount;
         const isSkipped = getStudentIdentityKeys(student).some(function(key) { return !!skipped[key]; });
         return {
           student: student,
@@ -36768,7 +36903,9 @@
           '<div class="receipt-line"><strong>นักเรียน</strong><span>' + escapeHtml(getStudentDisplayName(payment, student)) + '</span></div>' +
           '<div class="receipt-line"><strong>Member ID</strong><span>' + escapeHtml(student.memberId || payment.memberId || '-') + '</span></div>' +
           '<div class="receipt-line"><strong>เดือน</strong><span>' + escapeHtml(payment.month || '-') + '</span></div>' +
-          '<div class="receipt-line"><strong>ยอดในระบบ</strong><span>' + escapeHtml(payment.finalAmount || payment.amount || payment.baseAmount || '-') + '</span></div>' +
+          '<div class="receipt-line"><strong>ยอดในระบบ</strong><span>' + escapeHtml(formatPrice(
+            getPaymentInstallmentSatang(payment) > 0 && getPaymentDisplayStatus(payment) !== 'ชำระแล้ว'
+              ? getPaymentPayableAmount(payment) : getPaymentFinalAmount(payment))) + '</span></div>' +
           '<h3 style="margin-top:18px;">ข้อมูล OCR</h3>' +
           '<div class="receipt-line"><strong>ผู้โอน</strong><span>' + escapeHtml(payment.ocrPayerName || '-') + '</span></div>' +
           '<div class="receipt-line"><strong>ผู้รับ</strong><span>' + escapeHtml(payment.ocrReceiverName || '-') + '</span></div>' +
@@ -37060,7 +37197,8 @@
         student: payment ? (payment.student || '-') : (row && row.children[2] ? row.children[2].innerText.trim() : '-'),
         course: payment ? (payment.course || '-') : (row && row.children[3] ? row.children[3].innerText.trim() : '-'),
         month: payment ? (payment.month || '-') : (row && row.children[4] ? row.children[4].innerText.trim() : '-'),
-        amount: payment ? String(getPaymentFinalAmount(payment)) : (row && row.children[5] ? row.children[5].innerText.trim().replace(' บาท', '') : '0'),
+        amount: payment ? String(getPaymentDisplayStatus(payment) === 'ชำระแล้ว' ? getPaymentFinalAmount(payment) : getPaymentPayableAmount(payment))
+          : (row && row.children[5] ? row.children[5].innerText.trim().replace(' บาท', '') : '0'),
         lineItems: payment && Array.isArray(payment.lineItems) ? payment.lineItems : [],
         slip: payment ? (getPaymentSlipUrl(payment) ? 'มีสลิป' : (payment.slipSource || '-')) : (row && row.children[6] ? row.children[6].innerText.trim() : '-'),
         slipNote: payment ? (payment.slipNote || ('นักเรียนแจ้งส่งสลิปของเดือน ' + (payment.month || '-'))) : '',
@@ -37096,16 +37234,18 @@
       if (!row) return;
       tempPaymentDetail = getPaymentDataFromRow(row);
       const data = tempPaymentDetail;
+      const payment = findPaymentByAnyId(data.paymentId);
       openViewBubble('ข้อมูลการชำระเงิน',
         '<div class="receipt-box">' +
           '<div class="receipt-header"><div><div class="receipt-title">รายละเอียดชำระเงิน</div><p>ข้อมูลการชำระเงินรายเดือน</p></div><span class="status-badge ' + (data.status.includes('ชำระแล้ว') ? 'present' : data.status.includes('ไม่ผ่าน') || data.status.includes('ค้าง') ? 'absent' : 'parent') + '">' + data.status + '</span></div>' +
           '<div class="receipt-line"><strong>นักเรียน</strong><span>' + escapeHtml(getStudentDisplayName(data)) + '</span></div>' +
           '<div class="receipt-line"><strong>คอร์ส</strong><span>' + data.course + '</span></div>' +
           '<div class="receipt-line"><strong>เดือนที่ชำระ</strong><span>' + (data.month || '-') + '</span></div>' +
-          '<div class="receipt-line"><strong>ยอดเงิน</strong><span>' + data.amount + ' บาท</span></div>' +
+          '<div class="receipt-line"><strong>ยอดเงิน</strong><span>' + (payment ? renderPaymentAmountText(payment) : escapeHtml(data.amount) + ' บาท') + '</span></div>' +
           '<div class="receipt-line"><strong>สลิป</strong><span>' + data.slip + '</span></div>' +
           '<div class="receipt-line"><strong>หมายเหตุการส่งสลิป</strong><span>' + (data.slipNote || '-') + '</span></div>' +
           '<div class="receipt-line"><strong>วันที่นักเรียนแจ้ง</strong><span>' + (data.sentAt || '-') + '</span></div>' +
+          paymentInstallmentHistoryHtml(payment) + installmentSyncButtonHtml(payment) +
           '<div class="test-actions"><button class="btn btn-green" type="button" onclick="createReceiptFromPaymentDetail()">ออกใบเสร็จจากรายการนี้</button><button class="btn btn-dark" type="button" onclick="closeEditBubble()">ปิด</button></div>' +
         '</div>'
       );
@@ -37493,9 +37633,10 @@
           });
         }
         row.payments.push(payment);
-        row.totalAmount += Number(getPaymentFinalAmount(payment)) || 0;
+        row.totalAmount += getPaymentBalanceSatang(payment);
       });
       rows.forEach(function(row) {
+        row.totalAmount /= 100;
         row.payments.sort(function(a, b) {
           const monthDiff = compareThaiMonthYear(a.month || a.paymentMonth || '', b.month || b.paymentMonth || '');
           if (monthDiff !== 0) return monthDiff;
@@ -37617,13 +37758,166 @@
       return buildTuitionNoticeStudentRows().find(function(row) { return String(row.key) === String(key); }) || null;
     }
 
+    function canRecordPaymentInstallment(payment) {
+      return payment && payment.deleted !== true && getPaymentRecordId(payment) &&
+        !isCoursePaymentCancelled(payment) && !isPaymentInActiveBundle(payment) &&
+        payment.slipStatus !== 'uploading' &&
+        !payment.receiptId && !payment.receiptNo && !payment.receiptStatus &&
+        isTuitionNoticePrintablePayment(payment) && getPaymentBalanceSatang(payment) > 0;
+    }
+
+    function parsePaymentInstallmentSatang(value) {
+      const text = String(value || '').trim();
+      if (!/^\d+(\.\d{1,2})?$/.test(text)) return 0;
+      const satang = Math.round(Number(text) * 100);
+      return Number.isSafeInteger(satang) && satang > 0 ? satang : 0;
+    }
+
+    async function recordPaymentInstallment(paymentId, entry, settleWithSlip) {
+      if (!hasPermission('admin.finance')) throw new Error('ไม่มีสิทธิ์');
+      if (!firebaseReady || !db || !firebaseUser) throw new Error('Firebase ยังไม่พร้อมใช้งาน');
+      const ref = db.collection('payments').doc(String(paymentId));
+      const saved = await db.runTransaction(async function(transaction) {
+        const snapshot = await transaction.get(ref);
+        if (!snapshot.exists) throw new Error('ไม่พบรายการชำระเงิน');
+        const payment = Object.assign({}, snapshot.data(), { firebaseDocId: snapshot.id });
+        const history = Array.isArray(payment.installmentHistory) ? payment.installmentHistory : [];
+        if (history.some(function(item) { return item.id === entry.id; })) return payment;
+        if (payment.bundleId) {
+          const bundle = await transaction.get(db.collection('paymentBundles').doc(String(payment.bundleId)));
+          if (bundle.exists && isActivePaymentBundle(bundle.data())) throw new Error('รายการนี้อยู่ในยอดรวมที่ยังใช้งาน');
+        }
+        const balance = getPaymentBalanceSatang(payment);
+        const eligible = settleWithSlip
+          ? !payment.deleted && !isPaymentInActiveBundle(payment) &&
+            getPaymentDisplayStatus(payment) === 'รอตรวจสลิป' && !!getPaymentSlipUrl(payment) && getPaymentInstallmentSatang(payment) > 0 &&
+            !payment.receiptId && !payment.receiptNo
+          : canRecordPaymentInstallment(payment);
+        if (!eligible || balance <= 0) throw new Error('รายการนี้ไม่สามารถหักยอดได้ กรุณาตรวจสอบรายการล่าสุด');
+        if (balance !== entry.expectedBalanceSatang) throw new Error('ยอดคงเหลือเปลี่ยนแล้ว กรุณาเปิดรายการใหม่ก่อนบันทึก');
+        if (!Number.isSafeInteger(entry.amountSatang) || entry.amountSatang <= 0 || entry.amountSatang > balance ||
+            (settleWithSlip && entry.amountSatang !== balance)) {
+          throw new Error('กรุณาระบุยอดรับจริงมากกว่า 0 และไม่เกินยอดคงเหลือ');
+        }
+        const update = {
+          installmentHistory: history.concat({
+            id: entry.id,
+            amountSatang: entry.amountSatang,
+            note: entry.note,
+            source: settleWithSlip ? 'slip' : 'manual',
+            receivedAtMs: entry.receivedAtMs,
+            receivedByUid: firebaseUser.uid,
+            receivedByName: getFirebaseAuditUser().displayName || 'Admin'
+          }),
+          installmentReceivedSatang: getPaymentInstallmentSatang(payment) + entry.amountSatang,
+          updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+        };
+        if (typeof payment.finalAmount !== 'number') update.finalAmount = getPaymentFinalAmount(payment);
+        if (entry.amountSatang === balance) {
+          update.status = 'ชำระแล้ว';
+          update.paymentStatus = 'ชำระแล้ว';
+          update.slipStatus = settleWithSlip ? 'approved' : 'paid_manually';
+          update.installmentStatusSyncPending = true;
+        } else {
+          update.status = getPaymentDisplayStatus(payment);
+          update.paymentStatus = update.status;
+        }
+        transaction.update(ref, update);
+        return Object.assign(payment, update);
+      });
+      const local = findPaymentByAnyId(paymentId);
+      if (local) Object.assign(local, saved);
+      requestAdminPaymentRender(['table', 'notices', 'summary', 'dashboardSummary', 'preview']);
+      await syncClosedPaymentInstallment(local || saved);
+      return local || saved;
+    }
+
+    async function syncClosedPaymentInstallment(payment) {
+      if (!payment || !payment.installmentStatusSyncPending) return;
+      if (!hasPermission('admin.finance')) throw new Error('ไม่มีสิทธิ์');
+      const student = await syncStudentPaymentStatusFromPayment(payment, 'ชำระแล้ว', true);
+      if (!student) throw new Error('บันทึกยอดแล้ว แต่ไม่พบข้อมูลนักเรียนสำหรับอัปเดตสถานะ');
+      await db.collection('payments').doc(String(payment.firebaseDocId || getPaymentRecordId(payment))).update({ installmentStatusSyncPending: false });
+      payment.installmentStatusSyncPending = false;
+    }
+
+    function installmentSyncButtonHtml(payment) {
+      return payment && payment.installmentStatusSyncPending && hasPermission('admin.finance')
+        ? '<button type="button" class="btn btn-blue" onclick="retryPaymentInstallmentStatusSync(\'' + jsArg(getPaymentRecordId(payment)) + '\', this)">อัปเดตสถานะนักเรียนอีกครั้ง</button>'
+        : '';
+    }
+
+    async function retryPaymentInstallmentStatusSync(paymentId, button) {
+      button.disabled = true;
+      try {
+        await syncClosedPaymentInstallment(findPaymentByAnyId(paymentId));
+        button.hidden = true;
+      } catch (error) {
+        alert('อัปเดตสถานะนักเรียนไม่สำเร็จ: ' + error.message);
+      } finally {
+        button.disabled = false;
+      }
+    }
+
+    function paymentInstallmentHistoryHtml(payment) {
+      const history = payment && payment.installmentHistory;
+      if (!Array.isArray(history) || !history.length) return '';
+      return '<h4>ประวัติรับเงินผ่อน</h4><ul>' + history.map(function(entry) {
+        return '<li>' + escapeHtml(new Date(entry.receivedAtMs).toLocaleString('th-TH')) + ' · ' +
+          escapeHtml(formatPrice(entry.amountSatang / 100)) + ' · ' + escapeHtml(entry.receivedByName || '-') +
+          (entry.note ? ' · ' + escapeHtml(entry.note) : '') + '</li>';
+      }).join('') + '</ul>';
+    }
+
+    function updatePaymentInstallmentPreview(balanceSatang) {
+      const amount = parsePaymentInstallmentSatang(bubbleValue('tuitionInstallmentAmount'));
+      getElement('tuitionInstallmentPreview').textContent = amount > balanceSatang
+        ? 'ยอดรับเกินยอดคงเหลือ'
+        : 'คงเหลือหลังหัก ' + formatPrice((balanceSatang - amount) / 100);
+    }
+
+    function openPaymentInstallment(paymentId, rowKey) {
+      if (!hasPermission('admin.finance')) { alert('ไม่มีสิทธิ์'); return; }
+      const payment = findPaymentByAnyId(paymentId);
+      if (!canRecordPaymentInstallment(payment)) { alert('รายการนี้ไม่สามารถหักยอดได้'); return; }
+      const expectedBalanceSatang = getPaymentBalanceSatang(payment);
+      const entryId = createFirebaseDocId('payments');
+      openEditBubble('หักยอดผ่อน',
+        '<p>' + escapeHtml(getStudentDisplayName(payment)) + ' · ' +
+          escapeHtml(payment.month || payment.paymentMonth || '-') + ' · ' + escapeHtml(payment.course || payment.courseName || '-') + '</p>' +
+        '<p>ยอดค่าเรียน ' + formatPrice(getPaymentFinalAmount(payment)) + ' · รับแล้ว ' +
+          formatPrice(getPaymentInstallmentSatang(payment) / 100) + ' · คงเหลือ ' + formatPrice(expectedBalanceSatang / 100) + '</p>' +
+        '<label for="tuitionInstallmentAmount">ยอดรับเงินจริง (บาท)</label>' +
+        '<input id="tuitionInstallmentAmount" type="number" min="0.01" step="0.01" max="' + expectedBalanceSatang / 100 +
+          '" oninput="' + actionCall('updatePaymentInstallmentPreview', expectedBalanceSatang) + '">' +
+        '<label for="tuitionInstallmentNote">หมายเหตุการรับเงิน</label><input id="tuitionInstallmentNote" maxlength="300">' +
+        '<p id="tuitionInstallmentPreview" aria-live="polite">คงเหลือหลังหัก ' + formatPrice(expectedBalanceSatang / 100) + '</p>' +
+        paymentInstallmentHistoryHtml(payment),
+        async function() {
+          await recordPaymentInstallment(payment.firebaseDocId || paymentId, {
+            id: entryId,
+            amountSatang: parsePaymentInstallmentSatang(bubbleValue('tuitionInstallmentAmount')),
+            expectedBalanceSatang: expectedBalanceSatang,
+            note: bubbleValue('tuitionInstallmentNote').trim().slice(0, 300),
+            receivedAtMs: Date.now()
+          });
+          const remaining = getFilteredTuitionNoticeStudentRow(rowKey);
+          if (remaining) viewTuitionNoticeStudentDetails(rowKey);
+          else closeEditBubble();
+        }
+      );
+    }
+
     function tuitionNoticeDetailRowsHtml(row) {
       return (row && row.payments || []).map(function(payment) {
         const data = getPaymentRecordCourseAndStudent(payment);
         return '<tr><td>' + escapeHtml(payment.month || payment.paymentMonth || '-') + '</td>' +
           '<td>' + escapeHtml(payment.course || payment.courseName || '-') + '</td>' +
           '<td>' + escapeHtml(getPaymentCenterTextForQr(payment, data.student, data.course) || '-') + '</td>' +
-          '<td style="text-align:right;">' + escapeHtml(formatPrice(getPaymentFinalAmount(payment))) + '</td></tr>';
+          '<td style="text-align:right;">' + escapeHtml(formatPrice(getPaymentPayableAmount(payment))) + '</td>' +
+          '<td>' + (hasPermission('admin.finance') && canRecordPaymentInstallment(payment)
+            ? '<button type="button" class="btn btn-blue" onclick="' + actionCall('openPaymentInstallment', getPaymentRecordId(payment), row.key) + '">หักยอดผ่อน</button>'
+            : '') + paymentInstallmentHistoryHtml(payment) + '</td></tr>';
       }).join('');
     }
 
@@ -37634,7 +37928,7 @@
         '<div class="receipt-box"><div class="receipt-line"><strong>นักเรียน</strong><span>' + escapeHtml(getStudentDisplayName(row)) + '</span></div>' +
         '<div class="receipt-line"><strong>Member ID</strong><span>' + escapeHtml(row.memberId || '-') + '</span></div>' +
         '<div class="receipt-line"><strong>ระดับชั้น</strong><span>' + escapeHtml(row.grade || '-') + '</span></div>' +
-        '<div class="table-wrap" style="margin-top:14px;"><table><thead><tr><th>เดือน</th><th>คอร์ส</th><th>ศูนย์</th><th style="text-align:right;">ยอด</th></tr></thead><tbody>' + tuitionNoticeDetailRowsHtml(row) + '</tbody></table></div>' +
+        '<div class="table-wrap" style="margin-top:14px;"><table><thead><tr><th>เดือน</th><th>คอร์ส</th><th>ศูนย์</th><th style="text-align:right;">ยอดคงเหลือ</th><th>การผ่อนชำระ</th></tr></thead><tbody>' + tuitionNoticeDetailRowsHtml(row) + '</tbody></table></div>' +
         '<div class="receipt-total" style="margin-top:14px;">ยอดรวม ' + escapeHtml(formatPrice(row.totalAmount)) + '</div>' +
         '<div class="test-actions" style="margin-top:14px;"><button class="btn btn-orange" type="button" onclick="downloadTuitionNoticeStudentPdf(\'' + jsArg(row.key) + '\')">ดาวน์โหลด PDF</button><button class="btn btn-green" type="button" onclick="downloadTuitionNoticeStudentImage(\'' + jsArg(row.key) + '\')">ดาวน์โหลดรูป</button><button class="btn btn-dark" type="button" onclick="closeEditBubble()">ปิด</button></div></div>'
       );
@@ -37727,10 +38021,11 @@
           });
         }
         group.payments.push(payment);
-        group.totalAmount += Number(getPaymentFinalAmount(payment)) || 0;
+        group.totalAmount += getPaymentBalanceSatang(payment);
       });
 
       groups.forEach(function(group) {
+        group.totalAmount /= 100;
         group.payments.sort(function(a, b) {
           const monthDiff = compareThaiMonthYear(a.month || a.paymentMonth || '', b.month || b.paymentMonth || '');
           if (monthDiff !== 0) return monthDiff;
@@ -37759,7 +38054,7 @@
         return '<tr style="' + (index % 2 === 0 ? 'background:#f8fafc;' : 'background:#fff;') + '">' +
           '<td>' + escapeHtml(payment.course || payment.courseName || '-') + '</td>' +
           '<td>' + escapeHtml(payment.month || payment.paymentMonth || '-') + '</td>' +
-          '<td class="amount">' + escapeHtml(formatPrice(getPaymentFinalAmount(payment))) + '</td>' +
+          '<td class="amount">' + escapeHtml(formatPrice(getPaymentPayableAmount(payment))) + '</td>' +
         '</tr>';
       }).join('');
       const contacts = [];
@@ -37967,12 +38262,12 @@
       const phone = (systemSettings && systemSettings.phone) || '';
       const lineId = (systemSettings && systemSettings.lineOfficial) || '';
       const today = new Date().toLocaleDateString('th-TH', { year: 'numeric', month: 'long', day: 'numeric' });
-      const totalAmount = usedPayments.reduce(function(sum, p) { return sum + (Number(getPaymentFinalAmount(p)) || 0); }, 0);
+      const totalAmount = usedPayments.reduce(function(sum, p) { return sum + getPaymentPayableAmount(p); }, 0);
 
       const rowsHtml = usedPayments.map(function(p, i) {
         const pCourse = p.course || p.courseName || courseName;
         const pMonth = p.month || '-';
-        const pAmount = getPaymentFinalAmount(p);
+        const pAmount = getPaymentPayableAmount(p);
         return '<tr style="' + (i % 2 === 0 ? 'background:#f9fafb;' : 'background:#fff;') + '">' +
           '<td style="padding:9px 14px;border-bottom:1px solid #e5e7eb;">' + escapeHtml(pMonth) + '</td>' +
           '<td style="padding:9px 14px;border-bottom:1px solid #e5e7eb;">' + escapeHtml(pCourse) + '</td>' +
@@ -38673,6 +38968,7 @@ function receiptStatusText(status) {
 
     function isApprovedPaymentNeedingStudentRepair(payment) {
       if (!payment) return false;
+      if (getPaymentInstallmentSatang(payment) > 0) return false;
       const rawValues = [
         payment.status,
         payment.paymentStatus,
@@ -38782,7 +39078,7 @@ function receiptStatusText(status) {
       for (const receipt of receipts) {
         if (normalizeReceiptStatus(receipt.status) !== 'published') continue;
         const payment = findPaymentForReceiptAnyStatus(receipt);
-        if (!payment) continue;
+        if (!payment || getPaymentInstallmentSatang(payment) > 0) continue;
         if (payment.status === 'ชำระแล้ว' && payment.paymentStatus === 'ชำระแล้ว' && payment.slipStatus === 'approved') continue;
         payment.status = 'ชำระแล้ว';
         payment.paymentStatus = 'ชำระแล้ว';
@@ -38802,7 +39098,7 @@ function receiptStatusText(status) {
         for (const receipt of receipts) {
           if (normalizeReceiptStatus(receipt.status) !== 'published') continue;
           const payment = findPaymentForReceiptAnyStatus(receipt);
-          if (!payment) continue;
+          if (!payment || getPaymentInstallmentSatang(payment) > 0) continue;
           const needsRepair = payment.status !== 'ชำระแล้ว' || payment.paymentStatus !== 'ชำระแล้ว' || payment.slipStatus !== 'approved';
           if (!needsRepair) continue;
           const receiptAmount = parseReceiptAmount(receipt.amount);
@@ -38918,14 +39214,14 @@ function receiptStatusText(status) {
       const selectedMonth = getStudentSelectedPaymentMonth();
       const canShowMonth = !!(selectedMonth && selectedMonth !== '-');
       const mobilePaymentRecord = currentStudent && canShowMonth ? getCurrentStudentPaymentForSelectedMonth() : null;
-      const amount = mobilePaymentRecord ? getPaymentFinalAmount(mobilePaymentRecord) : 0;
+      const amount = mobilePaymentRecord ? getPaymentPayableAmount(mobilePaymentRecord) : 0;
       const statusText = currentStudent && getSelectedStudentCourseEnrollment(currentStudent) ? getCurrentStudentPaymentStatusText() : '-';
       const courseText = selectedCourse ? selectedCourse.name : '-';
 
       setStudentMobileText('studentMobilePaymentHero', (selectedMonth || '-') + ' · ' + (statusText || '-'));
       setStudentMobileText('studentMobilePaymentMonth', selectedMonth || '-');
       setStudentMobileText('studentMobilePaymentCourse', courseText);
-      setStudentMobileText('studentMobilePaymentAmount', amount ? formatPrice(amount) : '-');
+      setStudentMobileText('studentMobilePaymentAmount', mobilePaymentRecord ? formatPrice(amount) : '-');
       setStudentMobileTag('studentMobilePaymentStatusBadge', statusText || '-');
 
       const isPaid = statusText === 'ชำระแล้ว';
@@ -47259,6 +47555,14 @@ function receiptStatusText(status) {
             }
             return false;
           }
+          const received = getPaymentInstallmentSatang(payment);
+          if (received > 0 && Math.round(newFinal * 100) <= received) {
+            if (result) {
+              result.textContent = 'ยอดใหม่ต้องมากกว่ายอดเงินที่รับแล้ว';
+              result.style.color = '#dc2626';
+            }
+            return false;
+          }
           const newDiscount = Math.max(0, origAmt - newFinal);
           payment.originalAmount = origAmt;
           payment.baseAmount = origAmt;
@@ -47628,7 +47932,8 @@ function receiptStatusText(status) {
       const overdue = scopedPayments.filter(function(p) { return getPaymentDisplayStatus(p) === 'ค้างชำระ'; });
       box.innerHTML = '<div class="status-display-row"><span class="status-label">เดือน</span><strong>' + (scope.month || '-') + '</strong></div>' +
         '<div class="status-display-row"><span class="status-label">นักเรียนที่ต้องชำระ</span><strong>' + targetStudents.length + ' คน</strong></div>' +
-        '<div class="status-display-row"><span class="status-label">ชำระแล้ว</span><strong class="status-paid">' + paid.length + ' รายการ · ' + formatPrice(totals.paidAmount) + '</strong></div>' +
+        '<div class="status-display-row"><span class="status-label">ชำระครบ</span><strong class="status-paid">' + paid.length + ' รายการ</strong></div>' +
+        '<div class="status-display-row"><span class="status-label">ยอดรับจริง</span><strong>' + formatPrice(totals.paidAmount) + '</strong></div>' +
         '<div class="status-display-row"><span class="status-label">รอตรวจสลิป</span><strong class="status-waiting">' + (pending.length + pendingBundles.length) + ' รายการ</strong></div>' +
         '<div class="status-display-row"><span class="status-label">สลิปยอดรวมรอตรวจ</span><strong class="status-waiting">' + pendingBundles.length + ' รายการ</strong></div>' +
         '<div class="status-display-row"><span class="status-label">ค้างชำระ</span><strong class="status-absent">' + overdue.length + ' รายการ</strong></div>' +
@@ -47672,11 +47977,10 @@ function receiptStatusText(status) {
     function getMonthlyIncome(month) {
       return payments
         .filter(function(p) {
-          return p.deleted !== true &&
-            getPaymentDisplayStatus(p) === 'ชำระแล้ว' &&
+          return p.deleted !== true && !isCoursePaymentCancelled(p) &&
             (!month || month === 'ทั้งหมด' || p.month === month);
         })
-        .reduce(function(sum, p) { return sum + getPaymentFinalAmount(p); }, 0);
+        .reduce(function(sum, p) { return sum + getPaymentReceivedAmount(p); }, 0);
     }
 
     function getExpectedMonthlyIncome(month) {
@@ -47708,6 +48012,11 @@ function receiptStatusText(status) {
       var month = (getElement('financeSummaryMonthFilter') || {}).value || 'ทั้งหมด';
       var income = getMonthlyIncome(month);
       var expected = getExpectedMonthlyIncome(month);
+      var remaining = payments.filter(function(p) {
+        return p.deleted !== true && !isCoursePaymentCancelled(p) &&
+          getPaymentDisplayStatus(p) !== 'ชำระแล้ว' && getPaymentDisplayStatus(p) !== 'ยกเว้น' &&
+          (month === 'ทั้งหมด' || p.month === month);
+      }).reduce(function(sum, p) { return sum + getPaymentBalanceSatang(p); }, 0) / 100;
       var totalExp = getMonthlyExpensesTotal(month, 'ทั้งหมด');
       var profit = income - totalExp;
 
@@ -47715,7 +48024,8 @@ function receiptStatusText(status) {
       if (cards) {
         cards.innerHTML =
           '<div class="stat"><h4>ยอดที่ควรได้รับ</h4><p style="color:#6b7280;">' + formatPrice(expected) + '</p></div>' +
-          '<div class="stat"><h4>รายรับ (ชำระแล้ว)</h4><p style="color:#16a34a;">' + formatPrice(income) + '</p></div>' +
+          '<div class="stat"><h4>รายรับจริง</h4><p style="color:#16a34a;">' + formatPrice(income) + '</p></div>' +
+          '<div class="stat"><h4>ยอดคงเหลือ</h4><p>' + formatPrice(remaining) + '</p></div>' +
           '<div class="stat"><h4>รายจ่าย</h4><p style="color:#dc2626;">' + formatPrice(totalExp) + '</p></div>' +
           '<div class="stat"><h4>กำไร / ขาดทุน</h4><p style="color:' + (profit >= 0 ? '#16a34a' : '#dc2626') + ';font-weight:800;">' + formatPrice(profit) + '</p></div>';
       }
@@ -47805,7 +48115,7 @@ function receiptStatusText(status) {
 
       container.innerHTML =
         '<div class="table-wrap"><table>' +
-        '<thead><tr><th>เดือน</th><th>ยอดที่ควรได้รับ</th><th>รายรับ (ชำระแล้ว)</th><th>รายจ่าย</th><th>กำไร/ขาดทุน</th></tr></thead>' +
+        '<thead><tr><th>เดือน</th><th>ยอดที่ควรได้รับ</th><th>รายรับจริง</th><th>รายจ่าย</th><th>กำไร/ขาดทุน</th></tr></thead>' +
         '<tbody>' +
         rows.map(function(r) {
           var hasData = r.expected || r.income || r.expenses;
@@ -47828,12 +48138,12 @@ function receiptStatusText(status) {
     }
 
     function showFinanceDetailBubble(monthKey, type) {
-      var titleMap = { expected: 'ยอดที่ควรได้รับ', income: 'รายรับ (ชำระแล้ว)', expenses: 'รายจ่าย', profit: 'กำไร / ขาดทุน' };
+      var titleMap = { expected: 'ยอดที่ควรได้รับ', income: 'รายรับจริง', expenses: 'รายจ่าย', profit: 'กำไร / ขาดทุน' };
       var title = (titleMap[type] || type) + ' — ' + escapeHtml(monthKey);
 
-      function paymentByCourseRows(filterFn) {
+      function paymentByCourseRows(amountForPayment) {
         var list = payments.filter(function(p) {
-          return p.deleted !== true && !isCoursePaymentCancelled(p) && p.month === monthKey && filterFn(p);
+          return p.deleted !== true && !isCoursePaymentCancelled(p) && p.month === monthKey && amountForPayment(p) > 0;
         });
         if (!list.length) return '<p style="color:#6b7280;text-align:center;padding:12px 0;">ไม่มีรายการ</p>';
 
@@ -47845,13 +48155,13 @@ function receiptStatusText(status) {
           var location = (courseObj && courseObj.location) || '-';
           var key = String(p.courseId || courseName);
           if (!groupMap[key]) groupMap[key] = { courseName: courseName, location: location, total: 0, count: 0 };
-          groupMap[key].total += getPaymentFinalAmount(p);
+          groupMap[key].total += amountForPayment(p);
           groupMap[key].count += 1;
         });
 
         var groups = Object.keys(groupMap).map(function(k) { return groupMap[k]; });
         groups.sort(function(a, b) { return b.total - a.total; });
-        var grandTotal = list.reduce(function(s, p) { return s + getPaymentFinalAmount(p); }, 0);
+        var grandTotal = list.reduce(function(s, p) { return s + amountForPayment(p); }, 0);
 
         return '<div class="table-wrap" style="max-height:400px;overflow-y:auto;">' +
           '<table><thead><tr><th>คอร์ส</th><th>ศูนย์</th><th>จำนวน (คน)</th><th>ยอดรวม</th></tr></thead><tbody>' +
@@ -47886,9 +48196,9 @@ function receiptStatusText(status) {
 
       var bodyHtml = '';
       if (type === 'expected') {
-        bodyHtml = paymentByCourseRows(function() { return true; });
+        bodyHtml = paymentByCourseRows(getPaymentFinalAmount);
       } else if (type === 'income') {
-        bodyHtml = paymentByCourseRows(function(p) { return getPaymentDisplayStatus(p) === 'ชำระแล้ว'; });
+        bodyHtml = paymentByCourseRows(getPaymentReceivedAmount);
       } else if (type === 'expenses') {
         bodyHtml = expenseRows();
       } else if (type === 'profit') {
@@ -47897,11 +48207,11 @@ function receiptStatusText(status) {
         var profit = income - exp;
         bodyHtml =
           '<div class="dashboard-grid" style="margin-bottom:16px;">' +
-          '<div class="stat"><h4>รายรับ (ชำระแล้ว)</h4><p style="color:#16a34a;">' + formatPrice(income) + '</p></div>' +
+          '<div class="stat"><h4>รายรับจริง</h4><p style="color:#16a34a;">' + formatPrice(income) + '</p></div>' +
           '<div class="stat"><h4>รายจ่าย</h4><p style="color:#dc2626;">' + formatPrice(exp) + '</p></div>' +
           '<div class="stat"><h4>กำไร / ขาดทุน</h4><p style="color:' + (profit >= 0 ? '#16a34a' : '#dc2626') + ';font-weight:800;">' + formatPrice(profit) + '</p></div>' +
           '</div>' +
-          '<h4 style="margin:12px 0 6px;">รายรับ (แยกตามคอร์ส)</h4>' + paymentByCourseRows(function(p) { return getPaymentDisplayStatus(p) === 'ชำระแล้ว'; }) +
+          '<h4 style="margin:12px 0 6px;">รายรับ (แยกตามคอร์ส)</h4>' + paymentByCourseRows(getPaymentReceivedAmount) +
           '<h4 style="margin:16px 0 6px;">รายจ่าย</h4>' + expenseRows();
       }
 

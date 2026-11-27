@@ -638,15 +638,70 @@ service cloud.firestore {
       allow delete: if isAdmin();
     }
 
+    function paymentInstallmentLedgerIsValid() {
+      let before = resource.data;
+      let after = request.resource.data;
+      let oldHistory = before.get('installmentHistory', []);
+      let newHistory = after.get('installmentHistory', []);
+      let oldReceived = before.get('installmentReceivedSatang', 0);
+      let newReceived = after.get('installmentReceivedSatang', 0);
+      return (newHistory == oldHistory && newReceived == oldReceived)
+        || (newHistory is list && newHistory.size() == oldHistory.size() + 1
+          && paymentInstallmentAppendIsValid(oldHistory, newHistory, oldReceived, newReceived));
+    }
+
+    function paymentInstallmentAppendIsValid(oldHistory, newHistory, oldReceived, newReceived) {
+      let entry = newHistory[oldHistory.size()];
+      return entry is map
+        && entry.amountSatang is int && entry.amountSatang > 0
+        && entry.receivedByUid == request.auth.uid
+        && entry.id is string && entry.id.size() > 0
+        && entry.source in ['manual', 'slip']
+        && entry.receivedAtMs is int
+        && entry.note is string && entry.note.size() <= 300
+        && entry.receivedByName is string
+        && newHistory == oldHistory.concat([entry])
+        && newReceived == oldReceived + entry.amountSatang;
+    }
+
+    function paymentInstallmentsStayCollectible() {
+      let before = resource.data;
+      let after = request.resource.data;
+      let received = after.get('installmentReceivedSatang', 0);
+      let finalAmount = after.get('finalAmount', null);
+      let chargeSatang = (finalAmount == null ? after.get('amount', 0) : finalAmount) * 100;
+      let paid = after.get('status', '') == 'ชำระแล้ว' && after.get('paymentStatus', '') == 'ชำระแล้ว';
+      return after.get('deleted', false) == false
+        && after.get('status', '') in ['รอชำระเงิน', 'ค้างชำระ', 'สลิปไม่ผ่าน', 'รอตรวจสลิป', 'ชำระแล้ว']
+        && after.get('paymentStatus', after.get('status', '')) in ['รอชำระเงิน', 'ค้างชำระ', 'สลิปไม่ผ่าน', 'รอตรวจสลิป', 'ชำระแล้ว']
+        && !(after.get('slipStatus', '') in ['cancelled', 'canceled'])
+        && (paid || !(after.get('slipStatus', '') == 'approved'
+          || after.get('status', '') == 'ชำระแล้ว' || after.get('paymentStatus', '') == 'ชำระแล้ว'))
+        && (!paid || after.get('slipStatus', '') in ['approved', 'paid_manually'])
+        && (before.get('status', '') != 'ชำระแล้ว' || paid)
+        && after.get('bundleId', '') == before.get('bundleId', '')
+        && (paid
+          ? chargeSatang >= received - 0.5 && chargeSatang < received + 0.5
+          : chargeSatang >= received + 0.5);
+    }
+
+    function paymentInstallmentsProtected() {
+      let after = request.resource.data;
+      return paymentInstallmentLedgerIsValid()
+        && (after.get('installmentReceivedSatang', 0) == 0 || paymentInstallmentsStayCollectible());
+    }
+
     match /payments/{docId} {
       allow read: if hasStaffAccountType() || isPaymentOwner();
       // Admin/Finance normally create payment records; students may only create
       // their own pending-review slip record when uploading for an open month.
-      allow create: if isAdmin() || hasAdminPermission('admin.finance') || isStudentSlipPaymentCreate(docId);
+      allow create: if !request.resource.data.keys().hasAny(['installmentHistory', 'installmentReceivedSatang', 'installmentStatusSyncPending'])
+                    && (isAdmin() || hasAdminPermission('admin.finance') || isStudentSlipPaymentCreate(docId));
       // Apps Script uploads the file to Drive; the student client may update only slip review fields.
       // Students must not directly approve payment or change protected payment/course/receipt fields.
-      allow update: if isAdmin() || hasAdminPermission('admin.finance') || isStudentSlipUploadUpdate(docId);
-      allow delete: if isAdmin();
+      allow update: if ((isAdmin() || hasAdminPermission('admin.finance')) || isStudentSlipUploadUpdate(docId))
+                    && paymentInstallmentsProtected();
+      allow delete: if isAdmin() && resource.data.get('installmentReceivedSatang', 0) == 0;
     }
 
     match /paymentBundles/{docId} {

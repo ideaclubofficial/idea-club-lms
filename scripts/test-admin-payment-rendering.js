@@ -38,6 +38,7 @@ function setup() {
   c.renderTuitionNoticeStudentTableNow = () => {};
   c.renderTuitionNoticeMonthFilter = () => {};
   vm.createContext(c); installStudentDisplayHelpers(c);
+  vm.runInContext(source('getPaymentInstallmentSatang'), c);
   const queueStart = html.indexOf('    const adminPaymentRenderDirty = ');
   if (queueStart !== -1) vm.runInContext(html.slice(queueStart, html.indexOf('    function scheduleAdminPaymentDataRefresh(', queueStart)), c);
   for (const name of [...names,'updatePaymentAmountSummary','scheduleAdminPaymentDataRefresh']) {
@@ -356,6 +357,7 @@ test('paid standalone rows show edit amount while active bundle rows stay locked
     formatPrice: String
   };
   vm.createContext(c); installStudentDisplayHelpers(c);
+  vm.runInContext(source('getPaymentInstallmentSatang'), c);
   vm.runInContext(source('paymentActionButtons'), c);
   assert.match(c.paymentActionButtons('ชำระแล้ว', 'p1'), /editPaymentAmountDiscount/);
   c.getPaymentBundleForPayment = () => ({ id: 'b1', status: 'ชำระแล้ว' });
@@ -373,6 +375,7 @@ test('retroactive amount edit requires finance permission and rejects active bun
   c.hasPermission = key => c.allowed && key === 'admin.finance';
   c.isPaymentInActiveBundle = () => c.bundled;
   vm.createContext(c); installStudentDisplayHelpers(c);
+  vm.runInContext(source('getPaymentInstallmentSatang'), c);
   vm.runInContext(source('canEditPaymentAmount'), c);
   assert.equal(c.canEditPaymentAmount(payment), true);
   c.allowed = false;
@@ -494,7 +497,6 @@ function setupTuitionNotices() {
     getPaymentCenterTextForQr: payment => payment.center || '',
     getPaymentCenterKey: value => String(value || '').includes('หนองฉาง') ? 'nongchang' : String(value || '').includes('นครสวรรค์') ? 'nakhonsawan' : '',
     getPaymentQrImageSrcForContext: payment => payment.qr || '',
-    getPaymentFinalAmount: payment => payment.finalAmount ?? payment.amount ?? 0,
     getPaymentRecordCourseAndStudent: payment => ({ student: students.find(student => student.id === payment.studentId) || null, course: { location: payment.center || '' } }),
     compareThaiMonthYear: (a, b) => {
       const order = { 'กันยายน 2569': 1, 'ตุลาคม 2569': 2, 'พฤศจิกายน 2569': 3 };
@@ -505,15 +507,97 @@ function setupTuitionNotices() {
     escapeHtml: value => String(value ?? ''),
     formatPrice: value => Number(value).toLocaleString('th-TH') + ' บาท',
     getPrintableLogoHtml: () => '<div>LOGO</div>',
+    hasPermission: key => key === 'admin.finance',
+    isPaymentInActiveBundle: payment => !!payment.testBundle,
+    getPaymentRecordId: payment => payment && payment.id,
+    actionCall: (name, ...args) => name + '(' + args.join(',') + ')',
     Set,
     Date
   };
   vm.createContext(c); installStudentDisplayHelpers(c);
-  for (const name of ['getTuitionNoticeIdentityKeys','isTuitionNoticePrintablePayment','buildTuitionNoticeStudentRows','getTuitionNoticeRowCenters','getTuitionNoticeRowMonths','tuitionNoticeDetailRowsHtml','buildTuitionNoticeGroups','getTuitionNoticePreviewSummary','tuitionNoticeHtml']) {
+  for (const name of ['getPaymentFinalAmount', 'getPaymentInstallmentSatang', 'getPaymentBalanceSatang', 'getPaymentPayableAmount', 'getPaymentReceivedAmount',
+    'canRecordPaymentInstallment', 'parsePaymentInstallmentSatang', 'recordPaymentInstallment', 'paymentInstallmentHistoryHtml',
+    'getMonthlyIncome', 'getTuitionNoticeIdentityKeys','isTuitionNoticePrintablePayment','buildTuitionNoticeStudentRows',
+    'getTuitionNoticeRowCenters','getTuitionNoticeRowMonths','tuitionNoticeDetailRowsHtml','buildTuitionNoticeGroups',
+    'getTuitionNoticePreviewSummary','tuitionNoticeHtml']) {
     vm.runInContext(source(name), c);
   }
   return c;
 }
+
+test('installment balance is shared by notice details, exports and finance income', () => {
+  const c = setupTuitionNotices();
+  const payment = {
+    id: 'p1', studentId: 's1', course: 'Math', month: 'ตุลาคม 2569', finalAmount: 3000, status: 'ค้างชำระ',
+    installmentReceivedSatang: 100025, installmentHistory: [{ amountSatang: 100025, receivedByName: 'Admin', receivedAtMs: 1 }]
+  };
+  const otherCenter = { ...payment, id: 'p2', center: 'หนองฉาง', installmentReceivedSatang: 0, installmentHistory: [] };
+  c.payments = [payment, otherCenter];
+  const row = c.buildTuitionNoticeStudentRows(c.payments)[0];
+  assert.equal(row.totalAmount, 4999.75);
+  assert.match(c.tuitionNoticeDetailRowsHtml(row), /หักยอดผ่อน/);
+  const [first, second] = c.buildTuitionNoticeGroups(c.payments);
+  assert.deepEqual([first.totalAmount, second.totalAmount].sort(), [1999.75, 3000]);
+  assert.match(c.tuitionNoticeHtml(first.totalAmount === 1999.75 ? first : second), /1,999\.75 บาท/);
+  assert.equal(c.getMonthlyIncome(payment.month), 1000.25);
+  payment.status = 'ชำระแล้ว';
+  payment.installmentReceivedSatang = 300000;
+  assert.equal(c.getPaymentPayableAmount(payment), 0);
+  assert.equal(c.getMonthlyIncome(payment.month), 3000);
+  assert.equal(c.buildTuitionNoticeGroups(c.payments).length, 1);
+});
+
+test('installment transaction rejects stale and invalid amounts, and retries do not add another entry', async () => {
+  const c = setupTuitionNotices();
+  const record = { id: 'p1', amount: '3000', status: 'รอชำระเงิน' };
+  const ref = {};
+  Object.assign(c, {
+    firebaseReady: true, firebaseUser: { uid: 'finance' },
+    firebase: { firestore: { FieldValue: { serverTimestamp: () => 1 } } },
+    db: {
+      collection: () => ({ doc: () => ref }),
+      runTransaction: async fn => fn({
+        get: async () => ({ id: 'p1', exists: true, data: () => ({ ...record }) }),
+        update: (target, patch) => { assert.equal(target, ref); Object.assign(record, patch); }
+      })
+    },
+    getFirebaseAuditUser: () => ({ displayName: 'Admin' }),
+    findPaymentByAnyId: () => null,
+    requestAdminPaymentRender() {},
+    syncClosedPaymentInstallment: async () => {},
+    getPaymentSlipUrl: payment => payment.slip
+  });
+  const entry = { id: 'one', expectedBalanceSatang: 300000, amountSatang: 100025, note: '', receivedAtMs: 1 };
+  assert.equal(c.parsePaymentInstallmentSatang('1000.25'), 100025);
+  for (const text of ['-1', '0', '0.001', '1e3']) assert.equal(c.parsePaymentInstallmentSatang(text), 0);
+  await assert.rejects(c.recordPaymentInstallment('p1', { ...entry, amountSatang: 300001 }), /ไม่เกิน/);
+  await c.recordPaymentInstallment('p1', entry);
+  await c.recordPaymentInstallment('p1', entry);
+  assert.equal(record.finalAmount, 3000);
+  assert.equal(record.installmentHistory.length, 1);
+  await assert.rejects(c.recordPaymentInstallment('p1', { ...entry, id: 'stale' }), /เปลี่ยนแล้ว/);
+  record.status = 'รอตรวจสลิป';
+  record.slip = 'slip';
+  const final = { ...entry, id: 'final-slip', expectedBalanceSatang: 199975, amountSatang: 199975 };
+  await assert.rejects(c.recordPaymentInstallment('p1', final), /ไม่สามารถ/);
+  await c.recordPaymentInstallment('p1', final, true);
+  assert.equal(record.status, 'ชำระแล้ว');
+  assert.equal(record.installmentHistory[1].source, 'slip');
+  assert.equal(record.installmentReceivedSatang, 300000);
+  const manual = { ...entry, id: 'manual-full', amountSatang: 300000 };
+  record.status = 'รอชำระเงิน';
+  record.installmentReceivedSatang = 0;
+  record.installmentHistory = [];
+  record.testBundle = true;
+  await assert.rejects(c.recordPaymentInstallment('p1', manual), /ไม่สามารถ/);
+  record.testBundle = false;
+  await c.recordPaymentInstallment('p1', manual);
+  assert.equal(record.status, 'ชำระแล้ว');
+  assert.equal(record.slipStatus, 'paid_manually');
+  assert.equal(record.installmentHistory[0].source, 'manual');
+  c.hasPermission = () => false;
+  await assert.rejects(c.recordPaymentInstallment('p1', final), /ไม่มีสิทธิ์/);
+});
 
 test('tuition notices include only unpaid states and group one student per center', () => {
   const c = setupTuitionNotices();
