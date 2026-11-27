@@ -516,7 +516,8 @@ function setupTuitionNotices() {
   };
   vm.createContext(c); installStudentDisplayHelpers(c);
   for (const name of ['getPaymentFinalAmount', 'getPaymentInstallmentSatang', 'getPaymentBalanceSatang', 'getPaymentPayableAmount', 'getPaymentReceivedAmount',
-    'canRecordPaymentInstallment', 'parsePaymentInstallmentSatang', 'recordPaymentInstallment', 'paymentInstallmentHistoryHtml',
+    'canRecordPaymentInstallment', 'parsePaymentInstallmentSatang', 'recordPaymentInstallment', 'commitPaymentInstallments',
+    'preparePaymentInstallment', 'allocateTuitionNoticeInstallment', 'tuitionNoticeTotalInstallmentButton', 'paymentInstallmentHistoryHtml',
     'getMonthlyIncome', 'getTuitionNoticeIdentityKeys','isTuitionNoticePrintablePayment','buildTuitionNoticeStudentRows',
     'getTuitionNoticeRowCenters','getTuitionNoticeRowMonths','tuitionNoticeDetailRowsHtml','buildTuitionNoticeGroups',
     'getTuitionNoticePreviewSummary','tuitionNoticeHtml']) {
@@ -524,6 +525,53 @@ function setupTuitionNotices() {
   }
   return c;
 }
+
+test('tuition notice total installment allocates oldest first and commits all deductions together', async () => {
+  const c = setupTuitionNotices();
+  const records = {
+    oct: { id: 'oct', studentId: 's1', month: 'ตุลาคม 2569', amount: 1500, status: 'ค้างชำระ' },
+    nov: { id: 'nov', studentId: 's1', month: 'พฤศจิกายน 2569', amount: 2000, status: 'รอชำระเงิน' }
+  };
+  const row = c.buildTuitionNoticeStudentRows([records.nov, records.oct])[0];
+  assert.match(c.tuitionNoticeTotalInstallmentButton(row), /หักจากยอดรวม/);
+  records.nov.testBundle = true;
+  assert.equal(c.tuitionNoticeTotalInstallmentButton(row), '');
+  records.nov.testBundle = false;
+  const targets = row.payments.map(payment => ({
+    paymentId: payment.id, expectedBalanceSatang: c.getPaymentBalanceSatang(payment)
+  }));
+  const allocations = c.allocateTuitionNoticeInstallment(targets, 170025);
+  assert.deepEqual(Array.from(allocations, item => [item.paymentId, item.amountSatang]), [['oct', 150000], ['nov', 20025]]);
+  assert.equal(c.allocateTuitionNoticeInstallment(targets, 350001), null);
+  assert.equal(c.allocateTuitionNoticeInstallment(targets, 0), null);
+  const writes = [];
+  Object.assign(c, {
+    firebaseReady: true, firebaseUser: { uid: 'finance' },
+    firebase: { firestore: { FieldValue: { serverTimestamp: () => 1 } } },
+    db: {
+      collection: () => ({ doc: id => id }),
+      runTransaction: async fn => fn({
+        get: async id => ({ id, exists: true, data: () => ({ ...records[id] }) }),
+        update: (id, patch) => { writes.push(id); Object.assign(records[id], patch); }
+      })
+    },
+    getFirebaseAuditUser: () => ({ displayName: 'Admin' }),
+    findPaymentByAnyId: id => records[id],
+    requestAdminPaymentRender() {}
+  });
+  const entries = allocations.map(item => ({ ...item, id: 'one-payment', note: '', receivedAtMs: 1 }));
+  records.nov.amount = 1900;
+  await assert.rejects(c.commitPaymentInstallments(entries), /เปลี่ยนแล้ว/);
+  assert.deepEqual(writes, []);
+  records.nov.amount = 2000;
+  await c.commitPaymentInstallments(entries);
+  await c.commitPaymentInstallments(entries);
+  assert.deepEqual(writes, ['oct', 'nov']);
+  assert.equal(records.oct.status, 'ชำระแล้ว');
+  assert.equal(records.nov.status, 'รอชำระเงิน');
+  assert.equal(c.getPaymentPayableAmount(records.nov), 1799.75);
+  assert.equal(records.nov.installmentHistory[0].id, records.oct.installmentHistory[0].id);
+});
 
 test('installment balance is shared by notice details, exports and finance income', () => {
   const c = setupTuitionNotices();

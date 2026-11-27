@@ -4165,6 +4165,16 @@
 
     /* ── CHANGE D: Compact payment action buttons ── */
     .payment-actions-wrap { display: flex; flex-wrap: wrap; gap: 5px; align-items: center; min-width: 320px; }
+    #admin-tuition-notices .tuition-notice-list table { width: 100% !important; table-layout: fixed !important; }
+    #admin-tuition-notices .tuition-notice-list th,
+    #admin-tuition-notices .tuition-notice-list td { padding: 8px; vertical-align: middle; line-height: 1.4; white-space: normal; }
+    #admin-tuition-notices .tuition-notice-list td { overflow-wrap: anywhere !important; }
+    #admin-tuition-notices .tuition-notice-list .payment-actions-wrap { min-width: 0; }
+    #admin-tuition-notices .tuition-notice-list .btn { min-width: 0; white-space: normal !important; }
+    .tuition-notice-list .tuition-month { display: inline-block; max-width: 100%; margin-right: 6px; }
+    @media (max-width: 760px) {
+      #admin-tuition-notices .tuition-notice-list table { min-width: 36rem !important; }
+    }
 
     /* ── Finance detail clickable amounts ── */
     .finance-detail-link {
@@ -7113,10 +7123,11 @@
 
             <br />
 
-            <div class="table-wrap">
+            <div class="table-wrap tuition-notice-list">
               <table>
+                <colgroup><col style="width:8%"><col style="width:26%"><col style="width:14%"><col style="width:19%"><col style="width:12%"><col style="width:21%"></colgroup>
                 <thead><tr>
-                  <th>เลือก</th><th>นักเรียน</th><th>ระดับชั้น</th><th>ศูนย์</th><th>เดือนที่ต้องชำระ</th><th>จำนวนรายการ</th><th>ยอดรวม</th><th>จัดการ</th>
+                  <th>เลือก</th><th>นักเรียน</th><th>ศูนย์</th><th>เดือนที่ต้องชำระ</th><th>ยอดรวม</th><th>จัดการ</th>
                 </tr></thead>
                 <tbody id="tuitionNoticeTableBody"></tbody>
               </table>
@@ -37700,19 +37711,23 @@
       tbody.innerHTML = pageRows.length ? pageRows.map(function(row) {
         const checked = tuitionNoticeSelectedStudentKeys.has(row.key) ? ' checked' : '';
         const nickname = row.nickname ? ' (' + escapeHtml(row.nickname) + ')' : '';
-        const centers = getTuitionNoticeRowCenters(row).map(escapeHtml).join('<br>');
-        const months = getTuitionNoticeRowMonths(row).map(escapeHtml).join(', ');
+        const centers = getTuitionNoticeRowCenters(row).map(function(center) {
+          return escapeHtml(center.replace(/^IDEA\s+CLUB\s*ศูนย์\s*/i, '') || center);
+        }).join('<br>');
+        const months = getTuitionNoticeRowMonths(row).map(function(month) {
+          return '<span class="tuition-month">' + escapeHtml(month) + '</span>';
+        }).join(' ');
         return '<tr data-tuition-student-key="' + escapeHtml(row.key) + '">' +
           '<td style="text-align:center;"><input type="checkbox"' + checked + ' onchange="toggleTuitionNoticeStudentSelection(\'' + jsArg(row.key) + '\', this.checked)"></td>' +
-          '<td><strong>' + escapeHtml(row.studentName) + '</strong>' + nickname + '<br><span class="mini-muted">' + escapeHtml(row.memberId || '-') + '</span></td>' +
-          '<td>' + escapeHtml(row.grade || '-') + '</td>' +
+          '<td><strong>' + escapeHtml(row.studentName) + '</strong>' + nickname + '<br><span class="mini-muted">' + escapeHtml(row.grade || '-') + ' · ' + escapeHtml(row.memberId || '-') + '</span></td>' +
           '<td>' + (centers || '-') + '</td>' +
-          '<td>' + (months || '-') + '</td>' +
-          '<td>' + row.payments.length + ' รายการ</td>' +
+          '<td>' + (months || '-') + '<br><span class="mini-muted">' + row.payments.length + ' รายการ</span></td>' +
           '<td>' + escapeHtml(formatPrice(row.totalAmount)) + '</td>' +
-          '<td><div class="payment-actions-wrap"><button class="btn btn-blue" type="button" onclick="viewTuitionNoticeStudentDetails(\'' + jsArg(row.key) + '\')">ดูรายละเอียด</button><button class="btn btn-orange" type="button" onclick="downloadTuitionNoticeStudentPdf(\'' + jsArg(row.key) + '\')">ดาวน์โหลด PDF</button><button class="btn btn-green" type="button" onclick="downloadTuitionNoticeStudentImage(\'' + jsArg(row.key) + '\')">ดาวน์โหลดรูป</button></div></td>' +
+          '<td><div class="payment-actions-wrap"><button class="btn btn-blue" type="button" onclick="viewTuitionNoticeStudentDetails(\'' + jsArg(row.key) + '\')">ดูรายละเอียด</button>' +
+          tuitionNoticeTotalInstallmentButton(row) +
+          '<button class="btn btn-orange" type="button" onclick="downloadTuitionNoticeStudentPdf(\'' + jsArg(row.key) + '\')">PDF</button><button class="btn btn-green" type="button" onclick="downloadTuitionNoticeStudentImage(\'' + jsArg(row.key) + '\')">ดาวน์โหลดรูป</button></div></td>' +
         '</tr>';
-      }).join('') : '<tr><td colspan="8">ไม่พบนักเรียนที่มีรายการต้องชำระตามตัวกรอง</td></tr>';
+      }).join('') : '<tr><td colspan="6">ไม่พบนักเรียนที่มีรายการต้องชำระตามตัวกรอง</td></tr>';
       if (getElement('tuitionNoticeStudentCount')) getElement('tuitionNoticeStudentCount').textContent = rows.length + ' คน';
       if (getElement('tuitionNoticePaymentCount')) getElement('tuitionNoticePaymentCount').textContent = rows.reduce(function(sum, row) { return sum + row.payments.length; }, 0) + ' รายการ';
       if (getElement('tuitionNoticeTotalAmount')) getElement('tuitionNoticeTotalAmount').textContent = formatPrice(rows.reduce(function(sum, row) { return sum + row.totalAmount; }, 0));
@@ -37774,62 +37789,85 @@
     }
 
     async function recordPaymentInstallment(paymentId, entry, settleWithSlip) {
+      const saved = await commitPaymentInstallments([Object.assign({}, entry, { paymentId: paymentId })], settleWithSlip);
+      await syncClosedPaymentInstallment(saved[0]);
+      return saved[0];
+    }
+
+    async function commitPaymentInstallments(entries, settleWithSlip) {
       if (!hasPermission('admin.finance')) throw new Error('ไม่มีสิทธิ์');
       if (!firebaseReady || !db || !firebaseUser) throw new Error('Firebase ยังไม่พร้อมใช้งาน');
-      const ref = db.collection('payments').doc(String(paymentId));
+      if (!entries.length || new Set(entries.map(function(entry) { return String(entry.paymentId); })).size !== entries.length) {
+        throw new Error('รายการหักยอดไม่ถูกต้อง');
+      }
       const saved = await db.runTransaction(async function(transaction) {
-        const snapshot = await transaction.get(ref);
-        if (!snapshot.exists) throw new Error('ไม่พบรายการชำระเงิน');
-        const payment = Object.assign({}, snapshot.data(), { firebaseDocId: snapshot.id });
-        const history = Array.isArray(payment.installmentHistory) ? payment.installmentHistory : [];
-        if (history.some(function(item) { return item.id === entry.id; })) return payment;
-        if (payment.bundleId) {
-          const bundle = await transaction.get(db.collection('paymentBundles').doc(String(payment.bundleId)));
-          if (bundle.exists && isActivePaymentBundle(bundle.data())) throw new Error('รายการนี้อยู่ในยอดรวมที่ยังใช้งาน');
-        }
-        const balance = getPaymentBalanceSatang(payment);
-        const eligible = settleWithSlip
-          ? !payment.deleted && !isPaymentInActiveBundle(payment) &&
-            getPaymentDisplayStatus(payment) === 'รอตรวจสลิป' && !!getPaymentSlipUrl(payment) && getPaymentInstallmentSatang(payment) > 0 &&
-            !payment.receiptId && !payment.receiptNo
-          : canRecordPaymentInstallment(payment);
-        if (!eligible || balance <= 0) throw new Error('รายการนี้ไม่สามารถหักยอดได้ กรุณาตรวจสอบรายการล่าสุด');
-        if (balance !== entry.expectedBalanceSatang) throw new Error('ยอดคงเหลือเปลี่ยนแล้ว กรุณาเปิดรายการใหม่ก่อนบันทึก');
-        if (!Number.isSafeInteger(entry.amountSatang) || entry.amountSatang <= 0 || entry.amountSatang > balance ||
-            (settleWithSlip && entry.amountSatang !== balance)) {
-          throw new Error('กรุณาระบุยอดรับจริงมากกว่า 0 และไม่เกินยอดคงเหลือ');
-        }
-        const update = {
-          installmentHistory: history.concat({
-            id: entry.id,
-            amountSatang: entry.amountSatang,
-            note: entry.note,
-            source: settleWithSlip ? 'slip' : 'manual',
-            receivedAtMs: entry.receivedAtMs,
-            receivedByUid: firebaseUser.uid,
-            receivedByName: getFirebaseAuditUser().displayName || 'Admin'
-          }),
-          installmentReceivedSatang: getPaymentInstallmentSatang(payment) + entry.amountSatang,
-          updatedAt: firebase.firestore.FieldValue.serverTimestamp()
-        };
-        if (typeof payment.finalAmount !== 'number') update.finalAmount = getPaymentFinalAmount(payment);
-        if (entry.amountSatang === balance) {
-          update.status = 'ชำระแล้ว';
-          update.paymentStatus = 'ชำระแล้ว';
-          update.slipStatus = settleWithSlip ? 'approved' : 'paid_manually';
-          update.installmentStatusSyncPending = true;
-        } else {
-          update.status = getPaymentDisplayStatus(payment);
-          update.paymentStatus = update.status;
-        }
-        transaction.update(ref, update);
-        return Object.assign(payment, update);
+        const changes = await Promise.all(entries.map(async function(entry) {
+          const ref = db.collection('payments').doc(String(entry.paymentId));
+          return preparePaymentInstallment(transaction, ref, entry, settleWithSlip);
+        }));
+        changes.forEach(function(change) {
+          if (change.update) transaction.update(change.ref, change.update);
+        });
+        return changes.map(function(change) { return Object.assign(change.payment, change.update); });
       });
-      const local = findPaymentByAnyId(paymentId);
-      if (local) Object.assign(local, saved);
+      const updated = saved.map(function(payment, index) {
+        const local = findPaymentByAnyId(entries[index].paymentId);
+        return local ? Object.assign(local, payment) : payment;
+      });
       requestAdminPaymentRender(['table', 'notices', 'summary', 'dashboardSummary', 'preview']);
-      await syncClosedPaymentInstallment(local || saved);
-      return local || saved;
+      return updated;
+    }
+
+    async function preparePaymentInstallment(transaction, ref, entry, settleWithSlip) {
+      const snapshot = await transaction.get(ref);
+      if (!snapshot.exists) throw new Error('ไม่พบรายการชำระเงิน');
+      const payment = Object.assign({}, snapshot.data(), { firebaseDocId: snapshot.id });
+      const history = Array.isArray(payment.installmentHistory) ? payment.installmentHistory : [];
+      const previous = history.find(function(item) { return item.id === entry.id; });
+      if (previous) {
+        if (previous.amountSatang !== entry.amountSatang) throw new Error('ยอดรับเงินครั้งนี้ถูกบันทึกไปแล้ว');
+        return { payment: payment };
+      }
+      if (payment.bundleId) {
+        const bundle = await transaction.get(db.collection('paymentBundles').doc(String(payment.bundleId)));
+        if (bundle.exists && isActivePaymentBundle(bundle.data())) throw new Error('รายการนี้อยู่ในยอดรวมที่ยังใช้งาน');
+      }
+      const balance = getPaymentBalanceSatang(payment);
+      const eligible = settleWithSlip
+        ? !payment.deleted && !isPaymentInActiveBundle(payment) &&
+          getPaymentDisplayStatus(payment) === 'รอตรวจสลิป' && !!getPaymentSlipUrl(payment) && getPaymentInstallmentSatang(payment) > 0 &&
+          !payment.receiptId && !payment.receiptNo
+        : canRecordPaymentInstallment(payment);
+      if (!eligible || balance <= 0) throw new Error('รายการนี้ไม่สามารถหักยอดได้ กรุณาตรวจสอบรายการล่าสุด');
+      if (balance !== entry.expectedBalanceSatang) throw new Error('ยอดคงเหลือเปลี่ยนแล้ว กรุณาเปิดรายการใหม่ก่อนบันทึก');
+      if (!Number.isSafeInteger(entry.amountSatang) || entry.amountSatang <= 0 || entry.amountSatang > balance ||
+          (settleWithSlip && entry.amountSatang !== balance)) {
+        throw new Error('กรุณาระบุยอดรับจริงมากกว่า 0 และไม่เกินยอดคงเหลือ');
+      }
+      const update = {
+        installmentHistory: history.concat({
+          id: entry.id,
+          amountSatang: entry.amountSatang,
+          note: entry.note,
+          source: settleWithSlip ? 'slip' : 'manual',
+          receivedAtMs: entry.receivedAtMs,
+          receivedByUid: firebaseUser.uid,
+          receivedByName: getFirebaseAuditUser().displayName || 'Admin'
+        }),
+        installmentReceivedSatang: getPaymentInstallmentSatang(payment) + entry.amountSatang,
+        updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+      };
+      if (typeof payment.finalAmount !== 'number') update.finalAmount = getPaymentFinalAmount(payment);
+      if (entry.amountSatang === balance) {
+        update.status = 'ชำระแล้ว';
+        update.paymentStatus = 'ชำระแล้ว';
+        update.slipStatus = settleWithSlip ? 'approved' : 'paid_manually';
+        update.installmentStatusSyncPending = true;
+      } else {
+        update.status = getPaymentDisplayStatus(payment);
+        update.paymentStatus = update.status;
+      }
+      return { ref: ref, payment: payment, update: update };
     }
 
     async function syncClosedPaymentInstallment(payment) {
@@ -37908,6 +37946,91 @@
       );
     }
 
+    function tuitionNoticeTotalInstallmentButton(row) {
+      if (!hasPermission('admin.finance') || row.payments.filter(canRecordPaymentInstallment).length < 2) return '';
+      return '<button type="button" class="btn btn-dark" onclick="' +
+        actionCall('openTuitionNoticeTotalInstallment', row.key) + '">หักจากยอดรวม</button>';
+    }
+
+    function allocateTuitionNoticeInstallment(targets, amountSatang) {
+      if (!Number.isSafeInteger(amountSatang) || amountSatang <= 0) return null;
+      let remaining = amountSatang;
+      const allocations = [];
+      for (const target of targets) {
+        if (!remaining) break;
+        const allocated = Math.min(target.expectedBalanceSatang, remaining);
+        allocations.push(Object.assign({}, target, { amountSatang: allocated }));
+        remaining -= allocated;
+      }
+      return remaining === 0 ? allocations : null;
+    }
+
+    function openTuitionNoticeTotalInstallment(rowKey) {
+      if (!hasPermission('admin.finance')) { alert('ไม่มีสิทธิ์'); return; }
+      const row = getFilteredTuitionNoticeStudentRow(rowKey);
+      const eligible = row ? row.payments.filter(canRecordPaymentInstallment) : [];
+      if (eligible.length < 2) { alert('ต้องมีอย่างน้อย 2 รายการที่หักยอดได้ตามตัวกรอง'); return; }
+      // Student rows already sort by month (oldest first), then by course.
+      const targets = eligible.map(function(payment) {
+        const data = getPaymentRecordCourseAndStudent(payment);
+        return {
+          paymentId: payment.firebaseDocId || getPaymentRecordId(payment),
+          expectedBalanceSatang: getPaymentBalanceSatang(payment),
+          label: [payment.month || payment.paymentMonth || '-', payment.course || payment.courseName || '-',
+            getPaymentCenterTextForQr(payment, data.student, data.course)].filter(Boolean).join(' · ')
+        };
+      });
+      const totalSatang = targets.reduce(function(sum, target) { return sum + target.expectedBalanceSatang; }, 0);
+      const excludedCount = row.payments.length - targets.length;
+      const entryId = createFirebaseDocId('payments');
+      openEditBubble('หักจากยอดรวม · ' + getStudentDisplayName(row),
+        '<p>ยอดที่หักได้ตามตัวกรอง <strong>' + formatPrice(totalSatang / 100) + '</strong> จาก ' + targets.length + ' รายการ</p>' +
+        '<p class="mini-muted">หักจากเดือนเก่าสุดก่อน รายการเดือนเดียวกันเรียงตามชื่อคอร์ส</p>' +
+        (excludedCount ? '<p class="mini-muted">มี ' + excludedCount + ' รายการที่หักไม่ได้ เช่น รายการที่อยู่ในยอดรวมที่สร้างไว้แล้ว</p>' : '') +
+        '<label for="tuitionTotalInstallmentAmount">ยอดรับเงินจริง (บาท)</label>' +
+        '<input id="tuitionTotalInstallmentAmount" type="number" min="0.01" step="0.01" max="' + totalSatang / 100 + '">' +
+        '<label for="tuitionTotalInstallmentNote">หมายเหตุการรับเงิน</label><input id="tuitionTotalInstallmentNote" maxlength="300">' +
+        '<div id="tuitionTotalInstallmentPreview" aria-live="polite"></div>',
+        async function() {
+          const amount = parsePaymentInstallmentSatang(bubbleValue('tuitionTotalInstallmentAmount'));
+          const allocations = allocateTuitionNoticeInstallment(targets, amount);
+          if (!allocations) throw new Error('กรุณาระบุยอดรับจริงมากกว่า 0 และไม่เกินยอดที่หักได้');
+          // If the modal stays open after an interrupted request, reuse its exact allocation and ID.
+          const input = getElement('tuitionTotalInstallmentAmount');
+          const note = bubbleValue('tuitionTotalInstallmentNote').trim().slice(0, 300);
+          const receivedAtMs = Date.now();
+          input.readOnly = true;
+          const updated = await commitPaymentInstallments(allocations.map(function(allocation) {
+            return Object.assign({}, allocation, { id: entryId, note: note, receivedAtMs: receivedAtMs });
+          }));
+          let syncFailures = 0;
+          for (const payment of updated) {
+            try {
+              await syncClosedPaymentInstallment(payment);
+            } catch (error) {
+              console.error('Sync settled tuition payment:', error);
+              syncFailures++;
+            }
+          }
+          if (getFilteredTuitionNoticeStudentRow(rowKey)) viewTuitionNoticeStudentDetails(rowKey);
+          else closeEditBubble();
+          if (syncFailures) alert('บันทึกยอดรับแล้ว แต่มี ' + syncFailures +
+            ' รายการที่ยังไม่ได้อัปเดตสถานะนักเรียน ให้ลองอัปเดตอีกครั้งจากหน้าข้อมูลการชำระเงิน');
+        }
+      );
+      getElement('tuitionTotalInstallmentAmount').addEventListener('input', function() {
+        const amount = parsePaymentInstallmentSatang(this.value);
+        const allocations = allocateTuitionNoticeInstallment(targets, amount);
+        const preview = getElement('tuitionTotalInstallmentPreview');
+        preview.innerHTML = allocations
+          ? '<ul>' + allocations.map(function(item) {
+            return '<li>' + escapeHtml(item.label) + ' · หัก ' + formatPrice(item.amountSatang / 100) +
+              ' · เหลือ ' + formatPrice((item.expectedBalanceSatang - item.amountSatang) / 100) + '</li>';
+          }).join('') + '</ul><strong>ยอดรวมที่หักได้คงเหลือ ' + formatPrice((totalSatang - amount) / 100) + '</strong>'
+          : (amount > totalSatang ? 'ยอดรับเกินยอดที่หักได้' : '');
+      });
+    }
+
     function tuitionNoticeDetailRowsHtml(row) {
       return (row && row.payments || []).map(function(payment) {
         const data = getPaymentRecordCourseAndStudent(payment);
@@ -37930,7 +38053,8 @@
         '<div class="receipt-line"><strong>ระดับชั้น</strong><span>' + escapeHtml(row.grade || '-') + '</span></div>' +
         '<div class="table-wrap" style="margin-top:14px;"><table><thead><tr><th>เดือน</th><th>คอร์ส</th><th>ศูนย์</th><th style="text-align:right;">ยอดคงเหลือ</th><th>การผ่อนชำระ</th></tr></thead><tbody>' + tuitionNoticeDetailRowsHtml(row) + '</tbody></table></div>' +
         '<div class="receipt-total" style="margin-top:14px;">ยอดรวม ' + escapeHtml(formatPrice(row.totalAmount)) + '</div>' +
-        '<div class="test-actions" style="margin-top:14px;"><button class="btn btn-orange" type="button" onclick="downloadTuitionNoticeStudentPdf(\'' + jsArg(row.key) + '\')">ดาวน์โหลด PDF</button><button class="btn btn-green" type="button" onclick="downloadTuitionNoticeStudentImage(\'' + jsArg(row.key) + '\')">ดาวน์โหลดรูป</button><button class="btn btn-dark" type="button" onclick="closeEditBubble()">ปิด</button></div></div>'
+        '<div class="test-actions" style="margin-top:14px;">' + tuitionNoticeTotalInstallmentButton(row) +
+        '<button class="btn btn-orange" type="button" onclick="downloadTuitionNoticeStudentPdf(\'' + jsArg(row.key) + '\')">ดาวน์โหลด PDF</button><button class="btn btn-green" type="button" onclick="downloadTuitionNoticeStudentImage(\'' + jsArg(row.key) + '\')">ดาวน์โหลดรูป</button><button class="btn btn-dark" type="button" onclick="closeEditBubble()">ปิด</button></div></div>'
       );
     }
 
