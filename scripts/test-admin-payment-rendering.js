@@ -867,6 +867,42 @@ test('tuition notice student rows combine months and centers while preserving ev
   assert.deepEqual(Array.from(rows[0].payments, payment => payment.id), ['sep', 'oct-b', 'oct-a']);
 });
 
+test('tuition notice history picker stays inside the month menu and loads only after a valid selection', () => {
+  const select = { value: 'pick-history', dataset: { selectedMonth: 'พฤศจิกายน 2569' } };
+  const scope = html.match(/<select id="tuitionNoticeMonthFilter"[\s\S]*?<\/div>/)[0];
+  assert.doesNotMatch(scope, /<input\b/);
+  assert.match(source('renderTuitionNoticeMonthFilter'), /pick-history/);
+  let modalMonth;
+  let requestedMonth;
+  let loadCount = 0;
+  let closed = 0;
+  let year = '';
+  const c = {
+    getElement: () => select,
+    openTuitionNoticeHistoricalMonth: month => { modalMonth = month; },
+    isQuotaOptimizedLoadingEnabled: () => true,
+    loadTuitionNoticeScope: () => { loadCount++; },
+    applyTuitionNoticeFilters() {},
+    bubbleValue: id => id === 'tuitionNoticeHistoricalYear' ? year : '02',
+    getThaiMonthYearPickerKey: (month, beYear) => (beYear - 543) + '-' + month,
+    pickTuitionNoticeMonth: month => { requestedMonth = month; },
+    closeEditBubble: () => { closed++; },
+    alert() {}
+  };
+  vm.createContext(c);
+  for (const name of ['changeTuitionNoticeMonth', 'applyTuitionNoticeHistoricalMonth']) vm.runInContext(source(name), c);
+  c.changeTuitionNoticeMonth();
+  assert.equal(modalMonth, 'พฤศจิกายน 2569');
+  assert.equal(select.value, modalMonth);
+  assert.equal(loadCount, 0);
+  c.applyTuitionNoticeHistoricalMonth();
+  assert.equal(requestedMonth, undefined);
+  year = '2568';
+  c.applyTuitionNoticeHistoricalMonth();
+  assert.equal(requestedMonth, '2025-02');
+  assert.equal(closed, 1);
+});
+
 test('scoped tuition notices keep legacy month fields, bills without a month and reverse bundle links', async () => {
   const c = setupTuitionNotices();
   const month = 'พฤศจิกายน 2569';

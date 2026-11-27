@@ -7082,9 +7082,8 @@
               <br />
               <div class="form-row">
                 <div>
-                  <label>เดือน</label>
+                  <label for="tuitionNoticeMonthFilter">เดือน</label>
                   <select id="tuitionNoticeMonthFilter" onchange="changeTuitionNoticeMonth()"><option value="ทั้งหมด">ทุกเดือน</option></select>
-                  <input type="month" aria-label="เลือกเดือนย้อนหลัง" onchange="pickTuitionNoticeMonth(this.value)" />
                 </div>
                 <div>
                   <label>ศูนย์</label>
@@ -37918,9 +37917,10 @@
       }).filter(Boolean))).sort(function(a, b) { return compareThaiMonthYear(b, a); });
       select.innerHTML = '<option value="ทั้งหมด">ทุกเดือน</option>' + months.map(function(month) {
         return '<option value="' + escapeHtml(month) + '">' + escapeHtml(month) + '</option>';
-      }).join('');
+      }).join('') + '<option value="pick-history">เลือกเดือนย้อนหลัง…</option>';
       select.value = optimized && !tuitionNoticeScope.selected ? (months[0] || 'ทั้งหมด')
         : months.includes(current) ? current : 'ทั้งหมด';
+      select.dataset.selectedMonth = select.value;
     }
 
     function renderTuitionNoticeStudentTable() {
@@ -37972,8 +37972,40 @@
     }
 
     function changeTuitionNoticeMonth() {
+      const select = getElement('tuitionNoticeMonthFilter');
+      if (select && select.value === 'pick-history') {
+        select.value = select.dataset.selectedMonth || 'ทั้งหมด';
+        openTuitionNoticeHistoricalMonth(select.value);
+        return;
+      }
+      if (select) select.dataset.selectedMonth = select.value;
       if (isQuotaOptimizedLoadingEnabled()) loadTuitionNoticeScope(false);
       applyTuitionNoticeFilters();
+    }
+
+    function openTuitionNoticeHistoricalMonth(value) {
+      const selected = parseThaiMonthYearPickerValue(value);
+      const options = getThaiCalendarMonthNames().map(function(name, index) {
+        const month = String(index + 1).padStart(2, '0');
+        return '<option value="' + month + '"' + (month === selected.month ? ' selected' : '') + '>' + escapeHtml(name) + '</option>';
+      }).join('');
+      openViewBubble('เลือกเดือนย้อนหลัง',
+        '<div class="form-row"><div><label for="tuitionNoticeHistoricalMonth">เดือน</label>' +
+        '<select id="tuitionNoticeHistoricalMonth">' + options + '</select></div>' +
+        '<div><label for="tuitionNoticeHistoricalYear">ปี พ.ศ.</label>' +
+        '<input id="tuitionNoticeHistoricalYear" type="number" min="2400" max="2999" value="' + selected.beYear + '"></div></div>' +
+        '<div class="test-actions"><button class="btn btn-blue" type="button" onclick="applyTuitionNoticeHistoricalMonth()">ดูใบแจ้งยอด</button>' +
+        '<button class="btn btn-dark" type="button" onclick="closeEditBubble()">ยกเลิก</button></div>');
+    }
+
+    function applyTuitionNoticeHistoricalMonth() {
+      const year = Number(bubbleValue('tuitionNoticeHistoricalYear'));
+      if (!Number.isInteger(year) || year < 2400 || year > 2999) {
+        alert('กรุณากรอกปี พ.ศ. ให้ถูกต้อง');
+        return;
+      }
+      pickTuitionNoticeMonth(getThaiMonthYearPickerKey(bubbleValue('tuitionNoticeHistoricalMonth'), year));
+      closeEditBubble();
     }
 
     function pickTuitionNoticeMonth(value) {
