@@ -510,6 +510,8 @@ function setupTuitionNotices() {
     hasPermission: key => key === 'admin.finance',
     isPaymentInActiveBundle: payment => !!payment.testBundle,
     getPaymentRecordId: payment => payment && payment.id,
+    firestoreQuotaBlocked: false,
+    markFirestoreQuotaExceeded: () => false,
     actionCall: (name, ...args) => name + '(' + args.join(',') + ')',
     Set,
     Date
@@ -525,6 +527,42 @@ function setupTuitionNotices() {
   }
   return c;
 }
+
+test('installment stops retrying when Firestore rejects the pre-commit read with quota exceeded', async () => {
+  const c = setupTuitionNotices();
+  const quota = Object.assign(new Error('Quota exceeded.'), { code: 'resource-exhausted' });
+  let reads = 0;
+  let writes = 0;
+  Object.assign(c, {
+    firebaseReady: true, firebaseUser: { uid: 'finance' },
+    db: {
+      collection: () => ({ doc: id => id }),
+      async runTransaction(fn, options) {
+        for (let i = 0; i < (options?.maxAttempts ?? 5); i++) {
+          try {
+            return await fn({
+              get: async () => { reads++; throw quota; },
+              update: () => { writes++; }
+            });
+          } catch (error) {
+            if (error !== quota) throw error;
+          }
+        }
+        throw quota;
+      }
+    },
+    markFirestoreQuotaExceeded(error) {
+      if (error !== quota) return false;
+      c.firestoreQuotaBlocked = true;
+      return true;
+    }
+  });
+  const entries = [{ paymentId: 'p1', id: 'cash', amountSatang: 50000, expectedBalanceSatang: 150000 }];
+  await assert.rejects(c.commitPaymentInstallments(entries), /โควตา Firestore/);
+  await assert.rejects(c.commitPaymentInstallments(entries), /โควตา Firestore/);
+  assert.equal(reads, 1);
+  assert.equal(writes, 0);
+});
 
 test('tuition notice total installment allocates oldest first and commits all deductions together', async () => {
   const c = setupTuitionNotices();

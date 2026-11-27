@@ -37790,26 +37790,46 @@
 
     async function recordPaymentInstallment(paymentId, entry, settleWithSlip) {
       const saved = await commitPaymentInstallments([Object.assign({}, entry, { paymentId: paymentId })], settleWithSlip);
-      await syncClosedPaymentInstallment(saved[0]);
+      try {
+        await syncClosedPaymentInstallment(saved[0]);
+      } catch (error) {
+        if (!markFirestoreQuotaExceeded(error)) throw error;
+        throw new Error('บันทึกยอดรับแล้ว แต่โควตา Firestore เต็ม กรุณาอัปเดตสถานะนักเรียนอีกครั้งเมื่อระบบพร้อม');
+      }
       return saved[0];
     }
 
     async function commitPaymentInstallments(entries, settleWithSlip) {
       if (!hasPermission('admin.finance')) throw new Error('ไม่มีสิทธิ์');
       if (!firebaseReady || !db || !firebaseUser) throw new Error('Firebase ยังไม่พร้อมใช้งาน');
+      const quotaMessage = 'โควตา Firestore เต็ม กรุณารอให้โควตาพร้อม แล้วรีโหลดหน้าและตรวจประวัติรับเงินก่อนบันทึกอีกครั้ง';
+      if (firestoreQuotaBlocked) throw new Error(quotaMessage);
       if (!entries.length || new Set(entries.map(function(entry) { return String(entry.paymentId); })).size !== entries.length) {
         throw new Error('รายการหักยอดไม่ถูกต้อง');
       }
-      const saved = await db.runTransaction(async function(transaction) {
-        const changes = await Promise.all(entries.map(async function(entry) {
-          const ref = db.collection('payments').doc(String(entry.paymentId));
-          return preparePaymentInstallment(transaction, ref, entry, settleWithSlip);
-        }));
-        changes.forEach(function(change) {
-          if (change.update) transaction.update(change.ref, change.update);
+      let saved;
+      try {
+        saved = await db.runTransaction(async function(transaction) {
+          let changes;
+          try {
+            changes = await Promise.all(entries.map(async function(entry) {
+              const ref = db.collection('payments').doc(String(entry.paymentId));
+              return preparePaymentInstallment(transaction, ref, entry, settleWithSlip);
+            }));
+          } catch (error) {
+            // A plain application error stops the SDK from retrying a quota-rejected read.
+            if (markFirestoreQuotaExceeded(error)) throw new Error(quotaMessage);
+            throw error;
+          }
+          changes.forEach(function(change) {
+            if (change.update) transaction.update(change.ref, change.update);
+          });
+          return changes.map(function(change) { return Object.assign(change.payment, change.update); });
         });
-        return changes.map(function(change) { return Object.assign(change.payment, change.update); });
-      });
+      } catch (error) {
+        if (markFirestoreQuotaExceeded(error)) throw new Error(quotaMessage);
+        throw error;
+      }
       const updated = saved.map(function(payment, index) {
         const local = findPaymentByAnyId(entries[index].paymentId);
         return local ? Object.assign(local, payment) : payment;
@@ -38009,6 +38029,7 @@
               await syncClosedPaymentInstallment(payment);
             } catch (error) {
               console.error('Sync settled tuition payment:', error);
+              markFirestoreQuotaExceeded(error);
               syncFailures++;
             }
           }
