@@ -32,16 +32,40 @@ test('online exam remote autosave is capped to a 120-second changed-only cadence
   assert.ok(maximumWrites <= 10, String(maximumWrites));
 });
 
-test('quota optimized startup stays bounded; finance uses complete lazy listeners', () => {
+test('quota optimized Dashboard never opens finance listeners and finance subscribes only to requested collections', () => {
   assert.match(html, /STUDENT_HOME_REALTIME_COLLECTIONS = \['courseEnrollments', 'payments', 'receipts', 'paymentBundles'\]/);
   assert.match(html, /quotaOptimizedLoadingDisabled/);
   const finance = html.slice(html.indexOf('    function startAdminPaymentDataListeners('), html.indexOf('    function scheduleStudentRealtimeRefresh('));
-  assert.match(finance, /options.collections/);
+  assert.match(finance, /\(options\.collections \|\| \[\]\)\.forEach/);
   assert.match(finance, /query: db.collection\(name\)/);
   assert.doesNotMatch(finance, /\.limit\(|\.orderBy\(|\.where\(/);
+  assert.match(html, /function renderAdminTabContent\(tabId\) \{\s*retainAdminPaymentDataListeners\(getStaffTabCollections\(tabId\)\)/);
+  assert.match(html, /const QUOTA_OPTIMIZED_STAFF_TAB_DATA = \{\s*'admin-dashboard': \[\]/);
+  assert.match(html, /const financeSnapshot = name === 'receipts' \|\| name === 'paymentMonths'/);
   for (const collection of ['students', 'teachers', 'courses', 'courseEnrollments', 'payments', 'receipts', 'paymentBundles']) {
     assert.match(html, new RegExp(collection + ":[\\s\\S]{0,120}limit:"), collection);
   }
+});
+
+test('Dashboard aggregates use authenticated Firestore REST and distinguish quota errors from zero', async () => {
+  const start = html.indexOf('    async function getFirestoreCount(');
+  const end = html.indexOf('    async function loadAdminDashboardQuotaSummary(', start);
+  let request;
+  const context = {
+    firebase: { app: () => ({ options: { projectId: 'demo-project' } }) },
+    fetch: async (url, options) => {
+      request = { url, ...options, body: JSON.parse(options.body) };
+      return { ok: true, json: async () => [{ readTime: 'now' }, { result: { aggregateFields: { total: { integerValue: '0' } } } }] };
+    }
+  };
+  vm.createContext(context);
+  vm.runInContext(html.slice(start, end), context);
+  assert.equal(await context.getFirestoreCount('students', 'deleted', false, 'test-token'), 0);
+  assert.match(request.url, /demo-project.*runAggregationQuery$/);
+  assert.equal(request.headers.Authorization, 'Bearer test-token');
+  assert.deepEqual(request.body.structuredAggregationQuery.structuredQuery.where.fieldFilter.value, { booleanValue: false });
+  context.fetch = async () => ({ ok: false, status: 429 });
+  await assert.rejects(context.getFirestoreCount('students', 'deleted', false, 'test-token'), { code: 'resource-exhausted' });
 });
 
 test('Spark plan defaults to bounded loading while search index remains separately gated', () => {

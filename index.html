@@ -10145,24 +10145,58 @@
     let adminPaymentPreviewRequest = null;
     let adminDashboardQuotaSummary = null;
 
-    async function getFirestoreCount(query) {
-      const snapshot = await query.count().get();
-      return Number(snapshot.data().count || 0);
+    async function getFirestoreCount(collectionName, fieldPath, value, token) {
+      // The Firebase compat Query API used by this page has no count() method.
+      const project = encodeURIComponent(firebase.app().options.projectId);
+      const response = await fetch('https://firestore.googleapis.com/v1/projects/' + project + '/databases/(default)/documents:runAggregationQuery', {
+        method: 'POST',
+        headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ structuredAggregationQuery: {
+          aggregations: [{ alias: 'total', count: {} }],
+          structuredQuery: {
+            from: [{ collectionId: collectionName }],
+            where: { fieldFilter: {
+              field: { fieldPath: fieldPath }, op: 'EQUAL',
+              value: typeof value === 'boolean' ? { booleanValue: value } : { stringValue: value }
+            } }
+          }
+        } })
+      });
+      if (!response.ok) {
+        const error = new Error(response.status === 429 ? 'Quota exceeded.' : 'โหลดตัวเลขสรุปไม่สำเร็จ');
+        if (response.status === 429) error.code = 'resource-exhausted';
+        throw error;
+      }
+      const results = await response.json();
+      const entry = results.find(function(item) { return item.result && item.result.aggregateFields; });
+      const count = Number(entry && entry.result.aggregateFields.total.integerValue);
+      if (!Number.isSafeInteger(count) || count < 0 || !entry) throw new Error('ไม่พบตัวเลขสรุปจาก Firestore');
+      return count;
     }
 
     async function loadAdminDashboardQuotaSummary(force) {
-      if (!isQuotaOptimizedLoadingEnabled()) return null;
+      if (!isQuotaOptimizedLoadingEnabled() || !firebaseUser || firestoreQuotaBlocked) return null;
       if (adminDashboardQuotaSummary && !force) return adminDashboardQuotaSummary;
-      const counts = await Promise.all([
-        getFirestoreCount(db.collection('students').where('deleted', '==', false)),
-        getFirestoreCount(db.collection('courses').where('status', '==', 'open')),
-        getFirestoreCount(db.collection('payments').where('slipStatus', '==', 'waiting_admin_review')),
-        getFirestoreCount(db.collection('paymentBundles').where('slipStatus', '==', 'waiting_admin_review')),
-        getFirestoreCount(db.collection('payments').where('paymentStatus', '==', 'ค้างชำระ')),
-        getFirestoreCount(db.collection('courseEnrollments').where('courseStatus', '==', 'รออนุมัติคอร์ส'))
-      ]);
+      const user = firebaseUser;
+      const token = await user.getIdToken();
+      const queries = [
+        ['students', 'deleted', false], ['courses', 'status', 'open'],
+        ['payments', 'slipStatus', 'waiting_admin_review'],
+        ['paymentBundles', 'slipStatus', 'waiting_admin_review'],
+        ['payments', 'paymentStatus', 'ค้างชำระ'],
+        ['courseEnrollments', 'courseStatus', 'รออนุมัติคอร์ส']
+      ];
+      const counts = await Promise.all(queries.map(async function(args) {
+        try {
+          return await getFirestoreCount(...args, token);
+        } catch (error) {
+          if (firebaseUser === user) markFirestoreQuotaExceeded(error);
+          return null;
+        }
+      }));
+      if (firebaseUser !== user) return null;
       adminDashboardQuotaSummary = {
-        totalStudents: counts[0], openCourses: counts[1], pendingPayments: counts[2] + counts[3],
+        totalStudents: counts[0], openCourses: counts[1], pendingPayments: counts[2] === null || counts[3] === null ? null : counts[2] + counts[3],
         overduePayments: counts[4], pendingCourses: counts[5], todayAbsent: 0
       };
       return adminDashboardQuotaSummary;
@@ -10264,14 +10298,13 @@
 
     function startAdminPaymentDataListeners(options) {
       options = options || {};
-      if (!firebaseReady || !db || !firebaseUser) return null;
+      if (!firebaseReady || !db || !firebaseUser || firestoreQuotaBlocked) return null;
       if (!hasPermission('admin.finance') && !hasPermission('admin.full') && !hasPermission('admin.receipts')) {
         stopAdminPaymentDataListeners();
         return null;
       }
       const uid = firebaseUser.uid;
-      if (options.force || !adminRealtimeSession || adminRealtimeSession.uid !== uid ||
-          Object.values(adminRealtimeSession.groups).some(function(group) { return group.failed; })) {
+      if (!adminRealtimeSession || adminRealtimeSession.uid !== uid) {
         stopAdminPaymentDataListeners();
         adminRealtimeSession = { uid: uid, active: true, groups: {} };
       }
@@ -10281,8 +10314,11 @@
       // These screens filter and paginate locally, so their shared data must be
       // complete. A pending-slip query misses newly created unpaid bills and
       // stops reporting a record as soon as its slip is approved or rejected.
-      (options.collections || Object.keys(targets)).forEach(function(name) {
-        if (!targets[name] || session.groups[name]) return;
+      (options.collections || []).forEach(function(name) {
+        if (!targets[name]) return;
+        const existing = session.groups[name];
+        if (existing && existing.active && !existing.failed && !options.force) return;
+        if (existing) existing.stop();
         session.groups[name] = createRealtimeCollectionGroup([
           { key: name + ':all', query: db.collection(name) }
         ], targets[name], isCurrent, function() {
@@ -10290,12 +10326,21 @@
             replaceArray(adminPendingPaymentRecords, payments.filter(function(payment) {
               return payment.slipStatus === 'waiting_admin_review';
             }));
-            if (adminDashboardQuotaSummary) adminDashboardQuotaSummary.pendingPayments = adminPendingPaymentRecords.length;
           }
+          if (name === 'payments' || name === 'paymentBundles') adminDashboardQuotaSummary = null;
           scheduleAdminPaymentDataRefresh(name);
         });
       });
       return session;
+    }
+
+    function retainAdminPaymentDataListeners(collections) {
+      if (!adminRealtimeSession) return;
+      Object.keys(adminRealtimeSession.groups).forEach(function(name) {
+        if (collections.includes(name)) return;
+        adminRealtimeSession.groups[name].stop();
+        delete adminRealtimeSession.groups[name];
+      });
     }
 
     function scheduleStudentRealtimeRefresh(session) {
@@ -10898,8 +10943,8 @@
       'admin-online-class': ['courses', 'onlineRooms', 'onlineDocuments'],
       'admin-online-documents': ['courses', 'onlineDocuments'],
       'admin-video': ['courses', 'onDemandClips'],
-      'admin-payment-round': ['paymentMonths', 'courses'],
-      'admin-payment': ['payments', 'paymentBundles', 'receipts'],
+      'admin-payment-round': ['paymentMonths', 'courses', 'payments', 'receipts', 'paymentBundles'],
+      'admin-payment': ['paymentMonths', 'payments', 'paymentBundles', 'receipts'],
       'admin-tuition-notices': ['payments', 'paymentBundles'],
       'admin-private-lesson-billing': ['payments', 'monthlyPlanSessions'],
       'admin-receipts': ['receipts'],
@@ -10938,6 +10983,7 @@
       staffCollectionStates = {};
       staffTabLoadPromises = {};
       staffDataSessionUid = '';
+      adminDashboardQuotaSummary = null;
       if (typeof studentDisplayLoads !== 'undefined') studentDisplayLoads.clear();
       attendanceCourseRosterLoadedForUid = '';
       attendanceCourseRosterLoadPromise = null;
@@ -10979,8 +11025,9 @@
       if (!state || state.status !== 'ready') return false;
       if (state.realtime) {
         const group = state.realtime.groups[name];
-        return state.realtime === adminRealtimeSession && state.realtime.active && group && !group.failed;
+        return state.realtime === adminRealtimeSession && state.realtime.active && group && group.active && !group.failed;
       }
+      if (state.refreshAfter && Date.now() >= state.refreshAfter) return false;
       return true;
     }
 
@@ -11007,11 +11054,12 @@
         const isCurrent = function() { return firebaseUser && firebaseUser.uid === uid && studentDataSessionVersion === version && staffCollectionStates[name] === state; };
         state.promise = (async function() {
           try {
+            if (firestoreQuotaBlocked) throw new Error('โควตา Firestore เต็ม กรุณาลองใหม่เมื่อโควตาพร้อม');
             const status = { failed: false };
             const targets = getStaffCollectionTargets();
             if (!PRODUCTION_MODE && targets[name]) await seedCollectionIfEmpty(name, targets[name]);
-            if (['payments', 'receipts', 'paymentBundles', 'paymentMonths'].includes(name)) {
-              const live = startAdminPaymentDataListeners({ collections: [name] });
+            if (['payments', 'paymentBundles'].includes(name)) {
+              const live = startAdminPaymentDataListeners({ collections: [name], force: options.force });
               if (live) {
                 state.realtime = live;
                 state.unbounded = true;
@@ -11022,7 +11070,9 @@
                 return;
               }
             }
-            const items = name === 'payments' ? await getFirebasePaymentCollection(false, status) : await getFirebaseCollection(name, false, status, { unbounded: unbounded });
+            // Historical receipts and round settings do not need an open realtime stream.
+            const financeSnapshot = name === 'receipts' || name === 'paymentMonths';
+            const items = name === 'payments' ? await getFirebasePaymentCollection(false, status) : await getFirebaseCollection(name, false, status, { unbounded: unbounded || financeSnapshot });
             if (!isCurrent()) return;
             if (status.failed) throw new Error('โหลดข้อมูล ' + name + ' ไม่สำเร็จ');
             if (name === 'settings') {
@@ -11036,6 +11086,10 @@
               replaceArray(getStaffCollectionTargets()[name], items);
             }
             state.status = 'ready';
+            if (financeSnapshot) {
+              state.unbounded = true;
+              state.refreshAfter = Date.now() + 5 * 60 * 1000;
+            }
             if (name === 'students') rebuildStudentLookupMap();
           } catch (error) {
             if (isCurrent()) state.status = 'error';
@@ -17842,10 +17896,8 @@
     }
 
     function renderAdminTabContent(tabId) {
+      retainAdminPaymentDataListeners(getStaffTabCollections(tabId));
       if (!requireStaffTabData(tabId)) return;
-      if (['admin-dashboard', 'admin-payment', 'admin-payment-round', 'admin-tuition-notices', 'admin-receipts', 'admin-finance-summary'].includes(tabId)) {
-        startAdminPaymentDataListeners();
-      }
       if (adminPaymentRenderDirty.size) requestAdminPaymentRender([]);
       if (tabId === 'admin-dashboard') {
         if (isQuotaOptimizedLoadingEnabled()) {
@@ -18139,12 +18191,14 @@
     function renderAdminDashboardNow() {
       if (isQuotaOptimizedLoadingEnabled() && adminDashboardQuotaSummary) {
         const summary = adminDashboardQuotaSummary;
-        if (getElement('dashTotalStudents')) getElement('dashTotalStudents').textContent = summary.totalStudents + ' คน';
-        if (getElement('dashOpenCourses')) getElement('dashOpenCourses').textContent = summary.openCourses + ' คอร์ส';
-        if (getElement('dashPendingPayments')) getElement('dashPendingPayments').textContent = summary.pendingPayments + ' รายการ';
-        if (getElement('dashOverdueStudents')) getElement('dashOverdueStudents').textContent = summary.overduePayments + ' รายการ';
-        if (getElement('dashPendingCourses')) getElement('dashPendingCourses').textContent = summary.pendingCourses + ' คน';
-        if (getElement('pickupWaitingCount')) getElement('pickupWaitingCount').textContent = summary.todayAbsent + ' คน';
+        [
+          ['dashTotalStudents', summary.totalStudents, 'คน'], ['dashOpenCourses', summary.openCourses, 'คอร์ส'],
+          ['dashPendingPayments', summary.pendingPayments, 'รายการ'], ['dashOverdueStudents', summary.overduePayments, 'รายการ'],
+          ['dashPendingCourses', summary.pendingCourses, 'คน'], ['pickupWaitingCount', summary.todayAbsent, 'คน']
+        ].forEach(function(item) {
+          const element = getElement(item[0]);
+          if (element) element.textContent = item[1] === null ? '—' : item[1] + ' ' + item[2];
+        });
         return;
       }
       const totalStudents = Array.isArray(students) ? students.filter(isActiveStudentForDashboard).length : 0;
@@ -34108,7 +34162,6 @@
         student = (students || []).find(function(s) { return isStudentPaymentRecord(s, payment); });
       }
       if (!student) return null;
-      const beforeSync = [student.courseId, student.course, student.courseStatus, student.paymentStatus, Array.isArray(student.overdueMonths) ? student.overdueMonths.join('|') : ''].join('::');
       let enrollment = getStudentCourseEnrollment(student, payment.courseId || '');
       if (forceStudentWrite && payment.courseId && getEnrollmentStudentId(student) && (!enrollment || enrollment.legacy)) {
         const enrollmentId = getCourseEnrollmentDocId(getEnrollmentStudentId(student), payment.courseId);
@@ -34119,36 +34172,42 @@
         }
       }
       if (enrollment && !enrollment.legacy) {
-        enrollment.paymentStatus = status;
-        if (status === 'ชำระแล้ว' && enrollment.courseStatus === 'รออนุมัติคอร์ส') {
-          enrollment.courseStatus = 'อนุมัติแล้ว';
-          enrollment.everApproved = true;
-          enrollment.approvedAtMs = Number(enrollment.approvedAtMs || Date.now());
-          enrollment.historicalMediaStatus = 'not_applicable';
+        const approvalNeeded = status === 'ชำระแล้ว' && enrollment.courseStatus === 'รออนุมัติคอร์ส';
+        if (enrollment.paymentStatus !== status || approvalNeeded) {
+          const nextEnrollment = Object.assign({}, enrollment, { paymentStatus: status });
+          if (approvalNeeded) {
+            nextEnrollment.courseStatus = 'อนุมัติแล้ว';
+            nextEnrollment.everApproved = true;
+            nextEnrollment.approvedAtMs = Number(enrollment.approvedAtMs || Date.now());
+            nextEnrollment.historicalMediaStatus = 'not_applicable';
+          }
+          await setFirebaseDocument('courseEnrollments', nextEnrollment);
+          Object.assign(enrollment, nextEnrollment);
         }
-        await setFirebaseDocument('courseEnrollments', enrollment);
       }
       const syncsMainCourse = !payment.courseId || String(student.courseId || '') === String(payment.courseId || '');
+      const updates = {};
       if (syncsMainCourse && enrollment && !enrollment.legacy) {
-        Object.assign(student, buildStudentMainCourseFields(enrollment, getCourseForEnrollment(enrollment)));
+        Object.assign(updates, buildStudentMainCourseFields(enrollment, getCourseForEnrollment(enrollment)));
       }
       const month = payment.paymentMonth || payment.month || payment.billingMonth || '';
-      student.overdueMonths = Array.isArray(student.overdueMonths) ? student.overdueMonths : [];
-
-      if (status === 'ค้างชำระ') {
-        if (month && !student.overdueMonths.includes(month)) student.overdueMonths.push(month);
-        if (syncsMainCourse) student.paymentStatus = 'ค้างชำระ';
-      } else {
-        if (month) student.overdueMonths = student.overdueMonths.filter(function(item) { return item !== month; });
-        if (syncsMainCourse) student.paymentStatus = status;
+      const overdueMonths = Array.isArray(student.overdueMonths) ? student.overdueMonths : [];
+      if (month && status === 'ค้างชำระ' && !overdueMonths.includes(month)) {
+        updates.overdueMonths = overdueMonths.concat(month);
+      } else if (month && status !== 'ค้างชำระ' && overdueMonths.includes(month)) {
+        updates.overdueMonths = overdueMonths.filter(function(item) { return item !== month; });
       }
+      if (syncsMainCourse) updates.paymentStatus = status;
 
       if (syncsMainCourse && (!enrollment || enrollment.legacy) && status === 'ชำระแล้ว' && student.courseId && String(student.courseId) === String(payment.courseId || '') && student.courseStatus === 'รออนุมัติคอร์ส') {
-        student.courseStatus = 'อนุมัติแล้ว';
+        updates.courseStatus = 'อนุมัติแล้ว';
       }
 
-      const afterSync = [student.courseId, student.course, student.courseStatus, student.paymentStatus, Array.isArray(student.overdueMonths) ? student.overdueMonths.join('|') : ''].join('::');
-      if (forceStudentWrite || beforeSync !== afterSync) await setFirebaseDocument('students', student);
+      if (Object.keys(updates).some(function(key) { return JSON.stringify(updates[key]) !== JSON.stringify(student[key]); })) {
+        const nextStudent = Object.assign({}, student, updates);
+        await setFirebaseDocument('students', nextStudent);
+        Object.assign(student, nextStudent);
+      }
       if (currentStudent && isStudentPaymentRecord(currentStudent, payment)) {
         Object.assign(currentStudent, student);
         updateStudentCourseDisplay();
@@ -35721,11 +35780,13 @@
       const btn = document.getElementById('adminPaymentRefreshBtn');
       if (btn) { btn.disabled = true; btn.textContent = 'กำลังโหลด...'; }
       try {
-        const session = startAdminPaymentDataListeners({ force: true });
-        if (!session) throw new Error('ไม่สามารถเริ่มรับข้อมูลการชำระเงินได้');
-        const ready = await Promise.all(Object.values(session.groups).map(function(group) { return group.ready; }));
-        if (!session.active || session !== adminRealtimeSession) return;
-        if (ready.some(function(success) { return !success; })) throw new Error('โหลดข้อมูลบางส่วนไม่สำเร็จ กรุณาลองใหม่');
+        if (firestoreQuotaBlocked) throw new Error('โควตา Firestore เต็ม กรุณาลองใหม่เมื่อโควตาพร้อม');
+        const financeCollections = ['payments', 'paymentBundles'];
+        const collections = financeCollections.filter(function(name) {
+          return adminRealtimeSession && adminRealtimeSession.groups[name] && adminRealtimeSession.groups[name].active;
+        });
+        if (!collections.length) throw new Error('ไม่พบชุดข้อมูลการเงินที่เปิดอยู่');
+        await ensureStaffCollections(collections, { force: true });
         safeRun(applyPaymentRepairsSync, 'refresh-payment-repair');
         renderPaymentTable();
         updatePaymentSummary();

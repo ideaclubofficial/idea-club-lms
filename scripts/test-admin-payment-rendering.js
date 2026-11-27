@@ -528,6 +528,37 @@ function setupTuitionNotices() {
   return c;
 }
 
+test('settlement retries only the student status write that failed', async () => {
+  const c = setupTuitionNotices();
+  const student = { id: 's1', courseId: 'c1', paymentStatus: 'ค้างชำระ', overdueMonths: ['ตุลาคม 2569'] };
+  const enrollment = { id: 's1__c1', courseId: 'c1', paymentStatus: 'ค้างชำระ' };
+  const writes = [];
+  let failStudent = true;
+  Object.assign(c, {
+    currentStudent: null,
+    getEnrollmentStudentId: () => student.id,
+    getStudentCourseEnrollment: () => enrollment,
+    getCourseForEnrollment: () => null,
+    buildStudentMainCourseFields: existing => ({ courseId: existing.courseId }),
+    setFirebaseDocument: async name => {
+      writes.push(name);
+      if (name === 'students' && failStudent) throw new Error('offline');
+    }
+  });
+  c.students[0] = student;
+  vm.runInContext(source('syncStudentPaymentStatusFromPayment'), c);
+  const payment = { studentId: student.id, courseId: 'c1', month: 'ตุลาคม 2569' };
+  await assert.rejects(c.syncStudentPaymentStatusFromPayment(payment, 'ชำระแล้ว', true), /offline/);
+  assert.equal(student.paymentStatus, 'ค้างชำระ');
+  assert.equal(enrollment.paymentStatus, 'ชำระแล้ว');
+  failStudent = false;
+  await c.syncStudentPaymentStatusFromPayment(payment, 'ชำระแล้ว', true);
+  await c.syncStudentPaymentStatusFromPayment(payment, 'ชำระแล้ว', true);
+  assert.deepEqual(writes, ['courseEnrollments', 'students', 'students']);
+  assert.equal(student.paymentStatus, 'ชำระแล้ว');
+  assert.equal(student.overdueMonths.length, 0);
+});
+
 test('installment stops retrying when Firestore rejects the pre-commit read with quota exceeded', async () => {
   const c = setupTuitionNotices();
   const quota = Object.assign(new Error('Quota exceeded.'), { code: 'resource-exhausted' });
