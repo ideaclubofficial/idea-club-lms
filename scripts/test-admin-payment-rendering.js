@@ -508,6 +508,7 @@ function setupTuitionNotices() {
     formatPrice: value => Number(value).toLocaleString('th-TH') + ' บาท',
     getPrintableLogoHtml: () => '<div>LOGO</div>',
     hasPermission: key => key === 'admin.finance',
+    isQuotaOptimizedLoadingEnabled: () => false,
     isPaymentInActiveBundle: payment => !!payment.testBundle,
     getPaymentRecordId: payment => payment && payment.id,
     firestoreQuotaBlocked: false,
@@ -518,7 +519,7 @@ function setupTuitionNotices() {
   };
   vm.createContext(c); installStudentDisplayHelpers(c);
   for (const name of ['getPaymentFinalAmount', 'getPaymentInstallmentSatang', 'getPaymentBalanceSatang', 'getPaymentPayableAmount', 'getPaymentReceivedAmount',
-    'canRecordPaymentInstallment', 'parsePaymentInstallmentSatang', 'recordPaymentInstallment', 'commitPaymentInstallments',
+    'canRecordPaymentInstallment', 'canRecordTuitionNoticeInstallment', 'getTuitionNoticeBundleRecords', 'getTuitionNoticeMonth', 'parsePaymentInstallmentSatang', 'recordPaymentInstallment', 'commitPaymentInstallments',
     'preparePaymentInstallment', 'allocateTuitionNoticeInstallment', 'tuitionNoticeTotalInstallmentButton', 'paymentInstallmentHistoryHtml',
     'getMonthlyIncome', 'getTuitionNoticeIdentityKeys','isTuitionNoticePrintablePayment','buildTuitionNoticeStudentRows',
     'getTuitionNoticeRowCenters','getTuitionNoticeRowMonths','tuitionNoticeDetailRowsHtml','buildTuitionNoticeGroups',
@@ -866,6 +867,96 @@ test('tuition notice student rows combine months and centers while preserving ev
   assert.deepEqual(Array.from(rows[0].payments, payment => payment.id), ['sep', 'oct-b', 'oct-a']);
 });
 
+test('scoped tuition notices keep legacy month fields, bills without a month and reverse bundle links', async () => {
+  const c = setupTuitionNotices();
+  const month = 'พฤศจิกายน 2569';
+  const bill = { studentId: 's1', center: 'IDEA CLUB ศูนย์ นครสวรรค์', status: 'ค้างชำระ', amount: 100 };
+  const datasets = {
+    payments: [
+      { ...bill, id: '123', month, paymentMonth: month },
+      { ...bill, id: 'legacy', billingMonth: month, bundleId: 'old-bundle' },
+      { ...bill, id: 'other', month: 'ตุลาคม 2569', paymentMonth: month },
+      { ...bill, id: 'missing-month' }
+    ],
+    paymentBundles: [
+      { id: 'old-bundle', firebaseDocId: 'stored-under-another-id' },
+      { id: 'reverse-bundle', paymentIds: [123] },
+      { id: 'unrelated-bundle', paymentIds: ['unrelated'] }
+    ]
+  };
+  const reads = [];
+  const result = rows => ({ docs: rows.map(row => ({ id: row.firebaseDocId || row.id, data: () => ({ ...row }) })) });
+  Object.assign(c, {
+    firebase: { firestore: { FieldPath: { documentId: () => '__name__' } } },
+    db: { collection: name => ({
+      get: async () => { reads.push([name, '*']); return result(datasets[name]); },
+      where: (field, op, value) => ({
+        get: async () => {
+          reads.push([name, field]);
+          return result(datasets[name].filter(row => {
+            const fieldValue = field === '__name__' ? (row.firebaseDocId || row.id) : row[field];
+            if (op === '==') return fieldValue === value;
+            if (op === 'in') return value.includes(fieldValue);
+            return (fieldValue || []).some(id => value.includes(id));
+          }));
+        }
+      })
+    }) },
+    firebaseSnapshotItems: snapshot => snapshot.docs.map(doc => ({ ...doc.data(), firebaseDocId: doc.id })),
+    paymentBundles: [],
+    isActivePaymentBundle: bundle => !!bundle
+  });
+  for (const name of ['readTuitionNoticePayments', 'readTuitionNoticeBundles', 'getPaymentBundleForPayment']) {
+    vm.runInContext(source(name), c);
+  }
+  const scoped = await c.readTuitionNoticePayments(month);
+  assert.deepEqual(Array.from(scoped, payment => payment.id), ['123', 'legacy']);
+  assert.equal(c.buildTuitionNoticeStudentRows(scoped)[0].totalAmount, 200);
+  assert.match(c.tuitionNoticeHtml(c.buildTuitionNoticeGroups(scoped)[0]), /พฤศจิกายน 2569/);
+  const bundles = await c.readTuitionNoticeBundles(scoped, () => true);
+  assert.deepEqual(Array.from(bundles, bundle => bundle.id).sort(), ['old-bundle', 'reverse-bundle']);
+  assert.ok(scoped.every(payment => !c.canRecordPaymentInstallment(payment, bundles)));
+  assert.ok(reads.every(([, field]) => field !== '*'));
+  const all = await c.readTuitionNoticePayments('ทั้งหมด');
+  assert.deepEqual(Array.from(all, payment => payment.id), datasets.payments.map(payment => payment.id));
+  assert.equal(c.buildTuitionNoticeStudentRows(all)[0].totalAmount, 400);
+});
+
+test('late tuition notice loads and failed refreshes cannot enable exports for the wrong scope', async () => {
+  const c = setupTuitionNotices();
+  let month = 'ตุลาคม 2569';
+  const reads = [];
+  const alerts = [];
+  Object.assign(c, {
+    firebaseReady: true, firebaseUser: { uid: 'finance' }, studentDataSessionVersion: 1, db: {},
+    isCurrentStudentSession: () => false, isQuotaOptimizedLoadingEnabled: () => true,
+    getTuitionNoticeFilterScope: () => ({ month }),
+    getElement: () => null, renderTuitionNoticeStudentTable() {}, renderTuitionNoticeMonthFilter() {},
+    applyPaymentRepairsSync() {}, loadStudentDisplayRecords: async () => true, readTuitionNoticeBundles: async () => [],
+    readTuitionNoticePayments: label => new Promise((resolve, reject) => reads.push({ label, resolve, reject })),
+    alert: message => alerts.push(message), console: { warn() {} }
+  });
+  vm.runInContext(html.match(/^    let tuitionNoticeScope = .*;$/m)[0], c);
+  for (const name of ['loadTuitionNoticeScope', 'setTuitionNoticeScopeStatus', 'tuitionNoticeScopeReady']) vm.runInContext(source(name), c);
+  const older = c.loadTuitionNoticeScope(false);
+  month = 'พฤศจิกายน 2569';
+  const selected = c.loadTuitionNoticeScope(false);
+  reads[0].resolve([{ month: reads[0].label }]);
+  await older;
+  assert.equal(c.tuitionNoticeScopeReady(), false);
+  reads[1].resolve([{ month }]);
+  await selected;
+  assert.equal(c.tuitionNoticeScopeReady(), true);
+  await c.loadTuitionNoticeScope(false);
+  assert.equal(reads.length, 2);
+  const refresh = c.loadTuitionNoticeScope(true);
+  reads[2].reject(new Error('offline'));
+  await refresh;
+  assert.equal(c.tuitionNoticeScopeReady(), false);
+  assert.equal(vm.runInContext('tuitionNoticeScope.cache.get(tuitionNoticeScope.selected).payments.length', c), 1);
+  assert.equal(alerts.length, 2);
+});
+
 test('tuition notice filters keep only payable records inside the selected scope', () => {
   const c = {
     payments: [
@@ -913,6 +1004,7 @@ test('tuition notice per-student download requires finance permission', () => {
   let allowed = false;
   const c = {
     hasPermission: () => allowed,
+    tuitionNoticeScopeReady: () => true,
     alert: message => alerts.push(message),
     getFilteredTuitionNoticeStudentRow: () => null
   };
@@ -933,6 +1025,7 @@ test('selected tuition notice download exports all selected student-center pages
   let downloaded;
   const c = {
     hasPermission: () => true,
+    tuitionNoticeScopeReady: () => true,
     alert() {},
     buildTuitionNoticeStudentRows: () => rows,
     buildTuitionNoticeGroups: payments => payments.map(payment => ({ key: payment.id })),

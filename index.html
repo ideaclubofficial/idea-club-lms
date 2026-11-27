@@ -7073,7 +7073,7 @@
 
             <div class="form-box">
               <h3>ใบแจ้งยอดชำระค่าเรียน</h3>
-              <p style="margin-bottom:18px; color:#6b7280;">รวมรายชื่อนักเรียนที่มีรายการรอชำระ ค้างชำระ หรือสลิปไม่ผ่านจากทุกเดือน</p>
+              <p style="margin-bottom:18px; color:#6b7280;">แสดงยอดรอชำระ ค้างชำระ หรือสลิปไม่ผ่านตามเดือนที่เลือก เลือก “ทุกเดือน” เพื่อรวมยอดย้อนหลังทั้งหมด</p>
               <div class="dashboard-grid">
                 <div class="stat"><h4>นักเรียน</h4><p id="tuitionNoticeStudentCount">0 คน</p></div>
                 <div class="stat"><h4>รายการที่ต้องชำระ</h4><p id="tuitionNoticePaymentCount">0 รายการ</p></div>
@@ -7083,7 +7083,8 @@
               <div class="form-row">
                 <div>
                   <label>เดือน</label>
-                  <select id="tuitionNoticeMonthFilter" onchange="applyTuitionNoticeFilters()"><option value="ทั้งหมด">ทุกเดือน</option></select>
+                  <select id="tuitionNoticeMonthFilter" onchange="changeTuitionNoticeMonth()"><option value="ทั้งหมด">ทุกเดือน</option></select>
+                  <input type="month" aria-label="เลือกเดือนย้อนหลัง" onchange="pickTuitionNoticeMonth(this.value)" />
                 </div>
                 <div>
                   <label>ศูนย์</label>
@@ -7113,6 +7114,7 @@
                 </div>
               </div>
               <div class="admin-toolbar">
+                <button class="btn btn-dark" type="button" onclick="loadTuitionNoticeScope(true)">รีเฟรชใบแจ้งยอด</button>
                 <input id="tuitionNoticeSearchKeyword" type="text" placeholder="ค้นหาชื่อ / ชื่อเล่น / Member ID / คอร์ส" oninput="applyTuitionNoticeFilters()" />
                 <button class="btn btn-dark" type="button" onclick="selectAllFilteredTuitionNoticeStudents()">เลือกทั้งหมดตามตัวกรอง</button>
                 <button class="btn btn-dark" type="button" onclick="clearTuitionNoticeSelection()">ล้างที่เลือก</button>
@@ -7120,6 +7122,7 @@
                 <button class="btn btn-green" type="button" onclick="downloadSelectedTuitionNoticesImages()">ดาวน์โหลดรูปที่เลือก</button>
                 <span id="tuitionNoticeSelectionSummary" class="mini-muted">เลือก 0 คน</span>
               </div>
+              <p id="tuitionNoticeLoadStatus" role="status" aria-live="polite"></p>
             </div>
 
             <br />
@@ -10946,7 +10949,7 @@
       'admin-video': ['courses', 'onDemandClips'],
       'admin-payment-round': ['paymentMonths', 'courses', 'payments', 'receipts', 'paymentBundles'],
       'admin-payment': ['paymentMonths', 'payments', 'paymentBundles', 'receipts'],
-      'admin-tuition-notices': ['payments', 'paymentBundles'],
+      'admin-tuition-notices': ['paymentMonths'],
       'admin-private-lesson-billing': ['payments', 'monthlyPlanSessions'],
       'admin-receipts': ['receipts'],
       'admin-finance-summary': ['payments', 'expenses'],
@@ -10985,6 +10988,7 @@
       staffTabLoadPromises = {};
       staffDataSessionUid = '';
       adminDashboardQuotaSummary = null;
+      if (typeof resetTuitionNoticeScope === 'function') resetTuitionNoticeScope();
       if (typeof studentDisplayLoads !== 'undefined') studentDisplayLoads.clear();
       attendanceCourseRosterLoadedForUid = '';
       attendanceCourseRosterLoadPromise = null;
@@ -17961,7 +17965,8 @@
       }
       if (tabId === 'admin-tuition-notices') {
         safeRun(renderTuitionNoticeMonthFilter, 'tuition-notice-month-filter');
-        safeRun(renderTuitionNoticeStudentTable, 'tuition-notice-table');
+        if (isQuotaOptimizedLoadingEnabled()) loadTuitionNoticeScope(false);
+        else safeRun(renderTuitionNoticeStudentTable, 'tuition-notice-table');
       }
       if (tabId === 'admin-private-lesson-billing') {
         safeRun(renderPrivateLessonBillingPreview, 'private-lesson-billing-preview');
@@ -33753,13 +33758,19 @@
       }) || null;
     }
 
-    function getPaymentBundleForPayment(payment) {
+    function getPaymentBundleForPayment(payment, bundleRecords) {
+      const source = bundleRecords || paymentBundles || [];
       const bundleId = payment && payment.bundleId ? String(payment.bundleId) : '';
-      if (bundleId) return findPaymentBundleById(bundleId);
+      if (bundleId) {
+        if (!bundleRecords) return findPaymentBundleById(bundleId);
+        return source.find(function(bundle) {
+          return String(bundle.id || '') === bundleId || String(bundle.firebaseDocId || '') === bundleId;
+        }) || null;
+      }
       const paymentId = getPaymentRecordId(payment);
       if (!paymentId) return null;
       if (getPaymentInstallmentSatang(payment) > 0) return null;
-      return (paymentBundles || []).find(function(bundle) {
+      return source.find(function(bundle) {
         if (!bundle || bundle.status === 'ยกเลิก' || bundle.status === 'cancelled') return false;
         return (bundle.paymentIds || []).map(String).includes(paymentId);
       }) || null;
@@ -37665,6 +37676,148 @@
       return status === 'รอชำระเงิน' || status === 'สลิปไม่ผ่าน' || status === 'ค้างชำระ';
     }
 
+    let tuitionNoticeScope = { cache: new Map(), pending: new Map(), months: new Set(), selected: '', status: 'idle' };
+
+    function resetTuitionNoticeScope() {
+      tuitionNoticeScope = { cache: new Map(), pending: new Map(), months: new Set(), selected: '', status: 'idle' };
+      const select = getElement('tuitionNoticeMonthFilter');
+      if (select) select.value = 'ทั้งหมด';
+      tuitionNoticeSelectedStudentKeys.clear();
+      tuitionNoticeCurrentPage = 1;
+    }
+
+    function getTuitionNoticeMonth(payment) {
+      return String(payment.month || payment.paymentMonth || payment.billingMonth || '');
+    }
+
+    function setTuitionNoticeScopeStatus(status, message) {
+      tuitionNoticeScope.status = status;
+      const label = getElement('tuitionNoticeLoadStatus');
+      if (label) label.textContent = message || '';
+      const root = getElement('admin-tuition-notices');
+      if (root) root.setAttribute('aria-busy', status === 'loading' ? 'true' : 'false');
+      renderTuitionNoticeStudentTable();
+    }
+
+    async function readTuitionNoticePayments(month) {
+      const collection = db.collection('payments');
+      const fields = ['month', 'paymentMonth', 'billingMonth'];
+      const snapshots = month === 'ทั้งหมด' ? [await collection.get({ source: 'server' })] : await Promise.all(fields.map(function(field) {
+        return collection.where(field, '==', month).get({ source: 'server' });
+      }));
+      const records = new Map();
+      snapshots.forEach(function(snapshot) {
+        firebaseSnapshotItems(snapshot).forEach(function(payment) {
+          if (month === 'ทั้งหมด' || getTuitionNoticeMonth(payment) === month) {
+            records.set(String(payment.firebaseDocId || payment.id), payment);
+          }
+        });
+      });
+      return Array.from(records.values());
+    }
+
+    async function readTuitionNoticeBundles(records, isCurrent) {
+      const collection = db.collection('paymentBundles');
+      const directIds = new Set(), reverseIds = new Set();
+      const bundles = new Map();
+      records.forEach(function(payment) {
+        if (payment.bundleId) directIds.add(String(payment.bundleId));
+        else if (getPaymentInstallmentSatang(payment) === 0 && getPaymentRecordId(payment)) reverseIds.add(getPaymentRecordId(payment));
+      });
+      const queries = [];
+      const addChunks = function(ids, field, op) {
+        const values = Array.from(ids);
+        for (let i = 0; i < values.length; i += 10) queries.push(collection.where(field, op, values.slice(i, i + 10)));
+      };
+      const withLegacyNumbers = function(ids) {
+        const values = Array.from(ids);
+        values.forEach(function(value) {
+          const numeric = Number(value);
+          if (Number.isSafeInteger(numeric) && String(numeric) === value) values.push(numeric);
+        });
+        return values;
+      };
+      if (directIds.size) {
+        addChunks(directIds, firebase.firestore.FieldPath.documentId(), 'in');
+        // Older records may link the bundle's stored id rather than its document ID.
+        addChunks(withLegacyNumbers(directIds), 'id', 'in');
+      }
+      addChunks(withLegacyNumbers(reverseIds), 'paymentIds', 'array-contains-any');
+      for (let i = 0; i < queries.length; i += 5) {
+        if (!isCurrent()) return [];
+        const snapshots = await Promise.all(queries.slice(i, i + 5).map(function(query) { return query.get({ source: 'server' }); }));
+        snapshots.forEach(function(snapshot) {
+          firebaseSnapshotItems(snapshot).forEach(function(bundle) {
+            bundles.set(String(bundle.firebaseDocId || bundle.id), bundle);
+          });
+        });
+      }
+      return Array.from(bundles.values());
+    }
+
+    async function loadTuitionNoticeScope(force) {
+      if (!hasPermission('admin.finance') || !firebaseReady || !firebaseUser || !db || isCurrentStudentSession()) return;
+      if (!isQuotaOptimizedLoadingEnabled()) return requestStaffTabData('admin-tuition-notices');
+      const state = tuitionNoticeScope;
+      const uid = firebaseUser.uid, version = studentDataSessionVersion;
+      const isCurrent = function() {
+        return state === tuitionNoticeScope && firebaseUser && firebaseUser.uid === uid && studentDataSessionVersion === version;
+      };
+      const month = getTuitionNoticeFilterScope().month;
+      state.selected = month;
+      if (state.pending.has(month)) {
+        setTuitionNoticeScopeStatus('loading', 'กำลังโหลดใบแจ้งยอด…');
+        return state.pending.get(month);
+      }
+      const cached = state.cache.get(month);
+      if (!force && cached && state.status !== 'error' && Date.now() - cached.loadedAt < 60000) {
+        setTuitionNoticeScopeStatus('ready', '');
+        return;
+      }
+      if (firestoreQuotaBlocked) {
+        setTuitionNoticeScopeStatus('error', 'โควตา Firestore เต็ม กรุณาลองใหม่เมื่อโควตาพร้อม');
+        return;
+      }
+      setTuitionNoticeScopeStatus('loading', 'กำลังโหลดใบแจ้งยอด…');
+      const task = (async function() {
+        try {
+          const records = await readTuitionNoticePayments(month);
+          if (!isCurrent()) return;
+          applyPaymentRepairsSync(records);
+          const payable = records.filter(function(payment) {
+            return !isCoursePaymentCancelled(payment) && isTuitionNoticePrintablePayment(payment);
+          });
+          const result = await Promise.all([readTuitionNoticeBundles(payable, isCurrent), loadStudentDisplayRecords(payable)]);
+          if (!isCurrent()) return;
+          if (firestoreQuotaBlocked) throw new Error('โควตา Firestore เต็ม');
+          records.forEach(function(payment) {
+            const label = getTuitionNoticeMonth(payment);
+            if (label) state.months.add(label);
+          });
+          state.cache.delete(month);
+          state.cache.set(month, { payments: records, bundles: result[0], loadedAt: Date.now() });
+          while (state.cache.size > 5) {
+            const oldest = Array.from(state.cache.keys()).find(function(key) { return key !== state.selected; });
+            state.cache.delete(oldest);
+          }
+          if (state.selected !== month) return;
+          renderTuitionNoticeMonthFilter();
+          setTuitionNoticeScopeStatus('ready', '');
+        } catch (error) {
+          if (!isCurrent()) return;
+          markFirestoreQuotaExceeded(error);
+          console.warn('tuition notice scope load failed:', error);
+          if (state.selected === month) setTuitionNoticeScopeStatus('error', state.cache.has(month)
+            ? 'โหลดล่าสุดไม่สำเร็จ กำลังแสดงข้อมูลเดิม กรุณารีเฟรชก่อนออกใบแจ้งยอดหรือรับเงิน'
+            : 'โหลดใบแจ้งยอดไม่สำเร็จ กรุณากดรีเฟรชใบแจ้งยอด');
+        } finally {
+          state.pending.delete(month);
+        }
+      })();
+      state.pending.set(month, task);
+      return task;
+    }
+
     function getTuitionNoticeFilterScope() {
       return {
         month: getElement('tuitionNoticeMonthFilter') ? getElement('tuitionNoticeMonthFilter').value : 'ทั้งหมด',
@@ -37677,7 +37830,10 @@
 
     function getFilteredTuitionNoticePayments() {
       const scope = getTuitionNoticeFilterScope();
-      return (payments || []).filter(function(payment) {
+      const useScoped = typeof tuitionNoticeScope !== 'undefined' && isQuotaOptimizedLoadingEnabled();
+      const cached = useScoped && tuitionNoticeScope.cache.get(scope.month);
+      const source = useScoped ? (cached ? cached.payments : []) : payments;
+      return (source || []).filter(function(payment) {
         return payment && payment.deleted !== true && !isCoursePaymentCancelled(payment) &&
           isTuitionNoticePrintablePayment(payment) && paymentMatchesDashboardScope(payment, scope, true);
       });
@@ -37717,7 +37873,7 @@
       rows.forEach(function(row) {
         row.totalAmount /= 100;
         row.payments.sort(function(a, b) {
-          const monthDiff = compareThaiMonthYear(a.month || a.paymentMonth || '', b.month || b.paymentMonth || '');
+          const monthDiff = compareThaiMonthYear(getTuitionNoticeMonth(a), getTuitionNoticeMonth(b));
           if (monthDiff !== 0) return monthDiff;
           return String(a.course || a.courseName || '').localeCompare(String(b.course || b.courseName || ''), 'th');
         });
@@ -37743,7 +37899,7 @@
 
     function getTuitionNoticeRowMonths(row) {
       return Array.from(new Set((row && row.payments || []).map(function(payment) {
-        return payment.month || payment.paymentMonth || '-';
+        return getTuitionNoticeMonth(payment) || '-';
       }))).sort(compareThaiMonthYear);
     }
 
@@ -37751,15 +37907,20 @@
       const select = getElement('tuitionNoticeMonthFilter');
       if (!select) return;
       const current = select.value || 'ทั้งหมด';
-      const months = Array.from(new Set((payments || []).filter(function(payment) {
+      const optimized = isQuotaOptimizedLoadingEnabled();
+      const months = optimized ? Array.from(new Set([getCurrentThaiMonthYear()].concat(
+        paymentMonths.map(function(round) { return round.month; }),
+        Array.from(tuitionNoticeScope.months)
+      ).filter(Boolean))).sort(function(a, b) { return compareThaiMonthYear(b, a); }) : Array.from(new Set((payments || []).filter(function(payment) {
         return payment && payment.deleted !== true && !isCoursePaymentCancelled(payment) && isTuitionNoticePrintablePayment(payment);
       }).map(function(payment) {
-        return payment.month || payment.paymentMonth || '';
+        return getTuitionNoticeMonth(payment);
       }).filter(Boolean))).sort(function(a, b) { return compareThaiMonthYear(b, a); });
       select.innerHTML = '<option value="ทั้งหมด">ทุกเดือน</option>' + months.map(function(month) {
         return '<option value="' + escapeHtml(month) + '">' + escapeHtml(month) + '</option>';
       }).join('');
-      select.value = months.includes(current) ? current : 'ทั้งหมด';
+      select.value = optimized && !tuitionNoticeScope.selected ? (months[0] || 'ทั้งหมด')
+        : months.includes(current) ? current : 'ทั้งหมด';
     }
 
     function renderTuitionNoticeStudentTable() {
@@ -37795,7 +37956,8 @@
           tuitionNoticeTotalInstallmentButton(row) +
           '<button class="btn btn-orange" type="button" onclick="downloadTuitionNoticeStudentPdf(\'' + jsArg(row.key) + '\')">PDF</button><button class="btn btn-green" type="button" onclick="downloadTuitionNoticeStudentImage(\'' + jsArg(row.key) + '\')">ดาวน์โหลดรูป</button></div></td>' +
         '</tr>';
-      }).join('') : '<tr><td colspan="6">ไม่พบนักเรียนที่มีรายการต้องชำระตามตัวกรอง</td></tr>';
+      }).join('') : '<tr><td colspan="6">' + (typeof tuitionNoticeScope !== 'undefined' && isQuotaOptimizedLoadingEnabled() && tuitionNoticeScope.status !== 'ready'
+        ? 'รอข้อมูลใบแจ้งยอดสำหรับเดือนที่เลือก' : 'ไม่พบนักเรียนที่มีรายการต้องชำระตามตัวกรอง') + '</td></tr>';
       if (getElement('tuitionNoticeStudentCount')) getElement('tuitionNoticeStudentCount').textContent = rows.length + ' คน';
       if (getElement('tuitionNoticePaymentCount')) getElement('tuitionNoticePaymentCount').textContent = rows.reduce(function(sum, row) { return sum + row.payments.length; }, 0) + ' รายการ';
       if (getElement('tuitionNoticeTotalAmount')) getElement('tuitionNoticeTotalAmount').textContent = formatPrice(rows.reduce(function(sum, row) { return sum + row.totalAmount; }, 0));
@@ -37807,6 +37969,42 @@
       tuitionNoticeCurrentPage = 1;
       tuitionNoticeSelectedStudentKeys.clear();
       renderTuitionNoticeStudentTable();
+    }
+
+    function changeTuitionNoticeMonth() {
+      if (isQuotaOptimizedLoadingEnabled()) loadTuitionNoticeScope(false);
+      applyTuitionNoticeFilters();
+    }
+
+    function pickTuitionNoticeMonth(value) {
+      if (!/^\d{4}-\d{2}$/.test(value)) return;
+      const parts = value.split('-').map(Number);
+      const monthName = getThaiCalendarMonthNames()[parts[1] - 1];
+      if (!monthName) return;
+      const month = monthName + ' ' + (parts[0] + 543);
+      const select = getElement('tuitionNoticeMonthFilter');
+      if (!select) return;
+      if (!Array.from(select.options).some(function(option) { return option.value === month; })) {
+        const option = document.createElement('option');
+        option.value = option.textContent = month;
+        select.appendChild(option);
+      }
+      select.value = month;
+      tuitionNoticeScope.months.add(month);
+      changeTuitionNoticeMonth();
+    }
+
+    function tuitionNoticeScopeReady() {
+      if (!isQuotaOptimizedLoadingEnabled()) return true;
+      if (tuitionNoticeScope.status === 'ready' && tuitionNoticeScope.selected === getTuitionNoticeFilterScope().month) return true;
+      alert('กรุณาโหลดใบแจ้งยอดของเดือนที่เลือกให้สำเร็จก่อนทำรายการ');
+      return false;
+    }
+
+    function getTuitionNoticeBundleRecords() {
+      if (!isQuotaOptimizedLoadingEnabled()) return undefined;
+      const cached = tuitionNoticeScope.cache.get(tuitionNoticeScope.selected);
+      return cached ? cached.bundles : [];
     }
 
     function changeTuitionNoticePage(direction) {
@@ -37841,12 +38039,17 @@
       return buildTuitionNoticeStudentRows().find(function(row) { return String(row.key) === String(key); }) || null;
     }
 
-    function canRecordPaymentInstallment(payment) {
+    function canRecordPaymentInstallment(payment, bundleRecords) {
       return payment && payment.deleted !== true && getPaymentRecordId(payment) &&
-        !isCoursePaymentCancelled(payment) && !isPaymentInActiveBundle(payment) &&
+        !isCoursePaymentCancelled(payment) && !(Array.isArray(bundleRecords)
+          ? isActivePaymentBundle(getPaymentBundleForPayment(payment, bundleRecords)) : isPaymentInActiveBundle(payment)) &&
         payment.slipStatus !== 'uploading' &&
         !payment.receiptId && !payment.receiptNo && !payment.receiptStatus &&
         isTuitionNoticePrintablePayment(payment) && getPaymentBalanceSatang(payment) > 0;
+    }
+
+    function canRecordTuitionNoticeInstallment(payment) {
+      return canRecordPaymentInstallment(payment, getTuitionNoticeBundleRecords());
     }
 
     function parsePaymentInstallmentSatang(value) {
@@ -37856,8 +38059,8 @@
       return Number.isSafeInteger(satang) && satang > 0 ? satang : 0;
     }
 
-    async function recordPaymentInstallment(paymentId, entry, settleWithSlip) {
-      const saved = await commitPaymentInstallments([Object.assign({}, entry, { paymentId: paymentId })], settleWithSlip);
+    async function recordPaymentInstallment(paymentId, entry, settleWithSlip, bundleRecords) {
+      const saved = await commitPaymentInstallments([Object.assign({}, entry, { paymentId: paymentId })], settleWithSlip, bundleRecords);
       try {
         await syncClosedPaymentInstallment(saved[0]);
       } catch (error) {
@@ -37867,7 +38070,7 @@
       return saved[0];
     }
 
-    async function commitPaymentInstallments(entries, settleWithSlip) {
+    async function commitPaymentInstallments(entries, settleWithSlip, bundleRecords) {
       if (!hasPermission('admin.finance')) throw new Error('ไม่มีสิทธิ์');
       if (!firebaseReady || !db || !firebaseUser) throw new Error('Firebase ยังไม่พร้อมใช้งาน');
       const quotaMessage = 'โควตา Firestore เต็ม กรุณารอให้โควตาพร้อม แล้วรีโหลดหน้าและตรวจประวัติรับเงินก่อนบันทึกอีกครั้ง';
@@ -37882,7 +38085,7 @@
           try {
             changes = await Promise.all(entries.map(async function(entry) {
               const ref = db.collection('payments').doc(String(entry.paymentId));
-              return preparePaymentInstallment(transaction, ref, entry, settleWithSlip);
+              return preparePaymentInstallment(transaction, ref, entry, settleWithSlip, bundleRecords);
             }));
           } catch (error) {
             // A plain application error stops the SDK from retrying a quota-rejected read.
@@ -37899,6 +38102,12 @@
         throw error;
       }
       const updated = saved.map(function(payment, index) {
+        if (typeof tuitionNoticeScope !== 'undefined') {
+          tuitionNoticeScope.cache.forEach(function(snapshot) {
+            const existing = snapshot.payments.find(function(item) { return item.firebaseDocId === payment.firebaseDocId; });
+            if (existing) Object.assign(existing, payment);
+          });
+        }
         const local = findPaymentByAnyId(entries[index].paymentId);
         return local ? Object.assign(local, payment) : payment;
       });
@@ -37906,7 +38115,7 @@
       return updated;
     }
 
-    async function preparePaymentInstallment(transaction, ref, entry, settleWithSlip) {
+    async function preparePaymentInstallment(transaction, ref, entry, settleWithSlip, bundleRecords) {
       const snapshot = await transaction.get(ref);
       if (!snapshot.exists) throw new Error('ไม่พบรายการชำระเงิน');
       const payment = Object.assign({}, snapshot.data(), { firebaseDocId: snapshot.id });
@@ -37925,7 +38134,7 @@
         ? !payment.deleted && !isPaymentInActiveBundle(payment) &&
           getPaymentDisplayStatus(payment) === 'รอตรวจสลิป' && !!getPaymentSlipUrl(payment) && getPaymentInstallmentSatang(payment) > 0 &&
           !payment.receiptId && !payment.receiptNo
-        : canRecordPaymentInstallment(payment);
+        : canRecordPaymentInstallment(payment, bundleRecords);
       if (!eligible || balance <= 0) throw new Error('รายการนี้ไม่สามารถหักยอดได้ กรุณาตรวจสอบรายการล่าสุด');
       if (balance !== entry.expectedBalanceSatang) throw new Error('ยอดคงเหลือเปลี่ยนแล้ว กรุณาเปิดรายการใหม่ก่อนบันทึก');
       if (!Number.isSafeInteger(entry.amountSatang) || entry.amountSatang <= 0 || entry.amountSatang > balance ||
@@ -38004,13 +38213,16 @@
 
     function openPaymentInstallment(paymentId, rowKey) {
       if (!hasPermission('admin.finance')) { alert('ไม่มีสิทธิ์'); return; }
-      const payment = findPaymentByAnyId(paymentId);
-      if (!canRecordPaymentInstallment(payment)) { alert('รายการนี้ไม่สามารถหักยอดได้'); return; }
+      if (!tuitionNoticeScopeReady()) return;
+      const row = getFilteredTuitionNoticeStudentRow(rowKey);
+      const payment = row && row.payments.find(function(item) { return getPaymentRecordId(item) === String(paymentId); });
+      if (!canRecordTuitionNoticeInstallment(payment)) { alert('รายการนี้ไม่สามารถหักยอดได้'); return; }
+      const month = getTuitionNoticeFilterScope().month;
       const expectedBalanceSatang = getPaymentBalanceSatang(payment);
       const entryId = createFirebaseDocId('payments');
       openEditBubble('หักยอดผ่อน',
         '<p>' + escapeHtml(getStudentDisplayName(payment)) + ' · ' +
-          escapeHtml(payment.month || payment.paymentMonth || '-') + ' · ' + escapeHtml(payment.course || payment.courseName || '-') + '</p>' +
+          escapeHtml(getTuitionNoticeMonth(payment) || '-') + ' · ' + escapeHtml(payment.course || payment.courseName || '-') + '</p>' +
         '<p>ยอดค่าเรียน ' + formatPrice(getPaymentFinalAmount(payment)) + ' · รับแล้ว ' +
           formatPrice(getPaymentInstallmentSatang(payment) / 100) + ' · คงเหลือ ' + formatPrice(expectedBalanceSatang / 100) + '</p>' +
         '<label for="tuitionInstallmentAmount">ยอดรับเงินจริง (บาท)</label>' +
@@ -38020,13 +38232,14 @@
         '<p id="tuitionInstallmentPreview" aria-live="polite">คงเหลือหลังหัก ' + formatPrice(expectedBalanceSatang / 100) + '</p>' +
         paymentInstallmentHistoryHtml(payment),
         async function() {
+          if (getTuitionNoticeFilterScope().month !== month || !tuitionNoticeScopeReady()) throw new Error('กรุณาเปิดใบแจ้งยอดใหม่ก่อนบันทึก');
           await recordPaymentInstallment(payment.firebaseDocId || paymentId, {
             id: entryId,
             amountSatang: parsePaymentInstallmentSatang(bubbleValue('tuitionInstallmentAmount')),
             expectedBalanceSatang: expectedBalanceSatang,
             note: bubbleValue('tuitionInstallmentNote').trim().slice(0, 300),
             receivedAtMs: Date.now()
-          });
+          }, false, getTuitionNoticeBundleRecords());
           const remaining = getFilteredTuitionNoticeStudentRow(rowKey);
           if (remaining) viewTuitionNoticeStudentDetails(rowKey);
           else closeEditBubble();
@@ -38035,7 +38248,7 @@
     }
 
     function tuitionNoticeTotalInstallmentButton(row) {
-      if (!hasPermission('admin.finance') || row.payments.filter(canRecordPaymentInstallment).length < 2) return '';
+      if (!hasPermission('admin.finance') || row.payments.filter(canRecordTuitionNoticeInstallment).length < 2) return '';
       return '<button type="button" class="btn btn-dark" onclick="' +
         actionCall('openTuitionNoticeTotalInstallment', row.key) + '">หักจากยอดรวม</button>';
     }
@@ -38055,8 +38268,10 @@
 
     function openTuitionNoticeTotalInstallment(rowKey) {
       if (!hasPermission('admin.finance')) { alert('ไม่มีสิทธิ์'); return; }
+      if (!tuitionNoticeScopeReady()) return;
       const row = getFilteredTuitionNoticeStudentRow(rowKey);
-      const eligible = row ? row.payments.filter(canRecordPaymentInstallment) : [];
+      const eligible = row ? row.payments.filter(canRecordTuitionNoticeInstallment) : [];
+      const month = getTuitionNoticeFilterScope().month;
       if (eligible.length < 2) { alert('ต้องมีอย่างน้อย 2 รายการที่หักยอดได้ตามตัวกรอง'); return; }
       // Student rows already sort by month (oldest first), then by course.
       const targets = eligible.map(function(payment) {
@@ -38064,7 +38279,7 @@
         return {
           paymentId: payment.firebaseDocId || getPaymentRecordId(payment),
           expectedBalanceSatang: getPaymentBalanceSatang(payment),
-          label: [payment.month || payment.paymentMonth || '-', payment.course || payment.courseName || '-',
+          label: [getTuitionNoticeMonth(payment) || '-', payment.course || payment.courseName || '-',
             getPaymentCenterTextForQr(payment, data.student, data.course)].filter(Boolean).join(' · ')
         };
       });
@@ -38080,6 +38295,7 @@
         '<label for="tuitionTotalInstallmentNote">หมายเหตุการรับเงิน</label><input id="tuitionTotalInstallmentNote" maxlength="300">' +
         '<div id="tuitionTotalInstallmentPreview" aria-live="polite"></div>',
         async function() {
+          if (getTuitionNoticeFilterScope().month !== month || !tuitionNoticeScopeReady()) throw new Error('กรุณาเปิดใบแจ้งยอดใหม่ก่อนบันทึก');
           const amount = parsePaymentInstallmentSatang(bubbleValue('tuitionTotalInstallmentAmount'));
           const allocations = allocateTuitionNoticeInstallment(targets, amount);
           if (!allocations) throw new Error('กรุณาระบุยอดรับจริงมากกว่า 0 และไม่เกินยอดที่หักได้');
@@ -38090,7 +38306,7 @@
           input.readOnly = true;
           const updated = await commitPaymentInstallments(allocations.map(function(allocation) {
             return Object.assign({}, allocation, { id: entryId, note: note, receivedAtMs: receivedAtMs });
-          }));
+          }), false, getTuitionNoticeBundleRecords());
           let syncFailures = 0;
           for (const payment of updated) {
             try {
@@ -38123,11 +38339,11 @@
     function tuitionNoticeDetailRowsHtml(row) {
       return (row && row.payments || []).map(function(payment) {
         const data = getPaymentRecordCourseAndStudent(payment);
-        return '<tr><td>' + escapeHtml(payment.month || payment.paymentMonth || '-') + '</td>' +
+        return '<tr><td>' + escapeHtml(getTuitionNoticeMonth(payment) || '-') + '</td>' +
           '<td>' + escapeHtml(payment.course || payment.courseName || '-') + '</td>' +
           '<td>' + escapeHtml(getPaymentCenterTextForQr(payment, data.student, data.course) || '-') + '</td>' +
           '<td style="text-align:right;">' + escapeHtml(formatPrice(getPaymentPayableAmount(payment))) + '</td>' +
-          '<td>' + (hasPermission('admin.finance') && canRecordPaymentInstallment(payment)
+          '<td>' + (hasPermission('admin.finance') && canRecordTuitionNoticeInstallment(payment)
             ? '<button type="button" class="btn btn-blue" onclick="' + actionCall('openPaymentInstallment', getPaymentRecordId(payment), row.key) + '">หักยอดผ่อน</button>'
             : '') + paymentInstallmentHistoryHtml(payment) + '</td></tr>';
       }).join('');
@@ -38154,6 +38370,7 @@
 
     function downloadTuitionNoticeStudentPdf(key) {
       if (!hasPermission('admin.finance')) { alert('ไม่มีสิทธิ์'); return; }
+      if (!tuitionNoticeScopeReady()) return;
       const row = getFilteredTuitionNoticeStudentRow(key);
       if (!row) { alert('ไม่พบข้อมูลนักเรียนตามตัวกรองปัจจุบัน'); return; }
       const groups = buildTuitionNoticeGroups(row.payments);
@@ -38164,6 +38381,7 @@
 
     function downloadSelectedTuitionNoticesPdf() {
       if (!hasPermission('admin.finance')) { alert('ไม่มีสิทธิ์'); return; }
+      if (!tuitionNoticeScopeReady()) return;
       const selectedRows = buildTuitionNoticeStudentRows().filter(function(row) {
         return tuitionNoticeSelectedStudentKeys.has(row.key);
       });
@@ -38177,6 +38395,7 @@
 
     function downloadTuitionNoticeStudentImage(key) {
       if (!hasPermission('admin.finance')) { alert('ไม่มีสิทธิ์'); return; }
+      if (!tuitionNoticeScopeReady()) return;
       const row = getFilteredTuitionNoticeStudentRow(key);
       if (!row) { alert('ไม่พบข้อมูลนักเรียนตามตัวกรองปัจจุบัน'); return; }
       const groups = buildTuitionNoticeGroups(row.payments);
@@ -38186,6 +38405,7 @@
 
     function downloadSelectedTuitionNoticesImages() {
       if (!hasPermission('admin.finance')) { alert('ไม่มีสิทธิ์'); return; }
+      if (!tuitionNoticeScopeReady()) return;
       const selectedRows = buildTuitionNoticeStudentRows().filter(function(row) {
         return tuitionNoticeSelectedStudentKeys.has(row.key);
       });
@@ -38240,7 +38460,7 @@
       groups.forEach(function(group) {
         group.totalAmount /= 100;
         group.payments.sort(function(a, b) {
-          const monthDiff = compareThaiMonthYear(a.month || a.paymentMonth || '', b.month || b.paymentMonth || '');
+          const monthDiff = compareThaiMonthYear(getTuitionNoticeMonth(a), getTuitionNoticeMonth(b));
           if (monthDiff !== 0) return monthDiff;
           const courseA = String(a.course || a.courseName || '');
           const courseB = String(b.course || b.courseName || '');
@@ -38266,7 +38486,7 @@
       const rows = group.payments.map(function(payment, index) {
         return '<tr style="' + (index % 2 === 0 ? 'background:#f8fafc;' : 'background:#fff;') + '">' +
           '<td>' + escapeHtml(payment.course || payment.courseName || '-') + '</td>' +
-          '<td>' + escapeHtml(payment.month || payment.paymentMonth || '-') + '</td>' +
+          '<td>' + escapeHtml(getTuitionNoticeMonth(payment) || '-') + '</td>' +
           '<td class="amount">' + escapeHtml(formatPrice(getPaymentPayableAmount(payment))) + '</td>' +
         '</tr>';
       }).join('');
@@ -39254,17 +39474,18 @@ function receiptStatusText(status) {
       }
     }
 
-    function findPaymentForReceiptAnyStatus(receipt) {
+    function findPaymentForReceiptAnyStatus(receipt, sourcePayments) {
       if (!receipt) return null;
+      const records = sourcePayments || payments;
       if (receipt.paymentId) {
-        const byId = payments.find(function(p) {
+        const byId = records.find(function(p) {
           return String(p.id || p.firebaseDocId || '') === String(receipt.paymentId);
         });
         if (byId) return byId;
       }
       const rMonth = String(getReceiptMonth(receipt) || '').trim();
       if (!rMonth) return null;
-      return payments.find(function(p) {
+      return records.find(function(p) {
         const sameStudent = receipt.studentId && String(p.studentId || '') === String(receipt.studentId);
         const sameAuth = receipt.authUid && String(p.authUid || p.studentAuthUid || '') === String(receipt.authUid);
         const sameCourse = !receipt.courseId || String(p.courseId || '') === String(receipt.courseId);
@@ -39274,10 +39495,11 @@ function receiptStatusText(status) {
     }
 
     // Sync (no Firebase writes): correct in-memory status before first render so admin never sees stale data
-    function applyPaymentRepairsSync() {
-      if (!Array.isArray(payments)) return;
+    function applyPaymentRepairsSync(sourcePayments) {
+      const records = Array.isArray(sourcePayments) ? sourcePayments : payments;
+      if (!Array.isArray(records)) return;
       // Pass 1: any field already shows approved → normalize all 4 status fields
-      for (const payment of payments) {
+      for (const payment of records) {
         if (!isApprovedPaymentNeedingStudentRepair(payment)) continue;
         if (payment.status === 'ชำระแล้ว' && payment.paymentStatus === 'ชำระแล้ว' &&
             payment.slipStatus === 'approved' && payment.receiptStatus === 'published') continue;
@@ -39290,7 +39512,7 @@ function receiptStatusText(status) {
       if (!Array.isArray(receipts)) return;
       for (const receipt of receipts) {
         if (normalizeReceiptStatus(receipt.status) !== 'published') continue;
-        const payment = findPaymentForReceiptAnyStatus(receipt);
+        const payment = findPaymentForReceiptAnyStatus(receipt, records);
         if (!payment || getPaymentInstallmentSatang(payment) > 0) continue;
         if (payment.status === 'ชำระแล้ว' && payment.paymentStatus === 'ชำระแล้ว' && payment.slipStatus === 'approved') continue;
         payment.status = 'ชำระแล้ว';
