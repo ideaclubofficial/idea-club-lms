@@ -20,7 +20,7 @@ function setup() {
   const c = {
     firebaseUser:{uid:'A'},firebaseUserProfile:{},studentDataSessionUid:'A',studentDataSessionVersion:1,studentDataLoadedForUid:'A',
     currentStudent:{id:'A'},onlineExamCoursesLoadSeq:0,onlineExamCoursesLoaded:false,onlineExamCourseCache:[],prizeWheelSettings:{},
-    studentRealtimeSession:{studentDocIds:['A'],paymentStudentIds:['A'],groups:{}},
+    studentRealtimeSession:{uid:'A',active:true,studentDocIds:['A'],paymentStudentIds:['A'],groups:{}},
     isCurrentStudentSession:()=>true, getElement:id=>roots[id]||null,
     document:{createElement:element},console:{warn(){}},safeRun:fn=>fn(),
     ensureStudentDataLoaded:async()=>c.currentStudent,
@@ -35,7 +35,7 @@ function setup() {
   };
   function query(name) { return {where(){return this;},orderBy(){return this;},limit(){return this;},get:async()=>{reads.push(name);return {docs:[{id:name,data:()=>({id:name})}]};}}; }
   c.db={collection:query};
-  for(const name of ['onDemandClips','onlineRooms','onlineDocuments','monthlyExamLinks','scoreReports','adminScoreRecords','leaderboardProfiles','gamificationRewards','specialVoucherActivities','prizeWheelItems','prizeWheelSpins','avatarBattleQuestions','gamificationRedemptions'])c[name]=[];
+  for(const name of ['onDemandClips','onlineRooms','onlineDocuments','monthlyExamLinks','scoreReports','adminScoreRecords','leaderboardProfiles','gamificationRewards','specialVoucherActivities','prizeWheelItems','prizeWheelSpins','avatarBattleQuestions','gamificationRedemptions','studentGamificationProfiles','studentGamificationEvents','studentPersonalQuests'])c[name]=[];
   for(const name of ['renderStudentOnlineClasses','renderStudentOnDemandClasses','renderStudentMobileLearning','renderStudentExamFilters','renderScoreHistoryByMonth','renderStudentMobileExam','renderOnlineExamCourseGrid','updateStudentInWebExamUx','renderStudentGamificationPanel']) c[name]=()=>renders.push(name);
   vm.createContext(c);vm.runInContext(featureSource,c);
   return {c,reads,renders,liveStarts,roots,get observer(){return observer;}};
@@ -84,7 +84,9 @@ test('games share exam dependency and load owned redemption data once',async()=>
   assert.equal(h.reads.filter(x=>x==='onlineExamCourses').length,2);
   assert.equal(h.reads.filter(x=>x==='monthlyExamLinks').length,1);
   assert.ok(!h.reads.includes('onDemandClips'));
-  assert.deepEqual(h.liveStarts,[]);
+  assert.ok(h.liveStarts.includes('studentGamificationProfiles'));
+  assert.ok(h.liveStarts.includes('studentGamificationEvents'));
+  assert.ok(h.liveStarts.includes('studentPersonalQuests'));
   assert.ok(h.reads.includes('gamificationRedemptions'));
   assert.ok(h.reads.includes('prizeWheelSpins'));
   assert.equal(h.c.onlineExamCourseCache.length,1);
@@ -96,7 +98,7 @@ test('failed exam dependency keeps games unavailable and retry recovers',async()
   h.c.db.collection=name=>{if(name==='onlineExamCourses')return {where(){return this;},get:async()=>{throw new Error('offline');}};return original(name);};
   await assert.rejects(h.c.ensureStudentFeatureData('games'),/offline/);
   assert.equal(h.roots.studentGamificationPanel.attrs['data-student-feature-state'],'error');
-  assert.equal(h.liveStarts.length,0);
+  assert.ok(h.liveStarts.includes('studentGamificationProfiles'));
   h.c.db.collection=original;await h.c.ensureStudentFeatureData('games');
   assert.equal(h.c.isStudentFeatureReady('games'),true);
 });
@@ -106,4 +108,76 @@ test('home loading/error states expose a retry and ready removes the notice',()=
   assert.equal(h.roots.studentDashboard.attrs['aria-busy'],'true');
   h.c.updateStudentHomeLoadStatus('error');assert.match(h.roots.studentDashboard.children[0].innerHTML,/ลองใหม่/);
   h.c.updateStudentHomeLoadStatus('ready');assert.equal(h.roots.studentDashboard.children.length,0);
+});
+
+// Exercise the real login path: no progress read or reward may use an unloaded profile.
+test('daily login waits for the stored balance and aborts after an account change', async()=>{
+  const h=setup(), gate=deferred(), timers=[];
+  Object.assign(h.c, { DAILY_QUESTS_ENABLED:true, dailyLoginQuestTriggeredThisSession:false,
+    ensureStudentGamificationData:()=>gate.promise,
+    getDailyQuestProgressForStudent:()=>{throw new Error('read before profile ready');},
+    setTimeout:fn=>timers.push(fn) });
+  const start=html.search(/    (?:async )?function triggerDailyLoginQuestIfNeeded\(/);
+  vm.runInContext(html.slice(start,html.indexOf('    // ===========================',start)),h.c);
+  const loading=h.c.triggerDailyLoginQuestIfNeeded();
+  assert.equal(timers.length,0);
+  h.c.firebaseUser={uid:'B'};h.c.studentDataSessionVersion++;
+  gate.resolve(true);await loading;
+  assert.equal(timers.length,0);
+});
+
+test('games wait for owned snapshots before rendering and expose retry on failure', async()=>{
+  const h=setup(),gate=deferred();
+  h.c.startStudentPaymentListeners=(ids,uid,paymentIds,names)=>{
+    h.liveStarts.push(...names);
+    for(const name of names)h.c.studentRealtimeSession.groups[name]={ready:gate.promise,failed:false};
+  };
+  const loading=h.c.ensureStudentFeatureData('games');
+  await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(h.c.isStudentFeatureReady('games'),false);
+  assert.ok(!h.renders.includes('renderStudentGamificationPanel'));
+  gate.resolve(false);await assert.rejects(loading,/โหลดเหรียญ/);
+  assert.equal(h.roots.studentGamificationPanel.attrs['data-student-feature-state'],'error');
+  for(const group of Object.values(h.c.studentRealtimeSession.groups))group.ready=Promise.resolve(true);
+  h.c.startStudentPaymentListeners=()=>{};
+  assert.equal(await h.c.ensureStudentFeatureData('games',true),true);
+});
+
+test('session reset clears owned balances, events and quests',()=>{
+  const h=setup();
+  for(const name of ['studentGamificationProfiles','studentGamificationEvents','studentPersonalQuests'])h.c[name].push({authUid:'A',coins:900});
+  h.c.resetStudentFeatureData();
+  for(const name of ['studentGamificationProfiles','studentGamificationEvents','studentPersonalQuests'])assert.equal(h.c[name].length,0);
+});
+
+test('reward waits for the stored balance, retains coins and deduplicates loaded events',async()=>{
+  const h=setup(),gate=deferred(),writes=[];
+  let stored=null;
+  Object.assign(h.c,{
+    ensureStudentGamificationData:async()=>{await gate.promise;stored={id:'old-profile',coins:450,exp:80,level:2};return true;},
+    prizeWheelSpinning:false,DAILY_QUESTS_ENABLED:false,
+    hasStudentGamificationEvent:()=>h.c.studentGamificationEvents.length>0,
+    findCurrentStudentGamificationProfile:()=>stored,
+    getCurrentStudentGamificationProfile:()=>({...stored}),
+    applyProfessionMultiplier:(p,l,t,exp,coins)=>({exp,coins}),
+    getStudentGamificationEventId:()=> 'reward-1',getStudentRecordDocId:s=>s.id,
+    formatLevelBonusText:()=>'',saveStudentGamificationAward:async(profile,event)=>writes.push({profile:{...profile},event}),
+    alert:()=>{},console:{warn(){},error(){}}
+  });
+  h.c.LEVEL_UP_BONUS_COINS=20;
+  for(const name of ['getStudentGamificationLevelMaxExp','applyStudentGamificationReward']) {
+    const at=html.indexOf('    function '+name+'(');
+    vm.runInContext(html.slice(at,html.indexOf('\n    }',at)+6),h.c);
+  }
+  const start=html.indexOf('    async function awardStudentGamification(');
+  vm.runInContext(html.slice(start,html.indexOf('    function getStudentGamificationSummaryText(',start)),h.c);
+  const awarding=h.c.awardStudentGamification('onDemandClip','clip-1',40,2,'clip');
+  assert.equal(writes.length,0);gate.resolve();await awarding;
+  assert.equal(writes.length,1);assert.equal(writes[0].profile.coins,452);
+  assert.equal(writes[0].profile.id,'old-profile');
+  assert.equal(await h.c.awardStudentGamification('onDemandClip','clip-1',40,2,'clip'),false);
+  assert.equal(writes.length,1);
+  h.c.ensureStudentGamificationData=async()=>{throw new Error('offline');};
+  assert.equal(await h.c.awardStudentGamification('onDemandClip','clip-2',40,2,'clip'),false);
+  assert.equal(writes.length,1);
 });

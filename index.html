@@ -10433,11 +10433,33 @@
       return !!(studentFeatureStates[name] && studentFeatureStates[name].status === 'ready');
     }
 
+    async function ensureStudentGamificationData() {
+      if (!isCurrentStudentSession()) return true;
+      const uid = firebaseUser && firebaseUser.uid;
+      const version = studentDataSessionVersion;
+      if (!uid) return false;
+      const student = await ensureStudentDataLoaded(firebaseUserProfile);
+      const isCurrent = function() {
+        return firebaseUser && firebaseUser.uid === uid && studentDataSessionVersion === version;
+      };
+      if (!isCurrent() || !student || studentDataLoadedForUid !== uid) return false;
+      const live = studentRealtimeSession;
+      if (!live || live.uid !== uid || !live.active) return false;
+      const collections = ['studentGamificationProfiles', 'studentGamificationEvents', 'studentPersonalQuests'];
+      startStudentPaymentListeners(live.studentDocIds, uid, live.paymentStudentIds, collections);
+      const loadStatus = { failed: false };
+      await Promise.all(collections.map(function(name) { return waitForRealtimeCollection(live, name, loadStatus); }));
+      if (!isCurrent() || studentRealtimeSession !== live || !live.active) return false;
+      if (loadStatus.failed) throw new Error('โหลดเหรียญและประวัติรางวัลไม่สำเร็จ กรุณาลองใหม่');
+      return true;
+    }
+
     function resetStudentFeatureData() {
       studentFeatureStates = {};
       if (studentFeatureObserver) studentFeatureObserver.disconnect();
       studentFeatureObserver = null;
-      [onDemandClips, onlineRooms, onlineDocuments, monthlyExamLinks, leaderboardProfiles, gamificationRewards, specialVoucherActivities,
+      [studentGamificationProfiles, studentGamificationEvents, studentPersonalQuests,
+        onDemandClips, onlineRooms, onlineDocuments, monthlyExamLinks, leaderboardProfiles, gamificationRewards, specialVoucherActivities,
         prizeWheelItems, prizeWheelSpins, avatarBattleQuestions, gamificationRedemptions].forEach(function(items) { items.length = 0; });
       onlineExamCourseCache = [];
       onlineExamCoursesLoaded = false;
@@ -10548,6 +10570,7 @@
               fromQuery(db.collection('adminScoreRecords').where('grade', '==', grade).where('status', '==', 'published').limit(300))
             ]);
           } else {
+            if (!await ensureStudentGamificationData()) throw new Error('ข้อมูลเหรียญยังโหลดไม่ครบ กรุณาลองใหม่');
             // Battle questions also use eligible online exam courses.
             if (!await ensureStudentFeatureData('exams')) return false;
             if (!isCurrent()) return false;
@@ -28103,6 +28126,13 @@
 
     async function awardStudentGamification(sourceType, sourceId, exp, coins, reason) {
       if (!currentStudent) return false;
+      try {
+        if (!await ensureStudentGamificationData()) return false;
+      } catch (error) {
+        console.warn('student reward profile load failed:', error);
+        alert('ยังโหลดเหรียญเดิมไม่สำเร็จ กรุณาลองใหม่ก่อนรับรางวัล');
+        return false;
+      }
       const type = String(sourceType || '').trim();
       const id = String(sourceId || '').trim();
       if (!type || !id || hasStudentGamificationEvent(type, id)) {
@@ -29025,6 +29055,7 @@
 
     async function triggerDailyQuestProgress(questId) {
       if (!DAILY_QUESTS_ENABLED || !currentStudent) return;
+      if (!await ensureStudentGamificationData()) return;
       const questDef = DAILY_QUESTS.find(function(q) { return q.id === questId; });
       if (!questDef) return;
       const progress = getDailyQuestProgressForStudent();
@@ -29046,8 +29077,17 @@
       }
     }
 
-    function triggerDailyLoginQuestIfNeeded() {
+    async function triggerDailyLoginQuestIfNeeded() {
       if (!DAILY_QUESTS_ENABLED || !currentStudent || dailyLoginQuestTriggeredThisSession) return;
+      const sessionUid = firebaseUser && firebaseUser.uid;
+      const sessionVersion = studentDataSessionVersion;
+      try {
+        if (!await ensureStudentGamificationData()) return;
+      } catch (error) {
+        console.warn('daily login profile load failed:', error);
+        return;
+      }
+      if (!firebaseUser || firebaseUser.uid !== sessionUid || studentDataSessionVersion !== sessionVersion || dailyLoginQuestTriggeredThisSession) return;
       const progress = getDailyQuestProgressForStudent();
       const loginData = progress.quests['daily_login'] || {};
       if (!loginData.rewardClaimed) {
@@ -29055,7 +29095,12 @@
         const uid = firebaseUser && firebaseUser.uid;
         const version = studentDataSessionVersion;
         setTimeout(function() {
-          if (firebaseUser && firebaseUser.uid === uid && studentDataSessionVersion === version) triggerDailyQuestProgress('daily_login');
+          if (firebaseUser && firebaseUser.uid === uid && studentDataSessionVersion === version) {
+            triggerDailyQuestProgress('daily_login').catch(function(error) {
+              dailyLoginQuestTriggeredThisSession = false;
+              console.warn('daily login reward failed:', error);
+            });
+          }
         }, 500);
       } else {
         dailyLoginQuestTriggeredThisSession = true;
